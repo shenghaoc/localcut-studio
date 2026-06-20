@@ -113,7 +113,7 @@ enum CompositionBuilder {
         }
         let boundaries = boundarySet.sorted()
 
-        var instructions: [AVMutableVideoCompositionInstruction] = []
+        var instructions: [AVVideoCompositionInstruction] = []
         for i in 0..<(boundaries.count - 1) {
             let start = CMTime(seconds: boundaries[i], preferredTimescale: 600)
             let end = CMTime(seconds: boundaries[i + 1], preferredTimescale: 600)
@@ -123,23 +123,25 @@ enum CompositionBuilder {
             let midpoint = boundaries[i] + (boundaries[i + 1] - boundaries[i]) / 2
 
             // Topmost track first so it composites in front.
-            var layerInstructions: [AVMutableVideoCompositionLayerInstruction] = []
+            var layerInstructions: [AVVideoCompositionLayerInstruction] = []
             for entry in trackSegments.reversed() {
                 guard let seg = entry.segments.first(where: {
                     $0.timeRange.start.seconds <= midpoint && midpoint < $0.timeRange.end.seconds
                 }) else { continue }
 
-                let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: entry.track)
-                layer.setTransform(seg.transform, at: range.start)
-                layer.setOpacity(seg.opacity, at: range.start)
-                layerInstructions.append(layer)
+                var layerConfig = AVVideoCompositionLayerInstruction.Configuration(trackID: entry.track.trackID)
+                layerConfig.setTransform(seg.transform, at: range.start)
+                layerConfig.setOpacity(seg.opacity, at: range.start)
+                layerInstructions.append(AVVideoCompositionLayerInstruction(configuration: layerConfig))
             }
 
-            let instruction = AVMutableVideoCompositionInstruction()
-            instruction.timeRange = range
-            instruction.layerInstructions = layerInstructions
-            instruction.backgroundColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
-            instructions.append(instruction)
+            let instructionConfig = AVVideoCompositionInstruction.Configuration(
+                backgroundColor: CGColor(red: 0, green: 0, blue: 0, alpha: 1),
+                enablePostProcessing: false,
+                layerInstructions: layerInstructions,
+                requiredSourceSampleDataTrackIDs: [],
+                timeRange: range)
+            instructions.append(AVVideoCompositionInstruction(configuration: instructionConfig))
         }
 
         let videoComposition = AVMutableVideoComposition()
