@@ -31,7 +31,7 @@ This repo uses Kiro steering, specs, and skills. Canonical project intelligence 
 - [`.kiro/skills/`](.kiro/skills/) — reusable agent skill packs (`swiftui-patterns`, `avfoundation-pipeline`)
 - [`.kiro/settings/mcp.json`](.kiro/settings/mcp.json) — workspace MCP configuration
 
-Top-level Markdown: [`AGENTS.md`](AGENTS.md) is canonical; [`CLAUDE.md`](CLAUDE.md) and [`GEMINI.md`](GEMINI.md) redirect to it. Agent learning journals live in [`.jules/`](.jules/) (performance, accessibility, safety). User-facing docs are in [`docs/`](docs/).
+Top-level Markdown: [`AGENTS.md`](AGENTS.md) is canonical; [`CLAUDE.md`](CLAUDE.md) and [`GEMINI.md`](GEMINI.md) redirect to it. User-facing docs are in [`docs/`](docs/).
 
 ## Status — v0.1.0 (foundation)
 

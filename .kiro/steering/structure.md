@@ -7,7 +7,6 @@ Untitled Project/                  ← repo root (git)
 ├── A11Y-CHECKLIST.md  RELEASE-READINESS.md  BLOCKER-CLASSIFICATION.md
 ├── .github/                       ← CI, dependabot, PR template
 ├── .kiro/                         ← steering, specs, skills, settings (project intelligence)
-├── .jules/                        ← agent learning journals (bolt/palette/sentinel)
 ├── docs/                          ← user-facing documentation
 ├── LocalCut Studio.xcodeproj/     ← Xcode project (target: "LocalCut Studio")
 └── LocalCut Studio/               ← Swift sources

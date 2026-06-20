@@ -15,7 +15,7 @@ Add gesture handling to `TimelineView` clip blocks: edge-zone drags trim, body d
 
 ## Performance
 
-Use transient `offset`-based rendering during the drag (compositor-friendly), mutate + `rebuild()` only on commit (see `.jules/bolt.md`).
+Use transient `offset`-based rendering during the drag (compositor-friendly), mutate + `rebuild()` only on commit.
 
 ## Risks
 
