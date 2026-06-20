@@ -9,8 +9,8 @@ Untitled Project/                  ← repo root (git)
 ├── .kiro/                         ← steering, specs, skills, settings (project intelligence)
 ├── .jules/                        ← agent learning journals (bolt/palette/sentinel)
 ├── docs/                          ← user-facing documentation
-├── Untitled Project.xcodeproj/    ← Xcode project (target: MyApp → app "LocalCut Studio")
-└── MyApp/                         ← Swift sources
+├── LocalCut Studio.xcodeproj/     ← Xcode project (target: "LocalCut Studio")
+└── LocalCut Studio/               ← Swift sources
     ├── ContentView.swift          ← @main app entry + EditorView shell
     ├── Models.swift               ← MediaItem, Clip, Track, Project
     ├── EditorModel.swift          ← @Observable @MainActor orchestrator
@@ -36,7 +36,7 @@ Untitled Project/                  ← repo root (git)
 - **No AVFoundation in views** beyond the wrapped `AVPlayerView`; views talk to `EditorModel`.
 - **No SwiftUI in the engine** (`CompositionBuilder`, future compositor/exporter).
 - One `View` concern per file; lift shared helpers (e.g. `TimeFormatting`) next to their primary user.
-- New media-engine code goes in its own file under `MyApp/` (e.g. `Exporter.swift`, `EffectCompositor.swift`), added to the `MyApp` target.
+- New media-engine code goes in its own file under `LocalCut Studio/` (e.g. `Exporter.swift`, `EffectCompositor.swift`), added to the `LocalCut Studio` target.
 
 ## Where things live
 

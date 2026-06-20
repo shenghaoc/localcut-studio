@@ -5,7 +5,7 @@
 - **Target**: macOS 27 (`MACOSX_DEPLOYMENT_TARGET = 27.0`). `SUPPORTED_PLATFORMS = macosx` — this is a Mac-only app so AppKit interop is fair game.
 - **Language**: Swift 6 mode features enabled (approachable concurrency). `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` — types are main-actor isolated unless marked otherwise. Push blocking media work off the main actor deliberately.
 - **UI**: SwiftUI with the **Observation** framework (`@Observable`, `@Bindable`). No Combine — prefer `async`/`await` and `AsyncSequence`.
-- **Xcode project**: target `MyApp`, product/app name **LocalCut Studio**. Build/run via the `xcode-tools` MCP (`BuildProject`, `RunProject`) or `xcodebuild`.
+- **Xcode project**: target and product/app name **LocalCut Studio**. Build/run via the `xcode-tools` MCP (`BuildProject`, `RunProject`) or `xcodebuild`.
 
 ## Frameworks
 

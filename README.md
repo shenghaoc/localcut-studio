@@ -10,7 +10,7 @@ A **native macOS** non-linear video editor — the desktop-native port of the br
 - AVFoundation composition pipeline (`AVMutableComposition` + `AVMutableVideoComposition`)
 - Core Image / Metal for effects (custom `AVVideoCompositing`, upcoming)
 - AVKit `AVPlayerView` preview; `AVAssetExportSession` export
-- Target: macOS 27, App Sandbox on; Xcode target `MyApp` → app **LocalCut Studio**
+- Target: macOS 27, App Sandbox on; Xcode target **LocalCut Studio**
 
 ## How it maps from the browser original
 
@@ -46,10 +46,10 @@ Top-level Markdown: [`AGENTS.md`](AGENTS.md) is canonical; [`CLAUDE.md`](CLAUDE.
 
 ## Build & run
 
-Open `Untitled Project.xcodeproj` in Xcode (macOS 27 SDK), select the **MyApp** scheme and **My Mac**, and Run. Or:
+Open `LocalCut Studio.xcodeproj` in Xcode (macOS 27 SDK), select the **LocalCut Studio** scheme and **My Mac**, and Run. Or:
 
 ```sh
-xcodebuild build -project "Untitled Project.xcodeproj" -scheme MyApp -destination 'platform=macOS'
+xcodebuild build -project "LocalCut Studio.xcodeproj" -scheme "LocalCut Studio" -destination 'platform=macOS'
 ```
 
 ## License

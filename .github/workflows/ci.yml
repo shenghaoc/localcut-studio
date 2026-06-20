@@ -19,8 +19,8 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     env:
-      PROJECT: "Untitled Project.xcodeproj"
-      SCHEME: MyApp
+      PROJECT: "LocalCut Studio.xcodeproj"
+      SCHEME: "LocalCut Studio"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -31,7 +31,7 @@ jobs:
           swift --version
 
       # Debug build for macOS. Code signing is disabled so CI needs no
-      # certificates. When a MyAppTests target exists, switch `build` to
+      # certificates. When a LocalCut StudioTests target exists, switch `build` to
       # `test` and add `-resultBundlePath`.
       - name: Build
         run: |

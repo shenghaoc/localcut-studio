@@ -3,7 +3,7 @@
 ## Framework & environment
 
 - **Runner**: Swift Testing (`import Testing`, `@Test`, `#expect`) for unit tests; **XCUIAutomation** for UI tests. Do not add XCTest-based unit tests for new code.
-- **Location**: a `MyAppTests` target alongside the app target (added when the first non-trivial pure-logic unit lands).
+- **Location**: a `LocalCut StudioTests` target alongside the app target (added when the first non-trivial pure-logic unit lands).
 - **Scope**: deterministic, framework-light logic — timeline model math and the parts of `CompositionBuilder` that don't require decoding real media.
 
 ## What to test

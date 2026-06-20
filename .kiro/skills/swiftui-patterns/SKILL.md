@@ -37,7 +37,7 @@ The periodic time observer is the analogue of the browser project's shared-clock
 
 | Concern | Location |
 |---------|----------|
-| Layout, panels, transport | `MyApp/*View.swift` |
-| State, intents, playback, export | `MyApp/EditorModel.swift` |
-| Model types | `MyApp/Models.swift` |
-| Composition / transforms | `MyApp/CompositionBuilder.swift` |
+| Layout, panels, transport | `LocalCut Studio/*View.swift` |
+| State, intents, playback, export | `LocalCut Studio/EditorModel.swift` |
+| Model types | `LocalCut Studio/Models.swift` |
+| Composition / transforms | `LocalCut Studio/CompositionBuilder.swift` |
