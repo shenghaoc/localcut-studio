@@ -77,7 +77,8 @@ enum CompositionBuilder {
         let totalDuration = composition.duration
         guard totalDuration > .zero else { return nil }
 
-        let videoComposition = makeVideoComposition(
+        let videoComposition = try await makeVideoComposition(
+            composition: composition,
             trackSegments: trackSegments,
             totalDuration: totalDuration,
             renderSize: renderSize,
@@ -95,10 +96,11 @@ enum CompositionBuilder {
     /// between clip boundaries we emit one instruction whose layer instructions
     /// describe every track segment visible during that interval.
     private static func makeVideoComposition(
+        composition: AVComposition,
         trackSegments: [(track: AVCompositionTrack, segments: [VideoSegment])],
         totalDuration: CMTime,
         renderSize: CGSize,
-        frameRate: Double) -> AVVideoComposition? {
+        frameRate: Double) async throws -> AVVideoComposition? {
 
         let hasAnySegment = trackSegments.contains { !$0.segments.isEmpty }
         guard hasAnySegment else { return nil }
@@ -144,11 +146,11 @@ enum CompositionBuilder {
             instructions.append(AVVideoCompositionInstruction(configuration: instructionConfig))
         }
 
-        let videoComposition = AVMutableVideoComposition()
-        videoComposition.renderSize = renderSize
-        videoComposition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))
-        videoComposition.instructions = instructions
-        return videoComposition
+        var config = try await AVVideoComposition.Configuration(for: composition)
+        config.renderSize = renderSize
+        config.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))
+        config.instructions = instructions
+        return AVVideoComposition(configuration: config)
     }
 
     // MARK: - Geometry
