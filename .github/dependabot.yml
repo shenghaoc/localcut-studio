@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # No package-manager dependencies yet (no SwiftPM packages). Add a
+  # `swift` ecosystem block here if/when Package.swift dependencies are introduced.
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'monthly'
+      day: 'monday'
+      time: '09:00'
+      timezone: 'Asia/Singapore'
+    open-pull-requests-limit: 5
+    labels:
+      - 'dependencies'
+      - 'github-actions'
+    commit-message:
+      prefix: 'ci'
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - '*'
+        update-types:
+          - 'minor'
+          - 'patch'
