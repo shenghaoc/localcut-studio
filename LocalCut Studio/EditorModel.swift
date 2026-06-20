@@ -31,8 +31,8 @@ final class EditorModel {
     var exportProgress: Double?
     var isExporting = false
 
-    @ObservationIgnored private var timeObserver: Any?
-    @ObservationIgnored private var endObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
+    @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
 
     init() {
         let interval = CMTime(value: 1, timescale: 30)
