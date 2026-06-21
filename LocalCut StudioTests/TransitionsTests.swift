@@ -218,6 +218,28 @@ struct TransitionsTests {
         #expect(plan == [.layer(1), .transition(outgoing: 2, incoming: 3, type: .wipe)])
     }
 
+    @Test("Adjacent transition windows never overlap (chained clamp)")
+    func chainedTransitionsClampAgainstSharedHandle() {
+        // Three 5s clips with 4s transitions at both cuts. The middle clip's
+        // incoming window already consumes 4s of its 5s, leaving 1s for the next.
+        let media = UUID()
+        let a = Clip(mediaID: media, sourceStart: .zero, duration: time(5), timelineStart: .zero)
+        var b = Clip(mediaID: media, sourceStart: .zero, duration: time(5), timelineStart: time(5))
+        b.transition = Transition(duration: time(4))
+        var c = Clip(mediaID: media, sourceStart: .zero, duration: time(5), timelineStart: time(10))
+        c.transition = Transition(duration: time(4))
+
+        let cuts = TransitionLayout.cuts(videoTracks: [videoTrack([a, b, c])])
+        let placements = TransitionLayout.placements(for: [a, b, c], cuts: cuts)
+        let pb = placements.first { $0.id == b.id }!
+        let pc = placements.first { $0.id == c.id }!
+
+        #expect(pb.overlap == time(4))
+        #expect(pc.overlap == time(1)) // clamped: 5 - 4 already used by B's incoming
+        // The two transition windows abut but do not overlap.
+        #expect(pb.transitionRange!.end <= pc.transitionRange!.start)
+    }
+
     // MARK: - EditorModel integration (T1.4, R3, R4)
 
     private func makeModel() -> (EditorModel, Clip.ID, Clip.ID) {
@@ -287,6 +309,32 @@ struct TransitionsTests {
         model.selectedClipID = bID
         model.addTransitionToSelectedClip()
         model.removeSelectedTransition()
+
+        #expect(model.clip(for: bID)?.transition == nil)
+        #expect(model.selectedTransitionClipID == nil)
+    }
+
+    @Test("Deleting a transition's predecessor clears the now-orphaned transition")
+    func deletePredecessorClearsTransition() {
+        let (model, aID, bID) = makeModel()
+        model.selectedClipID = bID
+        model.addTransitionToSelectedClip()
+
+        model.selectedClipID = aID
+        model.deleteSelectedClip()
+
+        #expect(model.clip(for: bID)?.transition == nil)
+        #expect(model.selectedTransitionClipID == nil)
+    }
+
+    @Test("Moving a clip drops its incoming transition (cut destroyed)")
+    func moveClipClearsTransition() {
+        let (model, _, bID) = makeModel()
+        model.selectedClipID = bID
+        model.addTransitionToSelectedClip()
+
+        let trackID = model.project.videoTracks.first!.id
+        model.moveClip(id: bID, toTrack: trackID, start: time(20))
 
         #expect(model.clip(for: bID)?.transition == nil)
         #expect(model.selectedTransitionClipID == nil)

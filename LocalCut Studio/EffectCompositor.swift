@@ -148,7 +148,13 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         image = image.transformed(by: layer.transform)
 
         if layer.opacity < 1 {
-            image = scaled(image, by: layer.opacity)
+            // Scale alpha only (straight, not premultiplied): the later
+            // source-over composite applies this alpha, so dimming RGB here too
+            // would double-darken the clip.
+            let opacityFilter = CIFilter.colorMatrix()
+            opacityFilter.inputImage = image
+            opacityFilter.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(layer.opacity))
+            image = opacityFilter.outputImage ?? image
         }
         return image
     }

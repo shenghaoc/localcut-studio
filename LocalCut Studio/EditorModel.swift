@@ -133,18 +133,46 @@ final class EditorModel {
             track.clips.removeAll { $0.id == id }
         }
         selectedClipID = nil
+        sanitizeTransitions()
         statusMessage = "Deleted clip."
         Task { await rebuild() }
+    }
+
+    /// Clears any clip-owned transition whose cut no longer exists — i.e. the
+    /// clip is no longer immediately adjacent to a preceding clip. Prevents a
+    /// stored transition from silently re-binding to a different neighbour after
+    /// a move/trim/delete changes adjacency.
+    private func sanitizeTransitions() {
+        for track in allTracks {
+            let ordered = track.clips.sorted { $0.timelineStart < $1.timelineStart }
+            for (position, clip) in ordered.enumerated() where clip.transition != nil {
+                let adjacent = position > 0 &&
+                    abs((clip.timelineStart - ordered[position - 1].timelineEnd).seconds) < 0.001
+                if !adjacent, let index = track.clips.firstIndex(where: { $0.id == clip.id }) {
+                    track.clips[index].transition = nil
+                    if selectedTransitionClipID == clip.id { selectedTransitionClipID = nil }
+                }
+            }
+        }
     }
 
     /// Splits the selected clip at the current playhead into two adjacent clips.
     func splitSelectedClipAtPlayhead() {
         guard let id = selectedClipID else { return }
-        let playhead = CMTime(seconds: currentTime, preferredTimescale: 600)
 
         for track in allTracks {
             guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
             let clip = track.clips[index]
+
+            // The playhead is in effective (rippled) time; convert to this clip's
+            // authored time using its constant ripple shift so the split lands at
+            // the frame the user sees.
+            let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks)
+            let placements = TransitionLayout.placements(for: track.clips, cuts: cuts)
+            let shift = placements.first(where: { $0.id == id })
+                .map { clip.timelineStart - $0.effectiveStart } ?? .zero
+            let playhead = CMTime(seconds: currentTime, preferredTimescale: 600) + shift
+
             guard playhead > clip.timelineStart, playhead < clip.timelineEnd else { return }
 
             let offset = playhead - clip.timelineStart
@@ -441,6 +469,7 @@ final class EditorModel {
             }
 
             track.clips[index] = clip
+            sanitizeTransitions()
             Task { await rebuild() }
             return
         }
@@ -464,6 +493,12 @@ final class EditorModel {
         guard sourceTrack.kind == targetTrack.kind else { return }
 
         var clip = sourceTrack.clips[sourceIndex]
+        // Moving a clip destroys its incoming-transition cut; drop it so the
+        // transition can't silently re-bind to a new neighbour at the drop site.
+        if clip.transition != nil {
+            clip.transition = nil
+            if selectedTransitionClipID == id { selectedTransitionClipID = nil }
+        }
         let newStart = max(start, .zero)
         clip.timelineStart = newStart
 
@@ -475,6 +510,7 @@ final class EditorModel {
         targetTrack.clips.append(clip)
         targetTrack.clips.sort { $0.timelineStart < $1.timelineStart }
 
+        sanitizeTransitions()
         Task { await rebuild() }
     }
 

@@ -58,6 +58,29 @@ enum TransitionLayout {
         return CMTimeMaximum(clamped, .zero)
     }
 
+    /// Overlaps for each clip's incoming transition, in timeline order, with
+    /// chained transitions additionally clamped so a clip's incoming and outgoing
+    /// transition windows never overlap: the predecessor's head is already
+    /// consumed by *its* incoming transition, so only its remaining tail is
+    /// available here.
+    private static func orderedOverlaps(_ ordered: [Clip]) -> [CMTime] {
+        var result: [CMTime] = []
+        result.reserveCapacity(ordered.count)
+        var previous: Clip?
+        var previousOverlap = CMTime.zero
+        for clip in ordered {
+            var overlap = effectiveOverlap(into: clip, previous: previous)
+            if let previous {
+                let availableTail = CMTimeMaximum(previous.duration - previousOverlap, .zero)
+                overlap = CMTimeMinimum(overlap, availableTail)
+            }
+            result.append(overlap)
+            previousOverlap = overlap
+            previous = clip
+        }
+        return result
+    }
+
     /// The project-wide set of transition cuts, derived from every video track.
     /// Cuts that coincide within `adjacencyTolerance` (e.g. the same boundary on
     /// stacked tracks, possibly with tiny floating-point drift) are merged by
@@ -66,13 +89,9 @@ enum TransitionLayout {
         var rawCuts: [(time: Double, overlap: CMTime)] = []
         for track in videoTracks {
             let ordered = track.clips.sorted { $0.timelineStart < $1.timelineStart }
-            var previous: Clip?
-            for clip in ordered {
-                let overlap = effectiveOverlap(into: clip, previous: previous)
-                if overlap > .zero {
-                    rawCuts.append((clip.timelineStart.seconds, overlap))
-                }
-                previous = clip
+            let overlaps = orderedOverlaps(ordered)
+            for (index, clip) in ordered.enumerated() where overlaps[index] > .zero {
+                rawCuts.append((clip.timelineStart.seconds, overlaps[index]))
             }
         }
 
@@ -102,14 +121,12 @@ enum TransitionLayout {
     /// Placements for one track's clips, rippled by the project-wide cut list.
     static func placements(for clips: [Clip], cuts: [Cut]) -> [Placement] {
         let ordered = clips.sorted { $0.timelineStart < $1.timelineStart }
-        var previous: Clip?
+        let overlaps = orderedOverlaps(ordered)
         var result: [Placement] = []
         result.reserveCapacity(ordered.count)
-        for clip in ordered {
-            let overlap = effectiveOverlap(into: clip, previous: previous)
+        for (index, clip) in ordered.enumerated() {
             let effectiveStart = clip.timelineStart - shift(at: clip.timelineStart, cuts: cuts)
-            result.append(Placement(clip: clip, effectiveStart: effectiveStart, overlap: overlap))
-            previous = clip
+            result.append(Placement(clip: clip, effectiveStart: effectiveStart, overlap: overlaps[index]))
         }
         return result
     }
