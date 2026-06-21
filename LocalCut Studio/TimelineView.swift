@@ -209,12 +209,17 @@ struct TimelineView: View {
         let x = displayValues.x
         let isSelected = model.selectedClipID == clip.id
         let baseColor: Color = kind == .video ? .blue : .green
+        // Precompute the name and its localized accessibility label outside the
+        // view builder: inlining `.map(Text.init)` tipped this already-large
+        // expression past the Swift type-checker's time budget.
+        let clipName = model.project.media(for: clip.mediaID)?.name
+        let nameLabel: Text = clipName.map(Text.init) ?? Text("Clip")
 
         return ZStack {
             RoundedRectangle(cornerRadius: 6)
                 .fill(baseColor.opacity(isDragging(clip.id) ? 0.2 : 0.35))
                 .overlay(alignment: .leading) {
-                    Text(model.project.media(for: clip.mediaID)?.name ?? "Clip")
+                    Text(clipName ?? "Clip")
                         .font(.caption2)
                         .lineLimit(1)
                         .padding(.horizontal, 6)
@@ -240,7 +245,7 @@ struct TimelineView: View {
             model.selectedTransitionClipID = nil
         }
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
-        .accessibilityLabel(model.project.media(for: clip.mediaID)?.name ?? "Clip")
+        .accessibilityLabel(nameLabel)
         .accessibilityValue("Starts \(TimeFormatting.timecode(clip.timelineStart.seconds)), \(TimeFormatting.timecode(clip.duration.seconds)) long")
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(isSelected ? .isSelected : [])

@@ -63,7 +63,7 @@ struct PreviewView: View {
             }
             .keyboardShortcut(.space, modifiers: [])
             .help("Play / Pause")
-            .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
+            .accessibilityLabel(model.isPlaying ? Text("Pause") : Text("Play"))
 
             Text(TimeFormatting.timecode(model.currentTime))
                 .monospacedDigit()
