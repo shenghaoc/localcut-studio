@@ -36,8 +36,8 @@ Order follows the upstream recommendation (29 → 31 → 33 → 32b → 37, with
 
 | Tag | Phase | Spec | Theme |
 |---|---|---|---|
-| v0.2.1 | 29 | [phase-29-auto-captions](./phase-29-auto-captions/) | On-device auto captions (Speech / Core AI ASR) |
-| v0.2.2 | 31 | [phase-31-portrait-matting](./phase-31-portrait-matting/) | Portrait video matting (Vision / Core AI) |
+| v0.2.1 | 29 | [phase-29-auto-captions](./phase-29-auto-captions/) | On-device auto captions (Speech framework) |
+| v0.2.2 | 31 | [phase-31-portrait-matting](./phase-31-portrait-matting/) | Portrait video matting (Vision person segmentation) |
 | v0.2.3 | 33 | [phase-33-smart-reframe](./phase-33-smart-reframe/) | Smart reframe (Vision face/saliency + tracker) |
 | v0.2.4 | 32b | [phase-32b-landmark-beauty](./phase-32b-landmark-beauty/) | Landmark-driven beauty (瘦脸 / 大眼) |
 | v0.2.5 | 37 | [phase-37-frame-interpolation](./phase-37-frame-interpolation/) | Frame interpolation via VTFrameProcessor (no model vendoring) |
