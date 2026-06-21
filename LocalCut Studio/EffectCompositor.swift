@@ -318,19 +318,14 @@ private struct CachedLUT: Sendable {
 
 private final class LUTCache: @unchecked Sendable {
     nonisolated static let shared = LUTCache()
-    private let lock = OSAllocatedUnfairLock()
-    nonisolated(unsafe) private var cache: [Data: CachedLUT] = [:]
+    private let lock = OSAllocatedUnfairLock(initialState: [Data: CachedLUT]())
 
     nonisolated func lut(forBookmark bookmark: Data) -> CachedLUT? {
-        lock.lock()
-        defer { lock.unlock() }
-        return cache[bookmark]
+        lock.withLock { $0[bookmark] }
     }
 
     nonisolated func setLut(_ lut: CachedLUT, forBookmark bookmark: Data) {
-        lock.lock()
-        defer { lock.unlock() }
-        cache[bookmark] = lut
+        lock.withLock { $0[bookmark] = lut }
     }
 }
 

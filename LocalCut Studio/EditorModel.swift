@@ -191,13 +191,20 @@ final class EditorModel {
         }
     }
 
-    /// Removes a media item from the project and stops its security-scoped access.
+    /// Removes a media item and its orphaned clips, then stops its security-scoped access.
     func removeMedia(itemID: MediaItem.ID) {
         guard let media = project.media(for: itemID) else { return }
         media.url.stopAccessingSecurityScopedResource()
         project.mediaItems.removeAll { $0.id == itemID }
+        for track in allTracks {
+            track.clips.removeAll { $0.mediaID == itemID }
+        }
         if selectedMediaID == itemID { selectedMediaID = nil }
+        selectedClipID = nil
+        selectedTransitionClipID = nil
+        sanitizeTransitions()
         statusMessage = "Removed \(media.name)."
+        scheduleRebuild()
     }
 
     /// Clears any clip-owned transition whose cut no longer exists — i.e. the

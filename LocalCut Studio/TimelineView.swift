@@ -239,7 +239,7 @@ struct TimelineView: View {
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
         .accessibilityLabel(model.project.media(for: clip.mediaID)?.name ?? "Clip")
         .accessibilityAddTraits(.isButton)
-        .accessibilityAddTraits(.isSelected)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { hovering in
             if !hovering { hoverEdge = nil }
         }
