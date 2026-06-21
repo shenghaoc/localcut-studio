@@ -50,6 +50,49 @@ struct UndoRedoTests {
         #expect(videoClips(model).isEmpty)
     }
 
+    @Test("Removing media is undoable, dirty, and drops dependent clips")
+    func removeMediaUndoRedo() {
+        let (model, clipID) = makeModel()
+        let media = model.project.mediaItems[0]
+        model.selectedMediaID = media.id
+        model.selectedClipID = clipID
+
+        model.removeMedia(itemID: media.id)
+        #expect(model.project.mediaItems.isEmpty)
+        #expect(videoClips(model).isEmpty)
+        #expect(model.selectedMediaID == nil)
+        #expect(model.selectedClipID == nil)
+        #expect(model.isDirty)
+        #expect(model.canUndo)
+
+        model.undo()
+        #expect(model.project.mediaItems.map(\.id) == [media.id])
+        #expect(videoClips(model).map(\.id) == [clipID])
+        #expect(model.canRedo)
+
+        model.redo()
+        #expect(model.project.mediaItems.isEmpty)
+        #expect(videoClips(model).isEmpty)
+    }
+
+    @Test("Removing one duplicate media keeps shared URL access until the last item is gone")
+    func removeMediaKeepsSharedURLAccess() {
+        let model = EditorModel()
+        let url = URL(fileURLWithPath: "/tmp/shared-source.mov")
+        let first = MediaItem(url: url)
+        let second = MediaItem(url: url)
+        model.project.mediaItems.append(contentsOf: [first, second])
+        model.accessedURLs.insert(url)
+
+        model.removeMedia(itemID: first.id)
+        #expect(model.project.mediaItems.map(\.id) == [second.id])
+        #expect(model.accessedURLs.contains(url))
+
+        model.removeMedia(itemID: second.id)
+        #expect(model.project.mediaItems.isEmpty)
+        #expect(!model.accessedURLs.contains(url))
+    }
+
     @Test("Undo label reflects the action name")
     func undoLabel() {
         let (model, clipID) = makeModel()

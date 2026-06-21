@@ -196,9 +196,8 @@ final class EditorModel {
     func removeMedia(itemID: MediaItem.ID) {
         guard let media = project.media(for: itemID) else { return }
         performUndoable("Remove Media") {
-            media.url.stopAccessingSecurityScopedResource()
-            accessedURLs.remove(media.url)
             project.mediaItems.removeAll { $0.id == itemID }
+            releaseAccessIfUnused(for: media.url)
             for track in allTracks {
                 track.clips.removeAll { $0.mediaID == itemID }
             }
@@ -212,6 +211,14 @@ final class EditorModel {
             sanitizeTransitions()
             statusMessage = "Removed \(media.name)."
             scheduleRebuild()
+        }
+    }
+
+    /// Releases retained file access once no media item in the project still uses it.
+    private func releaseAccessIfUnused(for url: URL) {
+        guard !project.mediaItems.contains(where: { $0.url == url }) else { return }
+        if accessedURLs.remove(url) != nil {
+            url.stopAccessingSecurityScopedResource()
         }
     }
 
