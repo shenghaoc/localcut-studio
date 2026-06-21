@@ -14,20 +14,42 @@ struct CompositorLayer {
     let effects: [Effect]
 }
 
+/// One bottom-to-top render step within an instruction interval: either a single
+/// layer, or a transition that blends an outgoing and incoming layer over a
+/// derived progress through the overlap interval.
+enum RenderUnit {
+    case layer(CompositorLayer)
+    case transition(outgoing: CompositorLayer, incoming: CompositorLayer,
+                    type: TransitionType, overlap: CMTimeRange)
+
+    /// Every source track this unit reads from.
+    nonisolated var trackIDs: [CMPersistentTrackID] {
+        switch self {
+        case .layer(let layer): [layer.trackID]
+        case .transition(let outgoing, let incoming, _, _): [outgoing.trackID, incoming.trackID]
+        }
+    }
+}
+
 // MARK: - Custom instruction
 
 final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructionProtocol, @unchecked Sendable {
     let timeRange: CMTimeRange
     let enablePostProcessing: Bool = false
-    let containsTweening: Bool = false
+    let containsTweening: Bool
     let requiredSourceTrackIDs: [NSValue]?
     let passthroughTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
-    let layers: [CompositorLayer]
+    let units: [RenderUnit]
 
-    init(timeRange: CMTimeRange, layers: [CompositorLayer]) {
+    init(timeRange: CMTimeRange, units: [RenderUnit]) {
         self.timeRange = timeRange
-        self.layers = layers
-        requiredSourceTrackIDs = layers.isEmpty ? [] : layers.map { NSNumber(value: $0.trackID) as NSValue }
+        self.units = units
+        // A transition tweens its layers across the interval.
+        containsTweening = units.contains {
+            if case .transition = $0 { return true }; return false
+        }
+        let trackIDs = units.flatMap(\.trackIDs)
+        requiredSourceTrackIDs = trackIDs.isEmpty ? [] : trackIDs.map { NSNumber(value: $0) as NSValue }
     }
 }
 
@@ -63,22 +85,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let renderSize = request.renderContext.size
         var result: CIImage?
 
-        for layer in instruction.layers {
-            guard let sourceBuffer = request.sourceFrame(byTrackID: layer.trackID) else { continue }
-
-            var image = CIImage(cvPixelBuffer: sourceBuffer)
-
-            image = applyEffectChain(image, effects: layer.effects)
-
-            image = image.transformed(by: layer.transform)
-
-            if layer.opacity < 1 {
-                let opacityFilter = CIFilter.colorMatrix()
-                opacityFilter.inputImage = image
-                opacityFilter.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(layer.opacity))
-                image = opacityFilter.outputImage ?? image
-            }
-
+        for unit in instruction.units {
+            guard let image = renderedImage(for: unit, request: request) else { continue }
             if let existing = result {
                 result = image.composited(over: existing)
             } else {
@@ -98,6 +106,100 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         Self.sharedCIContext.render(composited, to: destination, bounds: destinationRect, colorSpace: Self.sRGBColorSpace)
 
         request.finish(withComposedVideoFrame: destination)
+    }
+
+    // MARK: - Render units
+
+    /// Renders a single unit (a plain layer or a transition blend) to a CIImage.
+    nonisolated private func renderedImage(
+        for unit: RenderUnit,
+        request: AVAsynchronousVideoCompositionRequest) -> CIImage? {
+
+        switch unit {
+        case .layer(let layer):
+            return renderedImage(for: layer, request: request)
+
+        case .transition(let outgoing, let incoming, let type, let overlap):
+            let out = renderedImage(for: outgoing, request: request)
+            let into = renderedImage(for: incoming, request: request)
+            // If a source frame is missing, fall back to whichever is available.
+            guard let out else { return into }
+            guard let into else { return out }
+            let progress = transitionProgress(time: request.compositionTime, overlap: overlap)
+            switch type {
+            case .crossDissolve:
+                return crossDissolve(outgoing: out, incoming: into, progress: progress)
+            case .wipe:
+                return wipe(outgoing: out, incoming: into, progress: progress)
+            }
+        }
+    }
+
+    /// Applies the layer's effect chain, fit transform, and per-clip opacity to
+    /// its source frame.
+    nonisolated private func renderedImage(
+        for layer: CompositorLayer,
+        request: AVAsynchronousVideoCompositionRequest) -> CIImage? {
+
+        guard let sourceBuffer = request.sourceFrame(byTrackID: layer.trackID) else { return nil }
+
+        var image = CIImage(cvPixelBuffer: sourceBuffer)
+        image = applyEffectChain(image, effects: layer.effects)
+        image = image.transformed(by: layer.transform)
+
+        if layer.opacity < 1 {
+            image = scaled(image, by: layer.opacity)
+        }
+        return image
+    }
+
+    // MARK: - Transitions
+
+    /// Normalised progress (0...1) of `time` through the overlap interval.
+    nonisolated private func transitionProgress(time: CMTime, overlap: CMTimeRange) -> Float {
+        let duration = overlap.duration.seconds
+        guard duration > 0 else { return 0 }
+        let elapsed = (time - overlap.start).seconds
+        return Float(max(0, min(1, elapsed / duration)))
+    }
+
+    /// A linear opacity-ramp cross-dissolve: `outgoing·(1-p) + incoming·p`.
+    /// Implemented as premultiplied scaling plus additive compositing so the
+    /// midpoint stays at full brightness (a true cross-fade).
+    nonisolated private func crossDissolve(outgoing: CIImage, incoming: CIImage, progress: Float) -> CIImage {
+        let fadedOut = scaled(outgoing, by: 1 - progress)
+        let fadedIn = scaled(incoming, by: progress)
+        guard let filter = CIFilter(name: "CIAdditionCompositing") else {
+            return fadedIn.composited(over: fadedOut)
+        }
+        filter.setValue(fadedIn, forKey: kCIInputImageKey)
+        filter.setValue(fadedOut, forKey: kCIInputBackgroundImageKey)
+        return filter.outputImage ?? fadedIn.composited(over: fadedOut)
+    }
+
+    /// A directional bars-swipe transition via Core Image.
+    nonisolated private func wipe(outgoing: CIImage, incoming: CIImage, progress: Float) -> CIImage {
+        guard let filter = CIFilter(name: "CIBarsSwipeTransition") else {
+            return crossDissolve(outgoing: outgoing, incoming: incoming, progress: progress)
+        }
+        filter.setDefaults()
+        filter.setValue(outgoing, forKey: kCIInputImageKey)
+        filter.setValue(incoming, forKey: "inputTargetImage")
+        filter.setValue(progress, forKey: kCIInputTimeKey)
+        return filter.outputImage ?? crossDissolve(outgoing: outgoing, incoming: incoming, progress: progress)
+    }
+
+    /// Scales every (premultiplied) channel of an image by `factor` — a uniform
+    /// opacity multiply.
+    nonisolated private func scaled(_ image: CIImage, by factor: Float) -> CIImage {
+        let f = CGFloat(factor)
+        let filter = CIFilter.colorMatrix()
+        filter.inputImage = image
+        filter.rVector = CIVector(x: f, y: 0, z: 0, w: 0)
+        filter.gVector = CIVector(x: 0, y: f, z: 0, w: 0)
+        filter.bVector = CIVector(x: 0, y: 0, z: f, w: 0)
+        filter.aVector = CIVector(x: 0, y: 0, z: 0, w: f)
+        return filter.outputImage ?? image
     }
 
     // MARK: - Effect chain

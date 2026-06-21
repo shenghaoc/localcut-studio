@@ -1,0 +1,107 @@
+import Foundation
+import AVFoundation
+
+/// Pure geometry for laying out tracks when transitions overlap neighbouring
+/// clips.
+///
+/// Authored clips stay butt-adjacent and non-overlapping in the timeline data
+/// model — this keeps trim & drag invariants intact. A transition is realised by
+/// *rippling* every clip at or after its cut earlier by the derived overlap, so
+/// the rendered timeline shortens by the total transition duration (matching the
+/// classic A/B-roll model). The same ripple is applied across all tracks so that
+/// linked video and audio stay in sync.
+///
+/// This computation is shared by `CompositionBuilder` (which builds the
+/// composition and instructions) and `TimelineView` (which draws clip blocks and
+/// transition glyphs) so that preview, export, and the UI agree on positions.
+enum TransitionLayout {
+
+    /// A cut on the timeline that hosts a transition, with its clamped overlap.
+    struct Cut: Hashable {
+        let time: CMTime
+        let overlap: CMTime
+    }
+
+    /// One clip placed in rippled ("effective") timeline coordinates.
+    struct Placement: Identifiable {
+        let clip: Clip
+        /// Start after rippling for upstream transitions.
+        let effectiveStart: CMTime
+        /// Derived overlap of this clip's incoming transition with its
+        /// predecessor (0 when there is no transition or the predecessor is not
+        /// adjacent). Equals the rendered transition length.
+        let overlap: CMTime
+
+        var id: Clip.ID { clip.id }
+        var effectiveEnd: CMTime { effectiveStart + clip.duration }
+
+        /// The interval over which this clip's incoming transition runs, in
+        /// effective coordinates, or `nil` when no transition is active.
+        var transitionRange: CMTimeRange? {
+            guard overlap > .zero, clip.transition != nil else { return nil }
+            return CMTimeRange(start: effectiveStart, duration: overlap)
+        }
+    }
+
+    /// Tolerance (seconds) for treating two clips as adjacent despite rounding.
+    private static let adjacencyTolerance = 0.001
+
+    /// The clamped overlap for `clip`'s incoming transition given its authored
+    /// predecessor. Zero unless a transition exists *and* the clips are adjacent.
+    /// Clamped to neither neighbour's length (R1.3) and never negative (R4.1).
+    static func effectiveOverlap(into clip: Clip, previous: Clip?) -> CMTime {
+        guard let transition = clip.transition, let previous else { return .zero }
+        let gap = abs((clip.timelineStart - previous.timelineEnd).seconds)
+        guard gap < adjacencyTolerance else { return .zero }
+        let maxOverlap = CMTimeMinimum(previous.duration, clip.duration)
+        let clamped = CMTimeMinimum(transition.duration, maxOverlap)
+        return CMTimeMaximum(clamped, .zero)
+    }
+
+    /// The project-wide set of transition cuts, derived from every video track.
+    /// Coincident cuts (e.g. the same boundary on stacked tracks) are merged by
+    /// taking the larger overlap so all tracks ripple consistently.
+    static func cuts(videoTracks: [Track]) -> [Cut] {
+        var overlapByCut: [Double: CMTime] = [:]
+        for track in videoTracks {
+            let ordered = track.clips.sorted { $0.timelineStart < $1.timelineStart }
+            var previous: Clip?
+            for clip in ordered {
+                let overlap = effectiveOverlap(into: clip, previous: previous)
+                if overlap > .zero {
+                    let key = clip.timelineStart.seconds
+                    overlapByCut[key] = CMTimeMaximum(overlapByCut[key] ?? .zero, overlap)
+                }
+                previous = clip
+            }
+        }
+        return overlapByCut
+            .map { Cut(time: CMTime(seconds: $0.key, preferredTimescale: 600), overlap: $0.value) }
+            .sorted { $0.time < $1.time }
+    }
+
+    /// Total leftward ripple applied to authored time `authored`: the sum of the
+    /// overlaps of every cut at or before it.
+    static func shift(at authored: CMTime, cuts: [Cut]) -> CMTime {
+        var shift = CMTime.zero
+        for cut in cuts where cut.time <= authored {
+            shift = shift + cut.overlap
+        }
+        return shift
+    }
+
+    /// Placements for one track's clips, rippled by the project-wide cut list.
+    static func placements(for clips: [Clip], cuts: [Cut]) -> [Placement] {
+        let ordered = clips.sorted { $0.timelineStart < $1.timelineStart }
+        var previous: Clip?
+        var result: [Placement] = []
+        result.reserveCapacity(ordered.count)
+        for clip in ordered {
+            let overlap = effectiveOverlap(into: clip, previous: previous)
+            let effectiveStart = clip.timelineStart - shift(at: clip.timelineStart, cuts: cuts)
+            result.append(Placement(clip: clip, effectiveStart: effectiveStart, overlap: overlap))
+            previous = clip
+        }
+        return result
+    }
+}

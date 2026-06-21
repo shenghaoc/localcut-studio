@@ -288,6 +288,104 @@ final class EditorModel {
         allTracks.first { $0.clips.contains(where: { $0.id == clipID }) }
     }
 
+    func clip(for clipID: Clip.ID) -> Clip? {
+        for track in allTracks {
+            if let clip = track.clips.first(where: { $0.id == clipID }) { return clip }
+        }
+        return nil
+    }
+
+    // MARK: - Transitions
+
+    /// The trailing clip whose transition is currently selected, if any.
+    var selectedTransitionClipID: Clip.ID?
+
+    /// The selected transition, or `nil` if none is selected (or it was removed).
+    var selectedTransition: Transition? {
+        guard let id = selectedTransitionClipID else { return nil }
+        return clip(for: id)?.transition
+    }
+
+    /// The adjacent predecessor of `clipID` on the same track, if the two clips
+    /// are butt-joined (a valid cut to host a transition).
+    private func adjacentPredecessor(of clipID: Clip.ID) -> (track: Track, previous: Clip, clip: Clip)? {
+        guard let track = track(for: clipID) else { return nil }
+        let ordered = track.clips.sorted { $0.timelineStart < $1.timelineStart }
+        guard let index = ordered.firstIndex(where: { $0.id == clipID }), index > 0 else { return nil }
+        let previous = ordered[index - 1]
+        let clip = ordered[index]
+        let gap = abs((clip.timelineStart - previous.timelineEnd).seconds)
+        guard gap < 0.001 else { return nil }
+        return (track, previous, clip)
+    }
+
+    /// Whether a transition can be added at the current clip selection: a video
+    /// clip that follows an adjacent clip and does not already have one.
+    var canAddTransitionAtSelection: Bool {
+        guard let id = selectedClipID,
+              let context = adjacentPredecessor(of: id),
+              context.track.kind == .video,
+              context.clip.transition == nil else { return false }
+        return true
+    }
+
+    /// The largest overlap available to the selected transition — the shorter of
+    /// its two neighbouring clips. Drives the inspector's duration ceiling.
+    var selectedTransitionMaxDuration: CMTime {
+        guard let id = selectedTransitionClipID,
+              let context = adjacentPredecessor(of: id) else { return .zero }
+        return CMTimeMinimum(context.previous.duration, context.clip.duration)
+    }
+
+    /// Adds a default cross-dissolve at the selected clip's incoming cut,
+    /// clamped to the available overlap, and selects it for editing.
+    func addTransitionToSelectedClip() {
+        guard let id = selectedClipID,
+              let context = adjacentPredecessor(of: id),
+              context.track.kind == .video else {
+            statusMessage = "Select a video clip that follows another to add a transition."
+            return
+        }
+        let maxOverlap = CMTimeMinimum(context.previous.duration, context.clip.duration)
+        let duration = CMTimeMinimum(Transition.defaultDuration, maxOverlap)
+        setTransition(Transition(duration: duration), onClip: id)
+        selectedClipID = nil
+        selectedMediaID = nil
+        selectedTransitionClipID = id
+        statusMessage = "Added transition."
+    }
+
+    /// Mutates the selected transition. Continuous edits (duration drag) pass
+    /// `coalesced: true` to debounce the rebuild.
+    func updateSelectedTransition(coalesced: Bool = false, _ body: (inout Transition) -> Void) {
+        guard let id = selectedTransitionClipID else { return }
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }),
+                  var transition = track.clips[index].transition else { continue }
+            body(&transition)
+            track.clips[index].transition = transition
+            if coalesced { rebuildDebounced() } else { Task { await rebuild() } }
+            return
+        }
+    }
+
+    /// Removes the selected transition, restoring the plain cut (R3.3).
+    func removeSelectedTransition() {
+        guard let id = selectedTransitionClipID else { return }
+        setTransition(nil, onClip: id)
+        selectedTransitionClipID = nil
+        statusMessage = "Removed transition."
+    }
+
+    private func setTransition(_ transition: Transition?, onClip id: Clip.ID) {
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+            track.clips[index].transition = transition
+            Task { await rebuild() }
+            return
+        }
+    }
+
     // MARK: - Trim & drag
 
     enum TrimEdge { case left, right }
