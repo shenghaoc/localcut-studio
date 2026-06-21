@@ -15,15 +15,21 @@ nonisolated struct TitleRasterRequest: Hashable {
     let text: String
     /// Word index when rendering the karaoke-highlight pass; `nil` for idle frames.
     let wordHighlightIndex: Int?
+    /// Digest of the line's `words` array (text + range), so a re-aligned ASR
+    /// pass or a hand-edited word range invalidates highlight rasters even when
+    /// the line id and word index stay the same. `0` when the line has no words.
+    let wordsDigest: Int
     let renderWidth: Int
     let renderHeight: Int
 
     init(lineID: UUID, styleHash: Int, text: String,
-         wordHighlightIndex: Int? = nil, renderSize: CGSize) {
+         wordHighlightIndex: Int? = nil, wordsDigest: Int = 0,
+         renderSize: CGSize) {
         self.lineID = lineID
         self.styleHash = styleHash
         self.text = text
         self.wordHighlightIndex = wordHighlightIndex
+        self.wordsDigest = wordsDigest
         self.renderWidth = Int(renderSize.width.rounded())
         self.renderHeight = Int(renderSize.height.rounded())
     }
@@ -125,8 +131,12 @@ final class TitleRasterer: @unchecked Sendable {
 
     /// Allocates a render-canvas-sized BGRA premultiplied bitmap, runs the draw
     /// closure with a y-flipped context (so Core Text top-down output composites
-    /// correctly under Core Image's bottom-up coordinate space), and wraps the
-    /// resulting bitmap in a `CIImage`.
+    /// correctly under Core Image's bottom-up coordinate space), then **crops
+    /// the resulting `CGImage` to the draw closure's bounding box** before
+    /// wrapping it as a `CIImage`. Full-canvas BGRA rasters at 1080p/4K weigh
+    /// ~8/33 MiB each; caching 128 of them would blow up to ~1 GiB / ~4 GiB.
+    /// Cropping shrinks each cached entry to roughly the text area while leaving
+    /// the canvas position intact via a translation on the resulting CIImage.
     nonisolated private func render(request: TitleRasterRequest, draw: DrawClosure) -> TitleRaster {
         let size = request.renderSize
         let width = max(1, Int(size.width.rounded()))
@@ -134,6 +144,8 @@ final class TitleRasterer: @unchecked Sendable {
         let bytesPerRow = width * 4
         let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue
             | CGBitmapInfo.byteOrder32Little.rawValue
+        let canvasRect = CGRect(origin: .zero, size: size)
+        let fallback = CIImage(color: .clear).cropped(to: canvasRect)
 
         guard let context = CGContext(
             data: nil,
@@ -144,8 +156,7 @@ final class TitleRasterer: @unchecked Sendable {
             space: Self.sRGB,
             bitmapInfo: bitmapInfo) else {
             os_log(.error, "TitleRasterer: could not allocate %dx%d CGContext", width, height)
-            return TitleRaster(image: CIImage(color: .clear).cropped(to: CGRect(origin: .zero, size: size)),
-                               boundingBox: .zero)
+            return TitleRaster(image: fallback, boundingBox: .zero)
         }
 
         // Start transparent and y-flip so a top-down Core Text frame maps onto
@@ -157,11 +168,39 @@ final class TitleRasterer: @unchecked Sendable {
         let boundingBox = draw(context, size)
         context.restoreGState()
 
-        guard let cgImage = context.makeImage() else {
-            return TitleRaster(image: CIImage(color: .clear).cropped(to: CGRect(origin: .zero, size: size)),
-                               boundingBox: .zero)
+        guard let fullImage = context.makeImage() else {
+            return TitleRaster(image: fallback, boundingBox: .zero)
         }
-        let ciImage = CIImage(cgImage: cgImage)
+
+        // Degenerate draw → return a clear, canvas-extent CIImage.
+        guard boundingBox.width > 0, boundingBox.height > 0 else {
+            return TitleRaster(image: fallback, boundingBox: .zero)
+        }
+
+        // Convert the CIImage-coord (y-up) bounding box into a CGImage-coord
+        // (y-down) crop rect, clamped to the canvas so a partly-off-canvas box
+        // still yields a valid CGImage.
+        let clampedBox = boundingBox.intersection(canvasRect)
+        guard !clampedBox.isEmpty else {
+            return TitleRaster(image: fallback, boundingBox: .zero)
+        }
+        let cropRect = CGRect(
+            x: clampedBox.minX,
+            y: CGFloat(height) - clampedBox.maxY,
+            width: clampedBox.width,
+            height: clampedBox.height)
+        guard let cropped = fullImage.cropping(to: cropRect) else {
+            // Cropping can fail for degenerate rects; surface the uncropped
+            // image rather than dropping the frame entirely.
+            return TitleRaster(image: CIImage(cgImage: fullImage), boundingBox: boundingBox)
+        }
+
+        // The cropped CIImage has extent (0, 0, w, h); translate so its
+        // extent sits where the text actually is on the canvas, leaving the
+        // compositor's animation math (centre = boundingBox.mid) unchanged.
+        let ciImage = CIImage(cgImage: cropped)
+            .transformed(by: CGAffineTransform(translationX: clampedBox.minX,
+                                               y: clampedBox.minY))
         return TitleRaster(image: ciImage, boundingBox: boundingBox)
     }
 }

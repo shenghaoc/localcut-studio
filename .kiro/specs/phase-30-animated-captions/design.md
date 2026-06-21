@@ -37,6 +37,10 @@ All five infrastructure deps are now specced. The first three land in the same c
 - Sub-pixel positioning during animation can cause shimmer; snap to pixel grid on integer time positions, ease only in between.
 - Bundle round-trip must include any user font referenced as an embedded asset, or pin to a system font name with a fallback policy.
 
+## Known limitations
+
+- **Caption tails past the last AV clip are truncated.** If a caption ends after every video clip ends, preview and export stop at the AV duration rather than the caption end. `AVMutableComposition.insertEmptyTimeRange` did not reliably extend `composition.duration` in our test runs on macOS 26; the correct fix is to insert a placeholder source media (tiny black/silent `.mov`) into the composition for the tail, tracked as a follow-up. Most projects keep at least one AV clip running until the final caption fades, so this is not commonly hit in practice.
+
 ## Non-goals
 
 - Speech recognition (Phase 29).

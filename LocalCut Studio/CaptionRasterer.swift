@@ -32,6 +32,10 @@ final class CaptionRasterer: @unchecked Sendable {
     }
 
     /// Renders the word-highlight frame for a line at index `wordIndex` (0-based).
+    /// The cache key includes a digest of `line.words` so a re-aligned ASR pass
+    /// (or any other change to the word ranges / text) invalidates the cached
+    /// raster — the wordIndex alone doesn't capture which substring is now
+    /// covered when the words array shifts.
     nonisolated func highlightRaster(line: CaptionLine, style: CaptionStyle, renderSize: CGSize,
                                      wordIndex: Int) -> TitleRaster? {
         guard renderSize.width > 0, renderSize.height > 0 else { return nil }
@@ -40,12 +44,28 @@ final class CaptionRasterer: @unchecked Sendable {
             styleHash: style.rasterHash,
             text: line.text,
             wordHighlightIndex: wordIndex,
+            wordsDigest: Self.wordsDigest(line.words),
             renderSize: renderSize)
         return rasterer.raster(for: request) { context, size in
             CaptionDrawing.draw(text: line.text, style: style,
                                 size: size, activeWordIndex: wordIndex, words: line.words,
                                 into: context)
         }
+    }
+
+    /// Stable hash of a `WordTiming` array — order-sensitive, text + range
+    /// included — used as part of the highlight cache key.
+    nonisolated private static func wordsDigest(_ words: [WordTiming]?) -> Int {
+        guard let words, !words.isEmpty else { return 0 }
+        var hasher = Hasher()
+        for w in words {
+            hasher.combine(w.word)
+            hasher.combine(w.range.start.value)
+            hasher.combine(w.range.start.timescale)
+            hasher.combine(w.range.duration.value)
+            hasher.combine(w.range.duration.timescale)
+        }
+        return hasher.finalize()
     }
 
     nonisolated func purge() { rasterer.purge() }

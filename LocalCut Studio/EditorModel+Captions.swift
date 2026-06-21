@@ -6,15 +6,23 @@ import AVFoundation
 extension EditorModel {
 
     /// Reads an SRT or VTT file and adds the parsed cues as a new caption track.
-    /// All edits flow through the undo system; the import itself is one step.
+    /// File IO + parsing run on a detached task so a large subtitle file doesn't
+    /// stall the UI; the model mutation hops back to the main actor inside the
+    /// undoable block. Security-scoped access is held for the whole operation.
     func importCaptionTrack(from url: URL) async {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let isVTT = url.pathExtension.lowercased() == "vtt"
+        let name = url.deletingPathExtension().lastPathComponent
         do {
-            let track = try CaptionImporter.importTrack(from: url)
+            let lines = try await Task.detached(priority: .userInitiated) {
+                let data = try Data(contentsOf: url)
+                return try CaptionImporter.parseLines(data: data, isVTT: isVTT)
+            }.value
             performUndoable("Import Captions") {
+                let track = CaptionTrack(name: name, lines: lines)
                 project.captionTracks.append(track)
-                statusMessage = "Imported \(track.lines.count) caption line(s) from \(url.lastPathComponent)."
+                statusMessage = "Imported \(lines.count) caption line(s) from \(url.lastPathComponent)."
                 scheduleRebuild()
             }
         } catch {

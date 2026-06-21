@@ -5,7 +5,11 @@ import os
 /// Parses SRT and VTT sidecar files into `CaptionLine`s. Stateless; one call
 /// per file. Word timings always come back `nil` here — Phase 29's ASR aligner
 /// fills them later.
-enum CaptionImporter {
+///
+/// Marked `nonisolated` so the file read + parse can run on a detached task
+/// without blocking the main actor — a large SRT file would otherwise stall
+/// preview while it imports.
+nonisolated enum CaptionImporter {
 
     enum ImportError: Error, LocalizedError {
         case notUTF8
@@ -21,7 +25,11 @@ enum CaptionImporter {
         }
     }
 
-    /// Detects format from the URL extension; defaults to SRT.
+    /// Detects format from the URL extension; defaults to SRT. Constructs a
+    /// `CaptionTrack`, so must run on the main actor (the model is
+    /// MainActor-isolated). Callers wanting off-main reads should use
+    /// `parseLines(data:isVTT:)` instead.
+    @MainActor
     static func importTrack(from url: URL, name: String? = nil) throws -> CaptionTrack {
         let data = try Data(contentsOf: url)
         let isVTT = url.pathExtension.lowercased() == "vtt"
@@ -31,7 +39,16 @@ enum CaptionImporter {
             name: name ?? url.deletingPathExtension().lastPathComponent)
     }
 
+    @MainActor
     static func importTrack(data: Data, isVTT: Bool, name: String) throws -> CaptionTrack {
+        let lines = try parseLines(data: data, isVTT: isVTT)
+        return CaptionTrack(name: name, lines: lines)
+    }
+
+    /// Pure parse path: returns just the `[CaptionLine]` array without
+    /// constructing a `CaptionTrack`. Safe to call off the main actor — used by
+    /// the editor's async import path to keep file IO + parsing off the UI.
+    static func parseLines(data: Data, isVTT: Bool) throws -> [CaptionLine] {
         guard let decoded = String(data: data, encoding: .utf8) else { throw ImportError.notUTF8 }
         // Strip the UTF-8 BOM (U+FEFF) if present — exporters from Notepad,
         // some video editors, and Windows tools include it, which would
@@ -39,7 +56,7 @@ enum CaptionImporter {
         let raw = decoded.hasPrefix("\u{FEFF}") ? String(decoded.dropFirst()) : decoded
         let lines = isVTT ? try parseVTT(raw) : parseSRT(raw)
         if lines.isEmpty { throw ImportError.emptyDocument }
-        return CaptionTrack(name: name, lines: lines)
+        return lines
     }
 
     // MARK: - SRT

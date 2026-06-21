@@ -81,6 +81,7 @@ struct CaptionsInspectorView: View {
                     model.removeCaptionTrack(id: track.id)
                 } label: { Image(systemName: "trash") }
                     .help("Remove track")
+                    .accessibilityLabel("Remove caption track")
             }
 
             ForEach(track.lines) { line in

@@ -55,8 +55,11 @@ struct TransformCode: Codable, Equatable {
 /// values plus security-scoped bookmarks instead of live `AVURLAsset`s, and a
 /// `schemaVersion` for forward-compatible decoding (R4.2).
 struct ProjectDocument: Codable, Equatable {
-    /// Bumped when the on-disk schema changes incompatibly.
-    static let currentSchemaVersion = 1
+    /// Bumped when the on-disk schema changes incompatibly. v2 adds
+    /// `captionTracks`; a v1 build would otherwise open a v2 file and silently
+    /// strip the caption tracks on the next save, so the version guard in
+    /// `EditorModel.load(document:from:)` keeps v1 builds from overwriting.
+    static let currentSchemaVersion = 2
     /// File extension for project documents.
     static let fileExtension = "lcstudio"
 

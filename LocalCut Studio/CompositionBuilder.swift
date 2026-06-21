@@ -209,10 +209,18 @@ enum CompositionBuilder {
             }
         }
 
+        let captionTracks = project.captionTracks.filter { !$0.isMuted }
+
+        // Known limitation: a caption that ends past the last AV clip is
+        // truncated to the AV duration on preview / export. Extending via
+        // `AVMutableComposition.insertEmptyTimeRange` did not reliably update
+        // `composition.duration` on macOS 26; the proper fix is to insert a
+        // placeholder source media (a tiny black/silent .mov) into the
+        // composition for the tail. Tracked as a follow-up; see Phase 30
+        // spec's "Known limitations".
         let totalDuration = composition.duration
         guard totalDuration > .zero else { return nil }
 
-        let captionTracks = project.captionTracks.filter { !$0.isMuted }
         let videoComposition = try await makeVideoComposition(
             composition: composition,
             projectTrackSegments: projectTrackSegments,

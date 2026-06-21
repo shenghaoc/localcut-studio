@@ -476,6 +476,11 @@ nonisolated struct CaptionStyle: Hashable, Codable, Sendable {
 
     static let identity = CaptionStyle()
 
+    /// Explicit no-arg init because the custom `init(from:)` below suppresses
+    /// the synthesised memberwise / default init; the property defaults still
+    /// fully define the identity style.
+    init() {}
+
     mutating func clamp() {
         fontSize = max(8, min(512, fontSize))
         stroke.width = max(0, min(64, stroke.width))
@@ -488,6 +493,38 @@ nonisolated struct CaptionStyle: Hashable, Codable, Sendable {
         letterSpacing = max(-32, min(64, letterSpacing))
         enterDuration = max(0, min(5, enterDuration))
         exitDuration = max(0, min(5, exitDuration))
+    }
+
+    /// Custom decoder so a partial style object (e.g. a hand-edited `.lccaption`
+    /// or a v1 preset missing a v2 field) decodes to the property defaults
+    /// instead of throwing on the first missing key. The synthesised decoder
+    /// would otherwise block every forward-compatible open path.
+    private enum CodingKeys: String, CodingKey {
+        case fontName, fontSize, fill, stroke, shadow, glow, pill,
+             anchor, verticalInset, letterSpacing,
+             enterAnimation, exitAnimation, enterDuration, exitDuration,
+             slideDirection, wordHighlightFill
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init()
+        if let v = try c.decodeIfPresent(String.self, forKey: .fontName) { fontName = v }
+        if let v = try c.decodeIfPresent(Float.self, forKey: .fontSize) { fontSize = v }
+        if let v = try c.decodeIfPresent(RGBAColour.self, forKey: .fill) { fill = v }
+        if let v = try c.decodeIfPresent(StrokeStyle.self, forKey: .stroke) { stroke = v }
+        if let v = try c.decodeIfPresent(ShadowStyle.self, forKey: .shadow) { shadow = v }
+        if let v = try c.decodeIfPresent(GlowStyle.self, forKey: .glow) { glow = v }
+        if let v = try c.decodeIfPresent(PillStyle.self, forKey: .pill) { pill = v }
+        if let v = try c.decodeIfPresent(CaptionAnchor.self, forKey: .anchor) { anchor = v }
+        if let v = try c.decodeIfPresent(Float.self, forKey: .verticalInset) { verticalInset = v }
+        if let v = try c.decodeIfPresent(Float.self, forKey: .letterSpacing) { letterSpacing = v }
+        if let v = try c.decodeIfPresent(CaptionEnterAnimation.self, forKey: .enterAnimation) { enterAnimation = v }
+        if let v = try c.decodeIfPresent(CaptionExitAnimation.self, forKey: .exitAnimation) { exitAnimation = v }
+        if let v = try c.decodeIfPresent(Double.self, forKey: .enterDuration) { enterDuration = v }
+        if let v = try c.decodeIfPresent(Double.self, forKey: .exitDuration) { exitDuration = v }
+        if let v = try c.decodeIfPresent(SlideDirection.self, forKey: .slideDirection) { slideDirection = v }
+        if let v = try c.decodeIfPresent(RGBAColour.self, forKey: .wordHighlightFill) { wordHighlightFill = v }
     }
 
     /// Stable digest used as the cache key by the title rasteriser. Encodes

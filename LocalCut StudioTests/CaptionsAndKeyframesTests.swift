@@ -374,6 +374,36 @@ func captionPersistenceRoundTrip() throws {
     #expect(restored.defaultStyle == BuiltInCaptionPresets.socialBoldYellow.style)
 }
 
+@Test("ProjectDocument: schema is v2 once captionTracks ship (Codex review #2)")
+func projectDocumentSchemaV2() {
+    #expect(ProjectDocument.currentSchemaVersion >= 2)
+}
+
+@Test("CaptionStyle: partial JSON decodes to defaults instead of throwing (Codex review #4)")
+func captionStyleTolerantDecode() throws {
+    // Only `fontName` is set; every other field should keep its default.
+    let partial = """
+    {"fontName":"Times-Italic"}
+    """
+    let style = try JSONDecoder().decode(CaptionStyle.self, from: Data(partial.utf8))
+    #expect(style.fontName == "Times-Italic")
+    #expect(style.fontSize == CaptionStyle.identity.fontSize)
+    #expect(style.fill == CaptionStyle.identity.fill)
+    #expect(style.enterAnimation == CaptionStyle.identity.enterAnimation)
+}
+
+@Test("TitleRasterRequest: wordsDigest separates cache entries when the words array shifts (Codex review #5)")
+func titleRasterRequestWordsDigest() {
+    let id = UUID()
+    let a = TitleRasterRequest(lineID: id, styleHash: 1, text: "hi",
+                               wordHighlightIndex: 0, wordsDigest: 100,
+                               renderSize: CGSize(width: 32, height: 32))
+    let b = TitleRasterRequest(lineID: id, styleHash: 1, text: "hi",
+                               wordHighlightIndex: 0, wordsDigest: 200,
+                               renderSize: CGSize(width: 32, height: 32))
+    #expect(a != b)
+}
+
 @Test("ProjectDocument: legacy document without captionTracks decodes to empty")
 func captionPersistenceLegacyDoc() throws {
     let legacyJSON = """
