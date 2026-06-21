@@ -188,6 +188,176 @@ final class EditorModel {
         return project.media(for: id)
     }
 
+    // MARK: - Trim & drag
+
+    enum TrimEdge { case left, right }
+
+    /// Minimum clip duration: one frame at 600 timescale.
+    private static let minClipDuration = CMTime(value: 1, timescale: 600)
+
+    /// Trims a clip edge to the given timeline time, clamping to source bounds
+    /// and a one-frame minimum length. Left-edge trims adjust both `sourceStart`
+    /// and `timelineStart`; right-edge trims adjust `duration` only.
+    func trimClip(id: Clip.ID, edge: TrimEdge, to time: CMTime) {
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+            var clip = track.clips[index]
+            guard let media = project.media(for: clip.mediaID) else { return }
+            let sourceDuration = media.duration
+
+            switch edge {
+            case .left:
+                let originalEnd = clip.timelineEnd
+                let originalSourceEnd = clip.sourceStart + clip.duration
+                var newTimelineStart = max(time, .zero)
+                // Can't push left edge past the source start offset (sourceStart can't go below zero).
+                let minTimelineStart = clip.timelineStart - clip.sourceStart
+                newTimelineStart = max(newTimelineStart, minTimelineStart)
+                // Can't push left edge past right edge minus min duration.
+                let maxTimelineStart = originalEnd - Self.minClipDuration
+                newTimelineStart = min(newTimelineStart, maxTimelineStart)
+
+                let delta = newTimelineStart - clip.timelineStart
+                clip.sourceStart = clip.sourceStart + delta
+                clip.timelineStart = newTimelineStart
+                clip.duration = originalEnd - newTimelineStart
+                // Ensure sourceStart + duration doesn't exceed source media.
+                let sourceEnd = clip.sourceStart + clip.duration
+                if sourceEnd > sourceDuration {
+                    clip.duration = sourceDuration - clip.sourceStart
+                }
+
+            case .right:
+                let maxSourceRemaining = sourceDuration - clip.sourceStart
+                var newDuration = time - clip.timelineStart
+                newDuration = max(newDuration, Self.minClipDuration)
+                newDuration = min(newDuration, maxSourceRemaining)
+                clip.duration = newDuration
+            }
+
+            track.clips[index] = clip
+            Task { await rebuild() }
+            return
+        }
+    }
+
+    /// Moves a clip to a target track at the given timeline start. The target
+    /// track must be the same kind (video↔video, audio↔audio). Overlapping clips
+    /// on the target track are resolved by snapping to the nearest gap.
+    func moveClip(id: Clip.ID, toTrack targetTrackID: Track.ID, start: CMTime) {
+        var sourceTrack: Track?
+        var sourceIndex: Int?
+        for track in allTracks {
+            if let idx = track.clips.firstIndex(where: { $0.id == id }) {
+                sourceTrack = track
+                sourceIndex = idx
+                break
+            }
+        }
+        guard let sourceTrack, let sourceIndex else { return }
+        guard let targetTrack = allTracks.first(where: { $0.id == targetTrackID }) else { return }
+        guard sourceTrack.kind == targetTrack.kind else { return }
+
+        var clip = sourceTrack.clips[sourceIndex]
+        let newStart = max(start, .zero)
+        clip.timelineStart = newStart
+
+        // Remove from source before resolving overlaps on target.
+        sourceTrack.clips.remove(at: sourceIndex)
+
+        // Resolve overlaps: find a non-overlapping position on the target track.
+        clip.timelineStart = resolveOverlap(clip: clip, on: targetTrack)
+        targetTrack.clips.append(clip)
+        targetTrack.clips.sort { $0.timelineStart < $1.timelineStart }
+
+        Task { await rebuild() }
+    }
+
+    /// Finds the nearest non-overlapping position for a clip on a track.
+    /// Prefers the requested position; shifts forward to the next gap if blocked.
+    private func resolveOverlap(clip: Clip, on track: Track) -> CMTime {
+        let requested = clip.timelineStart
+        let duration = clip.duration
+        let others = track.clips.sorted { $0.timelineStart < $1.timelineStart }
+
+        // Check if requested position works.
+        let requestedEnd = requested + duration
+        let hasOverlap = others.contains { other in
+            let otherEnd = other.timelineEnd
+            return requested < otherEnd && requestedEnd > other.timelineStart
+        }
+        if !hasOverlap { return requested }
+
+        // Snap to nearest gap: try just after each existing clip.
+        var candidates: [CMTime] = [.zero]
+        for other in others {
+            candidates.append(other.timelineEnd)
+        }
+
+        var bestStart = requested
+        var bestDistance = CMTime(value: Int64.max, timescale: 600)
+        for candidate in candidates {
+            let candidateEnd = candidate + duration
+            let wouldOverlap = others.contains { other in
+                let otherEnd = other.timelineEnd
+                return candidate < otherEnd && candidateEnd > other.timelineStart
+            }
+            if !wouldOverlap {
+                let distance = CMTimeAbsoluteValue(candidate - requested)
+                if distance < bestDistance {
+                    bestDistance = distance
+                    bestStart = candidate
+                }
+            }
+        }
+        return bestStart
+    }
+
+    /// Collects all snap targets: playhead position, every clip boundary, and
+    /// the timeline origin (0).
+    func snapTargets() -> [CMTime] {
+        var targets: [CMTime] = [
+            .zero,
+            CMTime(seconds: currentTime, preferredTimescale: 600)
+        ]
+        for track in allTracks {
+            for clip in track.clips {
+                targets.append(clip.timelineStart)
+                targets.append(clip.timelineEnd)
+            }
+        }
+        return targets
+    }
+
+    /// Returns the nearest snap target within threshold, or the candidate
+    /// itself if nothing is close enough.
+    func resolveSnap(candidate: CMTime, excluding clipID: Clip.ID? = nil, threshold: Double? = nil) -> CMTime {
+        let thresholdSeconds = threshold ?? (8.0 / pixelsPerSecond)
+        let thresholdTime = CMTime(seconds: thresholdSeconds, preferredTimescale: 600)
+
+        var allTargets = snapTargets()
+        // Exclude boundaries of the clip being dragged.
+        if let clipID {
+            for track in allTracks {
+                if let clip = track.clips.first(where: { $0.id == clipID }) {
+                    allTargets.removeAll { $0 == clip.timelineStart || $0 == clip.timelineEnd }
+                    break
+                }
+            }
+        }
+
+        var nearest = candidate
+        var minDist = CMTime(value: Int64.max, timescale: 600)
+        for target in allTargets {
+            let dist = CMTimeAbsoluteValue(candidate - target)
+            if dist < thresholdTime, dist < minDist {
+                minDist = dist
+                nearest = target
+            }
+        }
+        return nearest
+    }
+
     // MARK: - Composition / playback
 
     /// Rebuilds the preview composition from the current project state, keeping
