@@ -55,14 +55,14 @@ These currently-proposed feature specs are **prerequisites** for many of the pha
 | [feature-timeline-trim-and-drag](./feature-timeline-trim-and-drag/) | Direct-manipulation clip editing | most |
 | [feature-transitions](./feature-transitions/) | Cross-dissolve / wipe primitives | 38, 45 |
 | [feature-project-persistence](./feature-project-persistence/) | Codable ProjectDoc + security-scoped bookmarks + undo | 30, 38, 39, 44, 48 |
+| [feature-keyframes](./feature-keyframes/) | `Keyframed<T>` + `Interpolatable` + binary-search evaluator | 30, 32a, 35, 38, 43 |
+| [feature-caption-tracks](./feature-caption-tracks/) | `CaptionTrack` model + SRT/VTT importers + persistence | 30, 44 |
+| [feature-title-raster](./feature-title-raster/) | Core Text rasteriser with LRU cache | 30, 38 |
 
-The following infrastructure was implied by browser phases referenced in the prompts (P10 markers, P14 GPU title raster, P15 keyframes, P16 audio buses, P17/24 export expansion, P19 proxy/render cache, P21 colour management, P22 caption tracks, P25 diagnostics, P26 capability tiers). They are **not yet specced** for the native port and each spec calls out the ones it needs in its design `Prerequisites` section. Spec them as they become blocking; do not pre-spec speculatively.
+The following infrastructure was implied by browser phases referenced in the prompts (P10 markers, P14 GPU title raster, P15 keyframes, P16 audio buses, P17/24 export expansion, P19 proxy/render cache, P21 colour management, P22 caption tracks, P25 diagnostics, P26 capability tiers). The first three (P14 / P15 / P22) are now specced above. The rest are **not yet specced** for the native port and each spec calls out the ones it needs in its design `Prerequisites` section. Spec them as they become blocking; do not pre-spec speculatively.
 
 | Open infra | Native equivalent | First needed by |
 |---|---|---|
-| Keyframes (P15) | A `Keyframe<T>` model + Catmull–Rom/bezier evaluator surfaced in the inspector | 30, 32a, 35, 38, 43 |
-| Caption tracks (P22) | `CaptionTrack` model + SRT/VTT sidecar IO + Core Animation/Metal text raster | 30, 44 |
-| Title raster (P14) | Cached `CALayer`/`CIImage` text rasteriser, fed to the compositor | 30, 38 |
 | Markers (P10) | `TimelineMarker` model + ruler rendering + add/remove/keyboard | 34, 44 |
 | Audio master bus (P16) | `AVAudioEngine` master with meters, pan, fades | 35, 36, 46 |
 | Render cache (P19) | Frame cache keyed on (clip id, effect chain hash, time) under Caches/ | 35, 37 |

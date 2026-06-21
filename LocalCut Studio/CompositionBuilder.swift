@@ -212,9 +212,11 @@ enum CompositionBuilder {
         let totalDuration = composition.duration
         guard totalDuration > .zero else { return nil }
 
+        let captionTracks = project.captionTracks.filter { !$0.isMuted }
         let videoComposition = try await makeVideoComposition(
             composition: composition,
             projectTrackSegments: projectTrackSegments,
+            captionTracks: captionTracks,
             totalDuration: totalDuration,
             renderSize: renderSize,
             frameRate: project.frameRate)
@@ -244,6 +246,7 @@ enum CompositionBuilder {
     private static func makeVideoComposition(
         composition: AVComposition,
         projectTrackSegments: [[VideoSegment]],
+        captionTracks: [CaptionTrack],
         totalDuration: CMTime,
         renderSize: CGSize,
         frameRate: Double) async throws -> AVVideoComposition? {
@@ -251,7 +254,10 @@ enum CompositionBuilder {
         let hasAnySegment = projectTrackSegments.contains { !$0.isEmpty }
         guard hasAnySegment else { return nil }
 
-        // Collect and sort every distinct boundary time, including overlap edges.
+        // Collect and sort every distinct boundary time, including overlap edges
+        // and caption-line edges so each line's enter / exit lands on an
+        // instruction boundary (the compositor still re-evaluates animation per
+        // frame inside an interval).
         var boundarySet = Set<Double>([0, totalDuration.seconds])
         for segments in projectTrackSegments {
             for seg in segments {
@@ -261,6 +267,12 @@ enum CompositionBuilder {
                     boundarySet.insert(overlap.start.seconds)
                     boundarySet.insert(overlap.end.seconds)
                 }
+            }
+        }
+        for track in captionTracks {
+            for line in track.lines {
+                boundarySet.insert(line.range.start.seconds)
+                boundarySet.insert(line.range.end.seconds)
             }
         }
         let boundaries = boundarySet.sorted()
@@ -295,7 +307,10 @@ enum CompositionBuilder {
                 }
             }
 
-            instructions.append(EffectCompositionInstruction(timeRange: range, units: units))
+            let captionsForInterval = activeCaptionItems(
+                in: captionTracks, midpoint: midpoint)
+            instructions.append(EffectCompositionInstruction(
+                timeRange: range, units: units, captions: captionsForInterval))
         }
 
         var config = try await AVVideoComposition.Configuration(for: composition)
@@ -304,6 +319,28 @@ enum CompositionBuilder {
         config.customVideoCompositorClass = EffectCompositor.self
         config.instructions = instructions
         return AVVideoComposition(configuration: config)
+    }
+
+    /// Lines from each unmuted caption track active at `midpoint`. Track order
+    /// is bottom-to-top so later-listed tracks render above earlier ones — matches
+    /// the video-track stacking convention.
+    private static func activeCaptionItems(in tracks: [CaptionTrack],
+                                           midpoint: Double) -> [CaptionRenderItem] {
+        var items: [CaptionRenderItem] = []
+        for track in tracks {
+            for line in track.lines {
+                let start = line.range.start.seconds
+                let end = line.range.end.seconds
+                guard start <= midpoint, midpoint < end else { continue }
+                items.append(CaptionRenderItem(
+                    lineID: line.id,
+                    text: line.text,
+                    words: line.words,
+                    style: line.style ?? track.defaultStyle,
+                    range: line.range))
+            }
+        }
+        return items
     }
 
     // MARK: - Geometry

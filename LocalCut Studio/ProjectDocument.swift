@@ -18,7 +18,7 @@ extension UTType {
 
 /// Lossless `CMTime` representation: a rational `value/timescale` pair so timeline
 /// math round-trips exactly (a `Double` of seconds would not).
-struct CMTimeCode: Codable, Equatable {
+nonisolated struct CMTimeCode: Codable, Equatable, Sendable {
     var value: Int64
     var timescale: Int32
 
@@ -68,6 +68,7 @@ struct ProjectDocument: Codable, Equatable {
     var media: [MediaRef]
     var videoTracks: [TrackDoc]
     var audioTracks: [TrackDoc]
+    var captionTracks: [CaptionTrackDoc]
 
     init(schemaVersion: Int = ProjectDocument.currentSchemaVersion,
          name: String,
@@ -76,7 +77,8 @@ struct ProjectDocument: Codable, Equatable {
          frameRate: Double,
          media: [MediaRef],
          videoTracks: [TrackDoc],
-         audioTracks: [TrackDoc]) {
+         audioTracks: [TrackDoc],
+         captionTracks: [CaptionTrackDoc] = []) {
         self.schemaVersion = schemaVersion
         self.name = name
         self.renderWidth = renderWidth
@@ -85,10 +87,11 @@ struct ProjectDocument: Codable, Equatable {
         self.media = media
         self.videoTracks = videoTracks
         self.audioTracks = audioTracks
+        self.captionTracks = captionTracks
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, name, renderWidth, renderHeight, frameRate, media, videoTracks, audioTracks
+        case schemaVersion, name, renderWidth, renderHeight, frameRate, media, videoTracks, audioTracks, captionTracks
     }
 
     // Lenient decoding: missing fields fall back to defaults and unknown keys are
@@ -103,6 +106,34 @@ struct ProjectDocument: Codable, Equatable {
         media = try c.decodeIfPresent([MediaRef].self, forKey: .media) ?? []
         videoTracks = try c.decodeIfPresent([TrackDoc].self, forKey: .videoTracks) ?? []
         audioTracks = try c.decodeIfPresent([TrackDoc].self, forKey: .audioTracks) ?? []
+        captionTracks = try c.decodeIfPresent([CaptionTrackDoc].self, forKey: .captionTracks) ?? []
+    }
+}
+
+// MARK: - Caption track persistence
+
+/// Codable lane of caption lines, mirroring `CaptionTrack`.
+struct CaptionTrackDoc: Codable, Equatable {
+    var name: String
+    var isMuted: Bool
+    var defaultStyle: CaptionStyle
+    var lines: [CaptionLine]
+
+    init(name: String, isMuted: Bool, defaultStyle: CaptionStyle, lines: [CaptionLine]) {
+        self.name = name
+        self.isMuted = isMuted
+        self.defaultStyle = defaultStyle
+        self.lines = lines
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, isMuted, defaultStyle, lines }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        isMuted = try c.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
+        defaultStyle = try c.decodeIfPresent(CaptionStyle.self, forKey: .defaultStyle) ?? .identity
+        lines = try c.decodeIfPresent([CaptionLine].self, forKey: .lines) ?? []
     }
 }
 
@@ -208,7 +239,26 @@ extension ProjectDocument {
             frameRate: project.frameRate,
             media: project.mediaItems.map(MediaRef.init(item:)),
             videoTracks: project.videoTracks.map(TrackDoc.init(track:)),
-            audioTracks: project.audioTracks.map(TrackDoc.init(track:)))
+            audioTracks: project.audioTracks.map(TrackDoc.init(track:)),
+            captionTracks: project.captionTracks.map(CaptionTrackDoc.init(track:)))
+    }
+}
+
+extension CaptionTrackDoc {
+    init(track: CaptionTrack) {
+        self.init(
+            name: track.name,
+            isMuted: track.isMuted,
+            defaultStyle: track.defaultStyle,
+            lines: track.lines)
+    }
+
+    /// Rebuilds a runtime `CaptionTrack` from the stored values.
+    func makeTrack() -> CaptionTrack {
+        let track = CaptionTrack(name: name, lines: lines)
+        track.isMuted = isMuted
+        track.defaultStyle = defaultStyle
+        return track
     }
 }
 

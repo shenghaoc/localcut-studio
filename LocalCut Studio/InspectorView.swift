@@ -35,6 +35,7 @@ struct InspectorView: View {
                     }
                 }
 
+                CaptionsInspectorView(model: model)
                 projectSection
             }
             .formStyle(.grouped)

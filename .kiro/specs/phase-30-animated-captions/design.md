@@ -8,10 +8,13 @@ Add a styling engine over caption tracks: stroke, fill, shadow, glow, per-line b
 
 ## Prerequisites
 
-- Caption track model + SRT/VTT sidecar I/O (not yet specced — derive a `CaptionTrack` of `CaptionLine { range: CMTimeRange, text: String, words: [WordTiming]? }` from the SRT/VTT importer, persisted via `feature-project-persistence`).
-- Title raster path (not yet specced — a cached `CIImage` / Metal texture rasteriser that draws styled text once per line and reuses it across frames).
-- Keyframes (not yet specced — `Keyframe<T>` and an evaluator) so style parameters (slide offset, scale, opacity, colour) animate.
-- `feature-colour-grading`'s custom `AVVideoCompositing` is the integration point: caption rasters layer above clip layers.
+All five infrastructure deps are now specced. The first three land in the same change-set as Phase 30 on this branch; the latter two are already on `main`.
+
+- [`feature-keyframes`](../feature-keyframes/) (P15) — `Keyframe<T>`, `Keyframed<T>`, `Interpolatable`, binary-search evaluator. Phase 30's keyframable style parameters (`fillColour`, `scale`, `offset`, `opacity`, `letterSpacing` — see R2.3) ride on top.
+- [`feature-caption-tracks`](../feature-caption-tracks/) (P22) — `CaptionTrack` / `CaptionLine` / `WordTiming` model, SRT and VTT importers, Codable round-trip via `ProjectDocument`.
+- [`feature-title-raster`](../feature-title-raster/) (P14) — `TitleRasterer` that draws Core Text attributed strings into a render-canvas-sized BGRA bitmap with an LRU cache.
+- [`feature-colour-grading`](../feature-colour-grading/) — shipped; the custom `AVVideoCompositing` (`EffectCompositor`) is the integration point: caption rasters layer above clip layers.
+- [`feature-project-persistence`](../feature-project-persistence/) — shipped; caption tracks and per-line `CaptionStyle` overrides round-trip through the existing Codable document (R1.3).
 
 ## Approach
 
