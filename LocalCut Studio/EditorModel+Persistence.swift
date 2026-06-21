@@ -140,6 +140,7 @@ extension EditorModel {
             coalescedUndoBefore = captureState()
             coalescedUndoName = name
             coalescedUndoTarget = target
+            coalescedUndoWasDirty = isDirty
         }
         mutate()
         markDirty()
@@ -168,7 +169,14 @@ extension EditorModel {
         coalescedUndoName = nil
         coalescedUndoTarget = nil
         let after = captureState()
-        guard before != after else { return }
+        guard before != after else {
+            // The gesture settled with no net change (e.g. a trim clamped against a
+            // bound, or a value dragged back to its start); undo the speculative
+            // per-tick dirtying so a no-op edit doesn't show the edited dot or
+            // trigger a save prompt.
+            isDirty = coalescedUndoWasDirty
+            return
+        }
         registerUndo(name: name, before: before, after: after)
     }
 
@@ -259,6 +267,7 @@ extension EditorModel {
         undoManager.removeAllActions()
         coalescedCommitTask?.cancel()
         activeRebuildTask?.cancel()
+        pendingRebuildTask?.cancel()
         coalescedUndoBefore = nil
         coalescedUndoName = nil
         coalescedUndoTarget = nil
@@ -289,8 +298,13 @@ extension EditorModel {
         project.frameRate = document.frameRate
 
         var unresolved: [MediaRef] = []
+        var refreshedBookmark = false
         for ref in document.media {
             if let item = resolveMedia(ref) {
+                // resolveMedia regenerates the bookmark when the stored one resolved
+                // stale; flag the document dirty so the fresh bookmark is persisted
+                // on the next save instead of being re-derived on every launch.
+                if item.bookmark != ref.bookmark { refreshedBookmark = true }
                 project.mediaItems.append(item)
             } else {
                 unresolved.append(ref)
@@ -306,7 +320,7 @@ extension EditorModel {
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         documentURL = isNewerSchema ? nil : url
         unresolvedMedia = unresolved
-        isDirty = isNewerSchema
+        isDirty = isNewerSchema || refreshedBookmark
         undoManager.removeAllActions()
         refreshUndoFlags()
 
@@ -316,6 +330,7 @@ extension EditorModel {
 
         var notes: [String] = []
         if isNewerSchema { notes.append("saved in a newer format — saving downconverts to this version") }
+        if refreshedBookmark { notes.append("media moved — save to update its location") }
         if !unresolved.isEmpty { notes.append("\(unresolved.count) media file(s) need relinking") }
         statusMessage = notes.isEmpty
             ? "Opened \(project.name)."

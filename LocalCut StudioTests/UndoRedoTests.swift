@@ -186,6 +186,26 @@ struct UndoRedoTests {
         #expect(!model.canUndo)
     }
 
+    @Test("A no-op coalesced gesture leaves the document clean; a real one dirties it")
+    func noOpCoalescedGestureNotDirty() {
+        let (model, clipID) = makeModel()
+        #expect(!model.isDirty)
+
+        // Right-trim to the clip's existing end: clamps to no net change.
+        model.trimClip(id: clipID, edge: .right, to: time(10))
+        model.commitCoalescedUndo()
+        #expect(videoClips(model)[0].duration == time(10))
+        #expect(!model.isDirty)        // no change → not dirty
+        #expect(!model.canUndo)        // and no undo step registered
+
+        // A gesture that actually changes the clip does dirty the document.
+        model.trimClip(id: clipID, edge: .right, to: time(6))
+        model.commitCoalescedUndo()
+        #expect(videoClips(model)[0].duration == time(6))
+        #expect(model.isDirty)
+        #expect(model.canUndo)
+    }
+
     // MARK: - Sequencing
 
     @Test("Undo/redo walks a multi-step history in order")

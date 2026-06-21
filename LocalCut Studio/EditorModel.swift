@@ -33,7 +33,7 @@ final class EditorModel {
 
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
-    @ObservationIgnored private var pendingRebuildTask: Task<Void, Never>?
+    @ObservationIgnored var pendingRebuildTask: Task<Void, Never>?
     /// The in-flight preview rebuild. A new rebuild cancels the previous one so
     /// rapid edits/undo can't land an older composition on the player last.
     @ObservationIgnored var activeRebuildTask: Task<Void, Never>?
@@ -56,6 +56,9 @@ final class EditorModel {
     @ObservationIgnored var coalescedUndoName: String?
     @ObservationIgnored var coalescedUndoTarget: AnyHashable?
     @ObservationIgnored var coalescedCommitTask: Task<Void, Never>?
+    /// `isDirty` at the start of the current coalesced gesture, restored if the
+    /// gesture settles with no net change (so a no-op edit doesn't prompt to save).
+    @ObservationIgnored var coalescedUndoWasDirty = false
 
     /// Monotonically increases on every mutation; lets an async save tell whether
     /// the project changed between snapshotting its data and finishing the write.
