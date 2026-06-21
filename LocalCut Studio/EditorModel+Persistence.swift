@@ -18,6 +18,7 @@ struct ProjectState: Equatable {
 
     var name: String
     var media: [MediaItem]
+    var unresolvedMedia: [MediaRef]
     var renderSize: CGSize
     var frameRate: Double
     var videoTracks: [TrackClips]
@@ -28,6 +29,7 @@ struct ProjectState: Equatable {
     static func == (lhs: ProjectState, rhs: ProjectState) -> Bool {
         lhs.name == rhs.name
             && lhs.media.map(\.id) == rhs.media.map(\.id)
+            && lhs.unresolvedMedia == rhs.unresolvedMedia
             && lhs.renderSize == rhs.renderSize
             && lhs.frameRate == rhs.frameRate
             && lhs.videoTracks == rhs.videoTracks
@@ -49,6 +51,7 @@ extension EditorModel {
         ProjectState(
             name: project.name,
             media: project.mediaItems,
+            unresolvedMedia: unresolvedMedia,
             renderSize: project.renderSize,
             frameRate: project.frameRate,
             videoTracks: project.videoTracks.map {
@@ -66,6 +69,7 @@ extension EditorModel {
     func applyState(_ state: ProjectState) {
         project.name = state.name
         project.mediaItems = state.media
+        unresolvedMedia = state.unresolvedMedia
         project.renderSize = state.renderSize
         project.frameRate = state.frameRate
         for snapshot in state.videoTracks {
@@ -95,6 +99,14 @@ extension EditorModel {
         guard before != after else { return }
         registerUndo(name: name, before: before, after: after)
         markDirty()
+    }
+
+    /// Registers undo for an asynchronous mutation whose `before` snapshot was
+    /// captured at the start (e.g. media import, which appends incrementally).
+    func registerImportUndo(name: String, before: ProjectState) {
+        let after = captureState()
+        guard before != after else { return }
+        registerUndo(name: name, before: before, after: after)
     }
 
     /// Performs one step of a continuous gesture (slider drag, edge trim, clip
@@ -138,6 +150,12 @@ extension EditorModel {
     /// Registers a reversible swap between two snapshots, re-registering its
     /// inverse on invocation so redo works (the standard recursive pattern).
     private func registerUndo(name: String, before: ProjectState, after: ProjectState) {
+        // `groupsByEvent` is disabled (see init), so each top-level action gets
+        // its own explicit group — one user action = one undo step regardless of
+        // run-loop timing. While undoing/redoing, UndoManager already manages the
+        // group that collects the inverse registration, so we don't open one.
+        let opensGroup = !undoManager.isUndoing && !undoManager.isRedoing
+        if opensGroup { undoManager.beginUndoGrouping() }
         undoManager.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated {
                 model.applyState(before)
@@ -148,6 +166,7 @@ extension EditorModel {
             }
         }
         undoManager.setActionName(name)
+        if opensGroup { undoManager.endUndoGrouping() }
         refreshUndoFlags()
     }
 
@@ -289,7 +308,7 @@ extension EditorModel {
                                  bookmarkDataIsStale: &isStale) else { return nil }
         let access = url.startAccessingSecurityScopedResource()
         guard access || FileManager.default.isReadableFile(atPath: url.path) else { return nil }
-        if access { accessedURLs.insert(url) }
+        retainAccess(url, didStart: access)
 
         let item = MediaItem(url: url, id: ref.id)
         item.name = ref.displayName
@@ -319,19 +338,44 @@ extension EditorModel {
     }
 
     private func write(to url: URL) async {
-        ensureBookmarks()
-        let document = ProjectDocument(project: project)
         do {
-            let data = try document.encoded()
+            let data = try encodedDocument()
             // Atomic write so a failure never corrupts the previous file (R4.1).
+            // The write itself runs off the main actor.
             try await Task.detached { try data.write(to: url, options: .atomic) }.value
-            documentURL = url
-            project.name = url.deletingPathExtension().lastPathComponent
-            isDirty = false
+            adoptSaved(url: url)
             statusMessage = "Saved \(url.lastPathComponent)."
         } catch {
             statusMessage = "Save failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Synchronous save used by the close prompt, where the result must be known
+    /// before `windowShouldClose` returns. The document is small JSON, so the
+    /// atomic write on the main actor is acceptable here.
+    func writeSynchronously(to url: URL) -> Bool {
+        do {
+            let data = try encodedDocument()
+            try data.write(to: url, options: .atomic)
+            adoptSaved(url: url)
+            statusMessage = "Saved \(url.lastPathComponent)."
+            return true
+        } catch {
+            statusMessage = "Save failed: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// Encodes the current project, ensuring bookmarks are present first.
+    private func encodedDocument() throws -> Data {
+        ensureBookmarks()
+        return try ProjectDocument(project: project).encoded()
+    }
+
+    private func adoptSaved(url: URL) {
+        documentURL = url
+        project.name = url.deletingPathExtension().lastPathComponent
+        isDirty = false
     }
 
     /// Ensures every media item carries a security-scoped bookmark before saving.
@@ -366,7 +410,7 @@ extension EditorModel {
             statusMessage = "Could not access \(url.lastPathComponent)."
             return
         }
-        if access { accessedURLs.insert(url) }
+        retainAccess(url, didStart: access)
 
         let item = MediaItem(url: url, id: ref.id)
         item.name = ref.displayName
@@ -376,16 +420,32 @@ extension EditorModel {
         item.hasVideo = ref.hasVideo
         item.hasAudio = ref.hasAudio
         item.bookmark = bookmark
-        project.mediaItems.append(item)
-        unresolvedMedia.removeAll { $0.id == ref.id }
-        markDirty()
 
-        statusMessage = unresolvedMedia.isEmpty
-            ? "Relinked \(item.name)."
-            : "Relinked \(item.name) — \(unresolvedMedia.count) remaining."
+        // Undoable so the media item and the relink queue stay in sync across
+        // undo/redo (a non-undoable relink could be silently dropped by a later
+        // undo that restores a pre-relink media list).
+        performUndoable("Relink Media") {
+            project.mediaItems.append(item)
+            unresolvedMedia.removeAll { $0.id == ref.id }
+            statusMessage = unresolvedMedia.isEmpty
+                ? "Relinked \(item.name)."
+                : "Relinked \(item.name) — \(unresolvedMedia.count) remaining."
+        }
         Task {
             await rebuild()
             await generateThumbnail(for: item)
+        }
+    }
+
+    /// Records a successful security-scoped start, keeping exactly one outstanding
+    /// access per URL. A redundant start (same file accessed again) is balanced
+    /// immediately so the kernel refcount matches the single stop on teardown.
+    func retainAccess(_ url: URL, didStart: Bool) {
+        guard didStart else { return }
+        if accessedURLs.contains(url) {
+            url.stopAccessingSecurityScopedResource()
+        } else {
+            accessedURLs.insert(url)
         }
     }
 }
