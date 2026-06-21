@@ -202,8 +202,12 @@ final class EditorModel {
             track.clips.removeAll { $0.mediaID == itemID }
         }
         if selectedMediaID == itemID { selectedMediaID = nil }
-        selectedClipID = nil
-        selectedTransitionClipID = nil
+        if let selectedClipID, clip(for: selectedClipID) == nil {
+            self.selectedClipID = nil
+        }
+        if let selectedTransitionClipID, clip(for: selectedTransitionClipID) == nil {
+            self.selectedTransitionClipID = nil
+        }
         sanitizeTransitions()
         statusMessage = "Removed \(media.name)."
         scheduleRebuild()
@@ -736,10 +740,9 @@ final class EditorModel {
     // MARK: - Composition / playback
 
     /// Rebuilds the preview composition from the current project state, keeping
-    /// the playhead where it was and resuming playback if active.
+    /// the playhead where it was and resuming playback if still active.
     func rebuild() async {
         let resumeAt = currentTime
-        let wasPlaying = isPlaying
         do {
             let result = try await CompositionBuilder.build(project: project)
             // A newer rebuild superseded this one; don't clobber the player.
@@ -756,7 +759,9 @@ final class EditorModel {
             totalDuration = built.duration
             await player.seek(to: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600),
                               toleranceBefore: .zero, toleranceAfter: .zero)
-            if wasPlaying {
+            // Check the live isPlaying rather than a captured flag so a user's
+            // pause during the async build is not overridden.
+            if isPlaying {
                 player.play()
             }
         } catch {
@@ -790,24 +795,26 @@ final class EditorModel {
     func export(to url: URL) async {
         guard !isExporting else { return }
         isExporting = true
+        exportProgress = 0
+        statusMessage = "Exporting…"
+        defer {
+            isExporting = false
+            exportProgress = nil
+        }
         do {
             guard let built = try await CompositionBuilder.build(project: project) else {
                 statusMessage = "Nothing to export."
-                isExporting = false
                 return
             }
             guard let session = AVAssetExportSession(asset: built.composition,
                                                      presetName: AVAssetExportPresetHighestQuality) else {
                 statusMessage = "Could not create export session."
-                isExporting = false
                 return
             }
             session.videoComposition = built.videoComposition
             session.audioMix = built.audioMix
 
             try? FileManager.default.removeItem(at: url)
-            exportProgress = 0
-            statusMessage = "Exporting…"
 
             let progressTask = Task { [weak self] in
                 for await state in session.states(updateInterval: 0.25) {
@@ -817,18 +824,12 @@ final class EditorModel {
                 }
             }
 
-            defer {
-                progressTask.cancel()
-                isExporting = false
-                exportProgress = nil
-            }
+            defer { progressTask.cancel() }
 
             try await session.export(to: url, as: .mov)
             statusMessage = "Exported \(url.lastPathComponent)."
         } catch {
             statusMessage = "Export failed: \(error.localizedDescription)"
-            isExporting = false
-            exportProgress = nil
         }
     }
 }
