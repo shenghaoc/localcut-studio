@@ -7,6 +7,7 @@ import CoreGraphics
 struct BuiltComposition {
     let composition: AVComposition
     let videoComposition: AVVideoComposition?
+    let audioMix: AVAudioMix?
     let duration: Double
 }
 
@@ -115,61 +116,96 @@ enum CompositionBuilder {
 
         for projectTrack in project.videoTracks {
             // Each pool entry tracks a composition track and the effective end of
-            // its last-placed clip.
+            // its last-placed piece.
             var pool: [(track: AVMutableCompositionTrack, lastEnd: CMTime)] = []
 
             var segments: [VideoSegment] = []
-            let placements = TransitionLayout.placements(for: projectTrack.clips, cuts: cuts)
-            for placement in placements {
-                let clip = placement.clip
+            let ordered = projectTrack.clips.sorted { $0.timelineStart < $1.timelineStart }
+            let overlaps = TransitionLayout.orderedOverlaps(ordered)
+            for (clipIndex, clip) in ordered.enumerated() {
                 guard let media = project.media(for: clip.mediaID), media.hasVideo else { continue }
                 let sourceTracks = try await media.asset.loadTracks(withMediaType: .video)
                 guard let sourceTrack = sourceTracks.first else { continue }
-
-                // Reuse the first track free at this clip's start, else add one.
-                let start = placement.effectiveStart
-                let poolIndex: Int
-                if let free = pool.firstIndex(where: { $0.lastEnd <= start }) {
-                    poolIndex = free
-                } else {
-                    guard let newTrack = composition.addMutableTrack(
-                        withMediaType: .video,
-                        preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-                    pool.append((newTrack, .zero))
-                    poolIndex = pool.count - 1
-                }
-                let compTrack = pool[poolIndex].track
-                try compTrack.insertTimeRange(clip.timeRangeInSource, of: sourceTrack, at: start)
-                pool[poolIndex].lastEnd = placement.effectiveEnd
 
                 let transform = fitTransform(
                     naturalSize: media.naturalSize,
                     preferredTransform: media.preferredTransform,
                     into: renderSize)
-                segments.append(VideoSegment(
-                    compTrackID: compTrack.trackID,
-                    timeRange: CMTimeRange(start: placement.effectiveStart, duration: clip.duration),
-                    transform: transform,
-                    opacity: clip.opacity,
-                    effects: clip.effects,
-                    transitionRange: placement.transitionRange,
-                    transitionType: placement.clip.transition?.type))
+
+                // A clip may be split into pieces where it spans another track's
+                // transition cut; each piece is packed onto the first free track.
+                for piece in TransitionLayout.pieces(for: clip, overlap: overlaps[clipIndex], cuts: cuts) {
+                    let start = piece.effectiveStart
+                    let poolIndex: Int
+                    if let free = pool.firstIndex(where: { $0.lastEnd <= start }) {
+                        poolIndex = free
+                    } else {
+                        guard let newTrack = composition.addMutableTrack(
+                            withMediaType: .video,
+                            preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                        pool.append((newTrack, .zero))
+                        poolIndex = pool.count - 1
+                    }
+                    let compTrack = pool[poolIndex].track
+                    try compTrack.insertTimeRange(piece.sourceRange, of: sourceTrack, at: start)
+                    pool[poolIndex].lastEnd = piece.effectiveEnd
+
+                    segments.append(VideoSegment(
+                        compTrackID: compTrack.trackID,
+                        timeRange: CMTimeRange(start: start, duration: piece.duration),
+                        transform: transform,
+                        opacity: clip.opacity,
+                        effects: clip.effects,
+                        transitionRange: piece.transitionRange,
+                        transitionType: piece.overlap > .zero ? clip.transition?.type : nil))
+                }
             }
             projectTrackSegments.append(segments)
         }
 
+        // Audio: split clips at cuts and place each piece on its own composition
+        // track so rippled overlaps mix instead of corrupting one track, then
+        // crossfade the overlaps so transitions stay smooth and in sync.
+        var audioMixParameters: [AVMutableAudioMixInputParameters] = []
+        var hasAudioCrossfade = false
         for projectTrack in project.audioTracks where !projectTrack.isMuted {
-            guard let compTrack = composition.addMutableTrack(
-                withMediaType: .audio,
-                preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-
-            let placements = TransitionLayout.placements(for: projectTrack.clips, cuts: cuts)
-            for placement in placements {
-                let clip = placement.clip
+            var placed: [(track: AVMutableCompositionTrack, piece: TransitionLayout.Piece)] = []
+            let ordered = projectTrack.clips.sorted { $0.timelineStart < $1.timelineStart }
+            for clip in ordered {
                 guard let media = project.media(for: clip.mediaID), media.hasAudio else { continue }
                 let sourceTracks = try await media.asset.loadTracks(withMediaType: .audio)
                 guard let sourceTrack = sourceTracks.first else { continue }
-                try compTrack.insertTimeRange(clip.timeRangeInSource, of: sourceTrack, at: placement.effectiveStart)
+                for piece in TransitionLayout.pieces(for: clip, overlap: .zero, cuts: cuts) {
+                    guard let compTrack = composition.addMutableTrack(
+                        withMediaType: .audio,
+                        preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                    try compTrack.insertTimeRange(piece.sourceRange, of: sourceTrack, at: piece.effectiveStart)
+                    placed.append((compTrack, piece))
+                }
+            }
+
+            placed.sort { $0.piece.effectiveStart < $1.piece.effectiveStart }
+            for index in placed.indices {
+                let piece = placed[index].piece
+                let params = AVMutableAudioMixInputParameters(track: placed[index].track)
+                let leadOverlap = index > 0
+                    ? CMTimeMaximum(.zero, placed[index - 1].piece.effectiveEnd - piece.effectiveStart) : .zero
+                let trailOverlap = index < placed.count - 1
+                    ? CMTimeMaximum(.zero, piece.effectiveEnd - placed[index + 1].piece.effectiveStart) : .zero
+
+                if leadOverlap > .zero {
+                    params.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1,
+                                         timeRange: CMTimeRange(start: piece.effectiveStart, duration: leadOverlap))
+                    hasAudioCrossfade = true
+                } else {
+                    params.setVolume(1, at: piece.effectiveStart)
+                }
+                if trailOverlap > .zero {
+                    params.setVolumeRamp(fromStartVolume: 1, toEndVolume: 0,
+                                         timeRange: CMTimeRange(start: piece.effectiveEnd - trailOverlap, duration: trailOverlap))
+                    hasAudioCrossfade = true
+                }
+                audioMixParameters.append(params)
             }
         }
 
@@ -183,9 +219,19 @@ enum CompositionBuilder {
             renderSize: renderSize,
             frameRate: project.frameRate)
 
+        let audioMix: AVAudioMix?
+        if hasAudioCrossfade {
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = audioMixParameters
+            audioMix = mix
+        } else {
+            audioMix = nil
+        }
+
         return BuiltComposition(
             composition: composition,
             videoComposition: videoComposition,
+            audioMix: audioMix,
             duration: totalDuration.seconds)
     }
 

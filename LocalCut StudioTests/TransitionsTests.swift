@@ -180,6 +180,37 @@ struct TransitionsTests {
         #expect(TransitionLayout.shift(at: time(5), cuts: cuts) == time(2))
     }
 
+    // MARK: - Spanning-clip splitting (A/V sync across cuts)
+
+    @Test("A clip that spans a transition cut splits and ripples each side")
+    func spanningClipSplitsAtCut() {
+        // A continuous audio bed [0,10] under a video cut at 5s with a 1s overlap.
+        let bed = Clip(mediaID: UUID(), sourceStart: .zero, duration: time(10), timelineStart: .zero)
+        let cuts = [TransitionLayout.Cut(time: time(5), overlap: time(1))]
+        let pieces = TransitionLayout.pieces(for: bed, overlap: .zero, cuts: cuts)
+
+        #expect(pieces.count == 2)
+        // Head piece [0,5] stays put.
+        #expect(pieces[0].effectiveStart == .zero)
+        #expect(pieces[0].sourceRange.start == .zero)
+        #expect(pieces[0].sourceRange.duration == time(5))
+        // Tail piece reads source [5,10] but is rippled 1s earlier to stay in sync.
+        #expect(pieces[1].effectiveStart == time(4))
+        #expect(pieces[1].sourceRange.start == time(5))
+        #expect(pieces[1].sourceRange.duration == time(5))
+        // The bed now ends at 9s, matching the shortened video timeline.
+        #expect(pieces[1].effectiveEnd == time(9))
+    }
+
+    @Test("A clip clear of every cut is not split")
+    func clipClearOfCutsNotSplit() {
+        let clip = Clip(mediaID: UUID(), sourceStart: .zero, duration: time(4), timelineStart: time(6))
+        let cuts = [TransitionLayout.Cut(time: time(5), overlap: time(1))]
+        let pieces = TransitionLayout.pieces(for: clip, overlap: .zero, cuts: cuts)
+        #expect(pieces.count == 1)
+        #expect(pieces[0].effectiveStart == time(5)) // 6 - shift(1)
+    }
+
     // MARK: - Render planning (chained / overlapping transitions)
 
     private func segment(track: CMPersistentTrackID, start: Double,

@@ -621,6 +621,7 @@ final class EditorModel {
             }
             let item = AVPlayerItem(asset: built.composition)
             item.videoComposition = built.videoComposition
+            item.audioMix = built.audioMix
             player.replaceCurrentItem(with: item)
             totalDuration = built.duration
             await player.seek(to: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600),
@@ -666,6 +667,7 @@ final class EditorModel {
                 return
             }
             session.videoComposition = built.videoComposition
+            session.audioMix = built.audioMix
 
             try? FileManager.default.removeItem(at: url)
 

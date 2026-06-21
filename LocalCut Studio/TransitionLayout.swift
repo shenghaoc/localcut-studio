@@ -58,12 +58,68 @@ enum TransitionLayout {
         return CMTimeMaximum(clamped, .zero)
     }
 
+    /// A sub-range of a clip placed in effective (rippled) time. A clip that
+    /// spans a transition cut on another track is split into several pieces so
+    /// each side of the cut ripples by the correct amount and stays in sync.
+    struct Piece: Identifiable {
+        let clipID: Clip.ID
+        let index: Int
+        /// Range within the source media to read.
+        let sourceRange: CMTimeRange
+        /// Where this piece begins on the rippled timeline.
+        let effectiveStart: CMTime
+        /// Incoming-transition overlap — non-zero only on the head piece of a
+        /// clip that owns a transition.
+        let overlap: CMTime
+
+        var id: String { "\(clipID)-\(index)" }
+        var duration: CMTime { sourceRange.duration }
+        var effectiveEnd: CMTime { effectiveStart + sourceRange.duration }
+        var transitionRange: CMTimeRange? {
+            overlap > .zero ? CMTimeRange(start: effectiveStart, duration: overlap) : nil
+        }
+    }
+
+    /// Splits `clip` at every cut strictly inside its authored span and returns
+    /// the resulting pieces in effective coordinates. Pieces that aren't split
+    /// reduce to one entry. `overlap` is the clip's own incoming-transition
+    /// overlap, carried on the head piece only.
+    static func pieces(for clip: Clip, overlap: CMTime, cuts: [Cut]) -> [Piece] {
+        let start = clip.timelineStart
+        let end = clip.timelineEnd
+
+        var bounds: [CMTime] = [start]
+        for cut in cuts where cut.time > start && cut.time < end {
+            bounds.append(cut.time)
+        }
+        bounds.append(end)
+
+        var pieces: [Piece] = []
+        for index in 0..<(bounds.count - 1) {
+            let lower = bounds[index]
+            let upper = bounds[index + 1]
+            let duration = upper - lower
+            guard duration > .zero else { continue }
+
+            let sourceOffset = lower - start
+            let sourceRange = CMTimeRange(start: clip.sourceStart + sourceOffset, duration: duration)
+            let effectiveStart = lower - shift(at: lower, cuts: cuts)
+            pieces.append(Piece(
+                clipID: clip.id,
+                index: index,
+                sourceRange: sourceRange,
+                effectiveStart: effectiveStart,
+                overlap: index == 0 ? overlap : .zero))
+        }
+        return pieces
+    }
+
     /// Overlaps for each clip's incoming transition, in timeline order, with
     /// chained transitions additionally clamped so a clip's incoming and outgoing
     /// transition windows never overlap: the predecessor's head is already
     /// consumed by *its* incoming transition, so only its remaining tail is
     /// available here.
-    private static func orderedOverlaps(_ ordered: [Clip]) -> [CMTime] {
+    static func orderedOverlaps(_ ordered: [Clip]) -> [CMTime] {
         var result: [CMTime] = []
         result.reserveCapacity(ordered.count)
         var previous: Clip?
