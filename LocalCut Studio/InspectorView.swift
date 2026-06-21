@@ -65,7 +65,7 @@ struct InspectorView: View {
                 Slider(
                     value: Binding(
                         get: { Double(clip.opacity) },
-                        set: { newValue in model.updateSelectedClip { $0.opacity = Float(newValue) } }),
+                        set: { newValue in model.updateSelectedClipCoalesced("Adjust Opacity") { $0.opacity = Float(newValue) } }),
                     in: 0...1)
             }
         }
@@ -165,7 +165,7 @@ struct InspectorView: View {
         Binding(
             get: { model.selectedClipGrade[keyPath: keyPath] },
             set: { newValue in
-                model.updateSelectedClipCoalesced { clip in
+                model.updateSelectedClipCoalesced("Adjust Colour") { clip in
                     if let effectIndex = clip.effects.firstIndex(where: {
                         if case .colourGrade = $0 { return true }; return false
                     }) {
@@ -219,12 +219,12 @@ struct InspectorView: View {
     private var resolutionBinding: Binding<CGSize> {
         Binding(
             get: { model.project.renderSize },
-            set: { model.project.renderSize = $0; Task { await model.rebuild() } })
+            set: { model.setRenderSize($0) })
     }
 
     private var frameRateBinding: Binding<Double> {
         Binding(
             get: { model.project.frameRate },
-            set: { model.project.frameRate = $0; Task { await model.rebuild() } })
+            set: { model.setFrameRate($0) })
     }
 }

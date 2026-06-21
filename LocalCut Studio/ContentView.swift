@@ -197,7 +197,7 @@ private struct WindowConfigurator: NSViewRepresentable {
     final class Coordinator: NSObject, NSWindowDelegate {
         var model: EditorModel
         weak var window: NSWindow?
-        weak var previousDelegate: NSWindowDelegate?
+        nonisolated(unsafe) weak var previousDelegate: NSWindowDelegate?
 
         init(model: EditorModel) {
             self.model = model
@@ -226,11 +226,11 @@ private struct WindowConfigurator: NSViewRepresentable {
         }
 
         // Forward any delegate calls we don't implement to SwiftUI's delegate.
-        override func responds(to aSelector: Selector!) -> Bool {
+        nonisolated override func responds(to aSelector: Selector!) -> Bool {
             super.responds(to: aSelector) || (previousDelegate?.responds(to: aSelector) ?? false)
         }
 
-        override func forwardingTarget(for aSelector: Selector!) -> Any? {
+        nonisolated override func forwardingTarget(for aSelector: Selector!) -> Any? {
             if previousDelegate?.responds(to: aSelector) == true { return previousDelegate }
             return super.forwardingTarget(for: aSelector)
         }
