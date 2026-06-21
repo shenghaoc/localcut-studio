@@ -239,8 +239,8 @@ nonisolated protocol Interpolatable: Hashable, Codable {
     static func lerp(_ a: Self, _ b: Self, t: Float) -> Self
 }
 
-extension Float: Interpolatable {
-    static func lerp(_ a: Float, _ b: Float, t: Float) -> Float {
+extension Float: @preconcurrency Interpolatable {
+    nonisolated static func lerp(_ a: Float, _ b: Float, t: Float) -> Float {
         a + (b - a) * t
     }
 }
