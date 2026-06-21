@@ -50,29 +50,41 @@ enum CompositionBuilder {
         // in sync; the rendered timeline shortens by the total overlap.
         let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks)
 
-        // Each project video track expands to two alternating composition tracks
-        // (A/B-roll) so a transition's two clips can overlap on screen.
+        // Each project video track expands into a pool of composition tracks so a
+        // transition's two clips can overlap on screen (A/B-roll). Clips are
+        // packed greedily onto the first free composition track, so overlapping
+        // clips never share one — robust to any chain of transitions.
         // `projectTrackSegments` preserves bottom-to-top order.
         var projectTrackSegments: [[VideoSegment]] = []
 
         for projectTrack in project.videoTracks {
-            guard let compTrackA = composition.addMutableTrack(
-                    withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
-                  let compTrackB = composition.addMutableTrack(
-                    withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
-            else { continue }
-            let pool = [compTrackA, compTrackB]
+            // Each pool entry tracks a composition track and the effective end of
+            // its last-placed clip.
+            var pool: [(track: AVMutableCompositionTrack, lastEnd: CMTime)] = []
 
             var segments: [VideoSegment] = []
             let placements = TransitionLayout.placements(for: projectTrack.clips, cuts: cuts)
-            for (index, placement) in placements.enumerated() {
+            for placement in placements {
                 let clip = placement.clip
                 guard let media = project.media(for: clip.mediaID), media.hasVideo else { continue }
                 let sourceTracks = try await media.asset.loadTracks(withMediaType: .video)
                 guard let sourceTrack = sourceTracks.first else { continue }
 
-                let compTrack = pool[index % 2]
-                try compTrack.insertTimeRange(clip.timeRangeInSource, of: sourceTrack, at: placement.effectiveStart)
+                // Reuse the first track free at this clip's start, else add one.
+                let start = placement.effectiveStart
+                let poolIndex: Int
+                if let free = pool.firstIndex(where: { $0.lastEnd <= start }) {
+                    poolIndex = free
+                } else {
+                    guard let newTrack = composition.addMutableTrack(
+                        withMediaType: .video,
+                        preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                    pool.append((newTrack, .zero))
+                    poolIndex = pool.count - 1
+                }
+                let compTrack = pool[poolIndex].track
+                try compTrack.insertTimeRange(clip.timeRangeInSource, of: sourceTrack, at: start)
+                pool[poolIndex].lastEnd = placement.effectiveEnd
 
                 let transform = fitTransform(
                     naturalSize: media.naturalSize,

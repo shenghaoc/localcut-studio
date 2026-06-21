@@ -131,6 +131,34 @@ struct TransitionsTests {
         #expect(pb.effectiveStart == time(4)) // same ripple as the video B
     }
 
+    @Test("Chained transitions ripple cumulatively without negative ranges")
+    func chainedTransitionsRippleCumulatively() {
+        let media = UUID()
+        let a = Clip(mediaID: media, sourceStart: .zero, duration: time(4), timelineStart: .zero)
+        var b = Clip(mediaID: media, sourceStart: .zero, duration: time(4), timelineStart: time(4))
+        b.transition = Transition(duration: time(1))
+        var c = Clip(mediaID: media, sourceStart: .zero, duration: time(4), timelineStart: time(8))
+        c.transition = Transition(duration: time(1))
+
+        let track = videoTrack([a, b, c])
+        let cuts = TransitionLayout.cuts(videoTracks: [track])
+        let placements = TransitionLayout.placements(for: [a, b, c], cuts: cuts)
+
+        let pa = placements.first { $0.id == a.id }!
+        let pb = placements.first { $0.id == b.id }!
+        let pc = placements.first { $0.id == c.id }!
+
+        #expect(pa.effectiveStart == .zero)        // [0, 4]
+        #expect(pb.effectiveStart == time(3))      // 4 - 1  → [3, 7]
+        #expect(pc.effectiveStart == time(6))      // 8 - 2  → [6, 10]
+        // Every placement keeps a positive duration and forward order.
+        for p in placements { #expect(p.effectiveEnd > p.effectiveStart) }
+        #expect(pa.effectiveStart < pb.effectiveStart)
+        #expect(pb.effectiveStart < pc.effectiveStart)
+        // A and C must not overlap (so they can share a comp track safely here).
+        #expect(pa.effectiveEnd <= pc.effectiveStart)
+    }
+
     // MARK: - EditorModel integration (T1.4, R3, R4)
 
     private func makeModel() -> (EditorModel, Clip.ID, Clip.ID) {
