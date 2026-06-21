@@ -218,18 +218,13 @@ nonisolated enum CaptionDrawing {
         return nil
     }
 
-    /// Resolves the requested font; falls back to the system bold font at the
-    /// chosen size if the named font is unavailable. Phase 30 presets reference
-    /// system-shipped fonts to make this case rare.
+    /// Resolves the requested PostScript-named font. `CTFontCreateWithName`
+    /// silently falls back to a system font for unknown names — we accept that
+    /// rather than probing Font Manager and risking exclusion of installed
+    /// user fonts. Phase 30 presets reference system-shipped fonts to make
+    /// the silent fallback rare in practice.
     private static func makeFont(name: String, size: CGFloat) -> CTFont {
-        let psName = name as CFString
-        if let font = CTFontCreateWithName(psName, size, nil) as CTFont? {
-            // CTFontCreateWithName falls back to a system font silently when the
-            // PostScript name is unknown; we accept that fallback rather than
-            // probe Font Manager and risk excluding installed user fonts.
-            return font
-        }
-        return CTFontCreateUIFontForLanguage(.system, size, nil) ?? CTFontCreateWithName("Helvetica-Bold" as CFString, size, nil)
+        CTFontCreateWithName(name as CFString, size, nil)
     }
 }
 
@@ -300,9 +295,13 @@ nonisolated enum CaptionAnimation {
         case .slide:
             let eased = easeOut(t)
             let dist: CGFloat = 200
+            // Core Image uses y-up coordinates (origin at bottom-left), so a
+            // positive `translation.height` shifts the caption *above* its rest
+            // position. `fromBottom` therefore starts with a NEGATIVE y offset
+            // (below rest) and slides up to it; `fromTop` is the mirror.
             switch direction {
-            case .fromBottom: frame.translation = CGSize(width: 0, height: dist * (1 - CGFloat(eased)))
-            case .fromTop:    frame.translation = CGSize(width: 0, height: -dist * (1 - CGFloat(eased)))
+            case .fromBottom: frame.translation = CGSize(width: 0, height: -dist * (1 - CGFloat(eased)))
+            case .fromTop:    frame.translation = CGSize(width: 0, height:  dist * (1 - CGFloat(eased)))
             case .fromLeft:   frame.translation = CGSize(width: -dist * (1 - CGFloat(eased)), height: 0)
             case .fromRight:  frame.translation = CGSize(width:  dist * (1 - CGFloat(eased)), height: 0)
             }

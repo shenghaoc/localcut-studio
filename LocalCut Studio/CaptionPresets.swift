@@ -218,7 +218,7 @@ enum BuiltInCaptionPresets {
 
     static let retroOutline = CaptionPresetV1(
         name: "Retro Outline",
-        family: "social",
+        family: "retro",
         style: {
             var s = CaptionStyle()
             s.fontName = "Helvetica-Bold"

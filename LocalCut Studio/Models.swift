@@ -264,6 +264,18 @@ nonisolated struct Keyframed<T: Interpolatable>: Hashable, Codable, Sendable {
         self.defaultValue = defaultValue
     }
 
+    private enum CodingKeys: String, CodingKey { case keyframes, defaultValue }
+
+    /// Explicit decoder so a hand-edited or migrated document with unsorted
+    /// keyframes still produces sorted state — the synthesised decoder would
+    /// assign the raw array verbatim and break `value(at:)`'s binary search.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let raw = try c.decode([Keyframe<T>].self, forKey: .keyframes)
+        let dv = try c.decode(T.self, forKey: .defaultValue)
+        self.init(keyframes: raw, defaultValue: dv)
+    }
+
     var isAnimated: Bool { !keyframes.isEmpty }
 
     /// Linearly interpolates between the two surrounding keyframes.
@@ -307,8 +319,17 @@ nonisolated struct Keyframed<T: Interpolatable>: Hashable, Codable, Sendable {
 
     mutating func updateKeyframe(id: UUID, time: CMTime? = nil, value: T? = nil) {
         guard let i = keyframes.firstIndex(where: { $0.id == id }) else { return }
-        if let time { keyframes[i].time = time }
-        if let value { keyframes[i].value = value }
+        // If a new time is set and another keyframe already sits exactly there,
+        // drop the collider so the array preserves the single-keyframe-per-time
+        // invariant `addKeyframe` enforces. Without this, `value(at:)`'s binary
+        // search returns the first hit in the ambiguous zone.
+        if let time {
+            keyframes.removeAll { $0.id != id && $0.time == time }
+        }
+        // The just-updated keyframe may have moved during the removal above.
+        guard let j = keyframes.firstIndex(where: { $0.id == id }) else { return }
+        if let time { keyframes[j].time = time }
+        if let value { keyframes[j].value = value }
         keyframes.sort { $0.time < $1.time }
     }
 }
@@ -425,9 +446,11 @@ nonisolated enum CaptionAnchor: String, Hashable, Codable, CaseIterable, Identif
 /// has a documented default; missing values fall back to track defaults, then to
 /// `CaptionStyle.identity`.
 nonisolated struct CaptionStyle: Hashable, Codable, Sendable {
+    /// PostScript name. The weight is encoded by the name itself (e.g.
+    /// `Helvetica-Bold` vs `Helvetica`); there is no separate weight knob
+    /// because `CTFontCreateWithName` doesn't take one.
     var fontName: String = "Helvetica-Bold"
     var fontSize: Float = 72
-    var fontWeight: Float = 0.4
     var fill: RGBAColour = .white
     var stroke: StrokeStyle = StrokeStyle()
     var shadow: ShadowStyle = ShadowStyle()
@@ -455,7 +478,6 @@ nonisolated struct CaptionStyle: Hashable, Codable, Sendable {
 
     mutating func clamp() {
         fontSize = max(8, min(512, fontSize))
-        fontWeight = max(-1, min(1, fontWeight))
         stroke.width = max(0, min(64, stroke.width))
         shadow.blur = max(0, min(64, shadow.blur))
         glow.radius = max(0, min(128, glow.radius))
@@ -475,7 +497,6 @@ nonisolated struct CaptionStyle: Hashable, Codable, Sendable {
         var hasher = Hasher()
         hasher.combine(fontName)
         hasher.combine(fontSize)
-        hasher.combine(fontWeight)
         hasher.combine(fill)
         hasher.combine(stroke)
         hasher.combine(shadow)

@@ -58,9 +58,9 @@ struct CaptionsInspectorView: View {
             Toggle("Muted", isOn: Binding(
                 get: { track.isMuted },
                 set: { new in
-                    track.isMuted = new
-                    model.markDirty()
-                    model.scheduleRebuild()
+                    // Route through performUndoable so mute toggles join the
+                    // undo stack alongside every other caption edit.
+                    model.setCaptionTrackMuted(new, in: track.id)
                 }))
 
             Picker("Preset", selection: presetSelectionBinding(for: track)) {
@@ -119,6 +119,8 @@ struct CaptionsInspectorView: View {
                     model.removeCaptionLine(line.id, in: track.id)
                 } label: { Image(systemName: "minus.circle") }
                     .buttonStyle(.borderless)
+                    .help("Remove line")
+                    .accessibilityLabel("Remove caption line")
             }
             TextField("Caption text", text: Binding(
                 get: { line.text },

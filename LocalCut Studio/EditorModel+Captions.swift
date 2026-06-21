@@ -71,6 +71,17 @@ extension EditorModel {
         }
     }
 
+    /// Toggles a caption track's mute through the undo system so it groups with
+    /// every other caption edit.
+    func setCaptionTrackMuted(_ muted: Bool, in trackID: CaptionTrack.ID) {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              track.isMuted != muted else { return }
+        performUndoable(muted ? "Mute Caption Track" : "Unmute Caption Track") {
+            track.isMuted = muted
+            scheduleRebuild()
+        }
+    }
+
     /// Updates the default style for a track. Used by the inspector preset picker.
     func updateCaptionTrackDefaultStyle(_ style: CaptionStyle, in trackID: CaptionTrack.ID) {
         guard let track = project.captionTracks.first(where: { $0.id == trackID }) else { return }

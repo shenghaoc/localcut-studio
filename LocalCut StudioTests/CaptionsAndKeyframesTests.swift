@@ -59,6 +59,33 @@ func keyframesRemove() {
     #expect(k.keyframes.isEmpty)
 }
 
+@Test("Keyframed<Float>: updateKeyframe dedups when moved onto an existing time (Claude review #5)")
+func keyframesUpdateDedupsOnCollision() {
+    var k = Keyframed<Float>(defaultValue: 0)
+    k.addKeyframe(at: CMTime(seconds: 1, preferredTimescale: 600), value: 0.3)
+    k.addKeyframe(at: CMTime(seconds: 2, preferredTimescale: 600), value: 0.7)
+    let movingID = k.keyframes[0].id
+    // Move the first keyframe onto the second's time — the collider should drop.
+    k.updateKeyframe(id: movingID, time: CMTime(seconds: 2, preferredTimescale: 600), value: nil)
+    #expect(k.keyframes.count == 1)
+    #expect(k.keyframes[0].id == movingID)
+    #expect(k.value(at: CMTime(seconds: 2, preferredTimescale: 600)) == 0.3)
+}
+
+@Test("Keyframed<Float>: decoding an unsorted keyframes array sorts on the way in (Claude review #6)")
+func keyframesDecodeSorts() throws {
+    let unsortedJSON = """
+    {"defaultValue":0,"keyframes":[
+      {"id":"00000000-0000-0000-0000-000000000002","time":{"value":2,"timescale":1},"value":0.7},
+      {"id":"00000000-0000-0000-0000-000000000001","time":{"value":1,"timescale":1},"value":0.3}
+    ]}
+    """
+    let k = try JSONDecoder().decode(Keyframed<Float>.self, from: Data(unsortedJSON.utf8))
+    #expect(k.keyframes.count == 2)
+    #expect(k.keyframes[0].time.seconds == 1)
+    #expect(k.keyframes[1].time.seconds == 2)
+}
+
 @Test("Keyframed<Float>: Codable round-trips")
 func keyframesRoundTrip() throws {
     var k = Keyframed<Float>(defaultValue: 0.1)
@@ -245,6 +272,19 @@ func srtRejectsNegativeTimestamp() {
 
 // MARK: - Caption track persistence (R5.3)
 
+@Test("setCaptionTrackMuted: routes through undo (Claude review #4)")
+func captionMuteIsUndoable() {
+    let model = EditorModel()
+    let track = CaptionTrack(name: "T")
+    model.project.captionTracks = [track]
+    #expect(model.canUndo == false)
+    model.setCaptionTrackMuted(true, in: track.id)
+    #expect(track.isMuted == true)
+    #expect(model.canUndo == true)
+    model.undo()
+    #expect(track.isMuted == false)
+}
+
 @Test("ProjectDocument: round-trips caption tracks and lines losslessly")
 func captionPersistenceRoundTrip() throws {
     let project = Project()
@@ -377,6 +417,27 @@ func animationTypewriterRamp() {
         currentTime: CMTime(seconds: 0.5, preferredTimescale: 600),
         lineStart: start, lineEnd: end, style: style)
     #expect(abs(half.typewriterProgress - 0.5) < 0.01)
+}
+
+@Test("Animation: vertical slide enter respects y-up coordinates (Claude review #1)")
+func animationSlideVerticalDirection() {
+    var style = CaptionStyle()
+    style.enterAnimation = .slide
+    style.enterDuration = 0.2
+    let start = CMTime.zero
+    let end = CMTime(seconds: 5, preferredTimescale: 600)
+
+    // fromBottom at t=0 should sit BELOW the rest position (negative y in y-up).
+    style.slideDirection = .fromBottom
+    let bottomAtStart = CaptionAnimation.evaluate(currentTime: .zero,
+                                                  lineStart: start, lineEnd: end, style: style)
+    #expect(bottomAtStart.translation.height < 0)
+
+    // fromTop at t=0 should sit ABOVE rest (positive y in y-up).
+    style.slideDirection = .fromTop
+    let topAtStart = CaptionAnimation.evaluate(currentTime: .zero,
+                                               lineStart: start, lineEnd: end, style: style)
+    #expect(topAtStart.translation.height > 0)
 }
 
 @Test("Animation: fade exit drives opacity to zero at line end")
