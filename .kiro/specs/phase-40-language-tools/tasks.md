@@ -4,7 +4,7 @@
 
 ## Probes
 
-- [ ] **T1.1** `Translation.LanguageAvailability` probe + `LanguageModel.isAvailable` probe at app start.
+- [ ] **T1.1** `LanguageAvailability.status(from:to:)` (Translation) + `SystemLanguageModel.default.availability` (FoundationModels) probes at app start; re-poll on foreground.
 - [ ] **T1.2** Hide-on-unavailable wiring across the panel and menu items.
 
 ## Translation
@@ -16,9 +16,9 @@
 
 ## Draft
 
-- [ ] **T3.1** `actor DraftService` wrapping `FoundationModels.LanguageModel`.
-- [ ] **T3.2** Transcript hierarchical summariser.
-- [ ] **T3.3** Prompt templates: titles, hashtags, 文案.
+- [ ] **T3.1** `actor DraftService` driving a `LanguageModelSession(model: SystemLanguageModel.default)`; uses `respond(to:)` for plain prompts and `@Generable` typed responses for structured outputs.
+- [ ] **T3.2** Transcript hierarchical summariser fitting the Foundation Models token cap.
+- [ ] **T3.3** Prompt templates: titles, hashtags, 文案 (typed via `@Generable` where structure matters).
 - [ ] **T3.4** Read-only / copy-only draft panel.
 
 ## Download lifecycle

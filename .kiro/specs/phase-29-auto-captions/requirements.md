@@ -3,7 +3,7 @@
 ## R1 — ASR engine
 
 - **R1.1** `SFSpeechRecognizer(locale:)` is the engine; every request additionally sets `SFSpeechRecognitionRequest.requiresOnDeviceRecognition = true`.
-- **R1.2** Availability is gated by `SFSpeechRecognizer.supportsOnDeviceRecognition` (the recognizer's static probe) BEFORE the feature is exposed. When `false`, the feature is hidden — no cloud fallback, no degraded path.
+- **R1.2** Availability is gated by reading the instance property `supportsOnDeviceRecognition` on the constructed `SFSpeechRecognizer(locale:)` BEFORE the feature is exposed. When `false`, the feature is hidden — no cloud fallback, no degraded path. (Note: the gate depends on locale, so the probe is re-run when the user changes language.)
 - **R1.3** Language is chosen at recognizer init from (a) explicit user override → (b) clip asset metadata → (c) system locale. The recognizer cannot change language after init; `NLLanguageRecognizer` runs only as an after-the-fact verification flag.
 
 ## R2 — Audio extraction + windowing

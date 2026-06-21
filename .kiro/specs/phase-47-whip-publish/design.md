@@ -16,7 +16,7 @@ The browser-editor's v1 leans entirely on the platform's `RTCPeerConnection`. Na
 
 ## Approach
 
-1. **WebRTC stack.** Vendor **GoogleWebRTC** (`stable/M132` or later) via Swift Package Manager. **BSD-3-Clause** licence (the upstream `webrtc.googlesource.com` LICENSE file is BSD-3-Clause; some additional patent grants ride alongside), organisational backing (Google), industry-standard. Size on disk: ~80 MB as an XCFramework. We justify this AGENTS.md-significant addition because:
+1. **WebRTC stack.** Vendor **GoogleWebRTC** (the milestone branch current at integration time — e.g. `M140`+ for 2026) via Swift Package Manager. **BSD-3-Clause** licence (the upstream `webrtc.googlesource.com` LICENSE file is BSD-3-Clause; some additional patent grants ride alongside), organisational backing (Google), industry-standard. Size on disk: ~80 MB as an XCFramework. We justify this AGENTS.md-significant addition because:
    - WHIP requires `RTCPeerConnection`; there is no Apple-native equivalent for SDP + ICE + DTLS-SRTP egress.
    - Apple's `WKWebView` WebRTC implementation cannot bridge to AVFoundation media pipelines.
    - All open-source alternatives (LiveKit-WebRTC, hand-rolled) wrap the same Google sources.

@@ -17,24 +17,33 @@ The browser-editor restricts itself to Chrome's built-in `Translator` / `Languag
 ## Approach
 
 1. **Availability probe.** Before exposing any UI, the probe checks:
-   - `Translation.LanguageAvailability` for the requested pair (e.g. `zh-Hans → en`).
-   - The Foundation Models availability state for the draft pipeline. **Exact API surface TBD** — verify against the shipping `FoundationModels` framework docs at implementation time. As of macOS 26 beta the surface used was `SystemLanguageModel.default.availability` returning an `.available | .unavailable(reason:)` enum; the macOS 27 release may rename or restructure this. Both Translation and Foundation Models report something like `downloadable | downloading | ready | unavailable`.
-   - Hardware floor: Apple Silicon M-series + ≥ 8 GB unified memory for Foundation Models (Apple's published floor); Translation works on all Apple Silicon.
+   - `LanguageAvailability.status(from: srcLang, to: dstLang)` (Translation framework) for the requested pair. The status enum distinguishes installed vs. supported (downloadable) vs. unsupported.
+   - `SystemLanguageModel.default.availability` (Foundation Models, macOS 26+) for the draft pipeline. Switch on the result:
+     ```swift
+     switch SystemLanguageModel.default.availability {
+     case .available:
+         // expose UI
+     case .unavailable(let reason):
+         // hide UI; reason explains why (device not eligible, Apple Intelligence not enabled, model not ready)
+     }
+     ```
+   - Hardware floor: Apple Silicon M-series + Apple Intelligence enabled + supported region. Translation has a wider compatibility footprint than Foundation Models — the two probes are independent and the panel hides only what's unavailable.
 2. **Hide-on-unavailable.** Anything other than `ready` (or `downloadable` post-user-consent) hides the entire panel. No error dialogs.
 3. **Translation pipeline.**
-   - Detect source language with `LanguageDetection` on the first caption line.
-   - `TranslationSession` is bound at the SwiftUI view boundary via `.translationTask(_:)` — Apple gates the session on the modifier's view lifetime so the framework can show download / consent UI when needed. A pure `LanguageTranslator` actor batches caption lines into work items and hands them off; the view-owned session does the actual translate call and posts results back. This avoids the actor-owned-session pitfall (sessions outliving views or missing consent prompts).
+   - Detect source language with `NLLanguageRecognizer` (Natural Language framework) on the first caption line — Apple's general-purpose language ID, distinct from the Translation framework's pair-availability probe.
+   - `TranslationSession` is bound at the SwiftUI view boundary via `.translationTask(_:)` (`source:target:perform:`) — Apple gates the session on the modifier's view lifetime so the framework can show download / consent UI when needed. A pure `LanguageTranslator` actor batches caption lines into work items and hands them off; the view-owned session does the actual translate call and posts results back. This avoids the actor-owned-session pitfall (sessions outliving views or missing consent prompts).
    - For each translated text, the actor creates a mirrored `CaptionLine` with identical `CMTimeRange`.
    - Output lands as a SECOND `CaptionTrack` on the project. Bilingual SRT/VTT export pairs them per Phase 30's sidecar path (`stem.zh.srt`, `stem.en.srt`).
 4. **Draft pipeline.**
+   - `LanguageModelSession(model: SystemLanguageModel.default)` is the Foundation Models entry point; calls land on `respond(to:)` for plain prompts.
+   - For structured output (titles list, hashtag set) use `@Generable` types so Foundation Models returns a typed `[String]` / struct instead of free-form text we'd have to parse — same WWDC25-shipped macro Apple recommends for typed responses.
    - Transcript → hierarchical summarisation under the Foundation Models token cap.
    - Three prompt templates: titles (3 candidates), hashtags (5–10), 文案 (Chinese long-form copy).
    - Outputs render in a read-only, copy-only panel. NEVER auto-applied to the project. The user copies what they want.
 5. **Model download lifecycle.**
-   - `downloadable` state offers a "Download translation model" button with size displayed (`Translation.LanguageAvailability.downloadSize` or equivalent).
-   - `downloading` state shows progress; cancellable.
-   - `ready` state enables the feature.
-   - Models live in Apple's managed cache (we do NOT store them in the app sandbox).
+   - Translation: `LanguageAvailability.Status.supported(...)` means the language pair can be installed on demand. The first translate call against an installable pair triggers the OS download UI inline; we surface the request from the SwiftUI view that owns the `TranslationSession`.
+   - Foundation Models: `SystemLanguageModel.default.availability.unavailable(.modelNotReady)` indicates the model is still downloading; we poll the availability on app foreground and unhide the panel when it flips to `.available`.
+   - All models live in Apple's managed cache; we do NOT store them in the app sandbox.
 6. **On-device guarantee.** No network calls beyond the OS-managed model download. Translation and drafting use the on-device APIs only. We assert this in design.md and document it in the user-facing docs.
 
 ## Trade-offs

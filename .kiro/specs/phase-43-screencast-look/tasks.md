@@ -10,7 +10,7 @@
 
 ## Event log
 
-- [ ] **T2.1** Own-process input tap; write `events.json` sidecar alongside the chunk manifest.
+- [ ] **T2.1** Own-process input via `NSEvent.addLocalMonitorForEvents`; write `events.json` sidecar alongside the session manifest. No Accessibility entitlement required.
 - [ ] **T2.2** Loader + parser; integrate with the session model.
 - [ ] **T2.3** Detect "own-app" target at session open; skip if not.
 

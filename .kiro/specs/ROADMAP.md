@@ -101,6 +101,26 @@ The roadmap introduces exactly **two** non-Apple runtime libraries; both are jus
 
 Every other ML / media path uses an Apple-provided API — no vendored on-device models anywhere in the roadmap.
 
+## Apple API spot-checks
+
+API symbols cited in the specs were spot-checked against Apple's documentation as of June 2026:
+
+- **`SystemLanguageModel.default.availability`** + **`LanguageModelSession.respond(to:)`** (Foundation Models, macOS 26+) — verified against WWDC25 §286.
+- **`LanguageAvailability.status(from:to:)`** (Translation framework) + SwiftUI **`.translationTask(_:)`** — verified against framework reference.
+- **`SFSpeechRecognizer(locale:).supportsOnDeviceRecognition`** — instance property, depends on locale; gate must be re-run when language changes.
+- **`VNGeneratePersonSegmentationRequest`** / **`VNDetectFaceLandmarksRequest`** (returns `[VNFaceObservation]` with `landmarks: VNFaceLandmarks2D?` — detection + landmarks in one pass) / **`VNDetectFaceRectanglesRequest`** / **`VNGenerateAttentionBasedSaliencyImageRequest`** — Vision framework, all current.
+- **`VTFrameProcessor`** + per-task configurations (`VTLowLatencyFrameInterpolationConfiguration`, `VTFrameRateConversionConfiguration`, `VTOpticalFlowConfiguration`, `VTMotionBlurConfiguration`) — VideoToolbox, macOS 15.4+; verify the exact configuration class names against the live VideoToolbox docs before implementation.
+- **`AVAudioInputNode.setVoiceProcessingEnabled(_:)`** — real-time-rendering only; refuses `manualRenderingMode = .offline` (WWDC19 §510). Phase 36 splits live + offline graphs as a consequence.
+- **`AVMutableCompositionTrack.scaleTimeRange(_:toDuration:)`** — per-track, shifts every clip after it on the same track; build order matters or isolate to a dedicated track.
+- **`AVMutableAudioMixInputParameters.audioTimePitchAlgorithm`** — per-input-parameters, NOT on `AVMutableAudioMix`.
+- **`AVAssetWriter.movieFragmentInterval`** — the property that creates a fragmented `.mov` readable up to the last flushed fragment.
+- **`SCStreamConfiguration.capturesAudio = true`** (ScreenCaptureKit, macOS 13+) for system audio.
+- **`CMClockGetHostTimeClock()`** for shared capture timing — PTS are ns-since-boot; must be normalised by subtracting a `sessionStartHostTime` snapshot.
+- **`NSEvent.addLocalMonitorForEvents(matching:handler:)`** for Phase 43's own-process event log — does not require Accessibility permission (cross-app via `CGEventTap` would, and is out of scope).
+- **`FileManager.url(for: .cachesDirectory, in: .userDomainMask, ...)`** for Phase 46's spill — App Sandbox grants the container Caches directly; no security-scoped bookmark needed.
+
+If a symbol resolves differently when Xcode is opened, update the spec rather than working around the discrepancy.
+
 ## Source-of-truth note
 
 The canonical source for each phase's intent is the **shipped** spec in the upstream [browser-editor](https://github.com/shenghaoc/browser-editor) repo's `.kiro/specs/phase-NN-*/`. When implementing a phase here, cross-reference the upstream `design.md` for concrete decisions (model choice + provenance, parameter ranges, container formats, exact heuristics) — the macOS specs in this folder paraphrase those decisions for the AVFoundation / Metal / Core AI stack but do not duplicate every tuning constant.

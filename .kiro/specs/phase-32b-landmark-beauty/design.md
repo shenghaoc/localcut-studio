@@ -16,7 +16,7 @@ The browser-editor pipeline runs detection + landmarks via ONNX models on ORT-We
 
 ## Approach
 
-1. **Detection + landmarks.** `VNDetectFaceLandmarksRequest` returns `VNFaceLandmarks2D` with `allPoints` (~76 points covering jaw, eyes, mouth, nose, eyebrows). Built into Vision; runs on the Neural Engine on Apple Silicon.
+1. **Detection + landmarks.** `VNDetectFaceLandmarksRequest` returns `[VNFaceObservation]` where each observation carries a `landmarks: VNFaceLandmarks2D?` with `allPoints` (and the named groups: `faceContour`, `leftEye`, `rightEye`, `leftEyebrow`, `rightEyebrow`, `nose`, `noseCrest`, `medianLine`, `outerLips`, `innerLips`). Detection and landmark inference are one request, one pass — we don't need a separate `VNDetectFaceRectanglesRequest`. Built into Vision; runs on the Neural Engine on Apple Silicon.
 2. **Detection cadence.** Detection runs at a reduced cadence (default every 3 frames at 30 fps; configurable). Between inference frames we interpolate landmarks linearly between cached endpoints.
 3. **Temporal smoothing.** One-Euro filter on each landmark point (`minCutoff = 1.0 Hz`, `beta = 0.007` — same parameters as Phase 33). Kills jitter without lag.
 4. **Mesh warp.** A Metal compute pass takes the source frame + a per-vertex `(srcUV, dstUV)` map derived from the landmark deltas under the user's slider parameters. Standard barycentric interpolation across triangles.
