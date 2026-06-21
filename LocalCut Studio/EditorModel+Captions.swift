@@ -62,12 +62,14 @@ extension EditorModel {
         }
     }
 
-    /// Updates a line in place; matched by line id.
+    /// Updates a line in place; matched by line id. Coalesced + debounced so a
+    /// run of keystrokes against the same line folds into one undo step and one
+    /// composition rebuild — typing per-character through `performUndoable`
+    /// would otherwise flood the stack and stall preview.
     func updateCaptionLine(_ updated: CaptionLine, in trackID: CaptionTrack.ID) {
         guard let track = project.captionTracks.first(where: { $0.id == trackID }) else { return }
-        performUndoable("Edit Caption") {
+        performCoalescedUndoable("Edit Caption", target: updated.id, rebuild: .debounced) {
             track.updateLine(updated)
-            scheduleRebuild()
         }
     }
 

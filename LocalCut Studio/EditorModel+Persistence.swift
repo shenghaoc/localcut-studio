@@ -103,8 +103,12 @@ extension EditorModel {
         }
         // Caption tracks: restore existing-by-id, drop tracks not in the snapshot,
         // and append any from the snapshot that the current project doesn't yet have
-        // (an undo that brings back a deleted track).
-        var existing: [UUID: CaptionTrack] = Dictionary(uniqueKeysWithValues: project.captionTracks.map { ($0.id, $0) })
+        // (an undo that brings back a deleted track). `uniquingKeysWith` rather
+        // than `uniqueKeysWithValues` so a corrupted document with duplicate
+        // track ids degrades to a missed restore instead of a process crash.
+        var existing: [UUID: CaptionTrack] = Dictionary(
+            project.captionTracks.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
         var restored: [CaptionTrack] = []
         for snapshot in state.captionTracks {
             if let track = existing.removeValue(forKey: snapshot.trackID) {

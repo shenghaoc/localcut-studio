@@ -32,7 +32,11 @@ enum CaptionImporter {
     }
 
     static func importTrack(data: Data, isVTT: Bool, name: String) throws -> CaptionTrack {
-        guard let raw = String(data: data, encoding: .utf8) else { throw ImportError.notUTF8 }
+        guard let decoded = String(data: data, encoding: .utf8) else { throw ImportError.notUTF8 }
+        // Strip the UTF-8 BOM (U+FEFF) if present — exporters from Notepad,
+        // some video editors, and Windows tools include it, which would
+        // otherwise corrupt the WEBVTT header check and the SRT first cue.
+        let raw = decoded.hasPrefix("\u{FEFF}") ? String(decoded.dropFirst()) : decoded
         let lines = isVTT ? try parseVTT(raw) : parseSRT(raw)
         if lines.isEmpty { throw ImportError.emptyDocument }
         return CaptionTrack(name: name, lines: lines)
@@ -128,7 +132,11 @@ enum CaptionImporter {
         guard let start = parseTimestamp(parts[0], separator: separator) else { return nil }
 
         let tail = parts[1].trimmingCharacters(in: .whitespaces)
-        let endComponent = tail.split(separator: " ", maxSplits: 1).first.map(String.init) ?? tail
+        // VTT spec allows tab characters between the end timestamp and the cue
+        // settings; splitting on " " alone would treat a tab-separated settings
+        // suffix as part of the timestamp and reject the cue.
+        let endComponent = tail.split(maxSplits: 1, whereSeparator: { $0.isWhitespace })
+            .first.map(String.init) ?? tail
         guard let end = parseTimestamp(endComponent, separator: separator) else { return nil }
         guard end > start else { return nil }
         return CMTimeRange(start: start, duration: end - start)

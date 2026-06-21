@@ -147,6 +147,45 @@ func srtNonUTF8() {
     }
 }
 
+// MARK: - BOM + tab separator (Gemini review #2 / #3)
+
+@Test("SRT: tolerates a leading UTF-8 BOM")
+func srtTolerantOfBOM() throws {
+    var bytes: [UInt8] = [0xEF, 0xBB, 0xBF]
+    bytes.append(contentsOf: Array("""
+    1
+    00:00:01,000 --> 00:00:02,000
+    First
+
+    """.utf8))
+    let track = try CaptionImporter.importTrack(data: Data(bytes), isVTT: false, name: "T")
+    #expect(track.lines.count == 1)
+    #expect(track.lines[0].text == "First")
+}
+
+@Test("VTT: tolerates a leading UTF-8 BOM before WEBVTT")
+func vttTolerantOfBOM() throws {
+    var bytes: [UInt8] = [0xEF, 0xBB, 0xBF]
+    bytes.append(contentsOf: Array("""
+    WEBVTT
+
+    00:00:01.000 --> 00:00:02.000
+    Hi
+
+    """.utf8))
+    let track = try CaptionImporter.importTrack(data: Data(bytes), isVTT: true, name: "T")
+    #expect(track.lines.count == 1)
+}
+
+@Test("VTT: tab separator between end timestamp and cue settings is accepted")
+func vttTabSeparator() throws {
+    // A real-world VTT exporter writes "end\tline:foo" rather than "end line:foo".
+    let raw = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\tline:80%\nWith tabs\n"
+    let lines = try CaptionImporter.parseVTT(raw)
+    #expect(lines.count == 1)
+    #expect(lines[0].text == "With tabs")
+}
+
 // MARK: - VTT importer (R5.2)
 
 @Test("VTT: WEBVTT header required")
@@ -271,6 +310,29 @@ func srtRejectsNegativeTimestamp() {
 }
 
 // MARK: - Caption track persistence (R5.3)
+
+@Test("updateCaptionLine: typing several characters folds into ONE undo step (Gemini review #1)")
+func captionTextEditCoalesces() async {
+    let model = EditorModel()
+    let track = CaptionTrack(name: "T")
+    let line = CaptionLine(
+        range: CMTimeRange(start: .zero, duration: CMTime(seconds: 1, preferredTimescale: 600)),
+        text: "")
+    track.addLine(line)
+    model.project.captionTracks = [track]
+
+    for char in "hello" {
+        var updated = track.lines[0]
+        updated.text.append(char)
+        model.updateCaptionLine(updated, in: track.id)
+    }
+    // Commit any in-flight coalesced gesture and verify one — not five —
+    // undo entries cover the whole typing burst.
+    model.commitCoalescedUndo()
+    #expect(track.lines[0].text == "hello")
+    model.undo()
+    #expect(track.lines[0].text == "")
+}
 
 @Test("setCaptionTrackMuted: routes through undo (Claude review #4)")
 func captionMuteIsUndoable() {
