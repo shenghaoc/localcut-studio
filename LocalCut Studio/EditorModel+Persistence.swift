@@ -312,7 +312,7 @@ extension EditorModel {
 
         await rebuild()
         // Thumbnails are non-blocking so a multi-clip project opens immediately.
-        for item in project.mediaItems { Task { await generateThumbnail(for: item) } }
+        for item in project.mediaItems { Task { [weak self] in await self?.generateThumbnail(for: item) } }
 
         var notes: [String] = []
         if isNewerSchema { notes.append("saved in a newer format — saving downconverts to this version") }

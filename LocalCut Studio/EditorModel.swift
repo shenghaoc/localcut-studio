@@ -78,7 +78,8 @@ final class EditorModel {
         }
         endObserver = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.didPlayToEndTimeNotification,
-            object: nil, queue: .main) { [weak self] _ in
+            object: nil, queue: .main) { [weak self] notification in
+            guard notification.object as? AVPlayerItem == self?.player.currentItem else { return }
             MainActor.assumeIsolated {
                 self?.isPlaying = false
             }
@@ -134,7 +135,7 @@ final class EditorModel {
         registerImportUndo(name: "Import Media", before: before)
         markDirty()
         statusMessage = loaded.count == 1 ? "Imported \(loaded[0].name)." : "Imported \(loaded.count) items."
-        for item in loaded { Task { await self.generateThumbnail(for: item) } }
+        for item in loaded { Task { [weak self] in await self?.generateThumbnail(for: item) } }
     }
 
     func generateThumbnail(for item: MediaItem) async {
