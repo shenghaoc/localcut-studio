@@ -88,6 +88,22 @@ extension EditorModel {
         }
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
+        reconcileAccessedURLs()
+    }
+
+    /// Keeps retained security-scoped access aligned with the restored media set:
+    /// releases files an undo dropped, and re-acquires files a redo brought back
+    /// (the restored items hold the same security-scoped URLs, which support
+    /// repeated start/stop), so undo neither leaks tokens nor breaks redo.
+    private func reconcileAccessedURLs() {
+        let active = Set(project.mediaItems.map(\.url))
+        for url in accessedURLs.subtracting(active) {
+            url.stopAccessingSecurityScopedResource()
+            accessedURLs.remove(url)
+        }
+        for url in active.subtracting(accessedURLs) where url.startAccessingSecurityScopedResource() {
+            accessedURLs.insert(url)
+        }
     }
 
     /// Performs a discrete, immediately-committed mutation as one undo step.
