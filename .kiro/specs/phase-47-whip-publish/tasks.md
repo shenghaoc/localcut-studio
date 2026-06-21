@@ -23,7 +23,7 @@
 ## Media taps
 
 - [ ] **T4.1** `RTCVideoCapturer` subclass fed by Phase 45 program output.
-- [ ] **T4.2** Audio tap from `AVAudioEngine` master bus to `RTCAudioSource`.
+- [ ] **T4.2** Custom C++ `AudioDeviceModule` subclass (~200 lines) wrapped behind a Swift facade — GoogleWebRTC's Swift/Obj-C surface has no public push-PCM audio API; audio enters via the engine's ADM pull model. Master-bus samples feed in through an `AVAudioSinkNode` → ring buffer → ADM `NeedMorePlayData`.
 
 ## Settings
 

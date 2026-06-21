@@ -3,7 +3,7 @@
 ## R1 — Master bus inserts
 
 - **R1.1** Master bus exposes ordered inserts: denoiser → gate → compressor → limiter, each with bypass.
-- **R1.2** Live monitor and offline export use parallel `AVAudioEngine` graphs that share gate / compressor / limiter / meter nodes but swap the denoiser (Apple voice-processing AU on live; vDSP spectral-subtraction denoiser offline — the AU refuses `manualRenderingMode = .offline`). Golden-frame parity tests assert the two denoisers match on tuning-equivalent inputs within a documented tolerance.
+- **R1.2** A single custom `AVAudioUnit` (vDSP spectral-subtraction denoiser) is mounted on the master bus; it runs in both real-time rendering and `manualRenderingMode = .offline` so live monitor and offline export use the SAME node graph and produce sample-identical output. `AVAudioInputNode.setVoiceProcessingEnabled` is explicitly NOT used here — that's input-side mic denoise, which is Phase 41's concern.
 - **R1.3** Bypass toggles introduce no audible glitch (volume-ramped switching).
 
 ## R2 — Denoiser
