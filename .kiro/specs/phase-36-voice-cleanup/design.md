@@ -21,13 +21,13 @@ Three audio cleanup tools usable both live during monitoring and offline at rend
 
 ## Trade-offs
 
-- Apple's bundled denoiser reduces our dependency surface to zero and integrates with the OS audio session.
+- Custom vDSP denoiser reduces our dependency surface to zero — no third-party static library, no Apple voice-processing AU that doesn't run offline — at the cost of owning the algorithm and its maintenance. Spectral subtraction is a well-understood DSP recipe with no known patent encumbrances.
 - Offline R128 vs realtime LRA (loudness range): we ship the integrated measurement only; LRA is a v2 feature.
 - Limiter as a true-peak limiter requires 4× oversampling — we expose the option but default to sample-peak with a small margin to keep latency low.
 
 ## Risks
 
-- Apple AU availability across macOS versions; we feature-detect and fall back to RNNoise.
+- Spectral subtraction handles stationary noise (hum, hiss, fan) cleanly but performs poorly on non-stationary noise (keyboard clicks, door slams) and can introduce musical-noise artefacts; we document this in the user-facing copy and tune the over-subtraction factor conservatively rather than pretend the algorithm is a magic bullet.
 - R128 measurement on very short clips (<3 s) is meaningless — the UI states this when range is too short.
 
 ## Non-goals

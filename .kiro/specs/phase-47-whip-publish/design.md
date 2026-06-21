@@ -33,14 +33,14 @@ The browser-editor's v1 leans entirely on the platform's `RTCPeerConnection`. Na
 
 ## Trade-offs
 
-- GoogleWebRTC is an exception to "no third-party media libraries". We document this honestly: WHIP is otherwise impossible on macOS.
+- The community WebRTC XCFramework (`stasel/WebRTC` / `webrtc-sdk/webrtc`) is an exception to "no third-party media libraries". We document this honestly: WHIP is otherwise impossible on macOS, and these packages repackage the same upstream sources Google maintains.
 - WebRTC's media engine does the encoding (not VideoToolbox directly) — we lose some control vs. our normal pipeline, but get reconnect + congestion control + DTLS-SRTP for free.
 - RTMP-only platforms (YouTube, Douyin, Bilibili) are NOT supported directly; users run a WHIP → RTMP gateway (MediaMTX is the documented recipe). LocalCut never operates relay infra.
 
 ## Risks
 
-- GoogleWebRTC's API surface drifts between releases; we pin to a stable branch and update on a deliberate cadence.
-- Build size bumps to ~150 MB total app (~70 MB current + GoogleWebRTC). Users see this clearly in release notes.
+- The community WebRTC XCFramework's API surface drifts with upstream WebRTC; we pin to a milestone-tagged release and update on a deliberate cadence.
+- Build size bumps to ~150 MB total app (~70 MB current + ~80 MB community WebRTC XCFramework). Users see this clearly in release notes.
 - Apple may ship a first-party `WebRTC` framework in a future macOS; we'd switch.
 
 ## Non-goals

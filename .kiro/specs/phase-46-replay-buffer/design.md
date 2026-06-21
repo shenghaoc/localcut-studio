@@ -33,7 +33,7 @@ The browser-editor's v1 runs DSP in the worker's capture loop (not an `AudioWork
 ## Risks
 
 - Spill IO under the App Sandbox: `Library/Caches/ReplayBuffer/` is inside the app container, so reading + writing don't need a security-scoped bookmark. This intentionally does NOT reuse Phase 41's recordings folder — that path is user-selected and may not be accessible without resolving its bookmark first; the cache path is always available.
-- A user repeatedly hitting "save last N seconds" can fill the user's Movies folder if not pruned; we offer a per-session retention setting and document the disk footprint.
+- A user repeatedly hitting "save last N seconds" finalises clips into the app-container Caches partition (the saved fragmented `.mov` becomes a timeline source under `Library/Caches/ReplayBuffer/`) and can accumulate disk usage; we offer a per-session retention setting and surface the running footprint in diagnostics. (Saved clips are NOT written to `~/Movies` — that's Phase 41's recordings location, not Phase 46's path.)
 
 ## Non-goals
 
