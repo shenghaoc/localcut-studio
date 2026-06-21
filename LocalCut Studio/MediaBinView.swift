@@ -46,6 +46,12 @@ struct MediaBinView: View {
                                     Divider()
                                     Button("Remove from Project", role: .destructive) { model.removeMedia(itemID: item.id) }
                                 }
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel("\(item.name), \(TimeFormatting.timecode(item.durationSeconds))")
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityAddTraits(model.selectedMediaID == item.id ? .isSelected : [])
+                                .accessibilityAction(named: "Add to Timeline") { model.addToTimeline(mediaID: item.id) }
+                                .accessibilityAction(named: "Remove from Project") { model.removeMedia(itemID: item.id) }
                         }
                     }
                     .padding(8)

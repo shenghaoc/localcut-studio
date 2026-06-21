@@ -116,6 +116,7 @@ struct EditorView: View {
             if model.isExporting, let progress = model.exportProgress {
                 ProgressView(value: progress)
                     .frame(width: 120)
+                    .accessibilityLabel("Export progress")
             }
 
             Button {
@@ -141,11 +142,18 @@ struct EditorView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .allowsHitTesting(false)
+                .accessibilityLabel(model.statusMessage)
+                .accessibilityAddTraits(.updatesFrequently)
             Spacer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
         .background(.ultraThinMaterial)
+        // Announce status changes so background work and errors reach VoiceOver
+        // (A11Y-CHECKLIST: status line is an announced live region).
+        .onChange(of: model.statusMessage) { _, message in
+            AccessibilityNotification.Announcement(message).post()
+        }
     }
 
     private var relinkBanner: some View {

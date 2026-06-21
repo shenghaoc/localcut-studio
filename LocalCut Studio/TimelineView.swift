@@ -241,6 +241,7 @@ struct TimelineView: View {
         }
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
         .accessibilityLabel(model.project.media(for: clip.mediaID)?.name ?? "Clip")
+        .accessibilityValue("Starts \(TimeFormatting.timecode(clip.timelineStart.seconds)), \(TimeFormatting.timecode(clip.duration.seconds)) long")
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { hovering in
