@@ -319,7 +319,7 @@ private struct CachedLUT: Sendable {
     let cubeData: Data
 }
 
-private final class LUTCache: @unchecked Sendable {
+private final class LUTCache: Sendable {
     nonisolated static let shared = LUTCache()
     private let lock = OSAllocatedUnfairLock(initialState: [Data: CachedLUT]())
 
