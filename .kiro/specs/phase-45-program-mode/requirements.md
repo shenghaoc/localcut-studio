@@ -28,7 +28,7 @@
 
 ## R5 — Manifest
 
-- **R5.1** `scene-switch` records added to the Phase 41 NDJSON manifest.
+- **R5.1** Two record kinds added to the Phase 41 NDJSON manifest: (a) `scene-doc` — full `SceneDoc` snapshot written at session start AND re-written on every mid-session edit so recovery has the exact `SceneDefinition`s active at each switch; (b) `scene-switch` — `{ sceneId, atUs }` per switch. Recovery joins them: each `scene-switch` resolves against the latest preceding `scene-doc` snapshot.
 - **R5.2** Forward-compatible: parsers skip unknown record kinds.
 
 ## R6 — Landing
@@ -39,7 +39,7 @@
 
 ## R7 — Recovery
 
-- **R7.1** Killing the app mid-session: Phase 41 recovery surfaces the partial session; layout track reconstructed from the recovered `scene-switch` records.
+- **R7.1** Killing the app mid-session: Phase 41 recovery surfaces the partial session; layout track reconstructed from the recovered `scene-switch` records joined against the latest preceding `scene-doc` snapshots — never against the user's current scenes (which may have been edited post-crash).
 
 ## R8 — Capability gating
 

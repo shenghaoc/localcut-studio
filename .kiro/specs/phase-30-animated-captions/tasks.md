@@ -11,9 +11,9 @@
 ## Engine
 
 - [ ] **T2.1** `CaptionRasterer` — Core Text attributed-string render with stroke + fill + shadow + glow + pill; output `CGImage` + bounding box.
-- [ ] **T2.2** Idle frame cache keyed on `(lineId, styleHash)` with LRU eviction.
+- [ ] **T2.2** Idle frame cache keyed on `(lineId, styleHash, renderSize)` with LRU eviction. Render size is part of the key because raster dimensions and text wrapping depend on the project canvas — a project aspect / resolution change must not surface a stale bitmap.
 - [ ] **T2.3** Animation evaluator — pop / bounce / slide / typewriter — returning transform + opacity + mask progress; deterministic.
-- [ ] **T2.4** Word-highlight pass — second attributed-string render that recolours the active word; cache per `(lineId, styleHash, wordIndex)`.
+- [ ] **T2.4** Word-highlight pass — second attributed-string render that recolours the active word; cache per `(lineId, styleHash, wordIndex, renderSize)`.
 - [ ] **T2.5** Extend `EffectCompositor` to fetch active caption lines for the request time and composite rasters above clip layers, honouring track order.
 
 ## Presets

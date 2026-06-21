@@ -29,7 +29,7 @@
 - **R5.1** Sample interval default 0.5 s.
 - **R5.2** Scale ≥ 1.0; only zooms in beyond the aspect fill crop; never introduces letterbox.
 - **R5.3** Bounded velocity (0.3 norm/s) and acceleration (0.5 norm/s²) — iterative clamp until convergence.
-- **R5.4** Safe-zone compliance ≥ 95 % of frames inside action-safe (centre ± 0.45); reduce scale by 1 % up to 20 % iteratively until met; never below 1.0.
+- **R5.4** Safe-zone compliance ≥ 95 % of frames inside action-safe (centre ± 0.45); **increase** scale by 1 % up to 20 % iteratively until met (more overscan → more pan headroom). Never reduce below 1.0 (that would reveal letterbox). If still unmet after the 20 % cap, surface the limitation in the UI rather than violate the no-letterbox invariant.
 
 ## R6 — Review-before-apply
 

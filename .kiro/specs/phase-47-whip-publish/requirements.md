@@ -35,9 +35,9 @@
 
 ## R6 — Settings + secrets
 
-- **R6.1** Endpoint URL stored in app-scoped settings; token in keychain (per endpoint).
+- **R6.1** Endpoint URL stored in app-scoped settings. Bearer token defaults to in-memory **session-only** (typed once, never written to disk, dropped at app quit). The token only moves to a Keychain entry (per endpoint) after the user explicitly opts into "Remember on this device" via R6.3.
 - **R6.2** Bundle export structurally cannot include the publish store (test asserts).
-- **R6.3** "Remember token on this device" toggle stores it in Keychain; plain copy that it's a device-scoped secret.
+- **R6.3** "Remember token on this device" toggle is opt-in; only then does the token persist in Keychain with plain copy explaining it lives unencrypted there like an OBS stream key.
 
 ## R7 — Verification
 

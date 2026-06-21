@@ -10,7 +10,7 @@
 
 ## Source switching
 
-- [ ] **T2.1** Mid-session display / window / app switch via `SCStream.updateContentFilter(_:)`.
+- [ ] **T2.1** Mid-session display / window / app switch via `SCStream.updateContentFilter(_:)` paired with a GPU scale/crop pass (Core Image / Metal) that maps every captured frame into the writer's FIXED canvas size set at session start. `AVAssetWriter` rejects appends whose dimensions change mid-stream, so the writer's encoded format never changes; if the user wants source-native dimensions on the next take, that's `retake`.
 - [ ] **T2.2** Drop the first frame post-switch.
 
 ## PiP layouts

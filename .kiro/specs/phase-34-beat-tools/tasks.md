@@ -13,14 +13,15 @@
 ## Timeline integration
 
 - [ ] **T2.1** Add `TimelineMarker.Kind.beat` (depends on the markers spec).
-- [ ] **T2.2** Render beat markers on the ruler with distinct colour; off by default toggle.
-- [ ] **T2.3** Extend snapping with a beat-targets source; toggle in snap settings.
-- [ ] **T2.4** Global beat offset slider (±200 ms) wired through marker draw + snap.
+- [ ] **T2.2** Per-clip projection: emit `timelineBeat = clip.timelineStart + clip.mapSourceTimeToTimeline(sourceBeat − clip.sourceStart)` for every beat in range; trims, re-use, and Phase 35 ramps all flow through the same evaluator (identity when no ramp).
+- [ ] **T2.3** Render beat markers on the ruler with distinct colour; off by default toggle.
+- [ ] **T2.4** Extend snapping with a beat-targets source; toggle in snap settings.
+- [ ] **T2.5** Global beat offset slider (±200 ms) wired through marker draw + snap.
 
 ## Commands
 
-- [ ] **T3.1** "Cut at beats" command — clip split on every in-range beat; undoable.
-- [ ] **T3.2** "Align to beat" command — nearest-beat-within-window snap; undoable.
+- [ ] **T3.1** "Cut at beats" command — splits each selected clip at every projected `timelineBeat` (from T2.2) in its range; undoable.
+- [ ] **T3.2** "Align to beat" command — nearest projected-beat-within-window snap; undoable.
 
 ## Verification
 

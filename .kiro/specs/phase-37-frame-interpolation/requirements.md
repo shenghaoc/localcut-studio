@@ -36,7 +36,7 @@
 
 ## R7 — Render cache
 
-- **R7.1** Cache invalidation hash includes mode, factor cap, target fps, ramp hash, model id, compute units, tile profile, motion-blur toggle.
+- **R7.1** Cache invalidation hash includes mode, factor cap, target fps, ramp hash, configuration kind, compute units, tile profile, motion-blur toggle, AND `osVersion`. The OS-version input is required because `VTFrameProcessor` is OS-managed — Apple can change interpolation output across macOS revisions, so cached frames generated before an OS update would otherwise be reused with a different processor revision.
 - **R7.2** Changing any of those invalidates affected output ranges only.
 - **R7.3** Preview / export and proxy / original modes stay separated.
 

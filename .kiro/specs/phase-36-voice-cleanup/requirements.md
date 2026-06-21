@@ -8,7 +8,7 @@
 
 ## R2 — Denoiser
 
-- **R2.1** Default to the macOS-bundled noise suppression AU when available on the target OS; fall back to RNNoise via a thin static library if not.
+- **R2.1** A single custom `AVAudioUnit` (vDSP spectral-subtraction denoiser, per R1.2) is the only denoise implementation — no Apple voice-processing AU and no RNNoise fallback. The same unit runs in real-time and offline rendering so live monitor and export are sample-identical.
 - **R2.2** Adds no underruns at the standard 128-sample render quantum on a baseline-tier Mac.
 - **R2.3** Live-monitor end-to-end latency stays within the documented budget (≤25 ms total bus).
 

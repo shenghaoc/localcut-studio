@@ -3,7 +3,7 @@
 ## R1 — Availability gating
 
 - **R1.1** Probe `LanguageAvailability.status(from:to:)` (Translation framework) for the requested pair and `SystemLanguageModel.default.availability` (Foundation Models) for the draft pipeline at startup.
-- **R1.2** When either is `unavailable`, the entire language-tools surface is hidden (no error, no nag).
+- **R1.2** The two probes gate INDEPENDENT sub-panels: Translation availability hides only the translate-captions sub-panel (or specific language pair); Foundation Models availability hides only the draft sub-panel. A Mac where translation is `.installed` but Foundation Models is `.unavailable` still gets the translation feature. The whole language-tools surface only disappears when both sub-panels are unavailable. No error, no nag.
 - **R1.3** UI switches on the Apple probe enums directly: Translation `.installed | .supported | .unsupported` and Foundation Models `.available | .unavailable(reason)`. The browser-editor's `downloadable / downloading / ready` symbol set is NOT introduced.
 - **R1.4** No other feature depends on this phase being available.
 

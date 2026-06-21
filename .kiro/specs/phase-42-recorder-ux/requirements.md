@@ -25,7 +25,8 @@
 
 - **R5.1** A non-activating, always-on-top panel hosts start / stop / pause / source indicators / mic meter.
 - **R5.2** Closing the panel returns control to the main window.
-- **R5.3** "Hide while recording" option suppresses the panel during capture.
+- **R5.3** The panel's `CGWindowID` is passed to `SCContentFilter.init(display:excludingWindows:)` for the lifetime of every display / window / app capture session, so ScreenCaptureKit never burns the strip into the recorded frames — independent of whether the user keeps it visible.
+- **R5.4** "Hide while recording" option is offered as a user preference on top of R5.3 (belt-and-braces).
 
 ## R6 — Region capture + retake
 
