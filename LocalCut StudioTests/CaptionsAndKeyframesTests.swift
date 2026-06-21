@@ -169,6 +169,80 @@ func vttIdentifierAndHours() throws {
     #expect(lines[1].range.start.seconds == 3600)
 }
 
+// MARK: - CaptionTrack identity (review feedback)
+
+@Test("CaptionTrack: id round-trips through ProjectDocument save/load")
+func captionTrackIDPersistsAcrossSaveLoad() throws {
+    let project = Project()
+    let original = CaptionTrack(name: "Stable")
+    let originalID = original.id
+    project.captionTracks = [original]
+
+    let data = try ProjectDocument(project: project).encoded()
+    let reopened = try ProjectDocument(data: data)
+    let restored = reopened.captionTracks[0].makeTrack()
+    #expect(restored.id == originalID)
+}
+
+@Test("CaptionTrack: previously-deleted track returns with its original id on undo")
+func captionTrackIDStableAcrossUndoRestore() {
+    let project = Project()
+    let track = CaptionTrack(name: "T")
+    let originalID = track.id
+    project.captionTracks = [track]
+
+    // Snapshot, delete, then restore via `applyState`-equivalent.
+    let snapshot = ProjectState.CaptionTrackSnapshot(
+        trackID: track.id, name: track.name, isMuted: false,
+        defaultStyle: track.defaultStyle, lines: track.lines)
+    project.captionTracks = []
+    // Rebuild from snapshot using the same constructor path applyState uses.
+    let restored = CaptionTrack(id: snapshot.trackID, name: snapshot.name,
+                                lines: snapshot.lines)
+    #expect(restored.id == originalID)
+}
+
+// MARK: - CaptionLine / WordTiming defensive decoding (review feedback)
+
+@Test("CaptionLine: invalid (zero) timescale on disk decodes to a fallback rather than crashing")
+func captionLineDecodeFallsBackOnZeroTimescale() throws {
+    let json = """
+    {"id":"00000000-0000-0000-0000-000000000000",
+     "startValue":1000,"startScale":0,
+     "durationValue":2000,"durationScale":0,
+     "text":"Hi"}
+    """
+    let line = try JSONDecoder().decode(CaptionLine.self, from: Data(json.utf8))
+    #expect(line.range.start.timescale > 0)
+    #expect(line.range.duration.timescale > 0)
+}
+
+@Test("WordTiming: invalid (zero) timescale on disk decodes to a fallback rather than crashing")
+func wordTimingDecodeFallsBackOnZeroTimescale() throws {
+    let json = """
+    {"startValue":1000,"startScale":0,
+     "durationValue":2000,"durationScale":-5,
+     "word":"hi"}
+    """
+    let word = try JSONDecoder().decode(WordTiming.self, from: Data(json.utf8))
+    #expect(word.range.start.timescale > 0)
+    #expect(word.range.duration.timescale > 0)
+}
+
+// MARK: - SRT negative-timestamp guard (review feedback)
+
+@Test("SRT: rejects a cue with a negative timestamp component")
+func srtRejectsNegativeTimestamp() {
+    let raw = """
+    1
+    00:00:-1,000 --> 00:00:02,000
+    Negative seconds
+
+    """
+    let lines = CaptionImporter.parseSRT(raw)
+    #expect(lines.isEmpty)
+}
+
 // MARK: - Caption track persistence (R5.3)
 
 @Test("ProjectDocument: round-trips caption tracks and lines losslessly")

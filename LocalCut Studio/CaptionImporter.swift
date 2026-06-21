@@ -153,6 +153,10 @@ enum CaptionImporter {
         default:
             return nil
         }
+        // SRT/VTT timestamps are unsigned by spec; treat a negative parse as
+        // malformed rather than constructing a negative `CMTime` that would
+        // shove a cue before the timeline origin.
+        guard hours >= 0, minutes >= 0, seconds >= 0 else { return nil }
 
         let totalMs = Int64(hours) * 3_600_000 + Int64(minutes) * 60_000 + Int64(seconds) * 1_000 + Int64(ms)
         return CMTime(value: totalMs, timescale: 1_000)

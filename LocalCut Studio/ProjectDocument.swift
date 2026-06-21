@@ -112,24 +112,30 @@ struct ProjectDocument: Codable, Equatable {
 
 // MARK: - Caption track persistence
 
-/// Codable lane of caption lines, mirroring `CaptionTrack`.
+/// Codable lane of caption lines, mirroring `CaptionTrack`. The `id` round-trips
+/// across save/load so undo steps and external references survive a document
+/// open. Legacy documents without an `id` get a fresh UUID on decode.
 struct CaptionTrackDoc: Codable, Equatable {
+    var id: UUID
     var name: String
     var isMuted: Bool
     var defaultStyle: CaptionStyle
     var lines: [CaptionLine]
 
-    init(name: String, isMuted: Bool, defaultStyle: CaptionStyle, lines: [CaptionLine]) {
+    init(id: UUID = UUID(), name: String, isMuted: Bool,
+         defaultStyle: CaptionStyle, lines: [CaptionLine]) {
+        self.id = id
         self.name = name
         self.isMuted = isMuted
         self.defaultStyle = defaultStyle
         self.lines = lines
     }
 
-    private enum CodingKeys: String, CodingKey { case name, isMuted, defaultStyle, lines }
+    private enum CodingKeys: String, CodingKey { case id, name, isMuted, defaultStyle, lines }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         isMuted = try c.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
         defaultStyle = try c.decodeIfPresent(CaptionStyle.self, forKey: .defaultStyle) ?? .identity
@@ -247,15 +253,17 @@ extension ProjectDocument {
 extension CaptionTrackDoc {
     init(track: CaptionTrack) {
         self.init(
+            id: track.id,
             name: track.name,
             isMuted: track.isMuted,
             defaultStyle: track.defaultStyle,
             lines: track.lines)
     }
 
-    /// Rebuilds a runtime `CaptionTrack` from the stored values.
+    /// Rebuilds a runtime `CaptionTrack` from the stored values, preserving
+    /// the original UUID so undo steps and external references survive open.
     func makeTrack() -> CaptionTrack {
-        let track = CaptionTrack(name: name, lines: lines)
+        let track = CaptionTrack(id: id, name: name, lines: lines)
         track.isMuted = isMuted
         track.defaultStyle = defaultStyle
         return track

@@ -114,9 +114,12 @@ extension EditorModel {
                 track.replaceLines(snapshot.lines)
                 restored.append(track)
             } else {
-                // A previously-deleted track returns with the same id-bag of data;
-                // its UUID identity isn't reused, but content is fully restored.
-                let track = CaptionTrack(name: snapshot.name, lines: snapshot.lines)
+                // A previously-deleted track returns with its original UUID, so
+                // any redoable command captured against that identity still
+                // resolves the track after undo brings it back.
+                let track = CaptionTrack(id: snapshot.trackID,
+                                         name: snapshot.name,
+                                         lines: snapshot.lines)
                 track.isMuted = snapshot.isMuted
                 track.defaultStyle = snapshot.defaultStyle
                 restored.append(track)

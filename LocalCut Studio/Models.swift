@@ -512,9 +512,12 @@ nonisolated struct WordTiming: Hashable, Codable, Sendable {
         let ss = try c.decode(Int32.self, forKey: .startScale)
         let dv = try c.decode(Int64.self, forKey: .durationValue)
         let ds = try c.decode(Int32.self, forKey: .durationScale)
+        // CMTime with a non-positive timescale is invalid (and crashes on
+        // arithmetic); a corrupted document must not be allowed to construct one.
+        // Fall back to the project's default 600 timescale instead.
         range = CMTimeRange(
-            start: CMTime(value: sv, timescale: ss),
-            duration: CMTime(value: dv, timescale: ds))
+            start: CMTime(value: sv, timescale: ss > 0 ? ss : 600),
+            duration: CMTime(value: dv, timescale: ds > 0 ? ds : 600))
         word = try c.decode(String.self, forKey: .word)
     }
 
@@ -564,9 +567,11 @@ nonisolated struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
         let ss = try c.decode(Int32.self, forKey: .startScale)
         let dv = try c.decode(Int64.self, forKey: .durationValue)
         let ds = try c.decode(Int32.self, forKey: .durationScale)
+        // CMTime with a non-positive timescale is invalid; fall back to 600
+        // rather than letting a corrupted document construct one.
         range = CMTimeRange(
-            start: CMTime(value: sv, timescale: ss),
-            duration: CMTime(value: dv, timescale: ds))
+            start: CMTime(value: sv, timescale: ss > 0 ? ss : 600),
+            duration: CMTime(value: dv, timescale: ds > 0 ? ds : 600))
         text = try c.decode(String.self, forKey: .text)
         words = try c.decodeIfPresent([WordTiming].self, forKey: .words)
         style = try c.decodeIfPresent(CaptionStyle.self, forKey: .style)
@@ -599,14 +604,18 @@ nonisolated struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
 /// project can carry multiple languages or speaker streams in parallel.
 @Observable
 final class CaptionTrack: Identifiable {
-    let id = UUID()
+    let id: UUID
     var name: String
     var isMuted = false
     private(set) var lines: [CaptionLine]
     /// Default styling applied to every line that does not override `style`.
     var defaultStyle: CaptionStyle = .identity
 
-    init(name: String, lines: [CaptionLine] = []) {
+    /// `id` is `let` so it is stable for the lifetime of the runtime object.
+    /// Snapshot restoration and document decode pass the original UUID so
+    /// commands captured against the old identity keep working after undo/open.
+    init(id: UUID = UUID(), name: String, lines: [CaptionLine] = []) {
+        self.id = id
         self.name = name
         self.lines = lines.sorted { $0.range.start < $1.range.start }
     }
