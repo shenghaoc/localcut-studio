@@ -2,15 +2,6 @@ import Foundation
 import AVFoundation
 import CoreGraphics
 
-// MARK: - Helpers
-
-extension CMTimeRange {
-    /// Whether this range overlaps another range (positive-duration intersection).
-    func intersects(_ other: CMTimeRange) -> Bool {
-        intersection(other).duration > .zero
-    }
-}
-
 // MARK: - Media
 
 /// A source media file imported into the project's media bin.
@@ -133,30 +124,6 @@ final class Track: Identifiable {
     /// The first free time at the tail of the track, used for ripple-append.
     var endTime: CMTime {
         clips.reduce(.zero) { CMTimeMaximum($0, $1.timelineEnd) }
-    }
-
-    /// Returns the nearest `timelineStart` for a clip of the given duration such
-    /// that it does not overlap any existing clip. If the desired position already
-    /// fits, returns it unchanged; otherwise snaps to just after the overlapping
-    /// clip's end.
-    func nearestNonOverlappingStart(for duration: CMTime, desired start: CMTime) -> CMTime {
-        let sorted = clips.sorted { $0.timelineStart < $1.timelineStart }
-        var candidate = start
-        var didMove = true
-
-        while didMove {
-            didMove = false
-            let candidateRange = CMTimeRange(start: candidate, duration: duration)
-            for clip in sorted {
-                let clipRange = CMTimeRange(start: clip.timelineStart, duration: clip.duration)
-                guard candidateRange.intersects(clipRange) else { continue }
-                candidate = clip.timelineEnd
-                didMove = true
-                break
-            }
-        }
-
-        return candidate
     }
 }
 

@@ -1,6 +1,5 @@
 import SwiftUI
 import AVFoundation
-import AppKit
 
 /// The multi-track timeline: a time ruler, one lane per track, clip blocks, and a
 /// draggable playhead. Zoom is controlled by `model.pixelsPerSecond`.
@@ -21,8 +20,6 @@ struct TimelineView: View {
     private var tracks: [Track] {
         model.project.videoTracks + model.project.audioTracks
     }
-
-    @State private var dragState: DragState?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,15 +79,14 @@ struct TimelineView: View {
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
                     ruler
-                    ForEach(Array(tracks.enumerated()), id: \.element.id) { trackIndex, track in
+                    ForEach(tracks) { track in
                         Divider()
-                        lane(for: track, allTracksIndex: trackIndex)
+                        lane(for: track)
                     }
                 }
                 playhead
             }
             .frame(width: contentWidth, alignment: .topLeading)
-            .coordinateSpace(name: "timeline")
         }
     }
 
@@ -122,78 +118,40 @@ struct TimelineView: View {
         )
     }
 
-    private func lane(for track: Track, allTracksIndex: Int) -> some View {
+    private func lane(for track: Track) -> some View {
         ZStack(alignment: .topLeading) {
             Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    model.selectedClipID = nil
-                }
             ForEach(track.clips) { clip in
-                ClipBlockView(
-                    clip: clip,
-                    kind: track.kind,
-                    model: model,
-                    pps: pps,
-                    laneHeight: laneHeight,
-                    allTracksIndex: allTracksIndex,
-                    dragState: $dragState,
-                    commitDrag: commitDrag)
+                clipBlock(clip, kind: track.kind)
             }
         }
         .frame(height: laneHeight)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    // MARK: - Drag commit
+    private func clipBlock(_ clip: Clip, kind: TrackKind) -> some View {
+        let width = max(CGFloat(clip.duration.seconds) * pps, 2)
+        let x = CGFloat(clip.timelineStart.seconds) * pps
+        let isSelected = model.selectedClipID == clip.id
+        let baseColor: Color = kind == .video ? .blue : .green
 
-    private func commitDrag(finalLocation location: CGPoint, at translation: CGSize) {
-        guard let state = dragState else { return }
-        defer { dragState = nil }
-
-        let snapThreshold = Double(8 / pps)
-        let snapEnabled = !NSEvent.modifierFlags.contains(.option)
-
-        switch state.kind {
-        case .trimmingLeft:
-            let deltaTime = translation.width / pps
-            let rawTimelineStart = state.initialTimelineStart + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
-            let final = snapEnabled
-                ? model.resolveSnap(candidate: rawTimelineStart, thresholdSeconds: snapThreshold, excluding: state.clipID)
-                : rawTimelineStart
-            model.trimClip(id: state.clipID, edge: .left, to: final)
-
-        case .trimmingRight:
-            let deltaTime = translation.width / pps
-            let rawTimelineEnd = state.initialTimelineStart + state.initialDuration + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
-            let final = snapEnabled
-                ? model.resolveSnap(candidate: rawTimelineEnd, thresholdSeconds: snapThreshold, excluding: state.clipID)
-                : rawTimelineEnd
-            model.trimClip(id: state.clipID, edge: .right, to: final)
-
-        case .moving:
-            let deltaTime = translation.width / pps
-            let rawStart = state.initialTimelineStart + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
-            let snapped = snapEnabled
-                ? model.resolveSnap(candidate: rawStart, thresholdSeconds: snapThreshold, excluding: state.clipID)
-                : rawStart
-
-            let allTracks = model.project.videoTracks + model.project.audioTracks
-            // location is in the clip's local coordinate space (offset y=4 within its lane).
-            // Compute the Y in timeline coords using the source track index.
-            let clipOffsetInLane: CGFloat = 4
-            let timelineY = rulerHeight + CGFloat(state.sourceTrackIndex) * laneHeight + clipOffsetInLane + location.y
-            let rawTrackIndex = max(0, min(allTracks.count - 1, Int(timelineY / laneHeight)))
-
-            let targetTrack = allTracks[rawTrackIndex]
-            let sameKindTracks: [Track] = targetTrack.kind == .video ? model.project.videoTracks : model.project.audioTracks
-            let sameKindIndex = sameKindTracks.firstIndex { $0.id == targetTrack.id } ?? 0
-
-            model.moveClip(id: state.clipID, toTrackIndex: sameKindIndex, start: snapped)
-        }
+        return RoundedRectangle(cornerRadius: 6)
+            .fill(baseColor.opacity(0.35))
+            .overlay(alignment: .leading) {
+                Text(model.project.media(for: clip.mediaID)?.name ?? "Clip")
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .foregroundStyle(.primary)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(isSelected ? Color.accentColor : baseColor.opacity(0.6),
+                                  lineWidth: isSelected ? 2 : 1))
+            .frame(width: width, height: laneHeight - 8)
+            .offset(x: x, y: 4)
+            .onTapGesture { model.selectedClipID = clip.id }
     }
-
-    // MARK: Playhead
 
     private var playhead: some View {
         let x = CGFloat(model.currentTime) * pps
@@ -211,148 +169,5 @@ struct TimelineView: View {
         let raw = Double(targetPixels / pps)
         let candidates: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300]
         return candidates.first { $0 >= raw } ?? 600
-    }
-}
-
-// MARK: - Clip block view
-
-private struct ClipBlockView: View {
-    let clip: Clip
-    let kind: TrackKind
-    let model: EditorModel
-    let pps: CGFloat
-    let laneHeight: CGFloat
-    let allTracksIndex: Int
-    @Binding var dragState: DragState?
-    let commitDrag: (CGPoint, CGSize) -> Void
-
-    private let edgeHitZone: CGFloat = 8
-
-    @State private var isCursorPushed = false
-    @State private var isHoveringEdge = false
-
-    private var baseWidth: CGFloat {
-        max(CGFloat(clip.duration.seconds) * pps, 2)
-    }
-
-    private var baseX: CGFloat {
-        CGFloat(clip.timelineStart.seconds) * pps
-    }
-
-    var body: some View {
-        let isSelected = model.selectedClipID == clip.id
-        let baseColor: Color = kind == .video ? .blue : .green
-
-        let isBeingDragged = dragState?.clipID == clip.id
-        let visualX: CGFloat
-        let visualWidth: CGFloat
-        if let state = dragState, state.clipID == clip.id {
-            switch state.kind {
-            case .trimmingLeft:
-                let deltaTime = state.translation.width / pps
-                visualX = baseX + deltaTime
-                visualWidth = max(baseWidth - deltaTime, 2)
-            case .trimmingRight:
-                visualWidth = max(baseWidth + state.translation.width / pps, 2)
-                visualX = baseX
-            case .moving:
-                visualX = baseX + state.translation.width / pps
-                visualWidth = baseWidth
-            }
-        } else {
-            visualX = baseX
-            visualWidth = baseWidth
-        }
-
-        let dragOpacity: Double = isBeingDragged ? 0.75 : 1
-        let dragShadow: CGFloat = isBeingDragged ? 4 : 0
-
-        return RoundedRectangle(cornerRadius: 6)
-            .fill(baseColor.opacity(0.35 * dragOpacity))
-            .overlay(alignment: .leading) {
-                Text(model.project.media(for: clip.mediaID)?.name ?? "Clip")
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .padding(.horizontal, 6)
-                    .foregroundStyle(.primary)
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isSelected ? Color.accentColor : baseColor.opacity(0.6),
-                                  lineWidth: isSelected ? 2 : 1)
-            )
-            .frame(width: visualWidth, height: laneHeight - 8)
-            .offset(x: visualX, y: 4)
-            .shadow(radius: dragShadow)
-            .onTapGesture { model.selectedClipID = clip.id }
-            .gesture(
-                DragGesture(minimumDistance: 2, coordinateSpace: .local)
-                    .onChanged { value in
-                        if dragState == nil {
-                            let kind: DragState.Kind
-                            if value.startLocation.x < edgeHitZone {
-                                kind = .trimmingLeft
-                            } else if value.startLocation.x > baseWidth - edgeHitZone {
-                                kind = .trimmingRight
-                            } else {
-                                kind = .moving
-                            }
-                            dragState = DragState(
-                                kind: kind,
-                                clipID: clip.id,
-                                initialTimelineStart: clip.timelineStart,
-                                initialDuration: clip.duration,
-                                sourceTrackIndex: allTracksIndex,
-                                translation: value.translation)
-                        } else {
-                            dragState?.translation = value.translation
-                        }
-                    }
-                    .onEnded { value in
-                        guard abs(value.translation.width) > 2 || abs(value.translation.height) > 2 else {
-                            dragState = nil
-                            return
-                        }
-                        commitDrag(value.location, value.translation)
-                    }
-            )
-            .onContinuousHover(coordinateSpace: .local) { phase in
-                handleHover(phase)
-            }
-    }
-
-    private func handleHover(_ phase: HoverPhase) {
-        switch phase {
-        case .active(let point):
-            let onEdge = point.x < edgeHitZone || point.x > baseWidth - edgeHitZone
-            if onEdge != isHoveringEdge {
-                if isCursorPushed { NSCursor.pop(); isCursorPushed = false }
-                isHoveringEdge = onEdge
-                if onEdge {
-                    NSCursor.resizeLeftRight.push()
-                } else {
-                    NSCursor.openHand.push()
-                }
-                isCursorPushed = true
-            }
-        case .ended:
-            if isCursorPushed { NSCursor.pop(); isCursorPushed = false }
-            isHoveringEdge = false
-        }
-    }
-}
-
-// MARK: - Drag state
-
-private struct DragState {
-    let kind: Kind
-    let clipID: Clip.ID
-    let initialTimelineStart: CMTime
-    let initialDuration: CMTime
-    let sourceTrackIndex: Int
-    var translation: CGSize
-
-    enum Kind {
-        case trimmingLeft, trimmingRight, moving
     }
 }
