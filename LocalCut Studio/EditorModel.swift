@@ -274,36 +274,39 @@ final class EditorModel {
     }
 
     /// Finds the nearest non-overlapping position for a clip on a track.
-    /// Prefers the requested position; shifts forward to the next gap if blocked.
+    /// Prefers the requested position; shifts to the nearest gap if blocked.
     private func resolveOverlap(clip: Clip, on track: Track) -> CMTime {
         let requested = clip.timelineStart
         let duration = clip.duration
         let others = track.clips.sorted { $0.timelineStart < $1.timelineStart }
 
-        // Check if requested position works.
         let requestedEnd = requested + duration
         let hasOverlap = others.contains { other in
-            let otherEnd = other.timelineEnd
-            return requested < otherEnd && requestedEnd > other.timelineStart
+            requested < other.timelineEnd && requestedEnd > other.timelineStart
         }
         if !hasOverlap { return requested }
 
-        // Snap to nearest gap: try just after each existing clip.
+        // Candidate positions: timeline origin, just after each clip, and
+        // just before each clip (shifted back by duration) to cover gaps
+        // that end at a clip's start.
         var candidates: [CMTime] = [.zero]
         for other in others {
             candidates.append(other.timelineEnd)
+            let beforeClip = other.timelineStart - duration
+            if beforeClip >= .zero {
+                candidates.append(beforeClip)
+            }
         }
 
         var bestStart = requested
-        var bestDistance = CMTime(value: Int64.max, timescale: 600)
+        var bestDistance = Double.infinity
         for candidate in candidates {
             let candidateEnd = candidate + duration
             let wouldOverlap = others.contains { other in
-                let otherEnd = other.timelineEnd
-                return candidate < otherEnd && candidateEnd > other.timelineStart
+                candidate < other.timelineEnd && candidateEnd > other.timelineStart
             }
             if !wouldOverlap {
-                let distance = CMTimeAbsoluteValue(candidate - requested)
+                let distance = abs((candidate - requested).seconds)
                 if distance < bestDistance {
                     bestDistance = distance
                     bestStart = candidate
@@ -333,10 +336,8 @@ final class EditorModel {
     /// itself if nothing is close enough.
     func resolveSnap(candidate: CMTime, excluding clipID: Clip.ID? = nil, threshold: Double? = nil) -> CMTime {
         let thresholdSeconds = threshold ?? (8.0 / pixelsPerSecond)
-        let thresholdTime = CMTime(seconds: thresholdSeconds, preferredTimescale: 600)
 
         var allTargets = snapTargets()
-        // Exclude boundaries of the clip being dragged.
         if let clipID {
             for track in allTracks {
                 if let clip = track.clips.first(where: { $0.id == clipID }) {
@@ -347,10 +348,10 @@ final class EditorModel {
         }
 
         var nearest = candidate
-        var minDist = CMTime(value: Int64.max, timescale: 600)
+        var minDist = Double.infinity
         for target in allTargets {
-            let dist = CMTimeAbsoluteValue(candidate - target)
-            if dist < thresholdTime, dist < minDist {
+            let dist = abs((candidate - target).seconds)
+            if dist < thresholdSeconds, dist < minDist {
                 minDist = dist
                 nearest = target
             }

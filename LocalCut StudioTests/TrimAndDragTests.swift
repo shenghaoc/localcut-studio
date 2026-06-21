@@ -61,7 +61,7 @@ struct TrimAndDragTests {
         model.trimClip(id: clipID, edge: .left, to: time(100))
 
         let clip = model.project.videoTracks.first!.clips[0]
-        #expect(clip.duration > .zero)
+        #expect(clip.duration == CMTime(value: 1, timescale: 600))
     }
 
     // MARK: - Trim right edge
@@ -95,7 +95,7 @@ struct TrimAndDragTests {
         model.trimClip(id: clipID, edge: .right, to: time(-5))
 
         let clip = model.project.videoTracks.first!.clips[0]
-        #expect(clip.duration > .zero)
+        #expect(clip.duration == CMTime(value: 1, timescale: 600))
     }
 
     // MARK: - Move
@@ -153,10 +153,9 @@ struct TrimAndDragTests {
         // Try to move clip2 to overlap with clip1.
         model.moveClip(id: clip2.id, toTrack: track.id, start: time(2))
 
-        // After overlap resolution, clip2 should not overlap clip1.
+        // Nearest non-overlapping position is right after clip1 at 5s.
         let moved = track.clips.first { $0.id == clip2.id }!
-        let other = track.clips.first { $0.id == clip1.id }!
-        #expect(moved.timelineStart >= other.timelineEnd || moved.timelineEnd <= other.timelineStart)
+        #expect(moved.timelineStart == time(5))
     }
 
     // MARK: - Snap targets

@@ -181,7 +181,7 @@ struct TimelineView: View {
         .offset(x: x, y: displayValues.yOffset)
         .opacity(displayValues.opacity)
         .onTapGesture { model.selectedClipID = clip.id }
-        .gesture(bodyDragGesture(clip: clip, trackID: trackID, trackIndex: trackIndex))
+        .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex))
         .onHover { hovering in
             if !hovering { hoverEdge = nil }
         }
@@ -295,18 +295,21 @@ struct TimelineView: View {
             }
     }
 
-    private func bodyDragGesture(clip: Clip, trackID: Track.ID, trackIndex: Int) -> some Gesture {
+    private func bodyDragGesture(clip: Clip, kind: TrackKind, trackID: Track.ID, trackIndex: Int) -> some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
                 let originalX = CGFloat(clip.timelineStart.seconds) * pps
                 let newX = originalX + value.translation.width
                 var candidateStart = CMTime(seconds: max(0, Double(newX / pps)), preferredTimescale: 600)
 
-                // Determine target track from vertical offset.
+                // Constrain vertical drag to same-kind tracks only.
                 let trackDelta = Int(round(value.translation.height / (laneHeight + 1)))
-                let targetIndex = min(max(trackIndex + trackDelta, 0), tracks.count - 1)
+                let rawIndex = trackIndex + trackDelta
+                let sameKindIndices = tracks.indices.filter { tracks[$0].kind == kind }
+                let targetIndex = sameKindIndices.min(by: {
+                    abs($0 - rawIndex) < abs($1 - rawIndex)
+                }) ?? trackIndex
 
-                // Snap unless Option is held.
                 if !NSEvent.modifierFlags.contains(.option) {
                     candidateStart = model.resolveSnap(candidate: candidateStart, excluding: clip.id)
                 }
