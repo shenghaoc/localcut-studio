@@ -33,6 +33,7 @@ final class EditorModel {
 
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
+    @ObservationIgnored private var pendingRebuildTask: Task<Void, Never>?
 
     init() {
         let interval = CMTime(value: 1, timescale: 30)
@@ -175,6 +176,84 @@ final class EditorModel {
         }
     }
 
+    /// Mutates the selected clip and schedules a debounced rebuild (for continuous
+    /// drags such as colour sliders). Cancels any pending rebuild.
+    func updateSelectedClipCoalesced(_ transform: (inout Clip) -> Void) {
+        guard let id = selectedClipID else { return }
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+            transform(&track.clips[index])
+            rebuildDebounced()
+            return
+        }
+    }
+
+    private func rebuildDebounced(after delay: Duration = .milliseconds(200)) {
+        pendingRebuildTask?.cancel()
+        pendingRebuildTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled else { return }
+            await rebuild()
+        }
+    }
+
+    // MARK: - Colour grading
+
+    /// Returns the colour grade for the selected clip, inserting a neutral one if absent.
+    var selectedClipGrade: ColourGrade {
+        get {
+            guard let clip = selectedClip else { return .neutral }
+            if let effect = clip.effects.first(where: { if case .colourGrade = $0 { return true }; return false }),
+               case .colourGrade(let g) = effect {
+                return g
+            }
+            return .neutral
+        }
+        set {
+            guard let id = selectedClipID else { return }
+            for track in allTracks {
+                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                var grade = newValue
+                grade.clamp()
+                if let effectIndex = track.clips[index].effects.firstIndex(where: {
+                    if case .colourGrade = $0 { return true }; return false
+                }) {
+                    track.clips[index].effects[effectIndex] = .colourGrade(grade)
+                } else {
+                    track.clips[index].effects.append(.colourGrade(grade))
+                }
+                return
+            }
+        }
+    }
+
+    /// Removes all colour effects from the selected clip.
+    func resetClipColourEffects() {
+        guard let id = selectedClipID else { return }
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+            track.clips[index].effects.removeAll()
+            Task { await rebuild() }
+            return
+        }
+    }
+
+    /// Imports a .cube LUT file and attaches it as a LUT effect on the selected clip.
+    func importLUT(url: URL) {
+        guard url.startAccessingSecurityScopedResource() else { return }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        guard let bookmark = try? url.bookmarkData(options: .suitableForBookmarkFile, includingResourceValuesForKeys: nil, relativeTo: nil),
+              let id = selectedClipID else { return }
+
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+            track.clips[index].effects.append(.lut(bookmark: bookmark))
+            Task { await rebuild() }
+            return
+        }
+    }
+
     var selectedClip: Clip? {
         guard let id = selectedClipID else { return nil }
         for track in allTracks {
@@ -186,6 +265,131 @@ final class EditorModel {
     var selectedMedia: MediaItem? {
         guard let id = selectedMediaID else { return nil }
         return project.media(for: id)
+    }
+
+    /// Finds the `Track` that contains the clip with the given ID.
+    func track(for clipID: Clip.ID) -> Track? {
+        allTracks.first { $0.clips.contains(where: { $0.id == clipID }) }
+    }
+
+    /// Applies a closure to the clip with the given ID, then rebuilds.
+    private func applyToClip(id: Clip.ID, _ transform: (inout Clip) -> Void) {
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+            transform(&track.clips[index])
+            Task { await rebuild() }
+            return
+        }
+    }
+
+    /// Which edge of a clip is being trimmed.
+    enum TrimEdge {
+        case left, right
+    }
+
+    /// Minimum clip duration (one frame at 30 fps).
+    private static let minClipDuration = CMTime(value: 1, timescale: 30)
+
+    /// Trims the clip with the given ID. For the left edge, `to` is the new
+    /// `timelineStart`; for the right edge, `to` is the new `timelineEnd`.
+    /// Values are clamped to source bounds and minimum duration.
+    func trimClip(id: Clip.ID, edge: TrimEdge, to: CMTime) {
+        guard let clip = track(for: id)?.clips.first(where: { $0.id == id }),
+              let media = project.media(for: clip.mediaID) else { return }
+        let sourceDuration = media.duration
+
+        switch edge {
+        case .left:
+            let newTimelineStart = CMTime(seconds: max(0, to.seconds), preferredTimescale: 600)
+            let delta = newTimelineStart - clip.timelineStart
+            let newSourceStart = max(.zero, clip.sourceStart + delta)
+            let rawDuration = clip.duration - (newTimelineStart - clip.timelineStart)
+            let newDuration = max(Self.minClipDuration, rawDuration)
+            let clampedSourceEnd = newSourceStart + newDuration
+            let finalDuration: CMTime
+            if clampedSourceEnd > sourceDuration {
+                finalDuration = max(Self.minClipDuration, sourceDuration - newSourceStart)
+            } else {
+                finalDuration = newDuration
+            }
+
+            applyToClip(id: id) { clip in
+                clip.sourceStart = newSourceStart
+                clip.timelineStart = newTimelineStart
+                clip.duration = finalDuration
+            }
+
+        case .right:
+            let newTimelineEnd = CMTime(seconds: max(0, to.seconds), preferredTimescale: 600)
+            let rawDuration = newTimelineEnd - clip.timelineStart
+            let newDuration = max(Self.minClipDuration, rawDuration)
+            let sourceEnd = clip.sourceStart + newDuration
+            let finalDuration: CMTime
+            if sourceEnd > sourceDuration {
+                finalDuration = max(Self.minClipDuration, sourceDuration - clip.sourceStart)
+            } else {
+                finalDuration = newDuration
+            }
+
+            applyToClip(id: id) { clip in
+                clip.duration = finalDuration
+            }
+        }
+    }
+
+    /// Moves the clip to a new track (by index among tracks of the same kind) and
+    /// start time, resolving overlaps. Pass `trackIndex` as the 0-based index
+    /// within tracks of the same kind as the clip's current track.
+    func moveClip(id: Clip.ID, toTrackIndex: Int, start: CMTime) {
+        guard let source = track(for: id)?.clips.first(where: { $0.id == id }),
+              let sourceTrack = track(for: id) else { return }
+
+        let sameKindTracks: [Track] = sourceTrack.kind == .video ? project.videoTracks : project.audioTracks
+        let targetTrack: Track
+        if toTrackIndex >= 0, toTrackIndex < sameKindTracks.count {
+            targetTrack = sameKindTracks[toTrackIndex]
+        } else {
+            targetTrack = sourceTrack
+        }
+
+        for t in allTracks {
+            t.clips.removeAll { $0.id == id }
+        }
+
+        let resolved = targetTrack.nearestNonOverlappingStart(for: source.duration, desired: start)
+        var moved = source
+        moved.timelineStart = resolved
+        targetTrack.clips.append(moved)
+        targetTrack.clips.sort { $0.timelineStart < $1.timelineStart }
+        selectedClipID = moved.id
+
+        Task { await rebuild() }
+    }
+
+    /// All snap points — every clip boundary, zero, and the playhead.
+    func snapTargets(excluding clipID: Clip.ID? = nil) -> Set<CMTime> {
+        var targets: Set<CMTime> = [.zero]
+        for track in allTracks {
+            for clip in track.clips where clip.id != clipID {
+                targets.insert(clip.timelineStart)
+                targets.insert(clip.timelineEnd)
+            }
+        }
+        if currentTime > 0 {
+            targets.insert(CMTime(seconds: currentTime, preferredTimescale: 600))
+        }
+        return targets
+    }
+
+    /// Returns the nearest snap target within `thresholdSeconds`, or the candidate
+    /// if none is close enough.
+    func resolveSnap(candidate: CMTime, thresholdSeconds: Double) -> CMTime {
+        let targets = snapTargets()
+        let nearest = targets.min { abs($0.seconds - candidate.seconds) < abs($1.seconds - candidate.seconds) }
+        if let nearest, abs(nearest.seconds - candidate.seconds) <= thresholdSeconds {
+            return nearest
+        }
+        return candidate
     }
 
     // MARK: - Composition / playback

@@ -2,6 +2,15 @@ import Foundation
 import AVFoundation
 import CoreGraphics
 
+// MARK: - Helpers
+
+extension CMTimeRange {
+    /// Whether this range overlaps another range (positive-duration intersection).
+    func intersects(_ other: CMTimeRange) -> Bool {
+        intersection(other).duration > .zero
+    }
+}
+
 // MARK: - Media
 
 /// A source media file imported into the project's media bin.
@@ -42,6 +51,48 @@ enum TrackKind: Hashable {
     case audio
 }
 
+// MARK: - Colour Grading
+
+/// Perceptual colour-adjustment parameters with neutral defaults and clamping.
+struct ColourGrade: Hashable, Codable {
+    var exposure: Float = 0        // CIExposureAdjust.inputEV, range [-2, 2]
+    var contrast: Float = 1        // CIColorControls.inputContrast, range [0.5, 1.5]
+    var saturation: Float = 1      // CIColorControls.inputSaturation, range [0, 2]
+    var temperatureOffset: Float = 0  // CITemperatureAndTint offset from 6500K, range [-4000, 4000]
+    var tintOffset: Float = 0         // CITemperatureAndTint offset from 0, range [-150, 150]
+
+    static let neutral = ColourGrade()
+
+    mutating func clamp() {
+        exposure = max(-2, min(2, exposure))
+        contrast = max(0.5, min(1.5, contrast))
+        saturation = max(0, min(2, saturation))
+        temperatureOffset = max(-4000, min(4000, temperatureOffset))
+        tintOffset = max(-150, min(150, tintOffset))
+    }
+}
+
+/// An effect that can be applied to a video clip's source frames.
+enum Effect: Hashable, Codable {
+    case colourGrade(ColourGrade)
+    case lut(bookmark: Data)
+
+    static func == (lhs: Effect, rhs: Effect) -> Bool {
+        switch (lhs, rhs) {
+        case (.colourGrade(let a), .colourGrade(let b)): a == b
+        case (.lut(bookmark: let a), .lut(bookmark: let b)): a == b
+        default: false
+        }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        switch self {
+        case .colourGrade(let g): hasher.combine(0); hasher.combine(g)
+        case .lut(bookmark: let d): hasher.combine(1); hasher.combine(d)
+        }
+    }
+}
+
 /// A single placement of (part of) a media item on a track's timeline.
 struct Clip: Identifiable, Hashable {
     let id = UUID()
@@ -56,6 +107,9 @@ struct Clip: Identifiable, Hashable {
 
     /// Per-clip opacity used when compositing video layers (0...1).
     var opacity: Float = 1
+
+    /// Ordered effect chain applied to every source frame of this clip.
+    var effects: [Effect] = []
 
     var timelineEnd: CMTime { timelineStart + duration }
 
@@ -79,6 +133,23 @@ final class Track: Identifiable {
     /// The first free time at the tail of the track, used for ripple-append.
     var endTime: CMTime {
         clips.reduce(.zero) { CMTimeMaximum($0, $1.timelineEnd) }
+    }
+
+    /// Returns the nearest `timelineStart` for a clip of the given duration such
+    /// that it does not overlap any existing clip. If the desired position already
+    /// fits, returns it unchanged; otherwise snaps to just after the overlapping
+    /// clip's end.
+    func nearestNonOverlappingStart(for duration: CMTime, desired start: CMTime) -> CMTime {
+        let sorted = clips.sorted { $0.timelineStart < $1.timelineStart }
+        let desiredRange = CMTimeRange(start: start, duration: duration)
+        for clip in sorted {
+            let clipRange = CMTimeRange(start: clip.timelineStart, duration: clip.duration)
+            guard desiredRange.intersects(clipRange) else { continue }
+            // Push past this clip's end and recheck.
+            let pushedStart = clip.timelineEnd
+            return nearestNonOverlappingStart(for: duration, desired: pushedStart)
+        }
+        return start
     }
 }
 

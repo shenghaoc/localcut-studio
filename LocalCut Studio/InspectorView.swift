@@ -1,10 +1,12 @@
 import SwiftUI
 import AVFoundation
+import UniformTypeIdentifiers
 
 /// Context-sensitive properties for the current selection plus project-wide
 /// render settings.
 struct InspectorView: View {
     @Bindable var model: EditorModel
+    @State private var showLUTImporter = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,6 +21,7 @@ struct InspectorView: View {
             Form {
                 if let clip = model.selectedClip {
                     clipSection(clip)
+                    colourSection
                 } else if let media = model.selectedMedia {
                     mediaSection(media)
                 } else {
@@ -31,6 +34,15 @@ struct InspectorView: View {
                 projectSection
             }
             .formStyle(.grouped)
+        }
+        .fileImporter(
+            isPresented: $showLUTImporter,
+            allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                model.importLUT(url: url)
+            }
         }
     }
 
@@ -49,6 +61,67 @@ struct InspectorView: View {
                     in: 0...1)
             }
         }
+    }
+
+    // MARK: - Colour Grading
+
+    @ViewBuilder
+    private var colourSection: some View {
+        Section("Colour") {
+            colourSlider(label: "Exposure", value: colourGradeBinding(\.exposure),
+                         range: Float(-2)...Float(2), step: Float(0.05), display: String(format: "%+.2f", model.selectedClipGrade.exposure))
+            colourSlider(label: "Contrast", value: colourGradeBinding(\.contrast),
+                         range: Float(0.5)...Float(1.5), step: Float(0.05), display: String(format: "%.2f", model.selectedClipGrade.contrast))
+            colourSlider(label: "Saturation", value: colourGradeBinding(\.saturation),
+                         range: Float(0)...Float(2), step: Float(0.05), display: String(format: "%.2f", model.selectedClipGrade.saturation))
+            colourSlider(label: "Temp offset", value: colourGradeBinding(\.temperatureOffset),
+                         range: Float(-4000)...Float(4000), step: Float(100), display: "\(String(format: "%+.0f", model.selectedClipGrade.temperatureOffset))K")
+            colourSlider(label: "Tint offset", value: colourGradeBinding(\.tintOffset),
+                         range: Float(-150)...Float(150), step: Float(10), display: String(format: "%+.0f", model.selectedClipGrade.tintOffset))
+
+            HStack {
+                Button("Import LUT…") { showLUTImporter = true }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                Spacer()
+                Button("Reset") { model.resetClipColourEffects() }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func colourSlider(label: String, value: Binding<Float>, range: ClosedRange<Float>, step: Float, display: String) -> some View {
+        VStack(alignment: .leading) {
+            Text("\(label)  \(display)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Slider(value: value, in: range, step: step)
+        }
+    }
+
+    private func colourGradeBinding(_ keyPath: WritableKeyPath<ColourGrade, Float>) -> Binding<Float> {
+        Binding(
+            get: { model.selectedClipGrade[keyPath: keyPath] },
+            set: { newValue in
+                model.updateSelectedClipCoalesced { clip in
+                    if let effectIndex = clip.effects.firstIndex(where: {
+                        if case .colourGrade = $0 { return true }; return false
+                    }) {
+                        if case .colourGrade(var grade) = clip.effects[effectIndex] {
+                            grade[keyPath: keyPath] = newValue
+                            grade.clamp()
+                            clip.effects[effectIndex] = .colourGrade(grade)
+                        }
+                    } else {
+                        var grade = ColourGrade()
+                        grade[keyPath: keyPath] = newValue
+                        grade.clamp()
+                        clip.effects.append(.colourGrade(grade))
+                    }
+                }
+            }
+        )
     }
 
     @ViewBuilder
