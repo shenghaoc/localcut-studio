@@ -145,6 +145,27 @@ struct UndoRedoTests {
         #expect(model.project.renderSize.width == 1280)
     }
 
+    @Test("Undo preserves the unresolved-media relink queue")
+    func unresolvedMediaSurvivesUndo() {
+        let (model, clipID) = makeModel()
+        let ref = MediaRef(
+            id: UUID(), displayName: "Missing", bookmark: Data([0x01]),
+            duration: CMTimeCode(time(5)), naturalWidth: 1920, naturalHeight: 1080,
+            preferredTransform: TransformCode(.identity), hasVideo: true, hasAudio: false)
+        model.unresolvedMedia = [ref]
+        model.selectedClipID = clipID
+
+        // The delete's `before` snapshot must capture the relink queue...
+        model.deleteSelectedClip()
+        #expect(model.unresolvedMedia == [ref])
+
+        // ...so that undoing a later, unrelated change can never silently drop it.
+        model.unresolvedMedia = []
+        model.undo()
+        #expect(model.unresolvedMedia == [ref])
+        #expect(videoClips(model).count == 1)
+    }
+
     @Test("Undo restores a removed transition")
     func transitionRemoveUndo() {
         let (model, _) = makeModel()
