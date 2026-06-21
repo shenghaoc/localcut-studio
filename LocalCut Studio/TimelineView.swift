@@ -214,7 +214,9 @@ struct TimelineView: View {
         // expression past the Swift type-checker's time budget.
         let clipName = model.project.media(for: clip.mediaID)?.name
         let nameLabel: Text = clipName.map(Text.init) ?? Text("Clip")
-        let valueLabel = Text("Starts \(TimeFormatting.timecode(clip.timelineStart.seconds)), \(TimeFormatting.timecode(clip.duration.seconds)) long")
+        // Announce the rippled (effective) start so VoiceOver matches the drawn
+        // block position when an upstream transition has shortened the timeline.
+        let valueLabel = Text("Starts \(TimeFormatting.timecode(effectiveStart.seconds)), \(TimeFormatting.timecode(clip.duration.seconds)) long")
 
         return ZStack {
             RoundedRectangle(cornerRadius: 6)

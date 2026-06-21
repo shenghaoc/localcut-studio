@@ -148,6 +148,11 @@ final class EditorModel {
             }
         }
         guard !loaded.isEmpty else { return }
+        // A teardown during a *later* file's load — where that load then threw and
+        // took the catch path, bypassing the per-item guard above — can still reach
+        // here with stale items. releaseSession() already stopped their tokens, so
+        // discard them rather than appending onto the replacement document.
+        guard sessionGeneration == generation else { return }
 
         // Snapshot and append synchronously (no awaits between) so a concurrent
         // edit made while metadata loaded can't be folded into the import's
@@ -157,18 +162,10 @@ final class EditorModel {
         registerImportUndo(name: "Import Media", before: before)
         markDirty()
         statusMessage = loaded.count == 1 ? "Imported \(loaded[0].name)." : "Imported \(loaded.count) items."
-        for item in loaded { Task { [weak self] in await self?.generateThumbnail(for: item) } }
-    }
-
-    func generateThumbnail(for item: MediaItem) async {
-        guard item.hasVideo else { return }
-        let generator = AVAssetImageGenerator(asset: item.asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 320, height: 180)
-        let time = CMTime(seconds: min(0.1, item.durationSeconds / 2), preferredTimescale: 600)
-        if let result = try? await generator.image(at: time) {
-            item.thumbnail = result.image
-        }
+        // Decode poster frames off the editor: the task retains only the MediaItem
+        // (via loadThumbnail), never EditorModel, so tearing down the editor mid-
+        // decode doesn't keep the whole model alive.
+        for item in loaded { Task { await item.loadThumbnail() } }
     }
 
     // MARK: - Timeline editing
@@ -217,6 +214,12 @@ final class EditorModel {
     /// Removes a media item and its orphaned clips, then stops its security-scoped access.
     func removeMedia(itemID: MediaItem.ID) {
         guard let media = project.media(for: itemID) else { return }
+        // An in-flight export reads the source files through its own composition
+        // snapshot; revoking the security scope mid-export would fail the write.
+        guard !isExporting else {
+            statusMessage = "Finish exporting before removing media."
+            return
+        }
         performUndoable("Remove Media") {
             project.mediaItems.removeAll { $0.id == itemID }
             releaseAccessIfUnused(for: media.url)

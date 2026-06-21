@@ -258,10 +258,28 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     }
 
     nonisolated private func applyLUT(_ image: CIImage, bookmarkData: Data) -> CIImage? {
-        if let cached = LUTCache.shared.lut(forBookmark: bookmarkData) {
+        switch LUTCache.shared.entry(forBookmark: bookmarkData) {
+        case .loaded(let cached):
             return colorCube(image: image, dimension: cached.dimension, cubeData: cached.cubeData)
+        case .failed:
+            // Already known unusable — don't re-resolve or re-log on every frame.
+            return nil
+        case nil:
+            break
         }
 
+        guard let cached = loadLUT(bookmarkData: bookmarkData) else {
+            LUTCache.shared.setEntry(.failed, forBookmark: bookmarkData)
+            return nil
+        }
+        LUTCache.shared.setEntry(.loaded(cached), forBookmark: bookmarkData)
+        return colorCube(image: image, dimension: cached.dimension, cubeData: cached.cubeData)
+    }
+
+    /// Resolves and parses a LUT bookmark once. Returns nil (logging once for an
+    /// unreachable bookmark) when the file can't be read or parsed; the caller
+    /// caches the outcome so this isn't repeated per rendered frame.
+    nonisolated private func loadLUT(bookmarkData: Data) -> CachedLUT? {
         var isStale = false
         guard let url = try? URL(resolvingBookmarkData: bookmarkData,
                                  options: [.withSecurityScope, .withoutUI],
@@ -279,10 +297,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         let floats = result.table
         let cubeData = Data(bytes: floats, count: floats.count * MemoryLayout<Float>.stride)
-        let cached = CachedLUT(dimension: result.dimension, cubeData: cubeData)
-        LUTCache.shared.setLut(cached, forBookmark: bookmarkData)
-
-        return colorCube(image: image, dimension: cached.dimension, cubeData: cached.cubeData)
+        return CachedLUT(dimension: result.dimension, cubeData: cubeData)
     }
 
     nonisolated private func colorCube(image: CIImage, dimension: Int, cubeData: Data) -> CIImage? {
@@ -302,16 +317,23 @@ private struct CachedLUT: Sendable {
     let cubeData: Data
 }
 
+/// Cached outcome of loading a LUT bookmark, so a broken LUT is neither
+/// re-resolved nor re-logged on every rendered frame.
+private enum LUTEntry: Sendable {
+    case loaded(CachedLUT)
+    case failed
+}
+
 private final class LUTCache: Sendable {
     nonisolated static let shared = LUTCache()
-    private let lock = OSAllocatedUnfairLock(initialState: [Data: CachedLUT]())
+    private let lock = OSAllocatedUnfairLock(initialState: [Data: LUTEntry]())
 
-    nonisolated func lut(forBookmark bookmark: Data) -> CachedLUT? {
+    nonisolated func entry(forBookmark bookmark: Data) -> LUTEntry? {
         lock.withLock { $0[bookmark] }
     }
 
-    nonisolated func setLut(_ lut: CachedLUT, forBookmark bookmark: Data) {
-        lock.withLock { $0[bookmark] = lut }
+    nonisolated func setEntry(_ entry: LUTEntry, forBookmark bookmark: Data) {
+        lock.withLock { $0[bookmark] = entry }
     }
 }
 

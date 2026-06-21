@@ -260,6 +260,10 @@ extension EditorModel {
         // Invalidate any in-flight async import/relink so it can't leak access
         // into, or append clips onto, the session that replaces this one.
         sessionGeneration &+= 1
+        // A session swap must not let the replacement document's preview auto-resume
+        // from a stale playback flag (rebuild() resumes when `isPlaying` is true).
+        player.pause()
+        isPlaying = false
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
         accessedURLs.removeAll()
         project.mediaItems.removeAll()
@@ -329,7 +333,7 @@ extension EditorModel {
 
         await rebuild()
         // Thumbnails are non-blocking so a multi-clip project opens immediately.
-        for item in project.mediaItems { Task { [weak self] in await self?.generateThumbnail(for: item) } }
+        for item in project.mediaItems { Task { await item.loadThumbnail() } }
 
         var notes: [String] = []
         if isNewerSchema { notes.append("saved in a newer format — saving downconverts to this version") }
@@ -529,7 +533,7 @@ extension EditorModel {
                 : "Relinked \(item.name) — \(unresolvedMedia.count) remaining."
         }
         await rebuild()
-        await generateThumbnail(for: item)
+        await item.loadThumbnail()
     }
 
     /// Records a successful security-scoped start, keeping exactly one outstanding
