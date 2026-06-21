@@ -15,7 +15,7 @@ struct CompositorLayer {
 
 // MARK: - Custom instruction
 
-final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructionProtocol {
+final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructionProtocol, @unchecked Sendable {
     let timeRange: CMTimeRange
     let enablePostProcessing: Bool = false
     let containsTweening: Bool = false
@@ -34,12 +34,20 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
 final class EffectCompositor: NSObject, AVVideoCompositing {
 
+    private static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+
     private static let sharedCIContext: CIContext = {
         if let device = MTLCreateSystemDefaultDevice() {
-            return CIContext(mtlDevice: device, options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
+            return CIContext(mtlDevice: device, options: [.workingColorSpace: sRGBColorSpace])
         }
-        return CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
+        return CIContext(options: [.workingColorSpace: sRGBColorSpace])
     }()
+
+    private let filterLock = NSLock()
+    nonisolated(unsafe) private let exposureFilter = CIFilter(name: "CIExposureAdjust")
+    nonisolated(unsafe) private let colorControlsFilter = CIFilter(name: "CIColorControls")
+    nonisolated(unsafe) private let temperatureFilter = CIFilter(name: "CITemperatureAndTint")
+    nonisolated(unsafe) private let colorCubeFilter = CIFilter(name: "CIColorCubeWithColorSpace")
 
     nonisolated var sourcePixelBufferAttributes: [String: any Sendable]? {
         [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
@@ -49,11 +57,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
     }
 
-    nonisolated(unsafe) private var renderContext: AVVideoCompositionRenderContext?
-
-    nonisolated func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {
-        renderContext = newRenderContext
-    }
+    nonisolated func renderContextChanged(_: AVVideoCompositionRenderContext) {}
 
     nonisolated func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
         guard let instruction = request.videoCompositionInstruction as? EffectCompositionInstruction else {
@@ -95,7 +99,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let composited = result?.composited(over: black) ?? black
 
         let destinationRect = CGRect(origin: .zero, size: renderSize)
-        Self.sharedCIContext.render(composited, to: destination, bounds: destinationRect, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        Self.sharedCIContext.render(composited, to: destination, bounds: destinationRect, colorSpace: Self.sRGBColorSpace)
 
         request.finish(withComposedVideoFrame: destination)
     }
@@ -119,33 +123,46 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         var result = image
 
         if grade.exposure != 0 {
-            guard let filter = CIFilter(name: "CIExposureAdjust") else { return result }
-            filter.setValue(result, forKey: kCIInputImageKey)
-            filter.setValue(grade.exposure, forKey: "inputEV")
-            if let output = filter.outputImage { result = output }
+            if let output = outputImage(from: exposureFilter, configure: { filter in
+                filter.setValue(result, forKey: kCIInputImageKey)
+                filter.setValue(grade.exposure, forKey: "inputEV")
+            }) {
+                result = output
+            }
         }
 
         if grade.contrast != 1 || grade.saturation != 1 {
-            guard let filter = CIFilter(name: "CIColorControls") else { return result }
-            filter.setValue(result, forKey: kCIInputImageKey)
-            filter.setValue(grade.contrast, forKey: "inputContrast")
-            filter.setValue(grade.saturation, forKey: "inputSaturation")
-            if let output = filter.outputImage { result = output }
+            if let output = outputImage(from: colorControlsFilter, configure: { filter in
+                filter.setValue(result, forKey: kCIInputImageKey)
+                filter.setValue(grade.contrast, forKey: "inputContrast")
+                filter.setValue(grade.saturation, forKey: "inputSaturation")
+            }) {
+                result = output
+            }
         }
 
         if grade.temperatureOffset != 0 || grade.tintOffset != 0 {
-            guard let filter = CIFilter(name: "CITemperatureAndTint") else { return result }
-            filter.setValue(result, forKey: kCIInputImageKey)
-            filter.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
-            filter.setValue(CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset)), forKey: "inputTargetNeutral")
-            if let output = filter.outputImage { result = output }
+            if let output = outputImage(from: temperatureFilter, configure: { filter in
+                filter.setValue(result, forKey: kCIInputImageKey)
+                filter.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+                filter.setValue(CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset)), forKey: "inputTargetNeutral")
+            }) {
+                result = output
+            }
         }
 
         return result
     }
 
     nonisolated private func applyLUT(_ image: CIImage, bookmarkData: Data) -> CIImage? {
-        let cached = LUTCache.shared.lut(for: bookmarkData)
+        var isStale = false
+        guard let url = try? URL(resolvingBookmarkData: bookmarkData,
+                                 options: [.withSecurityScope, .withoutUI],
+                                 bookmarkDataIsStale: &isStale),
+              !isStale else { return nil }
+
+        let cacheKey = url.standardizedFileURL.path
+        let cached = LUTCache.shared.lut(forPath: cacheKey)
         let dim: Int
         let cubeData: Data
 
@@ -153,12 +170,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             dim = cached.dimension
             cubeData = cached.cubeData
         } else {
-            var isStale = false
-            guard let url = try? URL(resolvingBookmarkData: bookmarkData,
-                                     options: [.withSecurityScope, .withoutUI],
-                                     bookmarkDataIsStale: &isStale),
-                  !isStale,
-                  url.startAccessingSecurityScopedResource() else { return nil }
+            guard url.startAccessingSecurityScopedResource() else { return nil }
             defer { url.stopAccessingSecurityScopedResource() }
 
             guard let lutData = try? Data(contentsOf: url),
@@ -168,14 +180,23 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             let floats = result.table
             cubeData = Data(bytes: floats, count: floats.count * MemoryLayout<Float>.stride)
 
-            LUTCache.shared.setLut(CachedLUT(dimension: dim, cubeData: cubeData), for: bookmarkData)
+            LUTCache.shared.setLut(CachedLUT(dimension: dim, cubeData: cubeData), forPath: cacheKey)
         }
 
-        guard let filter = CIFilter(name: "CIColorCubeWithColorSpace") else { return nil }
-        filter.setValue(image, forKey: kCIInputImageKey)
-        filter.setValue(Float(dim), forKey: "inputCubeDimension")
-        filter.setValue(cubeData, forKey: "inputCubeData")
-        filter.setValue(CGColorSpace(name: CGColorSpace.sRGB), forKey: "inputColorSpace")
+        return outputImage(from: colorCubeFilter, configure: { filter in
+            filter.setValue(image, forKey: kCIInputImageKey)
+            filter.setValue(Float(dim), forKey: "inputCubeDimension")
+            filter.setValue(cubeData, forKey: "inputCubeData")
+            filter.setValue(Self.sRGBColorSpace, forKey: "inputColorSpace")
+        })
+    }
+
+    nonisolated private func outputImage(from filter: CIFilter?, configure: (CIFilter) -> Void) -> CIImage? {
+        guard let filter else { return nil }
+        filterLock.lock()
+        defer { filterLock.unlock() }
+        filter.setDefaults()
+        configure(filter)
         return filter.outputImage
     }
 }
@@ -188,20 +209,20 @@ private struct CachedLUT: Sendable {
 }
 
 private final class LUTCache: @unchecked Sendable {
-    nonisolated(unsafe) static let shared = LUTCache()
-    nonisolated(unsafe) private let lock = NSLock()
-    nonisolated(unsafe) private var cache: [Data: CachedLUT] = [:]
+    nonisolated static let shared = LUTCache()
+    private let lock = NSLock()
+    nonisolated(unsafe) private var cache: [String: CachedLUT] = [:]
 
-    nonisolated func lut(for data: Data) -> CachedLUT? {
+    nonisolated func lut(forPath path: String) -> CachedLUT? {
         lock.lock()
         defer { lock.unlock() }
-        return cache[data]
+        return cache[path]
     }
 
-    nonisolated func setLut(_ lut: CachedLUT, for data: Data) {
+    nonisolated func setLut(_ lut: CachedLUT, forPath path: String) {
         lock.lock()
         defer { lock.unlock() }
-        cache[data] = lut
+        cache[path] = lut
     }
 }
 

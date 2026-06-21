@@ -53,6 +53,7 @@ final class EditorModel {
     }
 
     deinit {
+        pendingRebuildTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
     }
@@ -223,6 +224,7 @@ final class EditorModel {
                 } else {
                     track.clips[index].effects.append(.colourGrade(grade))
                 }
+                rebuildDebounced()
                 return
             }
         }
@@ -379,8 +381,8 @@ final class EditorModel {
 
     /// Returns the nearest snap target within `thresholdSeconds`, or the candidate
     /// if none is close enough.
-    func resolveSnap(candidate: CMTime, thresholdSeconds: Double) -> CMTime {
-        let targets = snapTargets()
+    func resolveSnap(candidate: CMTime, thresholdSeconds: Double, excluding clipID: Clip.ID? = nil) -> CMTime {
+        let targets = snapTargets(excluding: clipID)
         let nearest = targets.min { abs($0.seconds - candidate.seconds) < abs($1.seconds - candidate.seconds) }
         if let nearest, abs(nearest.seconds - candidate.seconds) <= thresholdSeconds {
             return nearest

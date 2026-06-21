@@ -141,15 +141,22 @@ final class Track: Identifiable {
     /// clip's end.
     func nearestNonOverlappingStart(for duration: CMTime, desired start: CMTime) -> CMTime {
         let sorted = clips.sorted { $0.timelineStart < $1.timelineStart }
-        let desiredRange = CMTimeRange(start: start, duration: duration)
-        for clip in sorted {
-            let clipRange = CMTimeRange(start: clip.timelineStart, duration: clip.duration)
-            guard desiredRange.intersects(clipRange) else { continue }
-            // Push past this clip's end and recheck.
-            let pushedStart = clip.timelineEnd
-            return nearestNonOverlappingStart(for: duration, desired: pushedStart)
+        var candidate = start
+        var didMove = true
+
+        while didMove {
+            didMove = false
+            let candidateRange = CMTimeRange(start: candidate, duration: duration)
+            for clip in sorted {
+                let clipRange = CMTimeRange(start: clip.timelineStart, duration: clip.duration)
+                guard candidateRange.intersects(clipRange) else { continue }
+                candidate = clip.timelineEnd
+                didMove = true
+                break
+            }
         }
-        return start
+
+        return candidate
     }
 }
 

@@ -112,6 +112,20 @@ func snapWithinThreshold() {
     #expect(CMTimeCompare(result, CMTime(seconds: 10, preferredTimescale: 600)) == 0)
 }
 
+@MainActor
+@Test("resolveSnap can exclude a moved clip's own boundaries")
+func snapExcludesMovedClip() {
+    let model = EditorModel()
+    let track = Track(name: "V1", kind: .video)
+    let clip = Clip(mediaID: UUID(), sourceStart: .zero, duration: CMTime(seconds: 10, preferredTimescale: 600), timelineStart: .zero)
+    track.clips = [clip]
+    model.project.videoTracks = [track]
+
+    let candidate = CMTime(seconds: 9.8, preferredTimescale: 600)
+    let result = model.resolveSnap(candidate: candidate, thresholdSeconds: 0.5, excluding: clip.id)
+    #expect(CMTimeCompare(result, candidate) == 0)
+}
+
 // ── Trim logic ──
 
 @MainActor
@@ -187,4 +201,48 @@ func trimLeftClamped() {
     let updated = track.clips[0]
     #expect(CMTimeCompare(updated.timelineStart, .zero) == 0)
     #expect(CMTimeCompare(updated.sourceStart, .zero) == 0)
+}
+
+@MainActor
+@Test("trimClip right edge clamps to the next clip start")
+func trimRightClampsToNextClip() {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/tmp/test.mov"))
+    media.duration = CMTime(seconds: 60, preferredTimescale: 600)
+    model.project.mediaItems.append(media)
+
+    let first = Clip(mediaID: media.id,
+                     sourceStart: .zero,
+                     duration: CMTime(seconds: 10, preferredTimescale: 600),
+                     timelineStart: CMTime(seconds: 10, preferredTimescale: 600))
+    let second = Clip(mediaID: media.id,
+                      sourceStart: .zero,
+                      duration: CMTime(seconds: 5, preferredTimescale: 600),
+                      timelineStart: CMTime(seconds: 22, preferredTimescale: 600))
+    let track = Track(name: "V1", kind: .video)
+    track.clips = [first, second]
+    model.project.videoTracks = [track]
+
+    model.trimClip(id: first.id, edge: .right, to: CMTime(seconds: 30, preferredTimescale: 600))
+
+    let updated = track.clips[0]
+    #expect(CMTimeCompare(updated.duration, CMTime(seconds: 12, preferredTimescale: 600)) == 0)
+    #expect(CMTimeCompare(updated.timelineEnd, second.timelineStart) == 0)
+}
+
+@MainActor
+@Test("moveClip clamps negative starts to zero before resolving overlaps")
+func moveClipClampsNegativeStart() {
+    let model = EditorModel()
+    let clip = Clip(mediaID: UUID(),
+                    sourceStart: .zero,
+                    duration: CMTime(seconds: 5, preferredTimescale: 600),
+                    timelineStart: CMTime(seconds: 8, preferredTimescale: 600))
+    let track = Track(name: "V1", kind: .video)
+    track.clips = [clip]
+    model.project.videoTracks = [track]
+
+    model.moveClip(id: clip.id, toTrackIndex: 0, start: CMTime(seconds: -4, preferredTimescale: 600))
+
+    #expect(CMTimeCompare(track.clips[0].timelineStart, .zero) == 0)
 }

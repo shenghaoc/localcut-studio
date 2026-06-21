@@ -125,6 +125,10 @@ struct TimelineView: View {
     private func lane(for track: Track, allTracksIndex: Int) -> some View {
         ZStack(alignment: .topLeading) {
             Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    model.selectedClipID = nil
+                }
             ForEach(track.clips) { clip in
                 ClipBlockView(
                     clip: clip,
@@ -155,7 +159,7 @@ struct TimelineView: View {
             let deltaTime = translation.width / pps
             let rawTimelineStart = state.initialTimelineStart + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
             let final = snapEnabled
-                ? model.resolveSnap(candidate: rawTimelineStart, thresholdSeconds: snapThreshold)
+                ? model.resolveSnap(candidate: rawTimelineStart, thresholdSeconds: snapThreshold, excluding: state.clipID)
                 : rawTimelineStart
             model.trimClip(id: state.clipID, edge: .left, to: final)
 
@@ -163,7 +167,7 @@ struct TimelineView: View {
             let deltaTime = translation.width / pps
             let rawTimelineEnd = state.initialTimelineStart + state.initialDuration + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
             let final = snapEnabled
-                ? model.resolveSnap(candidate: rawTimelineEnd, thresholdSeconds: snapThreshold)
+                ? model.resolveSnap(candidate: rawTimelineEnd, thresholdSeconds: snapThreshold, excluding: state.clipID)
                 : rawTimelineEnd
             model.trimClip(id: state.clipID, edge: .right, to: final)
 
@@ -171,7 +175,7 @@ struct TimelineView: View {
             let deltaTime = translation.width / pps
             let rawStart = state.initialTimelineStart + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
             let snapped = snapEnabled
-                ? model.resolveSnap(candidate: rawStart, thresholdSeconds: snapThreshold)
+                ? model.resolveSnap(candidate: rawStart, thresholdSeconds: snapThreshold, excluding: state.clipID)
                 : rawStart
 
             let allTracks = model.project.videoTracks + model.project.audioTracks
@@ -297,7 +301,6 @@ private struct ClipBlockView: View {
                                 kind: kind,
                                 clipID: clip.id,
                                 initialTimelineStart: clip.timelineStart,
-                                initialSourceStart: clip.sourceStart,
                                 initialDuration: clip.duration,
                                 sourceTrackIndex: allTracksIndex,
                                 translation: value.translation)
@@ -345,7 +348,6 @@ private struct DragState {
     let kind: Kind
     let clipID: Clip.ID
     let initialTimelineStart: CMTime
-    let initialSourceStart: CMTime
     let initialDuration: CMTime
     let sourceTrackIndex: Int
     var translation: CGSize
