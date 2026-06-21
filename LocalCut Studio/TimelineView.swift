@@ -285,8 +285,10 @@ struct TimelineView: View {
 
                 switch edge {
                 case .left:
+                    candidate = min(candidate, clip.timelineEnd)
                     dragMode = .trimmingLeft(clipID: clip.id, candidate: candidate)
                 case .right:
+                    candidate = max(candidate, clip.timelineStart)
                     dragMode = .trimmingRight(clipID: clip.id, candidate: candidate)
                 }
             }
@@ -330,9 +332,11 @@ struct TimelineView: View {
 
         switch mode {
         case .trimmingLeft(let id, let candidate):
+            NSCursor.pop()
             model.trimClip(id: id, edge: .left, to: candidate)
 
         case .trimmingRight(let id, let candidate):
+            NSCursor.pop()
             model.trimClip(id: id, edge: .right, to: candidate)
 
         case .moving(let id, let candidateStart, _, let targetIndex):
