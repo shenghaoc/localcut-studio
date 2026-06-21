@@ -86,6 +86,8 @@ The browser prompts assume "Phase 28": a worker-owned inference runtime over `tr
 
 The ML phases (29, 31, 32b, 33, 37, 40) each name the specific Apple framework or Core ML model they target. Phase 40 is the only one that depends on **Foundation Models** (`com.apple.foundationmodels`) being publicly available; the others use Vision / Speech / Core ML which are mature on macOS 26 but get materially better APIs and on-device models on macOS 27. We wait for 27 to land everywhere so every ML feature shares one minimum-OS baseline.
 
+Note on Phase 37: VideoToolbox's `VTFrameProcessor` (macOS 15.4+) ships native frame interpolation, frame-rate conversion, optical flow, and motion blur on the Neural Engine — Phase 37 uses it directly rather than vendoring a Core ML port of RIFE.
+
 ## Source-of-truth note
 
 The canonical source for each phase's intent is the **shipped** spec in the upstream [browser-editor](https://github.com/shenghaoc/browser-editor) repo's `.kiro/specs/phase-NN-*/`. When implementing a phase here, cross-reference the upstream `design.md` for concrete decisions (model choice + provenance, parameter ranges, container formats, exact heuristics) — the macOS specs in this folder paraphrase those decisions for the AVFoundation / Metal / Core ML stack but do not duplicate every tuning constant.

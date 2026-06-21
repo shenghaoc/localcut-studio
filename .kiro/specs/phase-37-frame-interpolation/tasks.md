@@ -1,19 +1,13 @@
 # Tasks: Phase 37 — Optical-Flow Frame Interpolation
 
-> Status: **Proposed**. Depends on Phase 35, Phase 33, render cache, capability tiers; blocked on macOS 27 leaving beta. Hidden until a permissive Core ML RIFE-class model is vendored.
-
-## Model + manifest
-
-- [ ] **T1.1** Convert / vendor a permissive RIFE-class Core ML model; record provenance + licence.
-- [ ] **T1.2** `InterpolationManifest.swift` — SHA-256 pinned, `template` flag rejected at load.
-- [ ] **T1.3** Manifest validator + integrity check.
+> Status: **Proposed**. Depends on Phase 35, Phase 33, render cache, capability tiers; blocked on macOS 27 leaving beta.
 
 ## Engine
 
-- [ ] **T2.1** `InterpolationEngine` actor — loads the model, exposes `synthesise(F0, F1, tau)`.
-- [ ] **T2.2** `IOSurface` `CVPixelBuffer` → `MTLTexture` preprocess.
-- [ ] **T2.3** Core ML predict via `MLPredictionOptions(usesCPUOnly: false)`.
-- [ ] **T2.4** Postprocess `MTLTexture` → compositor target.
+- [ ] **T1.1** `InterpolationEngine` actor — owns `VTFrameProcessor` instances per configuration kind.
+- [ ] **T1.2** Configuration picker: `VTLowLatencyFrameInterpolationConfiguration` for ramps; `VTFrameRateConversionConfiguration` for export upconversion; `VTOpticalFlowConfiguration` / `VTMotionBlurConfiguration` for motion blur.
+- [ ] **T1.3** Feature-detect via availability gate; report `unavailable` on Intel + pre-macOS-15.4.
+- [ ] **T1.4** `synthesise(F0, F1, tau)` API surface backed by the chosen configuration.
 
 ## Tiling + estimate
 

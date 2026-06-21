@@ -1,15 +1,15 @@
 # Requirements: Phase 37 — Optical-Flow Frame Interpolation
 
-## R1 — Model
+## R1 — Engine
 
-- **R1.1** Core ML port of a RIFE-class interpolator with MIT or permissive licence; SHA-256-pinned manifest.
-- **R1.2** Until a real model lands, the shipped manifest is `template = true` and the feature is hidden.
-- **R1.3** Integrity check rejects placeholder / non-CoreML / non-permissive manifests at load time.
+- **R1.1** `VTFrameProcessor` is the engine; no external model is vendored.
+- **R1.2** Feature-detect via `if #available(macOS 15.4, *)`; the feature reports `unavailable` on older OS or on Intel Macs.
+- **R1.3** Per-task configurations chosen by use: `VTLowLatencyFrameInterpolationConfiguration` for ramps, `VTFrameRateConversionConfiguration` for export upconversion, `VTOpticalFlowConfiguration` (or `VTMotionBlurConfiguration`) for motion blur.
 
 ## R2 — Pipeline
 
-- **R2.1** Zero-copy: `IOSurface`-backed input → `MTLTexture` → Core ML → `MTLTexture` output → compositor; no CPU pixel round-trip.
-- **R2.2** Frame interpolation shares the Metal device with the compositor.
+- **R2.1** Zero-copy: `IOSurface`-backed `CVPixelBuffer` → `VTFrameProcessor` → `CVPixelBuffer` → compositor; no CPU pixel round-trip.
+- **R2.2** Frame interpolation uses the same `IOSurface` pool as the compositor.
 
 ## R3 — Tiling + VRAM
 
