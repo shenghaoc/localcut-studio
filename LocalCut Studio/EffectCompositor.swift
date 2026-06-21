@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import Metal
 import CoreVideo
 
@@ -43,12 +44,6 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         return CIContext(options: [.workingColorSpace: sRGBColorSpace])
     }()
 
-    private let filterLock = NSLock()
-    nonisolated(unsafe) private let exposureFilter = CIFilter(name: "CIExposureAdjust")
-    nonisolated(unsafe) private let colorControlsFilter = CIFilter(name: "CIColorControls")
-    nonisolated(unsafe) private let temperatureFilter = CIFilter(name: "CITemperatureAndTint")
-    nonisolated(unsafe) private let colorCubeFilter = CIFilter(name: "CIColorCubeWithColorSpace")
-
     nonisolated var sourcePixelBufferAttributes: [String: any Sendable]? {
         [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
     }
@@ -78,9 +73,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             image = image.transformed(by: layer.transform)
 
             if layer.opacity < 1 {
-                image = image.applyingFilter("CIColorMatrix", parameters: [
-                    "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(layer.opacity))
-                ])
+                let opacityFilter = CIFilter.colorMatrix()
+                opacityFilter.inputImage = image
+                opacityFilter.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(layer.opacity))
+                image = opacityFilter.outputImage ?? image
             }
 
             if let existing = result {
@@ -123,7 +119,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         var result = image
 
         if grade.exposure != 0 {
-            if let output = outputImage(from: exposureFilter, configure: { filter in
+            if let output = outputImage(named: "CIExposureAdjust", configure: { filter in
                 filter.setValue(result, forKey: kCIInputImageKey)
                 filter.setValue(grade.exposure, forKey: "inputEV")
             }) {
@@ -132,7 +128,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
 
         if grade.contrast != 1 || grade.saturation != 1 {
-            if let output = outputImage(from: colorControlsFilter, configure: { filter in
+            if let output = outputImage(named: "CIColorControls", configure: { filter in
                 filter.setValue(result, forKey: kCIInputImageKey)
                 filter.setValue(grade.contrast, forKey: "inputContrast")
                 filter.setValue(grade.saturation, forKey: "inputSaturation")
@@ -142,7 +138,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
 
         if grade.temperatureOffset != 0 || grade.tintOffset != 0 {
-            if let output = outputImage(from: temperatureFilter, configure: { filter in
+            if let output = outputImage(named: "CITemperatureAndTint", configure: { filter in
                 filter.setValue(result, forKey: kCIInputImageKey)
                 filter.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
                 filter.setValue(CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset)), forKey: "inputTargetNeutral")
@@ -155,46 +151,41 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     }
 
     nonisolated private func applyLUT(_ image: CIImage, bookmarkData: Data) -> CIImage? {
+        if let cached = LUTCache.shared.lut(forBookmark: bookmarkData) {
+            return colorCube(image: image, dimension: cached.dimension, cubeData: cached.cubeData)
+        }
+
         var isStale = false
         guard let url = try? URL(resolvingBookmarkData: bookmarkData,
                                  options: [.withSecurityScope, .withoutUI],
                                  bookmarkDataIsStale: &isStale),
               !isStale else { return nil }
 
-        let cacheKey = url.standardizedFileURL.path
-        let cached = LUTCache.shared.lut(forPath: cacheKey)
-        let dim: Int
-        let cubeData: Data
+        guard url.startAccessingSecurityScopedResource() else { return nil }
+        defer { url.stopAccessingSecurityScopedResource() }
 
-        if let cached {
-            dim = cached.dimension
-            cubeData = cached.cubeData
-        } else {
-            guard url.startAccessingSecurityScopedResource() else { return nil }
-            defer { url.stopAccessingSecurityScopedResource() }
+        guard let lutData = try? Data(contentsOf: url),
+              let result = CubeLUTParser.parse(lutData) else { return nil }
 
-            guard let lutData = try? Data(contentsOf: url),
-                  let result = CubeLUTParser.parse(lutData) else { return nil }
+        let floats = result.table
+        let cubeData = Data(bytes: floats, count: floats.count * MemoryLayout<Float>.stride)
+        let cached = CachedLUT(dimension: result.dimension, cubeData: cubeData)
+        LUTCache.shared.setLut(cached, forBookmark: bookmarkData)
 
-            dim = result.dimension
-            let floats = result.table
-            cubeData = Data(bytes: floats, count: floats.count * MemoryLayout<Float>.stride)
+        return colorCube(image: image, dimension: cached.dimension, cubeData: cached.cubeData)
+    }
 
-            LUTCache.shared.setLut(CachedLUT(dimension: dim, cubeData: cubeData), forPath: cacheKey)
-        }
-
-        return outputImage(from: colorCubeFilter, configure: { filter in
+    nonisolated private func colorCube(image: CIImage, dimension: Int, cubeData: Data) -> CIImage? {
+        outputImage(named: "CIColorCubeWithColorSpace", configure: { filter in
             filter.setValue(image, forKey: kCIInputImageKey)
-            filter.setValue(Float(dim), forKey: "inputCubeDimension")
+            filter.setValue(Float(dimension), forKey: "inputCubeDimension")
             filter.setValue(cubeData, forKey: "inputCubeData")
             filter.setValue(Self.sRGBColorSpace, forKey: "inputColorSpace")
         })
     }
 
-    nonisolated private func outputImage(from filter: CIFilter?, configure: (CIFilter) -> Void) -> CIImage? {
-        guard let filter else { return nil }
-        filterLock.lock()
-        defer { filterLock.unlock() }
+    nonisolated private func outputImage(named name: String, configure: (CIFilter) -> Void) -> CIImage? {
+        guard let filter = CIFilter(name: name) else { return nil }
         filter.setDefaults()
         configure(filter)
         return filter.outputImage
@@ -211,18 +202,18 @@ private struct CachedLUT: Sendable {
 private final class LUTCache: @unchecked Sendable {
     nonisolated static let shared = LUTCache()
     private let lock = NSLock()
-    nonisolated(unsafe) private var cache: [String: CachedLUT] = [:]
+    nonisolated(unsafe) private var cache: [Data: CachedLUT] = [:]
 
-    nonisolated func lut(forPath path: String) -> CachedLUT? {
+    nonisolated func lut(forBookmark bookmark: Data) -> CachedLUT? {
         lock.lock()
         defer { lock.unlock() }
-        return cache[path]
+        return cache[bookmark]
     }
 
-    nonisolated func setLut(_ lut: CachedLUT, forPath path: String) {
+    nonisolated func setLut(_ lut: CachedLUT, forBookmark bookmark: Data) {
         lock.lock()
         defer { lock.unlock() }
-        cache[path] = lut
+        cache[bookmark] = lut
     }
 }
 
@@ -247,18 +238,17 @@ private enum CubeLUTParser {
             guard !trimmed.isEmpty else { continue }
             if trimmed.hasPrefix("#") || trimmed.hasPrefix("TITLE") { continue }
 
-            let parts = trimmed.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace }).map(String.init)
+            let parts = trimmed.split(omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace }).map(String.init)
+            guard !parts.isEmpty else { continue }
 
             if parts[0] == "LUT_3D_SIZE", parts.count >= 2 {
                 dimension = Int(parts[1]) ?? 0
                 continue
             }
 
-            if parts.count >= 3 {
-                let rgb = parts.compactMap { Float($0) }
-                if rgb.count == 3 {
-                    entries.append(rgb)
-                }
+            guard let r = Float(parts[0]) else { continue }
+            if parts.count >= 3, let g = Float(parts[1]), let b = Float(parts[2]) {
+                entries.append([r, g, b])
             }
         }
 
