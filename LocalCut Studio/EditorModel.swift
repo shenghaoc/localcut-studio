@@ -195,6 +195,7 @@ final class EditorModel {
     func removeMedia(itemID: MediaItem.ID) {
         guard let media = project.media(for: itemID) else { return }
         media.url.stopAccessingSecurityScopedResource()
+        accessedURLs.remove(media.url)
         project.mediaItems.removeAll { $0.id == itemID }
         for track in allTracks {
             track.clips.removeAll { $0.mediaID == itemID }
