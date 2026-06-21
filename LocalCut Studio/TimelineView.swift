@@ -199,14 +199,18 @@ struct TimelineView: View {
             .frame(width: edgeZoneWidth)
             .contentShape(Rectangle())
             .onHover { hovering in
+                let inTrimDrag: Bool = switch dragMode {
+                case .trimmingLeft, .trimmingRight: true
+                default: false
+                }
                 if hovering {
                     hoverEdge = edge == .left ? .left(clip.id) : .right(clip.id)
-                    NSCursor.resizeLeftRight.push()
+                    if !inTrimDrag { NSCursor.resizeLeftRight.push() }
                 } else {
                     if hoverEdge == (edge == .left ? .left(clip.id) : .right(clip.id)) {
                         hoverEdge = nil
                     }
-                    NSCursor.pop()
+                    if !inTrimDrag { NSCursor.pop() }
                 }
             }
             .gesture(trimDragGesture(clip: clip, edge: edge))
@@ -332,9 +336,11 @@ struct TimelineView: View {
 
         switch mode {
         case .trimmingLeft(let id, let candidate):
+            NSCursor.pop()
             model.trimClip(id: id, edge: .left, to: candidate)
 
         case .trimmingRight(let id, let candidate):
+            NSCursor.pop()
             model.trimClip(id: id, edge: .right, to: candidate)
 
         case .moving(let id, let candidateStart, _, let targetIndex):
