@@ -4,6 +4,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import Metal
 import CoreVideo
+import os
 
 // MARK: - Layer metadata for the compositor
 
@@ -57,7 +58,9 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
 final class EffectCompositor: NSObject, AVVideoCompositing {
 
-    private static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    private static let sRGBColorSpace: CGColorSpace = {
+        CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+    }()
 
     private static let sharedCIContext: CIContext = {
         if let device = MTLCreateSystemDefaultDevice() {
@@ -181,23 +184,19 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     nonisolated private func crossDissolve(outgoing: CIImage, incoming: CIImage, progress: Float) -> CIImage {
         let fadedOut = scaled(outgoing, by: 1 - progress)
         let fadedIn = scaled(incoming, by: progress)
-        guard let filter = CIFilter(name: "CIAdditionCompositing") else {
-            return fadedIn.composited(over: fadedOut)
-        }
-        filter.setValue(fadedIn, forKey: kCIInputImageKey)
-        filter.setValue(fadedOut, forKey: kCIInputBackgroundImageKey)
+        let filter = CIFilter.additionCompositing()
+        filter.inputImage = fadedIn
+        filter.backgroundImage = fadedOut
         return filter.outputImage ?? fadedIn.composited(over: fadedOut)
     }
 
-    /// A directional bars-swipe transition via Core Image.
+    /// A directional bars-swipe transition via Core Image. The type-safe builtin
+    /// is created with the filter's default angle/width/bar-offset already set.
     nonisolated private func wipe(outgoing: CIImage, incoming: CIImage, progress: Float) -> CIImage {
-        guard let filter = CIFilter(name: "CIBarsSwipeTransition") else {
-            return crossDissolve(outgoing: outgoing, incoming: incoming, progress: progress)
-        }
-        filter.setDefaults()
-        filter.setValue(outgoing, forKey: kCIInputImageKey)
-        filter.setValue(incoming, forKey: "inputTargetImage")
-        filter.setValue(progress, forKey: kCIInputTimeKey)
+        let filter = CIFilter.barsSwipeTransition()
+        filter.inputImage = outgoing
+        filter.targetImage = incoming
+        filter.time = progress
         return filter.outputImage ?? crossDissolve(outgoing: outgoing, incoming: incoming, progress: progress)
     }
 
@@ -233,47 +232,73 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         var result = image
 
         if grade.exposure != 0 {
-            if let output = outputImage(named: "CIExposureAdjust", configure: { filter in
-                filter.setValue(result, forKey: kCIInputImageKey)
-                filter.setValue(grade.exposure, forKey: "inputEV")
-            }) {
-                result = output
-            }
+            let filter = CIFilter.exposureAdjust()
+            filter.inputImage = result
+            filter.ev = grade.exposure
+            result = filter.outputImage ?? result
         }
 
         if grade.contrast != 1 || grade.saturation != 1 {
-            if let output = outputImage(named: "CIColorControls", configure: { filter in
-                filter.setValue(result, forKey: kCIInputImageKey)
-                filter.setValue(grade.contrast, forKey: "inputContrast")
-                filter.setValue(grade.saturation, forKey: "inputSaturation")
-            }) {
-                result = output
-            }
+            let filter = CIFilter.colorControls()
+            filter.inputImage = result
+            filter.contrast = grade.contrast
+            filter.saturation = grade.saturation
+            result = filter.outputImage ?? result
         }
 
         if grade.temperatureOffset != 0 || grade.tintOffset != 0 {
-            if let output = outputImage(named: "CITemperatureAndTint", configure: { filter in
-                filter.setValue(result, forKey: kCIInputImageKey)
-                filter.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
-                filter.setValue(CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset)), forKey: "inputTargetNeutral")
-            }) {
-                result = output
-            }
+            let filter = CIFilter.temperatureAndTint()
+            filter.inputImage = result
+            filter.neutral = CIVector(x: 6500, y: 0)
+            filter.targetNeutral = CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset))
+            result = filter.outputImage ?? result
         }
 
         return result
     }
 
+    /// How long a failed LUT load is cached before another attempt: long enough to
+    /// avoid per-frame re-resolution/logging, short enough to recover when a file on
+    /// a removable/network volume (or one still being written) becomes available.
+    nonisolated private static let lutRetryInterval: TimeInterval = 3
+
     nonisolated private func applyLUT(_ image: CIImage, bookmarkData: Data) -> CIImage? {
-        if let cached = LUTCache.shared.lut(forBookmark: bookmarkData) {
+        let prior = LUTCache.shared.entry(forBookmark: bookmarkData)
+        switch prior {
+        case .loaded(let cached):
             return colorCube(image: image, dimension: cached.dimension, cubeData: cached.cubeData)
+        case .failed(let when):
+            // Retry transient failures after a cooldown; otherwise skip silently so
+            // a broken LUT doesn't re-resolve or re-log on every rendered frame.
+            guard Date().timeIntervalSince(when) >= Self.lutRetryInterval else { return nil }
+        case nil:
+            break
         }
 
+        guard let cached = loadLUT(bookmarkData: bookmarkData) else {
+            // Log only on the first failure for this bookmark (prior == nil); a retry
+            // (prior == .failed) stays silent, and a healthy .loaded never reaches here.
+            if case nil = prior {
+                os_log(.error, "LUT bookmark unreadable — skipping LUT effect (will retry)")
+            }
+            LUTCache.shared.setEntry(.failed(Date()), forBookmark: bookmarkData)
+            return nil
+        }
+        LUTCache.shared.setEntry(.loaded(cached), forBookmark: bookmarkData)
+        return colorCube(image: image, dimension: cached.dimension, cubeData: cached.cubeData)
+    }
+
+    /// Resolves and parses a LUT bookmark once. Returns nil when the file can't be
+    /// reached, read, or parsed; the caller caches the outcome (with a retry
+    /// cooldown) so this isn't repeated on every rendered frame.
+    nonisolated private func loadLUT(bookmarkData: Data) -> CachedLUT? {
         var isStale = false
         guard let url = try? URL(resolvingBookmarkData: bookmarkData,
                                  options: [.withSecurityScope, .withoutUI],
                                  bookmarkDataIsStale: &isStale),
-              !isStale else { return nil }
+              !isStale else {
+            return nil
+        }
 
         guard url.startAccessingSecurityScopedResource() else { return nil }
         defer { url.stopAccessingSecurityScopedResource() }
@@ -283,25 +308,15 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         let floats = result.table
         let cubeData = Data(bytes: floats, count: floats.count * MemoryLayout<Float>.stride)
-        let cached = CachedLUT(dimension: result.dimension, cubeData: cubeData)
-        LUTCache.shared.setLut(cached, forBookmark: bookmarkData)
-
-        return colorCube(image: image, dimension: cached.dimension, cubeData: cached.cubeData)
+        return CachedLUT(dimension: result.dimension, cubeData: cubeData)
     }
 
     nonisolated private func colorCube(image: CIImage, dimension: Int, cubeData: Data) -> CIImage? {
-        outputImage(named: "CIColorCubeWithColorSpace", configure: { filter in
-            filter.setValue(image, forKey: kCIInputImageKey)
-            filter.setValue(Float(dimension), forKey: "inputCubeDimension")
-            filter.setValue(cubeData, forKey: "inputCubeData")
-            filter.setValue(Self.sRGBColorSpace, forKey: "inputColorSpace")
-        })
-    }
-
-    nonisolated private func outputImage(named name: String, configure: (CIFilter) -> Void) -> CIImage? {
-        guard let filter = CIFilter(name: name) else { return nil }
-        filter.setDefaults()
-        configure(filter)
+        let filter = CIFilter.colorCubeWithColorSpace()
+        filter.inputImage = image
+        filter.cubeDimension = Float(dimension)
+        filter.cubeData = cubeData
+        filter.colorSpace = Self.sRGBColorSpace
         return filter.outputImage
     }
 }
@@ -313,21 +328,23 @@ private struct CachedLUT: Sendable {
     let cubeData: Data
 }
 
-private final class LUTCache: @unchecked Sendable {
-    nonisolated static let shared = LUTCache()
-    private let lock = NSLock()
-    nonisolated(unsafe) private var cache: [Data: CachedLUT] = [:]
+/// Cached outcome of loading a LUT bookmark, so a broken LUT is neither
+/// re-resolved nor re-logged on every rendered frame.
+private enum LUTEntry: Sendable {
+    case loaded(CachedLUT)
+    case failed(Date)
+}
 
-    nonisolated func lut(forBookmark bookmark: Data) -> CachedLUT? {
-        lock.lock()
-        defer { lock.unlock() }
-        return cache[bookmark]
+private final class LUTCache: Sendable {
+    nonisolated static let shared = LUTCache()
+    private let lock = OSAllocatedUnfairLock(initialState: [Data: LUTEntry]())
+
+    nonisolated func entry(forBookmark bookmark: Data) -> LUTEntry? {
+        lock.withLock { $0[bookmark] }
     }
 
-    nonisolated func setLut(_ lut: CachedLUT, forBookmark bookmark: Data) {
-        lock.lock()
-        defer { lock.unlock() }
-        cache[bookmark] = lut
+    nonisolated func setEntry(_ entry: LUTEntry, forBookmark bookmark: Data) {
+        lock.withLock { $0[bookmark] = entry }
     }
 }
 
@@ -340,9 +357,18 @@ private struct CubeLUTResult {
 
 private enum CubeLUTParser {
 
-    nonisolated static func parse(_ data: Data) -> CubeLUTResult? {
-        guard let content = String(data: data, encoding: .utf8) else { return nil }
+    /// Largest cube size accepted (matches common .cube exports). Bounds both the
+    /// final table allocation and the pre-validation parse work below.
+    nonisolated private static let maxDimension = 64
 
+    nonisolated static func parse(_ data: Data) -> CubeLUTResult? {
+        // Reject oversized input before any work: a 64³ cube is well under ~10 MB,
+        // so a larger file can only be padding or an attempt to exhaust memory via
+        // the String / line-array / entries allocations below.
+        guard data.count <= 16 * 1024 * 1024,
+              let content = String(data: data, encoding: .utf8) else { return nil }
+
+        let maxEntries = maxDimension * maxDimension * maxDimension
         var dimension = 0
         var entries: [[Float]] = []
 
@@ -356,13 +382,19 @@ private enum CubeLUTParser {
             guard !parts.isEmpty else { continue }
 
             if parts[0] == "LUT_3D_SIZE", parts.count >= 2 {
-                dimension = Int(parts[1]) ?? 0
+                // Bound the declared size: a crafted file could otherwise request a
+                // huge cube (dimension³·4 floats) and exhaust memory.
+                guard let size = Int(parts[1]), size > 1, size <= maxDimension else { return nil }
+                dimension = size
                 continue
             }
 
             guard let r = Float(parts[0]) else { continue }
             if parts.count >= 3, let g = Float(parts[1]), let b = Float(parts[2]) {
                 entries.append([r, g, b])
+                // Stop if the table outgrows the largest accepted cube, even when
+                // LUT_3D_SIZE is missing or declared after the data lines.
+                if entries.count > maxEntries { return nil }
             }
         }
 

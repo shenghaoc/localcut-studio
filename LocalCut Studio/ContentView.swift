@@ -75,7 +75,7 @@ struct EditorView: View {
         }
         .toolbar { toolbarContent }
         .navigationTitle(model.project.name)
-        .overlay(alignment: .bottom) { statusBar }
+        .safeAreaInset(edge: .bottom) { statusBar }
         .background(WindowConfigurator(model: model))
     }
 
@@ -116,6 +116,7 @@ struct EditorView: View {
             if model.isExporting, let progress = model.exportProgress {
                 ProgressView(value: progress)
                     .frame(width: 120)
+                    .accessibilityLabel("Export progress")
             }
 
             Button {
@@ -130,19 +131,29 @@ struct EditorView: View {
 
     @ViewBuilder
     private var statusBar: some View {
-        VStack(spacing: 6) {
+        HStack {
             if !model.unresolvedMedia.isEmpty {
                 relinkBanner
+                Spacer()
             }
             Text(model.statusMessage)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .background(.ultraThinMaterial, in: Capsule())
                 .allowsHitTesting(false)
+                .accessibilityLabel(model.statusMessage)
+                .accessibilityAddTraits(.updatesFrequently)
+            Spacer()
         }
-        .padding(.bottom, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(.ultraThinMaterial)
+        // Announce status changes so background work and errors reach VoiceOver
+        // (A11Y-CHECKLIST: status line is an announced live region).
+        .onChange(of: model.statusMessage) { _, message in
+            AccessibilityNotification.Announcement(message).post()
+        }
     }
 
     private var relinkBanner: some View {
@@ -155,9 +166,6 @@ struct EditorView: View {
             Button("Relink…") { Task { await model.relinkNextMissingMedia() } }
                 .controlSize(.small)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(.ultraThinMaterial, in: Capsule())
     }
 
     private func exportTapped() {

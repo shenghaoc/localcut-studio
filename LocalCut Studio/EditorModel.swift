@@ -33,7 +33,7 @@ final class EditorModel {
 
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
-    @ObservationIgnored private var pendingRebuildTask: Task<Void, Never>?
+    @ObservationIgnored var pendingRebuildTask: Task<Void, Never>?
     /// The in-flight preview rebuild. A new rebuild cancels the previous one so
     /// rapid edits/undo can't land an older composition on the player last.
     @ObservationIgnored var activeRebuildTask: Task<Void, Never>?
@@ -56,6 +56,9 @@ final class EditorModel {
     @ObservationIgnored var coalescedUndoName: String?
     @ObservationIgnored var coalescedUndoTarget: AnyHashable?
     @ObservationIgnored var coalescedCommitTask: Task<Void, Never>?
+    /// `isDirty` at the start of the current coalesced gesture, restored if the
+    /// gesture settles with no net change (so a no-op edit doesn't prompt to save).
+    @ObservationIgnored var coalescedUndoWasDirty = false
 
     /// Monotonically increases on every mutation; lets an async save tell whether
     /// the project changed between snapshotting its data and finishing the write.
@@ -63,6 +66,11 @@ final class EditorModel {
 
     /// Security-scoped resources retained for the session, stopped on teardown.
     @ObservationIgnored nonisolated(unsafe) var accessedURLs: Set<URL> = []
+
+    /// Bumped on every session swap (New/Open). Async import/relink capture it
+    /// and bail if it changes across their awaits, so work started for one
+    /// document can neither leak security-scoped access nor land clips in another.
+    @ObservationIgnored var sessionGeneration = 0
 
     init() {
         // Each editor action manages its own undo group explicitly, so disable
@@ -78,7 +86,11 @@ final class EditorModel {
         }
         endObserver = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.didPlayToEndTimeNotification,
-            object: nil, queue: .main) { [weak self] _ in
+            object: nil, queue: .main) { [weak self] notification in
+            // Read the (non-Sendable) notification on the delivery queue (.main)
+            // before entering assumeIsolated; capturing it inside the isolated
+            // closure would be a Swift 6 "sending risks data races" error.
+            guard notification.object as? AVPlayerItem == self?.player.currentItem else { return }
             MainActor.assumeIsolated {
                 self?.isPlaying = false
             }
@@ -98,6 +110,7 @@ final class EditorModel {
     /// Loads the given files into the media bin, reading metadata and a poster
     /// frame for each. Security-scoped access is retained for the session.
     func importMedia(urls: [URL]) async {
+        let generation = sessionGeneration
         var loaded: [MediaItem] = []
         for url in urls {
             let didAccess = url.startAccessingSecurityScopedResource()
@@ -112,6 +125,16 @@ final class EditorModel {
                 }
                 item.hasAudio = try await !item.asset.loadTracks(withMediaType: .audio).isEmpty
 
+                // If the document was replaced (New/Open) while this file's metadata
+                // loaded, the import belongs to a session that no longer exists:
+                // release the just-started token and abandon, rather than leaking
+                // access or appending clips onto the new document. Tokens retained
+                // for earlier items were already stopped by releaseSession().
+                guard sessionGeneration == generation else {
+                    if didAccess { url.stopAccessingSecurityScopedResource() }
+                    return
+                }
+
                 // Retain access for the session and capture a persistable bookmark
                 // so the file can be re-resolved after relaunch (R1.2).
                 retainAccess(url, didStart: didAccess)
@@ -125,6 +148,11 @@ final class EditorModel {
             }
         }
         guard !loaded.isEmpty else { return }
+        // A teardown during a *later* file's load — where that load then threw and
+        // took the catch path, bypassing the per-item guard above — can still reach
+        // here with stale items. releaseSession() already stopped their tokens, so
+        // discard them rather than appending onto the replacement document.
+        guard sessionGeneration == generation else { return }
 
         // Snapshot and append synchronously (no awaits between) so a concurrent
         // edit made while metadata loaded can't be folded into the import's
@@ -134,18 +162,10 @@ final class EditorModel {
         registerImportUndo(name: "Import Media", before: before)
         markDirty()
         statusMessage = loaded.count == 1 ? "Imported \(loaded[0].name)." : "Imported \(loaded.count) items."
-        for item in loaded { Task { await self.generateThumbnail(for: item) } }
-    }
-
-    func generateThumbnail(for item: MediaItem) async {
-        guard item.hasVideo else { return }
-        let generator = AVAssetImageGenerator(asset: item.asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 320, height: 180)
-        let time = CMTime(seconds: min(0.1, item.durationSeconds / 2), preferredTimescale: 600)
-        if let result = try? await generator.image(at: time) {
-            item.thumbnail = result.image
-        }
+        // Decode poster frames off the editor: the task retains only the MediaItem
+        // (via loadThumbnail), never EditorModel, so tearing down the editor mid-
+        // decode doesn't keep the whole model alive.
+        for item in loaded { Task { await item.loadThumbnail() } }
     }
 
     // MARK: - Timeline editing
@@ -188,6 +208,42 @@ final class EditorModel {
             sanitizeTransitions()
             statusMessage = "Deleted clip."
             scheduleRebuild()
+        }
+    }
+
+    /// Removes a media item and its orphaned clips, then stops its security-scoped access.
+    func removeMedia(itemID: MediaItem.ID) {
+        guard let media = project.media(for: itemID) else { return }
+        // An in-flight export reads the source files through its own composition
+        // snapshot; revoking the security scope mid-export would fail the write.
+        guard !isExporting else {
+            statusMessage = "Finish exporting before removing media."
+            return
+        }
+        performUndoable("Remove Media") {
+            project.mediaItems.removeAll { $0.id == itemID }
+            releaseAccessIfUnused(for: media.url)
+            for track in allTracks {
+                track.clips.removeAll { $0.mediaID == itemID }
+            }
+            if selectedMediaID == itemID { selectedMediaID = nil }
+            if let selectedClipID, clip(for: selectedClipID) == nil {
+                self.selectedClipID = nil
+            }
+            if let selectedTransitionClipID, clip(for: selectedTransitionClipID) == nil {
+                self.selectedTransitionClipID = nil
+            }
+            sanitizeTransitions()
+            statusMessage = "Removed \(media.name)."
+            scheduleRebuild()
+        }
+    }
+
+    /// Releases retained file access once no media item in the project still uses it.
+    private func releaseAccessIfUnused(for url: URL) {
+        guard !project.mediaItems.contains(where: { $0.url == url }) else { return }
+        if accessedURLs.remove(url) != nil {
+            url.stopAccessingSecurityScopedResource()
         }
     }
 
@@ -522,7 +578,7 @@ final class EditorModel {
                 let minDur = minClipDuration
 
                 let sorted = track.clips.sorted { $0.timelineStart < $1.timelineStart }
-                let sortedIndex = sorted.firstIndex(where: { $0.id == id })!
+                guard let sortedIndex = sorted.firstIndex(where: { $0.id == id }) else { return }
                 let prevClip = sortedIndex > 0 ? sorted[sortedIndex - 1] : nil
                 let nextClip = sortedIndex < sorted.count - 1 ? sorted[sortedIndex + 1] : nil
 
@@ -718,7 +774,7 @@ final class EditorModel {
     // MARK: - Composition / playback
 
     /// Rebuilds the preview composition from the current project state, keeping
-    /// the playhead where it was.
+    /// the playhead where it was and resuming playback if still active.
     func rebuild() async {
         let resumeAt = currentTime
         do {
@@ -728,6 +784,9 @@ final class EditorModel {
             guard let built = result else {
                 player.replaceCurrentItem(with: nil)
                 totalDuration = 0
+                // No preview left to play; clear the flag so a later rebuild that
+                // re-creates an item (undo, add clip) doesn't silently auto-resume.
+                isPlaying = false
                 return
             }
             let item = AVPlayerItem(asset: built.composition)
@@ -737,6 +796,11 @@ final class EditorModel {
             totalDuration = built.duration
             await player.seek(to: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600),
                               toleranceBefore: .zero, toleranceAfter: .zero)
+            // Check the live isPlaying rather than a captured flag so a user's
+            // pause during the async build is not overridden.
+            if isPlaying {
+                player.play()
+            }
         } catch {
             statusMessage = "Preview build failed: \(error.localizedDescription)"
         }
@@ -767,6 +831,21 @@ final class EditorModel {
 
     func export(to url: URL) async {
         guard !isExporting else { return }
+        isExporting = true
+        exportProgress = 0
+        statusMessage = "Exporting…"
+        defer {
+            isExporting = false
+            exportProgress = nil
+        }
+        // Hold security-scoped access to every source file for the whole export,
+        // independent of the editable session. A redo (or any session change) that
+        // revokes the session's access mid-export — which the removeMedia guard
+        // can't intercept, since UndoManager replays snapshots directly — must not
+        // pull a source file out from under the in-flight write.
+        let exportSources = Set(project.mediaItems.map(\.url))
+        let heldSources = exportSources.filter { $0.startAccessingSecurityScopedResource() }
+        defer { for source in heldSources { source.stopAccessingSecurityScopedResource() } }
         do {
             guard let built = try await CompositionBuilder.build(project: project) else {
                 statusMessage = "Nothing to export."
@@ -782,10 +861,6 @@ final class EditorModel {
 
             try? FileManager.default.removeItem(at: url)
 
-            isExporting = true
-            exportProgress = 0
-            statusMessage = "Exporting…"
-
             let progressTask = Task { [weak self] in
                 for await state in session.states(updateInterval: 0.25) {
                     if case .exporting(let progress) = state {
@@ -794,18 +869,12 @@ final class EditorModel {
                 }
             }
 
-            defer {
-                progressTask.cancel()
-                isExporting = false
-                exportProgress = nil
-            }
+            defer { progressTask.cancel() }
 
             try await session.export(to: url, as: .mov)
             statusMessage = "Exported \(url.lastPathComponent)."
         } catch {
             statusMessage = "Export failed: \(error.localizedDescription)"
-            isExporting = false
-            exportProgress = nil
         }
     }
 }

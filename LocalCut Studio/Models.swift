@@ -39,6 +39,20 @@ final class MediaItem: Identifiable {
     }
 
     var durationSeconds: Double { duration.seconds.isFinite ? duration.seconds : 0 }
+
+    /// Generates the poster frame from near the asset's start. Lives on the media
+    /// item (not the editor) so a background decode task retains only this object,
+    /// never the whole `EditorModel`.
+    func loadThumbnail() async {
+        guard hasVideo else { return }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 320, height: 180)
+        let time = CMTime(seconds: min(0.1, durationSeconds / 2), preferredTimescale: 600)
+        if let result = try? await generator.image(at: time) {
+            thumbnail = result.image
+        }
+    }
 }
 
 // MARK: - Timeline

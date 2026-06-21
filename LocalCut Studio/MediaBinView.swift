@@ -21,6 +21,7 @@ struct MediaBinView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Import media…")
+                .accessibilityLabel("Import media")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -42,7 +43,15 @@ struct MediaBinView: View {
                                 .onTapGesture(count: 2) { model.addToTimeline(mediaID: item.id) }
                                 .contextMenu {
                                     Button("Add to Timeline") { model.addToTimeline(mediaID: item.id) }
+                                    Divider()
+                                    Button("Remove from Project", role: .destructive) { model.removeMedia(itemID: item.id) }
                                 }
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel("\(item.name), \(TimeFormatting.timecode(item.durationSeconds))")
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityAddTraits(model.selectedMediaID == item.id ? .isSelected : [])
+                                .accessibilityAction(named: "Add to Timeline") { model.addToTimeline(mediaID: item.id) }
+                                .accessibilityAction(named: "Remove from Project") { model.removeMedia(itemID: item.id) }
                         }
                     }
                     .padding(8)
@@ -95,7 +104,7 @@ private struct MediaRow: View {
             Spacer(minLength: 0)
         }
         .padding(6)
-        .background(isSelected ? AnyShapeStyle(.selection) : AnyShapeStyle(.clear),
+        .background(isSelected ? Color(.selectedContentBackgroundColor) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 6))
     }
 }

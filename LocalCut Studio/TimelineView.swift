@@ -64,10 +64,13 @@ struct TimelineView: View {
             Spacer()
             Image(systemName: "minus.magnifyingglass")
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Slider(value: $model.pixelsPerSecond, in: 20...300)
                 .frame(width: 140)
+                .accessibilityLabel("Timeline zoom")
             Image(systemName: "plus.magnifyingglass")
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -206,12 +209,20 @@ struct TimelineView: View {
         let x = displayValues.x
         let isSelected = model.selectedClipID == clip.id
         let baseColor: Color = kind == .video ? .blue : .green
+        // Precompute the name and its localized accessibility label outside the
+        // view builder: inlining `.map(Text.init)` tipped this already-large
+        // expression past the Swift type-checker's time budget.
+        let clipName = model.project.media(for: clip.mediaID)?.name
+        let nameLabel: Text = clipName.map(Text.init) ?? Text("Clip")
+        // Announce the rippled (effective) start so VoiceOver matches the drawn
+        // block position when an upstream transition has shortened the timeline.
+        let valueLabel = Text("Starts \(TimeFormatting.timecode(effectiveStart.seconds)), \(TimeFormatting.timecode(clip.duration.seconds)) long")
 
         return ZStack {
             RoundedRectangle(cornerRadius: 6)
                 .fill(baseColor.opacity(isDragging(clip.id) ? 0.2 : 0.35))
                 .overlay(alignment: .leading) {
-                    Text(model.project.media(for: clip.mediaID)?.name ?? "Clip")
+                    Text(clipName ?? "Clip")
                         .font(.caption2)
                         .lineLimit(1)
                         .padding(.horizontal, 6)
@@ -237,6 +248,10 @@ struct TimelineView: View {
             model.selectedTransitionClipID = nil
         }
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
+        .accessibilityLabel(nameLabel)
+        .accessibilityValue(valueLabel)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { hovering in
             if !hovering { hoverEdge = nil }
         }

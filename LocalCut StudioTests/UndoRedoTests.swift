@@ -50,6 +50,49 @@ struct UndoRedoTests {
         #expect(videoClips(model).isEmpty)
     }
 
+    @Test("Removing media is undoable, dirty, and drops dependent clips")
+    func removeMediaUndoRedo() {
+        let (model, clipID) = makeModel()
+        let media = model.project.mediaItems[0]
+        model.selectedMediaID = media.id
+        model.selectedClipID = clipID
+
+        model.removeMedia(itemID: media.id)
+        #expect(model.project.mediaItems.isEmpty)
+        #expect(videoClips(model).isEmpty)
+        #expect(model.selectedMediaID == nil)
+        #expect(model.selectedClipID == nil)
+        #expect(model.isDirty)
+        #expect(model.canUndo)
+
+        model.undo()
+        #expect(model.project.mediaItems.map(\.id) == [media.id])
+        #expect(videoClips(model).map(\.id) == [clipID])
+        #expect(model.canRedo)
+
+        model.redo()
+        #expect(model.project.mediaItems.isEmpty)
+        #expect(videoClips(model).isEmpty)
+    }
+
+    @Test("Removing one duplicate media keeps shared URL access until the last item is gone")
+    func removeMediaKeepsSharedURLAccess() {
+        let model = EditorModel()
+        let url = URL(fileURLWithPath: "/tmp/shared-source.mov")
+        let first = MediaItem(url: url)
+        let second = MediaItem(url: url)
+        model.project.mediaItems.append(contentsOf: [first, second])
+        model.accessedURLs.insert(url)
+
+        model.removeMedia(itemID: first.id)
+        #expect(model.project.mediaItems.map(\.id) == [second.id])
+        #expect(model.accessedURLs.contains(url))
+
+        model.removeMedia(itemID: second.id)
+        #expect(model.project.mediaItems.isEmpty)
+        #expect(!model.accessedURLs.contains(url))
+    }
+
     @Test("Undo label reflects the action name")
     func undoLabel() {
         let (model, clipID) = makeModel()
@@ -141,6 +184,26 @@ struct UndoRedoTests {
         model.undo()
         #expect(videoClips(model)[0].opacity == 1)
         #expect(!model.canUndo)
+    }
+
+    @Test("A no-op coalesced gesture leaves the document clean; a real one dirties it")
+    func noOpCoalescedGestureNotDirty() {
+        let (model, clipID) = makeModel()
+        #expect(!model.isDirty)
+
+        // Right-trim to the clip's existing end: clamps to no net change.
+        model.trimClip(id: clipID, edge: .right, to: time(10))
+        model.commitCoalescedUndo()
+        #expect(videoClips(model)[0].duration == time(10))
+        #expect(!model.isDirty)        // no change → not dirty
+        #expect(!model.canUndo)        // and no undo step registered
+
+        // A gesture that actually changes the clip does dirty the document.
+        model.trimClip(id: clipID, edge: .right, to: time(6))
+        model.commitCoalescedUndo()
+        #expect(videoClips(model)[0].duration == time(6))
+        #expect(model.isDirty)
+        #expect(model.canUndo)
     }
 
     // MARK: - Sequencing
