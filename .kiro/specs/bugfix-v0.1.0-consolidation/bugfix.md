@@ -69,3 +69,21 @@ Clip blocks in `TimelineView` have no `accessibilityLabel` or accessibility trai
 `EditorModel.swift:79-85` registers the end-of-playback observer with `object: nil`, meaning any `AVPlayerItem.didPlayToEndTimeNotification` from any player sets `isPlaying = false`. Currently harmless (single player), but fragile.
 
 - **Fix**: Filter in the closure to only respond when the notification's object matches `player.currentItem`.
+
+### B12 — `wasPlaying` race in `rebuild()` (review follow-up)
+
+`EditorModel.swift:742` captured `isPlaying` into a `wasPlaying` flag before the `await CompositionBuilder.build(...)`. If the user pauses during the async build, the old `wasPlaying=true` would override their pause and resume playback.
+
+- **Fix**: Remove the captured flag; check live `isPlaying` after the seek instead. If the user paused during the build, `isPlaying` is `false` and playback won't resume.
+
+### B13 — Repetitive `isExporting` reset (review follow-up)
+
+`export(to:)` manually reset `isExporting = false` on every early return path and in the `catch` block, in addition to a `defer` on the success path. Adding a new early return could forget the reset.
+
+- **Fix**: Restructure with a single `defer { isExporting = false; exportProgress = nil }` at the top of the function body, before any `do` block. The inner `defer` on the success path only cancels the progress task.
+
+### B14 — Unconditional selection clear (review follow-up)
+
+`removeMedia` unconditionally set `selectedClipID = nil` and `selectedTransitionClipID = nil`. If the removed media item was unrelated to the currently selected clip, the selection was unnecessarily lost.
+
+- **Fix**: Only clear `selectedClipID`/`selectedTransitionClipID` if the selected clip/transition was orphaned by the removal (i.e. `clip(for:)` returns nil after orphan cleanup).

@@ -13,6 +13,9 @@
 - [x] **B9** Fix silent LUT failure: log `os_log(.error, ...)` when stale bookmark drops effect.
 - [x] **B10** Fix thumbnail Task strong-capture `self`: use `[weak self]`.
 - [x] **B11** Fix `endObserver` scope: filter notifications to match `player.currentItem`.
+- [x] **B12** Fix `wasPlaying` race: check live `isPlaying` instead of captured flag.
+- [x] **B13** Fix repetitive `isExporting` reset: single `defer` at top of `export(to:)`.
+- [x] **B14** Fix unconditional selection clear: only clear if clip/transition orphaned.
 
 ## Verification
 
