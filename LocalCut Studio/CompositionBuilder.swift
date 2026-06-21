@@ -14,8 +14,8 @@ struct BuiltComposition {
 /// (`AVPlayerItem`) and export (`AVAssetExportSession`).
 ///
 /// This is the native counterpart to the browser project's compositing engine:
-/// instead of a WebGPU pipeline we lean on `AVMutableVideoComposition`'s layer
-/// instructions to transform and stack each track.
+/// instead of a WebGPU pipeline we lean on AVFoundation composition tracks plus
+/// a custom video compositor to transform, grade, and stack each track.
 enum CompositionBuilder {
 
     enum BuildError: Error { case noVideoTrackInSource, noAudioTrackInSource }
@@ -94,9 +94,9 @@ enum CompositionBuilder {
 
     // MARK: - Video composition
 
-    /// Builds non-overlapping instructions covering the timeline. For each gap
-    /// between clip boundaries we emit one instruction whose layer instructions
-    /// describe every track segment visible during that interval.
+    /// Builds non-overlapping custom instructions covering the timeline. For
+    /// each gap between clip boundaries we emit one instruction whose layer
+    /// metadata describes every track segment visible during that interval.
     private static func makeVideoComposition(
         composition: AVComposition,
         trackSegments: [(track: AVCompositionTrack, segments: [VideoSegment])],

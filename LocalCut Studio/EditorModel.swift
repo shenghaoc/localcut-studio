@@ -243,15 +243,28 @@ final class EditorModel {
 
     /// Imports a .cube LUT file and attaches it as a LUT effect on the selected clip.
     func importLUT(url: URL) {
-        guard url.startAccessingSecurityScopedResource() else { return }
+        guard let id = selectedClipID,
+              let selectedTrack = track(for: id),
+              selectedTrack.kind == .video else {
+            statusMessage = "Select a video clip before importing a LUT."
+            return
+        }
+
+        guard url.startAccessingSecurityScopedResource() else {
+            statusMessage = "Could not access \(url.lastPathComponent)."
+            return
+        }
         defer { url.stopAccessingSecurityScopedResource() }
 
-        guard let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil),
-              let id = selectedClipID else { return }
+        guard let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) else {
+            statusMessage = "Could not store access to \(url.lastPathComponent)."
+            return
+        }
 
         for track in allTracks {
             guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
             track.clips[index].effects.append(.lut(bookmark: bookmark))
+            statusMessage = "Imported LUT \(url.lastPathComponent)."
             Task { await rebuild() }
             return
         }
