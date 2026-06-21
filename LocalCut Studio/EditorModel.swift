@@ -138,6 +138,15 @@ final class EditorModel {
         Task { await rebuild() }
     }
 
+    /// Removes a media item from the project and stops its security-scoped access.
+    func removeMedia(itemID: MediaItem.ID) {
+        guard let media = project.media(for: itemID) else { return }
+        media.url.stopAccessingSecurityScopedResource()
+        project.mediaItems.removeAll { $0.id == itemID }
+        if selectedMediaID == itemID { selectedMediaID = nil }
+        statusMessage = "Removed \(media.name)."
+    }
+
     /// Clears any clip-owned transition whose cut no longer exists — i.e. the
     /// clip is no longer immediately adjacent to a preceding clip. Prevents a
     /// stored transition from silently re-binding to a different neighbour after
@@ -446,7 +455,7 @@ final class EditorModel {
             let minDur = minClipDuration
 
             let sorted = track.clips.sorted { $0.timelineStart < $1.timelineStart }
-            let sortedIndex = sorted.firstIndex(where: { $0.id == id })!
+            guard let sortedIndex = sorted.firstIndex(where: { $0.id == id }) else { return }
             let prevClip = sortedIndex > 0 ? sorted[sortedIndex - 1] : nil
             let nextClip = sortedIndex < sorted.count - 1 ? sorted[sortedIndex + 1] : nil
 

@@ -4,6 +4,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import Metal
 import CoreVideo
+import os
 
 // MARK: - Layer metadata for the compositor
 
@@ -57,7 +58,9 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
 final class EffectCompositor: NSObject, AVVideoCompositing {
 
-    private static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    private static let sRGBColorSpace: CGColorSpace = {
+        CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+    }()
 
     private static let sharedCIContext: CIContext = {
         if let device = MTLCreateSystemDefaultDevice() {
@@ -315,7 +318,7 @@ private struct CachedLUT: Sendable {
 
 private final class LUTCache: @unchecked Sendable {
     nonisolated static let shared = LUTCache()
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock()
     nonisolated(unsafe) private var cache: [Data: CachedLUT] = [:]
 
     nonisolated func lut(forBookmark bookmark: Data) -> CachedLUT? {
