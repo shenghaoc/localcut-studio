@@ -9,7 +9,11 @@
 - [x] **B5** Add accessibility labels to timeline clip blocks.
 - [x] **B6** Migrate `LUTCache` from `NSLock` to `OSAllocatedUnfairLock`.
 
+- [x] **B7** Fix export race: set `isExporting = true` before first `await` in `export(to:)`.
+- [x] **B8** Fix rebuild killing playback: capture `isPlaying` and resume after seek.
+- [x] **B9** Fix silent LUT failure: log `os_log(.error, ...)` when stale bookmark drops effect.
+
 ## Verification
 
 - [x] **V1** `xcodebuild` Debug/macOS clean build, zero warnings.
-- [x] **V2** All 50 existing tests pass (no regressions).
+- [x] **V2** All 71 existing tests pass (no regressions).
