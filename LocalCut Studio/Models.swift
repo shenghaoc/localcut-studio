@@ -2,6 +2,39 @@ import Foundation
 import AVFoundation
 import CoreGraphics
 
+// MARK: - Metadata Sanitization
+
+extension CMTime {
+    /// Returns a validated time, falling back to `.zero` if the time is invalid,
+    /// indefinite, infinite, or negative (which could corrupt geometry or time math).
+    var sanitized: CMTime {
+        guard isValid, !isIndefinite, !isPositiveInfinity, !isNegativeInfinity, value >= 0 else {
+            return .zero
+        }
+        return self
+    }
+}
+
+extension CGSize {
+    /// Returns a validated size, falling back to `.zero` if non-finite, and
+    /// clamping negative dimensions to 0.
+    var sanitized: CGSize {
+        guard width.isFinite, height.isFinite else { return .zero }
+        return CGSize(width: max(0, width), height: max(0, height))
+    }
+}
+
+extension CGAffineTransform {
+    /// Returns a validated transform, falling back to `.identity` if any component
+    /// is non-finite.
+    var sanitized: CGAffineTransform {
+        guard a.isFinite, b.isFinite, c.isFinite, d.isFinite, tx.isFinite, ty.isFinite else {
+            return .identity
+        }
+        return self
+    }
+}
+
 // MARK: - Media
 
 /// A source media file imported into the project's media bin.

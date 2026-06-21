@@ -116,12 +116,12 @@ final class EditorModel {
             let didAccess = url.startAccessingSecurityScopedResource()
             let item = MediaItem(url: url)
             do {
-                item.duration = try await item.asset.load(.duration)
+                item.duration = try await item.asset.load(.duration).sanitized
 
                 if let v = try await item.asset.loadTracks(withMediaType: .video).first {
                     item.hasVideo = true
-                    item.naturalSize = try await v.load(.naturalSize)
-                    item.preferredTransform = try await v.load(.preferredTransform)
+                    item.naturalSize = try await v.load(.naturalSize).sanitized
+                    item.preferredTransform = try await v.load(.preferredTransform).sanitized
                 }
                 item.hasAudio = try await !item.asset.loadTracks(withMediaType: .audio).isEmpty
 
