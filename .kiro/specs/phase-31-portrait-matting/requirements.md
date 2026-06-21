@@ -3,12 +3,12 @@
 ## R1 — Engine
 
 - **R1.1** Tier A: `VNGeneratePersonSegmentationRequest` (`qualityLevel = .accurate`) is the default when available.
-- **R1.2** Tier B: optional Core ML matting model (MODNet default, RVM optional) with manifest + SHA-256.
-- **R1.3** `MLComputeUnits` selected by the capability probe; Neural Engine preferred on Apple Silicon.
+- **R1.2** Tier B: optional Core AI matting model (MODNet default, RVM optional) with manifest + SHA-256.
+- **R1.3** Core AI compute-unit selection driven by the capability probe; Neural Engine preferred on Apple Silicon.
 
 ## R2 — Pipeline
 
-- **R2.1** Zero-copy: `IOSurface`-backed `CVPixelBuffer` from `AVAssetReader` → Vision / Core ML → alpha texture → compositor.
+- **R2.1** Zero-copy: `IOSurface`-backed `CVPixelBuffer` from `AVAssetReader` → Vision / Core AI → alpha texture → compositor.
 - **R2.2** Effect modes: `remove` (alpha), `replace` (alpha + background source), `blur` (mask-driven gaussian).
 - **R2.3** Preview runs at proxy resolution; export runs at full project resolution.
 - **R2.4** Recurrent models reset their per-clip state on seek and on shot boundaries.

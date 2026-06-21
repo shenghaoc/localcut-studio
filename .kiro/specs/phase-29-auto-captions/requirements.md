@@ -3,7 +3,7 @@
 ## R1 — ASR engine
 
 - **R1.1** Tier A: `SFSpeechRecognizer` with `requiresOnDeviceRecognition = true` is the default when supported on the host.
-- **R1.2** Tier B: an optional Whisper Core ML model (Base default, Tiny lower-tier) downloads on demand with progress surfaced before any fetch.
+- **R1.2** Tier B: an optional Whisper Core AI model (Base default, Tiny lower-tier) downloads on demand with progress surfaced before any fetch.
 - **R1.3** Model file integrity verified by SHA-256 against a versioned `ModelManifest.swift`; mismatched files are rejected.
 
 ## R2 — Audio extraction + windowing

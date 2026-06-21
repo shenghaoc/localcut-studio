@@ -4,9 +4,9 @@
 
 ## Engine
 
-- [ ] **T1.1** `actor TranscriptionService` — off-main-actor wrapper around Speech / Core ML.
+- [ ] **T1.1** `actor TranscriptionService` — off-main-actor wrapper around Speech / Core AI.
 - [ ] **T1.2** Tier A path: `SFSpeechRecognizer` with `requiresOnDeviceRecognition = true`; segment → `CaptionLine`.
-- [ ] **T1.3** Tier B path: Core ML Whisper Base loader + greedy decoder; word-token → `WordTiming` mapping.
+- [ ] **T1.3** Tier B path: Core AI Whisper Base loader + greedy decoder; word-token → `WordTiming` mapping.
 - [ ] **T1.4** `ModelManifest.swift` — pinned SHA-256, on-disk path, version migration.
 - [ ] **T1.5** `URLSession` background download with progress; cancellable.
 

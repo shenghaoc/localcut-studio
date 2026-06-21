@@ -40,7 +40,7 @@ The browser-editor selects **Practical-RIFE 4.25 lite (MIT)** as an ONNX model o
 
 ## Trade-offs
 
-- `VTFrameProcessor` over a vendored Core ML RIFE: no licence + provenance + Core ML conversion work; runs on the Neural Engine; ships with the OS; gets Apple's algorithmic improvements free with OS updates. The cost is: less control over the exact algorithm (we accept Apple's choices) and harder bit-exact reproducibility across OS versions (already a v1 non-goal).
+- `VTFrameProcessor` over a vendored Core AI RIFE: no licence + provenance + Core AI conversion work; runs on the Neural Engine; ships with the OS; gets Apple's algorithmic improvements free with OS updates. The cost is: less control over the exact algorithm (we accept Apple's choices) and harder bit-exact reproducibility across OS versions (already a v1 non-goal).
 - For motion-blur synthesis we have a choice: `VTMotionBlurConfiguration` directly (one call) vs. `VTOpticalFlowConfiguration` + a custom Metal blur (more control over shutter angle / direction). We default to the direct configuration; the custom path is the follow-up if creator feedback wants finer control.
 - Realtime preview at proxy resolution is possible on high-tier hardware; we still surface the time estimate up-front because consistent behaviour matters more than hiding the cost.
 

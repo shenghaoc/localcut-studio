@@ -2,7 +2,7 @@
 
 LocalCut Studio is the native macOS port of [browser-editor](https://github.com/shenghaoc/browser-editor), which has reached **v1.0.0**. This document plans the path from our current **v0.1.0** (Phase 1 foundation) to a parity **v1.0.0** native release.
 
-The plan splits the upstream roadmap by ML dependency. macOS 27 is still in beta at the time of writing, so [Apple's on-device Core AI stack](https://developer.apple.com/core-ai/) (Foundation Models, Translation, Speech, Vision/Core ML refresh) is out of reach for now. We ship every feature that does **not** need on-device ML first, then resume with the ML-backed features once macOS 27 leaves beta.
+The plan splits the upstream roadmap by ML dependency. macOS 27 is still in beta at the time of writing, so [Apple's on-device Core AI stack](https://developer.apple.com/core-ai/) (Foundation Models, Translation, Speech, Vision) — which supersedes the older Core ML framework — is out of reach for now. We ship every feature that does **not** need on-device ML first, then resume with the ML-backed features once macOS 27 leaves beta.
 
 ## Version path
 
@@ -36,11 +36,11 @@ Order follows the upstream recommendation (29 → 31 → 33 → 32b → 37, with
 
 | Tag | Phase | Spec | Theme |
 |---|---|---|---|
-| v0.2.1 | 29 | [phase-29-auto-captions](./phase-29-auto-captions/) | On-device auto captions (Speech/Core ML ASR) |
-| v0.2.2 | 31 | [phase-31-portrait-matting](./phase-31-portrait-matting/) | Portrait video matting (Vision / Core ML) |
+| v0.2.1 | 29 | [phase-29-auto-captions](./phase-29-auto-captions/) | On-device auto captions (Speech / Core AI ASR) |
+| v0.2.2 | 31 | [phase-31-portrait-matting](./phase-31-portrait-matting/) | Portrait video matting (Vision / Core AI) |
 | v0.2.3 | 33 | [phase-33-smart-reframe](./phase-33-smart-reframe/) | Smart reframe (Vision face/saliency + tracker) |
 | v0.2.4 | 32b | [phase-32b-landmark-beauty](./phase-32b-landmark-beauty/) | Landmark-driven beauty (瘦脸 / 大眼) |
-| v0.2.5 | 37 | [phase-37-frame-interpolation](./phase-37-frame-interpolation/) | Optical-flow frame interpolation (RIFE-class Core ML) |
+| v0.2.5 | 37 | [phase-37-frame-interpolation](./phase-37-frame-interpolation/) | Frame interpolation via VTFrameProcessor (no model vendoring) |
 | **v1.0.0** | 40 | [phase-40-language-tools](./phase-40-language-tools/) | On-device language tools (Foundation Models, Translation) |
 
 ## Prerequisite infrastructure (interleaved through v0.1.x)
@@ -76,21 +76,21 @@ The browser prompts assume "Phase 28": a worker-owned inference runtime over `tr
 
 | Browser ML runtime (P28) | Native macOS equivalent |
 |---|---|
-| transformers.js / onnxruntime-web | Core ML (`MLModel`) + Apple Foundation Models (macOS 27+) |
-| WebGPU compute / WebNN | Neural Engine + Metal Performance Shaders Graph |
+| transformers.js / onnxruntime-web | **Core AI** runtime + Foundation Models (macOS 27+) — Core AI is the umbrella that supersedes Core ML |
+| WebGPU compute / WebNN | Neural Engine + Metal Performance Shaders Graph (Core AI selects compute units) |
 | OPFS-cached weights + manifest | App container `Models/` with notarised manifest; many models bundled with the OS |
-| Per-EP execution providers | `MLComputeUnits` (`.all` / `.cpuAndGPU` / `.cpuOnly`) chosen by a probe |
+| Per-EP execution providers | Core AI compute-unit selection chosen by a probe |
 | `VideoFrame` → external texture | `CVPixelBuffer` → Metal texture (zero-copy via IOSurface) |
 | Origin trial token gating | OS version + chip family + Foundation Models availability check |
-| Model download size UX | Bundled or on-demand `MLModel` with progress on first use |
+| Model download size UX | Bundled or on-demand Core AI model with progress on first use |
 
-The ML phases (29, 31, 32b, 33, 37, 40) each name the specific Apple framework or Core ML model they target. Phase 40 is the only one that depends on **Foundation Models** (`com.apple.foundationmodels`) being publicly available; the others use Vision / Speech / Core ML which are mature on macOS 26 but get materially better APIs and on-device models on macOS 27. We wait for 27 to land everywhere so every ML feature shares one minimum-OS baseline.
+The ML phases (29, 31, 32b, 33, 37, 40) each name the specific Apple framework or Core AI model they target. Phase 40 is the only one that depends on **Foundation Models** (`com.apple.foundationmodels`) being publicly available; the others use Vision / Speech / Core AI / VideoToolbox which are mature on macOS 26 but get materially better APIs and on-device models on macOS 27. We wait for 27 to land everywhere so every ML feature shares one minimum-OS baseline.
 
-Note on Phase 37: VideoToolbox's `VTFrameProcessor` (macOS 15.4+) ships native frame interpolation, frame-rate conversion, optical flow, and motion blur on the Neural Engine — Phase 37 uses it directly rather than vendoring a Core ML port of RIFE.
+Note on Phase 37: VideoToolbox's `VTFrameProcessor` (macOS 15.4+) ships native frame interpolation, frame-rate conversion, optical flow, and motion blur on the Neural Engine — Phase 37 uses it directly rather than vendoring a Core AI port of RIFE.
 
 ## Source-of-truth note
 
-The canonical source for each phase's intent is the **shipped** spec in the upstream [browser-editor](https://github.com/shenghaoc/browser-editor) repo's `.kiro/specs/phase-NN-*/`. When implementing a phase here, cross-reference the upstream `design.md` for concrete decisions (model choice + provenance, parameter ranges, container formats, exact heuristics) — the macOS specs in this folder paraphrase those decisions for the AVFoundation / Metal / Core ML stack but do not duplicate every tuning constant.
+The canonical source for each phase's intent is the **shipped** spec in the upstream [browser-editor](https://github.com/shenghaoc/browser-editor) repo's `.kiro/specs/phase-NN-*/`. When implementing a phase here, cross-reference the upstream `design.md` for concrete decisions (model choice + provenance, parameter ranges, container formats, exact heuristics) — the macOS specs in this folder paraphrase those decisions for the AVFoundation / Metal / Core AI stack but do not duplicate every tuning constant.
 
 | Phase | macOS spec drafted from |
 |---|---|
