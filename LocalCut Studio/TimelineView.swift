@@ -82,14 +82,15 @@ struct TimelineView: View {
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
                     ruler
-                    ForEach(tracks) { track in
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { trackIndex, track in
                         Divider()
-                        lane(for: track)
+                        lane(for: track, allTracksIndex: trackIndex)
                     }
                 }
                 playhead
             }
             .frame(width: contentWidth, alignment: .topLeading)
+            .coordinateSpace(name: "timeline")
         }
     }
 
@@ -121,7 +122,7 @@ struct TimelineView: View {
         )
     }
 
-    private func lane(for track: Track) -> some View {
+    private func lane(for track: Track, allTracksIndex: Int) -> some View {
         ZStack(alignment: .topLeading) {
             Color.clear
             ForEach(track.clips) { clip in
@@ -131,6 +132,7 @@ struct TimelineView: View {
                     model: model,
                     pps: pps,
                     laneHeight: laneHeight,
+                    allTracksIndex: allTracksIndex,
                     dragState: $dragState,
                     commitDrag: commitDrag)
             }
@@ -173,8 +175,11 @@ struct TimelineView: View {
                 : rawStart
 
             let allTracks = model.project.videoTracks + model.project.audioTracks
-            let laneY = location.y - rulerHeight
-            let rawTrackIndex = max(0, min(allTracks.count - 1, Int(laneY / laneHeight)))
+            // location is in the clip's local coordinate space (offset y=4 within its lane).
+            // Compute the Y in timeline coords using the source track index.
+            let clipOffsetInLane: CGFloat = 4
+            let timelineY = rulerHeight + CGFloat(state.sourceTrackIndex) * laneHeight + clipOffsetInLane + location.y
+            let rawTrackIndex = max(0, min(allTracks.count - 1, Int(timelineY / laneHeight)))
 
             let targetTrack = allTracks[rawTrackIndex]
             let sameKindTracks: [Track] = targetTrack.kind == .video ? model.project.videoTracks : model.project.audioTracks
@@ -213,6 +218,7 @@ private struct ClipBlockView: View {
     let model: EditorModel
     let pps: CGFloat
     let laneHeight: CGFloat
+    let allTracksIndex: Int
     @Binding var dragState: DragState?
     let commitDrag: (CGPoint, CGSize) -> Void
 
@@ -276,7 +282,7 @@ private struct ClipBlockView: View {
             .shadow(radius: dragShadow)
             .onTapGesture { model.selectedClipID = clip.id }
             .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                DragGesture(minimumDistance: 2, coordinateSpace: .local)
                     .onChanged { value in
                         if dragState == nil {
                             let kind: DragState.Kind
@@ -293,12 +299,17 @@ private struct ClipBlockView: View {
                                 initialTimelineStart: clip.timelineStart,
                                 initialSourceStart: clip.sourceStart,
                                 initialDuration: clip.duration,
+                                sourceTrackIndex: allTracksIndex,
                                 translation: value.translation)
                         } else {
                             dragState?.translation = value.translation
                         }
                     }
                     .onEnded { value in
+                        guard abs(value.translation.width) > 2 || abs(value.translation.height) > 2 else {
+                            dragState = nil
+                            return
+                        }
                         commitDrag(value.location, value.translation)
                     }
             )
@@ -336,6 +347,7 @@ private struct DragState {
     let initialTimelineStart: CMTime
     let initialSourceStart: CMTime
     let initialDuration: CMTime
+    let sourceTrackIndex: Int
     var translation: CGSize
 
     enum Kind {

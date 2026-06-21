@@ -155,7 +155,8 @@ final class EditorModel {
                          sourceStart: clip.sourceStart + offset,
                          duration: clip.duration - offset,
                          timelineStart: playhead,
-                         opacity: clip.opacity)
+                         opacity: clip.opacity,
+                         effects: clip.effects)
 
             track.clips.replaceSubrange(index...index, with: [left, right])
             selectedClipID = left.id
@@ -316,7 +317,12 @@ final class EditorModel {
 
         case .right:
             let minTimelineEnd = clip.timelineStart + Self.minClipDuration
-            let maxTimelineEnd = clip.timelineStart + (sourceDuration - clip.sourceStart)
+            let sourceMax = clip.timelineStart + (sourceDuration - clip.sourceStart)
+            let nextClipStart = track(for: id)?.clips
+                .filter { $0.timelineStart > clip.timelineStart }
+                .min { $0.timelineStart < $1.timelineStart }?
+                .timelineStart
+            let maxTimelineEnd = min(sourceMax, nextClipStart ?? sourceMax)
             let clampedSeconds = max(minTimelineEnd.seconds, min(maxTimelineEnd.seconds, to.seconds))
             let newTimelineEnd = CMTime(seconds: clampedSeconds, preferredTimescale: 600)
             let finalDuration = newTimelineEnd - clip.timelineStart

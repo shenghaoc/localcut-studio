@@ -19,13 +19,14 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let timeRange: CMTimeRange
     let enablePostProcessing: Bool = false
     let containsTweening: Bool = false
-    let requiredSourceTrackIDs: [NSValue]? = nil
+    let requiredSourceTrackIDs: [NSValue]?
     let passthroughTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
     let layers: [CompositorLayer]
 
     init(timeRange: CMTimeRange, layers: [CompositorLayer]) {
         self.timeRange = timeRange
         self.layers = layers
+        requiredSourceTrackIDs = layers.isEmpty ? [] : layers.map { NSNumber(value: $0.trackID) as NSValue }
     }
 }
 
@@ -90,7 +91,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             return
         }
 
-        let composited = result ?? CIImage(color: .black).cropped(to: CGRect(origin: .zero, size: renderSize))
+        let black = CIImage(color: .black).cropped(to: CGRect(origin: .zero, size: renderSize))
+        let composited = result?.composited(over: black) ?? black
 
         let destinationRect = CGRect(origin: .zero, size: renderSize)
         Self.sharedCIContext.render(composited, to: destination, bounds: destinationRect, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))

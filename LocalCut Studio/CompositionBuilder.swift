@@ -140,8 +140,6 @@ enum CompositionBuilder {
                     effects: seg.effects))
             }
 
-            guard !layers.isEmpty else { continue }
-
             instructions.append(EffectCompositionInstruction(timeRange: range, layers: layers))
         }
 

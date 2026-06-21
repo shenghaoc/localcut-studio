@@ -21,7 +21,9 @@ struct InspectorView: View {
             Form {
                 if let clip = model.selectedClip {
                     clipSection(clip)
-                    colourSection
+                    if clipIsVideo(clip) {
+                        colourSection
+                    }
                 } else if let media = model.selectedMedia {
                     mediaSection(media)
                 } else {
@@ -44,6 +46,10 @@ struct InspectorView: View {
                 model.importLUT(url: url)
             }
         }
+    }
+
+    private func clipIsVideo(_ clip: Clip) -> Bool {
+        model.track(for: clip.id)?.kind == .video
     }
 
     @ViewBuilder
