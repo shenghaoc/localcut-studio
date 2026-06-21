@@ -195,22 +195,24 @@ final class EditorModel {
     /// Removes a media item and its orphaned clips, then stops its security-scoped access.
     func removeMedia(itemID: MediaItem.ID) {
         guard let media = project.media(for: itemID) else { return }
-        media.url.stopAccessingSecurityScopedResource()
-        accessedURLs.remove(media.url)
-        project.mediaItems.removeAll { $0.id == itemID }
-        for track in allTracks {
-            track.clips.removeAll { $0.mediaID == itemID }
+        performUndoable("Remove Media") {
+            media.url.stopAccessingSecurityScopedResource()
+            accessedURLs.remove(media.url)
+            project.mediaItems.removeAll { $0.id == itemID }
+            for track in allTracks {
+                track.clips.removeAll { $0.mediaID == itemID }
+            }
+            if selectedMediaID == itemID { selectedMediaID = nil }
+            if let selectedClipID, clip(for: selectedClipID) == nil {
+                self.selectedClipID = nil
+            }
+            if let selectedTransitionClipID, clip(for: selectedTransitionClipID) == nil {
+                self.selectedTransitionClipID = nil
+            }
+            sanitizeTransitions()
+            statusMessage = "Removed \(media.name)."
+            scheduleRebuild()
         }
-        if selectedMediaID == itemID { selectedMediaID = nil }
-        if let selectedClipID, clip(for: selectedClipID) == nil {
-            self.selectedClipID = nil
-        }
-        if let selectedTransitionClipID, clip(for: selectedTransitionClipID) == nil {
-            self.selectedTransitionClipID = nil
-        }
-        sanitizeTransitions()
-        statusMessage = "Removed \(media.name)."
-        scheduleRebuild()
     }
 
     /// Clears any clip-owned transition whose cut no longer exists — i.e. the
