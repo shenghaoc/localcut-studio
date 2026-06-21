@@ -276,7 +276,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         guard let url = try? URL(resolvingBookmarkData: bookmarkData,
                                  options: [.withSecurityScope, .withoutUI],
                                  bookmarkDataIsStale: &isStale),
-              !isStale else { return nil }
+              !isStale else {
+            os_log(.error, "LUT bookmark stale or unresolvable — skipping LUT effect")
+            return nil
+        }
 
         guard url.startAccessingSecurityScopedResource() else { return nil }
         defer { url.stopAccessingSecurityScopedResource() }

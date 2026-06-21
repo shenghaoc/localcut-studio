@@ -735,9 +735,10 @@ final class EditorModel {
     // MARK: - Composition / playback
 
     /// Rebuilds the preview composition from the current project state, keeping
-    /// the playhead where it was.
+    /// the playhead where it was and resuming playback if active.
     func rebuild() async {
         let resumeAt = currentTime
+        let wasPlaying = isPlaying
         do {
             let result = try await CompositionBuilder.build(project: project)
             // A newer rebuild superseded this one; don't clobber the player.
@@ -754,6 +755,9 @@ final class EditorModel {
             totalDuration = built.duration
             await player.seek(to: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600),
                               toleranceBefore: .zero, toleranceAfter: .zero)
+            if wasPlaying {
+                player.play()
+            }
         } catch {
             statusMessage = "Preview build failed: \(error.localizedDescription)"
         }
@@ -784,22 +788,23 @@ final class EditorModel {
 
     func export(to url: URL) async {
         guard !isExporting else { return }
+        isExporting = true
         do {
             guard let built = try await CompositionBuilder.build(project: project) else {
                 statusMessage = "Nothing to export."
+                isExporting = false
                 return
             }
             guard let session = AVAssetExportSession(asset: built.composition,
                                                      presetName: AVAssetExportPresetHighestQuality) else {
                 statusMessage = "Could not create export session."
+                isExporting = false
                 return
             }
             session.videoComposition = built.videoComposition
             session.audioMix = built.audioMix
 
             try? FileManager.default.removeItem(at: url)
-
-            isExporting = true
             exportProgress = 0
             statusMessage = "Exporting…"
 
