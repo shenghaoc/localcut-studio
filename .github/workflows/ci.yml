@@ -1,10 +1,10 @@
 name: CI
 
-# CI is paused: GitHub-hosted runners do not yet provide macOS 27, which this
-# project requires (MACOSX_DEPLOYMENT_TARGET = 27.0, Xcode 27 SDK). The build
-# job below is retained but only runs on manual dispatch. Restore the
-# `pull_request` and `push` triggers once macos-27 runners are available.
 on:
+  pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     name: Build (macOS)
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 30
     env:
       PROJECT: "LocalCut Studio.xcodeproj"
