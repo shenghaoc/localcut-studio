@@ -12,7 +12,7 @@
 
 ## Storage + recovery
 
-- [ ] **T2.1** Sandbox bookmark to `~/Movies/LocalCut Recordings/`; create per-session UUID directory.
+- [ ] **T2.1** First-recording UX picks the root folder via `NSOpenPanel` → security-scoped bookmark persisted in app settings. On every launch, resolve + `startAccessingSecurityScopedResource()` before the recovery scan; offer a "Choose recordings folder" command in Preferences for re-binding after a folder move.
 - [ ] **T2.2** Capacity preflight + live monitor (warn at 10%, stop at 5%).
 - [ ] **T2.3** Recovery scan on launch; surface partial sessions in the media bin.
 - [ ] **T2.4** Recovered partial `.mov` per source loads as one composition source per track — no concatenation needed since fragments are within a single file.

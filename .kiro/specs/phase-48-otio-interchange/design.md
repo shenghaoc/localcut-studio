@@ -31,6 +31,7 @@ The browser-editor's implementation is hand-rolled TypeScript with no runtime de
    | `TimelineMarker` | `Marker.2` on the `Stack` | zero-duration; default `PURPLE` |
    | `TimelineTransition` | `Transition.1` | total duration snapped; `in/out_offset` floor/round; cross-dissolve → `SMPTE_Dissolve`, others → `Custom_Transition` |
    | effects / transform / keyframes / LUT ref / fades | `Clip.metadata.localcut` | LUT by `key` + `fileName` only |
+   | Phase 35 speed curve / time remap | `Clip.metadata.localcut.speedCurve` (full curve) + the source range adjusted to honour the AVERAGE ramp ratio so foreign tools that ignore our namespace still get an output-duration-correct clip; emit a warning per non-uniform curve so the user knows the variation won't round-trip into apps that don't read `metadata.localcut` |
    | caption tracks + styling | `Timeline.metadata.localcut.captionTracks` | OTIO has no portable caption schema |
    | media fingerprint | `ExternalReference.metadata.localcut.fingerprint` | content identity for future re-linking |
 4. **Determinism.** The serialiser is a pure function of `ProjectDoc` (plus an options record). It reads `doc.savedAt` for any timestamp, generates no IDs, emits via `JSONEncoder` with `.sortedKeys + .prettyPrinted` over objects built in fixed key order. Goldens compare byte-for-byte.

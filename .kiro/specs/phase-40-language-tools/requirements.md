@@ -4,7 +4,7 @@
 
 - **R1.1** Probe `LanguageAvailability.status(from:to:)` (Translation framework) for the requested pair and `SystemLanguageModel.default.availability` (Foundation Models) for the draft pipeline at startup.
 - **R1.2** When either is `unavailable`, the entire language-tools surface is hidden (no error, no nag).
-- **R1.3** `downloadable` exposes a download button with displayed size; `downloading` shows progress.
+- **R1.3** UI switches on the Apple probe enums directly: Translation `.installed | .supported | .unsupported` and Foundation Models `.available | .unavailable(reason)`. The browser-editor's `downloadable / downloading / ready` symbol set is NOT introduced.
 - **R1.4** No other feature depends on this phase being available.
 
 ## R2 — Translation
@@ -21,7 +21,7 @@
 
 ## R4 — Offline
 
-- **R4.1** Once Apple reports the relevant models `ready`, the feature works offline.
+- **R4.1** Once Translation reports `.installed` and / or Foundation Models reports `.available`, the feature works offline.
 - **R4.2** No network calls beyond the OS-managed model download.
 
 ## R5 — Privacy

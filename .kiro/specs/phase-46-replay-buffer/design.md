@@ -10,7 +10,7 @@ The browser-editor's v1 runs DSP in the worker's capture loop (not an `AudioWork
 
 ## Prerequisites
 
-- Phase 41 capture engine — the ring buffer sits in front of the encoder; saves finalise into the chunked writer path.
+- Phase 41 capture engine — the ring buffer taps the **encoded output** of the Phase 41 writer (after VideoToolbox produces `CMSampleBuffer`s with keyframe attachments). Pre-encoder raw frames have no keyframe boundaries and at 4K30 a 256 MiB budget would cover only a couple of seconds; only the encoded-chunk tap gets the advertised 30 s – 300 s durations. Saves finalise the buffered encoded chunks into a fragmented `.mov` without re-encoding.
 - Phase 36 voice cleanup — provides the denoiser, gate, limiter, compressor inserts.
 - Audio master bus + meters (shared with Phase 36).
 
@@ -32,7 +32,7 @@ The browser-editor's v1 runs DSP in the worker's capture loop (not an `AudioWork
 
 ## Risks
 
-- Spill IO blocked by sandbox: the spill directory must be inside an already-granted user folder (we reuse the Phase 41 recordings directory's parent).
+- Spill IO under the App Sandbox: `Library/Caches/ReplayBuffer/` is inside the app container, so reading + writing don't need a security-scoped bookmark. This intentionally does NOT reuse Phase 41's recordings folder — that path is user-selected and may not be accessible without resolving its bookmark first; the cache path is always available.
 - A user repeatedly hitting "save last N seconds" can fill the user's Movies folder if not pruned; we offer a per-session retention setting and document the disk footprint.
 
 ## Non-goals

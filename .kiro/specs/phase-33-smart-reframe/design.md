@@ -22,9 +22,9 @@ The browser-editor ships UltraFace RFB-320 ONNX + a pure-DSP saliency fallback +
 5. **Keyframe generator.**
    - Sample interval default 0.5 s.
    - Scale starts at 1.0 (above the aspect's fill crop); only increases for tighter framing; never below 1.0.
-   - Position: `x = -subjectCx * scale`, `y = -subjectCy * scale` (subject in centred coords, negate to shift the layer).
+   - Position: `x = clamp(-subjectCx * scale, -panBound, panBound)`, `y = clamp(-subjectCy * scale, -panBoundY, panBoundY)`, where `panBound = (scale - aspectFillScale) / 2` is the overscan available after the aspect-fill crop at this scale. Subjects near a source edge therefore stay framed even at `scale = 1.0` (where `panBound = 0` for the aspect-fill axis), preventing the generator from translating the layer past the source extent and revealing letterbox.
    - Bound velocity (0.3 norm/s) and acceleration (0.5 norm/s²) iteratively until convergence.
-   - Safe-zone (action-safe centre ± 0.45): if compliance < 95 %, reduce scale by 1 % up to 20 % until satisfied; never below 1.0; if still unmet, note the limitation in the UI.
+   - Safe-zone (action-safe centre ± 0.45): if compliance < 95 %, **increase** scale by 1 % up to 20 % (zoom in for more overscan headroom) — never reduce below 1.0; if still unmet, note the limitation in the UI rather than risk letterbox.
 6. **Review overlay.** A SwiftUI overlay above `AVPlayerView` draws the target-aspect crop rectangle + a dashed action-safe inner rect at the current playhead, sampling the proposed keyframes via the existing keyframe evaluator. No GPU readback — pure SwiftUI shapes.
 7. **Apply.** Replaces the clip's transform keyframe tracks in one undoable transaction. After apply the user can edit, delete, or extend the keyframes by hand.
 

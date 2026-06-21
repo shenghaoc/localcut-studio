@@ -20,7 +20,7 @@
 
 ## R4 — Chapter export
 
-- **R4.1** YouTube chapter text `.txt` sidecar validated against YouTube's format rules (first at 00:00, ≥3 chapters, monotonic).
+- **R4.1** YouTube chapter text `.txt` sidecar validated against YouTube's format rules (first chapter at 00:00, ≥3 chapters, monotonic times, each chapter span ≥ 10 s). Sub-10-second spans are rejected with a clear error; the export dialog offers merge / drop options.
 - **R4.2** MP4 chapter track embedded when container + codec support it; sidecar always written.
 - **R4.3** A documented manual verification step confirms VLC shows the embedded chapters.
 

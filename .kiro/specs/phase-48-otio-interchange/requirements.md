@@ -17,7 +17,8 @@
 ## R3 — Mapping
 
 - **R3.1** Project metadata + tracks + clips + gaps + transitions + markers map per the design table.
-- **R3.2** LocalCut-specific fields (effects, transforms, keyframes, LUT refs, fades, caption styling, layout tracks) nest under `metadata.localcut`.
+- **R3.2** LocalCut-specific fields (effects, transforms, keyframes, LUT refs, fades, caption styling, layout tracks, **Phase 35 speed curves**) nest under `metadata.localcut`.
+- **R3.2a** Speed-ramped clips additionally adjust their emitted `source_range` to reflect the AVERAGE ramp ratio so foreign tools that ignore `metadata.localcut` still receive a clip of approximately the correct output duration. Non-uniform curves emit a warning per clip so the user knows variation won't round-trip into tools that don't honour our namespace.
 - **R3.3** Media references carry the file fingerprint (SHA-256) in metadata for future re-linking.
 - **R3.4** Missing media emits `MissingReference.1` with the original file name preserved.
 

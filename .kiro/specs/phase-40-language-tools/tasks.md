@@ -23,7 +23,7 @@
 
 ## Download lifecycle
 
-- [ ] **T4.1** `downloadable → downloading → ready` state machine surfaced in UI.
+- [ ] **T4.1** UI switches on Apple's probe enums (Translation `.installed | .supported | .unsupported`, Foundation Models `.available | .unavailable(reason)`) — no intermediate `downloadable / downloading / ready` symbols invented on top.
 - [ ] **T4.2** Cancellable download.
 
 ## Verification

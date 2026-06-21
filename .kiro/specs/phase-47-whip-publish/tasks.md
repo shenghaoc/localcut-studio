@@ -4,7 +4,7 @@
 
 ## Dependency + entitlements
 
-- [ ] **T1.1** Add GoogleWebRTC via SPM, pinned to a stable release; document size + licence (BSD-3-Clause) in design.md and `docs/USER-GUIDE.md`.
+- [ ] **T1.1** Add a macOS-capable WebRTC XCFramework via SPM (recommended primary: `stasel/WebRTC`; fallback: `webrtc-sdk/webrtc`), pinned to a stable release. The official GoogleWebRTC CocoaPods binary is iOS-only and would not link the macOS target. Document size + licence (BSD-3-Clause) in design.md and `docs/USER-GUIDE.md`; record which package + release we picked.
 - [ ] **T1.2** Build flag to drop the dep for users who don't need streaming.
 - [ ] **T1.3** Add `com.apple.security.network.client` to the entitlements file (sandbox blocks outgoing HTTP + WebRTC without it). Smoke-test that the publish flow makes its first POST under the sandbox.
 
@@ -23,7 +23,7 @@
 ## Media taps
 
 - [ ] **T4.1** `RTCVideoCapturer` subclass fed by Phase 45 program output.
-- [ ] **T4.2** Custom C++ `AudioDeviceModule` subclass (~200 lines) wrapped behind a Swift facade — GoogleWebRTC's Swift/Obj-C surface has no public push-PCM audio API; audio enters via the engine's ADM pull model. Master-bus samples feed in through an `AVAudioSinkNode` → ring buffer → ADM `NeedMorePlayData`.
+- [ ] **T4.2** Custom C++ `AudioDeviceModule` subclass (~200 lines) wrapped behind a Swift facade. WHIP is `sendonly`, so outbound audio rides the ADM **capture / recording** transport (e.g. `AudioTransport::RecordedDataIsAvailable`), NOT the playout path `NeedMorePlayData`. Master-bus samples are pulled from an `AVAudioSinkNode` into a ring buffer; a dedicated capture thread delivers fixed-size frames to `RecordedDataIsAvailable` at the 10 ms cadence WebRTC expects. The playout side of the ADM stays inert in this sendonly session.
 
 ## Settings
 
