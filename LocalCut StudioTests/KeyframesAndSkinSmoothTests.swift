@@ -121,7 +121,7 @@ func skinSmoothNeutralDefaults() {
     let effect = SkinSmoothEffect()
     #expect(effect.strength.defaultValue == 0)
     #expect(effect.maskWarmthBias == 0)
-    #expect(effect.maskLuminanceGate == 0.5)
+    #expect(effect.maskLuminanceGate == 0.1)
     #expect(!effect.bypass)
 }
 

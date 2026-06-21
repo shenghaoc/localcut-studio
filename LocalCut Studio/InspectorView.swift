@@ -251,6 +251,14 @@ struct InspectorView: View {
                 }))
             .toggleStyle(.switch)
 
+            Toggle("Show Mask", isOn: Binding(
+                get: { model.showSkinMask },
+                set: { newValue in
+                    model.showSkinMask = newValue
+                    model.scheduleRebuild()
+                }))
+            .toggleStyle(.switch)
+
             HStack {
                 Button("Reset") { model.resetClipSkinSmooth() }
                     .controlSize(.small)

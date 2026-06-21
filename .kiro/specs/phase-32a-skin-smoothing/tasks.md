@@ -17,6 +17,6 @@
 
 ## Verification
 
-- [x] **T3.1** Snapshot tests at three strengths on a skin + foliage + text fixture; goldens diff within tolerance.
+- [ ] **T3.1** Snapshot tests at three strengths on a skin + foliage + text fixture; goldens diff within tolerance.
 - [x] **T3.2** Unit tests for parameter clamping, identity at strength 0, codable round-trip.
 - [x] **T3.3** `xcodebuild` (Debug, macOS) green; no test count regression.

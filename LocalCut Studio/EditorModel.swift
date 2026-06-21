@@ -31,6 +31,9 @@ final class EditorModel {
     var exportProgress: Double?
     var isExporting = false
 
+    // Skin smoothing debug
+    var showSkinMask = false
+
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
     @ObservationIgnored var pendingRebuildTask: Task<Void, Never>?
@@ -848,7 +851,7 @@ final class EditorModel {
     func rebuild() async {
         let resumeAt = currentTime
         do {
-            let result = try await CompositionBuilder.build(project: project)
+            let result = try await CompositionBuilder.build(project: project, showSkinMask: showSkinMask)
             // A newer rebuild superseded this one; don't clobber the player.
             guard !Task.isCancelled else { return }
             guard let built = result else {

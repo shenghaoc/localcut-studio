@@ -90,7 +90,7 @@ nonisolated struct SkinSmoothEffect: Hashable, Codable {
     /// Bias for the skin-tone probability mask (positive = more inclusive).
     var maskWarmthBias: Float = 0
     /// Luminance gate for the mask (0 = all luminances, 1 = only mid-tones).
-    var maskLuminanceGate: Float = 0.5
+    var maskLuminanceGate: Float = 0.1
     /// When true, bypass the effect for A/B comparison.
     var bypass: Bool = false
 
@@ -258,14 +258,14 @@ nonisolated struct Keyframe<T: Interpolatable>: Hashable, Codable, Identifiable 
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, timeValue, timeScale, value
+        case id, timeValue, timescale, value
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         let timeValue = try container.decode(Int64.self, forKey: .timeValue)
-        let timeScale = try container.decode(Int32.self, forKey: .timeScale)
+        let timeScale = try container.decode(Int32.self, forKey: .timescale)
         time = CMTime(value: timeValue, timescale: timeScale)
         value = try container.decode(T.self, forKey: .value)
     }
@@ -274,7 +274,7 @@ nonisolated struct Keyframe<T: Interpolatable>: Hashable, Codable, Identifiable 
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(time.value, forKey: .timeValue)
-        try container.encode(time.timescale, forKey: .timeScale)
+        try container.encode(time.timescale, forKey: .timescale)
         try container.encode(value, forKey: .value)
     }
 }
@@ -358,10 +358,17 @@ nonisolated struct Keyframed<T: Interpolatable>: Hashable, Codable {
     }
 
     /// Updates an existing keyframe's time and/or value.
+    /// Prevents duplicate times by removing any other keyframe at the target time.
     mutating func updateKeyframe(id: UUID, time: CMTime? = nil, value: T? = nil) {
         guard let index = keyframes.firstIndex(where: { $0.id == id }) else { return }
-        if let time { keyframes[index].time = time }
-        if let value { keyframes[index].value = value }
+        if let time {
+            // Remove any other keyframe at the target time to prevent duplicates
+            keyframes.removeAll { $0.id != id && $0.time == time }
+        }
+        // Re-find index after potential removal
+        guard let currentIndex = keyframes.firstIndex(where: { $0.id == id }) else { return }
+        if let time { keyframes[currentIndex].time = time }
+        if let value { keyframes[currentIndex].value = value }
         keyframes.sort { $0.time < $1.time }
     }
 }
