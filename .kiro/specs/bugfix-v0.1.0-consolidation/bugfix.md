@@ -87,3 +87,21 @@ Clip blocks in `TimelineView` have no `accessibilityLabel` or accessibility trai
 `removeMedia` unconditionally set `selectedClipID = nil` and `selectedTransitionClipID = nil`. If the removed media item was unrelated to the currently selected clip, the selection was unnecessarily lost.
 
 - **Fix**: Only clear `selectedClipID`/`selectedTransitionClipID` if the selected clip/transition was orphaned by the removal (i.e. `clip(for:)` returns nil after orphan cleanup).
+
+### U1 — Media bin context menu missing "Remove"
+
+`MediaBinView`'s context menu only offered "Add to Timeline". There was no way to remove a media item from the project via the bin — users had to know about right-click menus in the timeline.
+
+- **Fix**: Add "Remove from Project" with `.destructive` role to the context menu, calling `model.removeMedia(itemID:)`.
+
+### U2 — Status bar uses iOS-style capsule overlay
+
+The status bar was rendered as a `Capsule`-shaped overlay at the bottom of the window, which is an iOS pattern. macOS status bars (e.g., Xcode, Safari, Finder) typically span the full width as a thin bar.
+
+- **Fix**: Change from `.overlay` with capsule to `.safeAreaInset(edge: .bottom)` with a full-width `.ultraThinMaterial` bar.
+
+### U3 — `AnyShapeStyle(.selection)` wrapper unnecessary
+
+`MediaRow` used `AnyShapeStyle(.selection)` for the selected background. The `AnyShapeStyle` type-erasure wrapper was unnecessary on macOS 26+ where `Color` directly accepts the standard system selection color.
+
+- **Fix**: Replace with `Color(.selectedContentBackgroundColor)`.

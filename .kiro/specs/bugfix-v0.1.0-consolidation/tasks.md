@@ -16,8 +16,12 @@
 - [x] **B12** Fix `wasPlaying` race: check live `isPlaying` instead of captured flag.
 - [x] **B13** Fix repetitive `isExporting` reset: single `defer` at top of `export(to:)`.
 - [x] **B14** Fix unconditional selection clear: only clear if clip/transition orphaned.
+- [x] **U1** Add "Remove from Project" to media bin context menu.
+- [x] **U2** Change status bar from capsule overlay to full-width bar (macOS HIG).
+- [x] **U3** Replace `AnyShapeStyle(.selection)` with standard `Color(.selectedContentBackgroundColor)`.
 
 ## Verification
 
 - [x] **V1** `xcodebuild` Debug/macOS clean build, zero warnings.
 - [x] **V2** All 71 existing tests pass (no regressions).
+- [x] **V3** UI audit: macOS HIG patterns confirmed (three-pane layout, grouped form style, .help tooltips, keyboard shortcuts, WindowConfigurator AppKit bridge).
