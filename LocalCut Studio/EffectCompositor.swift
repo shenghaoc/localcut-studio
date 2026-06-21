@@ -276,8 +276,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
 
         guard let cached = loadLUT(bookmarkData: bookmarkData) else {
-            // Log only on the first failure for this bookmark, not on each retry.
-            if case .some(.failed) = prior {} else {
+            // Log only on the first failure for this bookmark (prior == nil); a retry
+            // (prior == .failed) stays silent, and a healthy .loaded never reaches here.
+            if case nil = prior {
                 os_log(.error, "LUT bookmark unreadable — skipping LUT effect (will retry)")
             }
             LUTCache.shared.setEntry(.failed(Date()), forBookmark: bookmarkData)
