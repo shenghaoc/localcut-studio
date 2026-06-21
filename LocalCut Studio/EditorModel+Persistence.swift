@@ -112,10 +112,18 @@ extension EditorModel {
     /// Performs one step of a continuous gesture (slider drag, edge trim, clip
     /// move). The `before` snapshot is captured once at the start of the gesture
     /// and a single undo step is committed shortly after the gesture settles.
-    func performCoalescedUndoable(_ name: String, rebuild mode: RebuildMode, mutate: () -> Void) {
+    /// A change of `name` or `target` ends the previous gesture first, so two
+    /// adjacent gestures never fold into one undo step.
+    func performCoalescedUndoable(_ name: String, target: AnyHashable?,
+                                  rebuild mode: RebuildMode, mutate: () -> Void) {
+        if coalescedUndoBefore != nil,
+           coalescedUndoName != name || coalescedUndoTarget != target {
+            commitCoalescedUndo()
+        }
         if coalescedUndoBefore == nil {
             coalescedUndoBefore = captureState()
             coalescedUndoName = name
+            coalescedUndoTarget = target
         }
         mutate()
         markDirty()
@@ -142,6 +150,7 @@ extension EditorModel {
         guard let before = coalescedUndoBefore, let name = coalescedUndoName else { return }
         coalescedUndoBefore = nil
         coalescedUndoName = nil
+        coalescedUndoTarget = nil
         let after = captureState()
         guard before != after else { return }
         registerUndo(name: name, before: before, after: after)
@@ -193,7 +202,10 @@ extension EditorModel {
         refreshUndoFlags()
     }
 
-    func markDirty() { isDirty = true }
+    func markDirty() {
+        isDirty = true
+        mutationRevision &+= 1
+    }
 }
 
 // MARK: - Document lifecycle
@@ -270,20 +282,26 @@ extension EditorModel {
         project.videoTracks = makeTracks(from: document.videoTracks, kind: .video, fallbackName: "V1")
         project.audioTracks = makeTracks(from: document.audioTracks, kind: .audio, fallbackName: "A1")
 
-        documentURL = url
+        // A document from a newer schema would lose its future-only fields if we
+        // re-saved it as the current version, so don't adopt its URL — Save then
+        // prompts for a new location rather than silently overwriting it (R4.2).
+        let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
+        documentURL = isNewerSchema ? nil : url
         unresolvedMedia = unresolved
-        isDirty = false
+        isDirty = isNewerSchema
         undoManager.removeAllActions()
         refreshUndoFlags()
 
         await rebuild()
-        for item in project.mediaItems { await generateThumbnail(for: item) }
+        // Thumbnails are non-blocking so a multi-clip project opens immediately.
+        for item in project.mediaItems { Task { await generateThumbnail(for: item) } }
 
-        if unresolved.isEmpty {
-            statusMessage = "Opened \(project.name)."
-        } else {
-            statusMessage = "Opened \(project.name) — \(unresolved.count) media file(s) need relinking."
-        }
+        var notes: [String] = []
+        if isNewerSchema { notes.append("saved in a newer format — saving downconverts to this version") }
+        if !unresolved.isEmpty { notes.append("\(unresolved.count) media file(s) need relinking") }
+        statusMessage = notes.isEmpty
+            ? "Opened \(project.name)."
+            : "Opened \(project.name) — " + notes.joined(separator: "; ") + "."
     }
 
     private func makeTracks(from docs: [TrackDoc], kind: TrackKind, fallbackName: String) -> [Track] {
@@ -343,11 +361,14 @@ extension EditorModel {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
+            // Snapshot the mutation revision with the data: if the user keeps
+            // editing during the off-main write, those edits aren't in `data`,
+            // so we must not mark the document clean.
+            let savedRevision = mutationRevision
             let data = try encodedDocument()
             // Atomic write so a failure never corrupts the previous file (R4.1).
-            // The write itself runs off the main actor.
             try await Task.detached { try data.write(to: url, options: .atomic) }.value
-            adoptSaved(url: url)
+            adoptSaved(url: url, cleanIfRevision: savedRevision)
             statusMessage = "Saved \(url.lastPathComponent)."
         } catch {
             statusMessage = "Save failed: \(error.localizedDescription)"
@@ -372,16 +393,27 @@ extension EditorModel {
         }
     }
 
-    /// Encodes the current project, ensuring bookmarks are present first.
     private func encodedDocument() throws -> Data {
-        ensureBookmarks()
-        return try ProjectDocument(project: project).encoded()
+        try makeDocumentForSave().encoded()
     }
 
-    private func adoptSaved(url: URL) {
+    /// Builds the document to persist. Unresolved media refs are carried through
+    /// so saving before relinking never drops the references (and metadata) that
+    /// still-missing media — and the clips that point at it — depend on.
+    func makeDocumentForSave() -> ProjectDocument {
+        ensureBookmarks()
+        var document = ProjectDocument(project: project)
+        document.media.append(contentsOf: unresolvedMedia)
+        return document
+    }
+
+    /// Adopts a saved URL. Only clears the dirty flag when no edit has landed
+    /// since the saved snapshot (`cleanIfRevision`), so edits made during an
+    /// async write aren't lost to a skipped close prompt.
+    private func adoptSaved(url: URL, cleanIfRevision revision: Int? = nil) {
         documentURL = url
         project.name = url.deletingPathExtension().lastPathComponent
-        isDirty = false
+        if revision == nil || revision == mutationRevision { isDirty = false }
     }
 
     /// Ensures every media item carries a security-scoped bookmark before saving.
@@ -397,7 +429,7 @@ extension EditorModel {
 
     /// Prompts the user to locate the first unresolved media file and rebinds it
     /// to its original identity so referencing clips render again (R1.3).
-    func relinkNextMissingMedia() {
+    func relinkNextMissingMedia() async {
         guard let ref = unresolvedMedia.first else { return }
 
         let panel = NSOpenPanel()
@@ -416,15 +448,26 @@ extension EditorModel {
             statusMessage = "Could not access \(url.lastPathComponent)."
             return
         }
-        retainAccess(url, didStart: access)
 
+        // Read metadata from the chosen file rather than trusting the stale ref,
+        // so a wrong/short file is reflected (and warned about) instead of
+        // silently mismatching clip source ranges.
         let item = MediaItem(url: url, id: ref.id)
         item.name = ref.displayName
-        item.duration = ref.duration.cmTime
-        item.naturalSize = CGSize(width: ref.naturalWidth, height: ref.naturalHeight)
-        item.preferredTransform = ref.preferredTransform.cgTransform
-        item.hasVideo = ref.hasVideo
-        item.hasAudio = ref.hasAudio
+        do {
+            item.duration = try await item.asset.load(.duration)
+            if let videoTrack = try await item.asset.loadTracks(withMediaType: .video).first {
+                item.hasVideo = true
+                item.naturalSize = try await videoTrack.load(.naturalSize)
+                item.preferredTransform = try await videoTrack.load(.preferredTransform)
+            }
+            item.hasAudio = try await !item.asset.loadTracks(withMediaType: .audio).isEmpty
+        } catch {
+            if access { url.stopAccessingSecurityScopedResource() }
+            statusMessage = "Could not read \(url.lastPathComponent): \(error.localizedDescription)"
+            return
+        }
+        retainAccess(url, didStart: access)
         item.bookmark = bookmark
 
         // Undoable so the media item and the relink queue stay in sync across
@@ -433,14 +476,18 @@ extension EditorModel {
         performUndoable("Relink Media") {
             project.mediaItems.append(item)
             unresolvedMedia.removeAll { $0.id == ref.id }
+        }
+
+        let mismatched = (ref.hasVideo && !item.hasVideo) || (ref.hasAudio && !item.hasAudio)
+        if mismatched {
+            statusMessage = "Relinked \(item.name), but its tracks differ from the original — some clips may not render."
+        } else {
             statusMessage = unresolvedMedia.isEmpty
                 ? "Relinked \(item.name)."
                 : "Relinked \(item.name) — \(unresolvedMedia.count) remaining."
         }
-        Task {
-            await rebuild()
-            await generateThumbnail(for: item)
-        }
+        await rebuild()
+        await generateThumbnail(for: item)
     }
 
     /// Records a successful security-scoped start, keeping exactly one outstanding

@@ -189,6 +189,27 @@ struct PersistenceTests {
         #expect(clip.transition?.duration == time(1))
     }
 
+    @Test("Saving carries unresolved media refs so a save-before-relink keeps them")
+    func saveKeepsUnresolvedMedia() {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(fileURLWithPath: "/tmp/a.mov"))
+        media.bookmark = Data([0x01])
+        media.duration = time(5)
+        media.hasVideo = true
+        model.project.mediaItems.append(media)
+
+        let missing = MediaRef(
+            id: UUID(), displayName: "Missing", bookmark: Data([0x02]),
+            duration: CMTimeCode(time(3)), naturalWidth: 1920, naturalHeight: 1080,
+            preferredTransform: TransformCode(.identity), hasVideo: true, hasAudio: false)
+        model.unresolvedMedia = [missing]
+
+        let doc = model.makeDocumentForSave()
+        #expect(doc.media.count == 2)
+        #expect(doc.media.contains { $0.id == media.id })
+        #expect(doc.media.contains { $0.id == missing.id })
+    }
+
     @Test("Project snapshot survives a full JSON round trip")
     func projectSnapshotRoundTrip() throws {
         let project = Project()

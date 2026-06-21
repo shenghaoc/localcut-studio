@@ -149,9 +149,10 @@ struct EditorView: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)
+                .accessibilityHidden(true)
             Text("\(model.unresolvedMedia.count) media file(s) need relinking.")
                 .font(.caption)
-            Button("Relink…") { model.relinkNextMissingMedia() }
+            Button("Relink…") { Task { await model.relinkNextMissingMedia() } }
                 .controlSize(.small)
         }
         .padding(.horizontal, 10)

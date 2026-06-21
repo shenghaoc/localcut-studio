@@ -51,7 +51,12 @@ final class EditorModel {
     var redoTitle = "Redo"
     @ObservationIgnored var coalescedUndoBefore: ProjectState?
     @ObservationIgnored var coalescedUndoName: String?
+    @ObservationIgnored var coalescedUndoTarget: AnyHashable?
     @ObservationIgnored var coalescedCommitTask: Task<Void, Never>?
+
+    /// Monotonically increases on every mutation; lets an async save tell whether
+    /// the project changed between snapshotting its data and finishing the write.
+    @ObservationIgnored var mutationRevision = 0
 
     /// Security-scoped resources retained for the session, stopped on teardown.
     @ObservationIgnored nonisolated(unsafe) var accessedURLs: Set<URL> = []
@@ -89,17 +94,14 @@ final class EditorModel {
     /// Loads the given files into the media bin, reading metadata and a poster
     /// frame for each. Security-scoped access is retained for the session.
     func importMedia(urls: [URL]) async {
-        let before = captureState()
-        var importedAny = false
+        var loaded: [MediaItem] = []
         for url in urls {
             let didAccess = url.startAccessingSecurityScopedResource()
             let item = MediaItem(url: url)
             do {
-                let duration = try await item.asset.load(.duration)
-                item.duration = duration
+                item.duration = try await item.asset.load(.duration)
 
-                let videoTracks = try await item.asset.loadTracks(withMediaType: .video)
-                if let v = videoTracks.first {
+                if let v = try await item.asset.loadTracks(withMediaType: .video).first {
                     item.hasVideo = true
                     item.naturalSize = try await v.load(.naturalSize)
                     item.preferredTransform = try await v.load(.preferredTransform)
@@ -112,20 +114,23 @@ final class EditorModel {
                 item.bookmark = try? url.bookmarkData(options: .withSecurityScope,
                                                       includingResourceValuesForKeys: nil,
                                                       relativeTo: nil)
-
-                project.mediaItems.append(item)
-                importedAny = true
-                statusMessage = "Imported \(item.name)."
-                Task { await self.generateThumbnail(for: item) }
+                loaded.append(item)
             } catch {
                 if didAccess { url.stopAccessingSecurityScopedResource() }
                 statusMessage = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
             }
         }
-        if importedAny {
-            registerImportUndo(name: "Import Media", before: before)
-            markDirty()
-        }
+        guard !loaded.isEmpty else { return }
+
+        // Snapshot and append synchronously (no awaits between) so a concurrent
+        // edit made while metadata loaded can't be folded into the import's
+        // undo step.
+        let before = captureState()
+        project.mediaItems.append(contentsOf: loaded)
+        registerImportUndo(name: "Import Media", before: before)
+        markDirty()
+        statusMessage = loaded.count == 1 ? "Imported \(loaded[0].name)." : "Imported \(loaded.count) items."
+        for item in loaded { Task { await self.generateThumbnail(for: item) } }
     }
 
     func generateThumbnail(for item: MediaItem) async {
@@ -247,7 +252,7 @@ final class EditorModel {
     func updateSelectedClipCoalesced(_ actionName: String = "Adjust Clip",
                                      _ transform: @escaping (inout Clip) -> Void) {
         guard let id = selectedClipID else { return }
-        performCoalescedUndoable(actionName, rebuild: .debounced) {
+        performCoalescedUndoable(actionName, target: id, rebuild: .debounced) {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 transform(&track.clips[index])
@@ -279,7 +284,7 @@ final class EditorModel {
         }
         set {
             guard let id = selectedClipID else { return }
-            performCoalescedUndoable("Adjust Colour", rebuild: .debounced) {
+            performCoalescedUndoable("Adjust Colour", target: id, rebuild: .debounced) {
                 for track in allTracks {
                     guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                     var grade = newValue
@@ -444,7 +449,7 @@ final class EditorModel {
     func updateSelectedTransition(coalesced: Bool = false, _ body: (inout Transition) -> Void) {
         guard let id = selectedTransitionClipID else { return }
         if coalesced {
-            performCoalescedUndoable("Adjust Transition", rebuild: .debounced) {
+            performCoalescedUndoable("Adjust Transition", target: id, rebuild: .debounced) {
                 applyToSelectedTransition(id: id, body)
             }
         } else {
@@ -497,7 +502,7 @@ final class EditorModel {
     /// a one-frame minimum length, and neighbouring clip boundaries on the same
     /// track so trims never create overlaps.
     func trimClip(id: Clip.ID, edge: TrimEdge, to time: CMTime) {
-        performCoalescedUndoable("Trim Clip", rebuild: .immediate) {
+        performCoalescedUndoable("Trim Clip", target: id, rebuild: .immediate) {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 var clip = track.clips[index]
@@ -563,7 +568,7 @@ final class EditorModel {
         guard let targetTrack = allTracks.first(where: { $0.id == targetTrackID }) else { return }
         guard sourceTrack.kind == targetTrack.kind else { return }
 
-        performCoalescedUndoable("Move Clip", rebuild: .immediate) {
+        performCoalescedUndoable("Move Clip", target: id, rebuild: .immediate) {
             var clip = sourceTrack.clips[sourceIndex]
             // Moving a clip destroys its incoming-transition cut; drop it so the
             // transition can't silently re-bind to a new neighbour at the drop site.

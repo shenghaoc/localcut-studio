@@ -106,6 +106,29 @@ struct UndoRedoTests {
         #expect(!model.canUndo)
     }
 
+    @Test("Adjacent coalesced gestures on different clips stay separate undo steps")
+    func adjacentCoalescedGesturesSeparate() {
+        let (model, clipA) = makeModel()
+        let media = model.project.mediaItems[0]
+        let clipB = Clip(mediaID: media.id, sourceStart: .zero,
+                         duration: time(10), timelineStart: time(10))
+        model.project.videoTracks.first!.clips.append(clipB)
+
+        func clip(_ id: Clip.ID) -> Clip { videoClips(model).first { $0.id == id }! }
+
+        model.trimClip(id: clipB.id, edge: .right, to: time(15))   // gesture on B
+        model.trimClip(id: clipA, edge: .right, to: time(5))       // different target → ends B's gesture
+        #expect(clip(clipA).duration == time(5))
+        #expect(clip(clipB.id).duration == time(5))
+
+        model.undo()                                               // undoes only A
+        #expect(clip(clipA).duration == time(10))
+        #expect(clip(clipB.id).duration == time(5))
+
+        model.undo()                                               // undoes B
+        #expect(clip(clipB.id).duration == time(10))
+    }
+
     @Test("An opacity drag coalesces into a single undo step")
     func opacityUndo() {
         let (model, clipID) = makeModel()
