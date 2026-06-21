@@ -4,13 +4,48 @@ import UniformTypeIdentifiers
 
 @main
 struct LocalCutStudioApp: App {
+    // The editor owns the single AVPlayer and is the document controller; it lives
+    // at app scope so the menu commands and window can share it.
+    @State private var model = EditorModel()
+
     var body: some Scene {
         WindowGroup {
-            EditorView()
+            EditorView(model: model)
                 .frame(minWidth: 1000, minHeight: 640)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
+        .commands {
+            DocumentCommands(model: model)
+        }
+    }
+}
+
+/// File and Edit menu items backed by the editor's custom document controller.
+struct DocumentCommands: Commands {
+    let model: EditorModel
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New") { model.requestNew() }
+                .keyboardShortcut("n", modifiers: .command)
+            Button("Open…") { model.requestOpen() }
+                .keyboardShortcut("o", modifiers: .command)
+        }
+        CommandGroup(replacing: .saveItem) {
+            Button("Save") { model.requestSave() }
+                .keyboardShortcut("s", modifiers: .command)
+            Button("Save As…") { model.requestSaveAs() }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+        }
+        CommandGroup(replacing: .undoRedo) {
+            Button(model.undoTitle) { model.undo() }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!model.canUndo)
+            Button(model.redoTitle) { model.redo() }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(!model.canRedo)
+        }
     }
 }
 
@@ -18,7 +53,7 @@ struct LocalCutStudioApp: App {
 /// the timeline spanning the bottom. This is the native shell that mirrors the
 /// browser editor's three-pane workspace.
 struct EditorView: View {
-    @State private var model = EditorModel()
+    @Bindable var model: EditorModel
 
     var body: some View {
         VSplitView {
@@ -41,6 +76,7 @@ struct EditorView: View {
         .toolbar { toolbarContent }
         .navigationTitle(model.project.name)
         .overlay(alignment: .bottom) { statusBar }
+        .background(WindowConfigurator(model: model))
     }
 
     @ToolbarContentBuilder
@@ -92,15 +128,35 @@ struct EditorView: View {
         }
     }
 
+    @ViewBuilder
     private var statusBar: some View {
-        Text(model.statusMessage)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(.ultraThinMaterial, in: Capsule())
-            .padding(.bottom, 6)
-            .allowsHitTesting(false)
+        VStack(spacing: 6) {
+            if !model.unresolvedMedia.isEmpty {
+                relinkBanner
+            }
+            Text(model.statusMessage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.ultraThinMaterial, in: Capsule())
+                .allowsHitTesting(false)
+        }
+        .padding(.bottom, 6)
+    }
+
+    private var relinkBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+            Text("\(model.unresolvedMedia.count) media file(s) need relinking.")
+                .font(.caption)
+            Button("Relink…") { model.relinkNextMissingMedia() }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.ultraThinMaterial, in: Capsule())
     }
 
     private func exportTapped() {
@@ -110,5 +166,73 @@ struct EditorView: View {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task { await model.export(to: url) }
+    }
+}
+
+/// Bridges the SwiftUI window to AppKit so the title-bar edited dot, the
+/// represented document URL, and the save-on-close prompt reflect the model.
+/// The previous (SwiftUI) window delegate is preserved and forwarded to.
+private struct WindowConfigurator: NSViewRepresentable {
+    let model: EditorModel
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        let coordinator = context.coordinator
+        DispatchQueue.main.async { coordinator.attach(to: view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.model = model
+        DispatchQueue.main.async {
+            coordinator.attach(to: nsView.window)
+            coordinator.sync()
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSWindowDelegate {
+        var model: EditorModel
+        weak var window: NSWindow?
+        weak var previousDelegate: NSWindowDelegate?
+
+        init(model: EditorModel) {
+            self.model = model
+        }
+
+        func attach(to window: NSWindow?) {
+            guard let window else { return }
+            if window !== self.window {
+                self.window = window
+                if window.delegate !== self {
+                    previousDelegate = window.delegate
+                    window.delegate = self
+                }
+            }
+            sync()
+        }
+
+        /// Mirrors the model's edited/URL state onto the window chrome.
+        func sync() {
+            window?.isDocumentEdited = model.isDirty
+            window?.representedURL = model.documentURL
+        }
+
+        func windowShouldClose(_ sender: NSWindow) -> Bool {
+            model.confirmCloseSynchronously()
+        }
+
+        // Forward any delegate calls we don't implement to SwiftUI's delegate.
+        override func responds(to aSelector: Selector!) -> Bool {
+            super.responds(to: aSelector) || (previousDelegate?.responds(to: aSelector) ?? false)
+        }
+
+        override func forwardingTarget(for aSelector: Selector!) -> Any? {
+            if previousDelegate?.responds(to: aSelector) == true { return previousDelegate }
+            return super.forwardingTarget(for: aSelector)
+        }
     }
 }

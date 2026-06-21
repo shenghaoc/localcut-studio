@@ -1,0 +1,168 @@
+import Testing
+import Foundation
+import AVFoundation
+@testable import LocalCut_Studio
+
+@MainActor
+@Suite("Undo / Redo")
+struct UndoRedoTests {
+
+    private func time(_ seconds: Double) -> CMTime {
+        CMTime(seconds: seconds, preferredTimescale: 600)
+    }
+
+    /// A model with one 10s video clip on V1.
+    private func makeModel(clipDuration: Double = 10) -> (EditorModel, Clip.ID) {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        media.duration = time(clipDuration)
+        media.hasVideo = true
+        model.project.mediaItems.append(media)
+
+        let clip = Clip(mediaID: media.id, sourceStart: .zero,
+                        duration: time(clipDuration), timelineStart: .zero)
+        model.project.videoTracks.first!.clips.append(clip)
+        return (model, clip.id)
+    }
+
+    private func videoClips(_ model: EditorModel) -> [Clip] {
+        model.project.videoTracks.first!.clips
+    }
+
+    // MARK: - Discrete edits (R3.1, R3.3)
+
+    @Test("Delete then undo restores the clip; redo removes it again")
+    func deleteUndoRedo() {
+        let (model, clipID) = makeModel()
+        model.selectedClipID = clipID
+
+        model.deleteSelectedClip()
+        #expect(videoClips(model).isEmpty)
+        #expect(model.canUndo)
+        #expect(model.isDirty)
+
+        model.undo()
+        #expect(videoClips(model).count == 1)
+        #expect(videoClips(model)[0].id == clipID)
+        #expect(model.canRedo)
+
+        model.redo()
+        #expect(videoClips(model).isEmpty)
+    }
+
+    @Test("Undo label reflects the action name")
+    func undoLabel() {
+        let (model, clipID) = makeModel()
+        model.selectedClipID = clipID
+        model.deleteSelectedClip()
+        #expect(model.undoTitle.contains("Delete Clip"))
+        model.undo()
+        #expect(model.redoTitle.contains("Delete Clip"))
+    }
+
+    @Test("Split then undo collapses back to a single clip")
+    func splitUndo() {
+        let (model, clipID) = makeModel()
+        model.selectedClipID = clipID
+        model.currentTime = 4
+
+        model.splitSelectedClipAtPlayhead()
+        #expect(videoClips(model).count == 2)
+
+        model.undo()
+        #expect(videoClips(model).count == 1)
+        #expect(videoClips(model)[0].duration == time(10))
+    }
+
+    @Test("Changing render size is undoable")
+    func renderSizeUndo() {
+        let (model, _) = makeModel()
+        #expect(model.project.renderSize == CGSize(width: 1920, height: 1080))
+
+        model.setRenderSize(CGSize(width: 1280, height: 720))
+        #expect(model.project.renderSize == CGSize(width: 1280, height: 720))
+
+        model.undo()
+        #expect(model.project.renderSize == CGSize(width: 1920, height: 1080))
+    }
+
+    // MARK: - Coalesced gestures (R3.1)
+
+    @Test("A trim gesture is one undo step that restores the original clip")
+    func trimUndoIsOneStep() {
+        let (model, clipID) = makeModel()
+        let original = videoClips(model)[0]
+
+        // Simulate a drag: several trim updates in one gesture.
+        model.trimClip(id: clipID, edge: .right, to: time(8))
+        model.trimClip(id: clipID, edge: .right, to: time(6))
+        model.trimClip(id: clipID, edge: .right, to: time(5))
+        #expect(videoClips(model)[0].duration == time(5))
+
+        // One undo reverts the whole gesture (undo() flushes the coalesced step).
+        model.undo()
+        #expect(videoClips(model)[0].duration == original.duration)
+        #expect(videoClips(model)[0].sourceStart == original.sourceStart)
+        #expect(!model.canUndo)
+    }
+
+    @Test("An opacity drag coalesces into a single undo step")
+    func opacityUndo() {
+        let (model, clipID) = makeModel()
+        model.selectedClipID = clipID
+
+        model.updateSelectedClipCoalesced("Adjust Opacity") { $0.opacity = 0.8 }
+        model.updateSelectedClipCoalesced("Adjust Opacity") { $0.opacity = 0.5 }
+        #expect(videoClips(model)[0].opacity == 0.5)
+
+        model.undo()
+        #expect(videoClips(model)[0].opacity == 1)
+        #expect(!model.canUndo)
+    }
+
+    // MARK: - Sequencing
+
+    @Test("Undo/redo walks a multi-step history in order")
+    func multiStepHistory() {
+        let (model, clipID) = makeModel()
+        model.selectedClipID = clipID
+
+        model.setRenderSize(CGSize(width: 1280, height: 720))   // step 1
+        model.currentTime = 5
+        model.splitSelectedClipAtPlayhead()                     // step 2
+        #expect(videoClips(model).count == 2)
+        #expect(model.project.renderSize.width == 1280)
+
+        model.undo()                                            // undo split
+        #expect(videoClips(model).count == 1)
+        #expect(model.project.renderSize.width == 1280)
+
+        model.undo()                                            // undo render size
+        #expect(model.project.renderSize.width == 1920)
+        #expect(!model.canUndo)
+
+        model.redo()                                            // redo render size
+        #expect(model.project.renderSize.width == 1280)
+    }
+
+    @Test("Undo restores a removed transition")
+    func transitionRemoveUndo() {
+        let (model, _) = makeModel()
+        // Add a second adjacent clip so a transition can be hosted.
+        let media = model.project.mediaItems[0]
+        let clipB = Clip(mediaID: media.id, sourceStart: .zero,
+                         duration: time(5), timelineStart: time(10))
+        model.project.videoTracks.first!.clips.append(clipB)
+
+        model.selectedClipID = clipB.id
+        model.addTransitionToSelectedClip()
+        #expect(model.clip(for: clipB.id)?.transition != nil)
+
+        model.selectedTransitionClipID = clipB.id
+        model.removeSelectedTransition()
+        #expect(model.clip(for: clipB.id)?.transition == nil)
+
+        model.undo()   // undo the removal
+        #expect(model.clip(for: clipB.id)?.transition != nil)
+    }
+}
