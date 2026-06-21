@@ -83,15 +83,46 @@ struct ColourGrade: Hashable, Codable {
     }
 }
 
+/// Skin smoothing parameters with neutral defaults and clamping.
+nonisolated struct SkinSmoothEffect: Hashable, Codable {
+    /// Overall smoothing strength (0 = off, 1 = maximum).
+    var strength: Keyframed<Float>
+    /// Bias for the skin-tone probability mask (positive = more inclusive).
+    var maskWarmthBias: Float = 0
+    /// Luminance gate for the mask (0 = all luminances, 1 = only mid-tones).
+    var maskLuminanceGate: Float = 0.5
+    /// When true, bypass the effect for A/B comparison.
+    var bypass: Bool = false
+
+    init() {
+        self.strength = Keyframed<Float>(defaultValue: 0)
+    }
+
+    static var neutral: SkinSmoothEffect { SkinSmoothEffect() }
+
+    mutating func clamp() {
+        // Clamp static parameters
+        maskWarmthBias = max(-1, min(1, maskWarmthBias))
+        maskLuminanceGate = max(0, min(1, maskLuminanceGate))
+        // Clamp keyframe values
+        for i in strength.keyframes.indices {
+            strength.keyframes[i].value = max(0, min(1, strength.keyframes[i].value))
+        }
+        strength.defaultValue = max(0, min(1, strength.defaultValue))
+    }
+}
+
 /// An effect that can be applied to a video clip's source frames.
 enum Effect: Hashable, Codable {
     case colourGrade(ColourGrade)
     case lut(bookmark: Data)
+    case skinSmooth(SkinSmoothEffect)
 
     static func == (lhs: Effect, rhs: Effect) -> Bool {
         switch (lhs, rhs) {
         case (.colourGrade(let a), .colourGrade(let b)): a == b
         case (.lut(bookmark: let a), .lut(bookmark: let b)): a == b
+        case (.skinSmooth(let a), .skinSmooth(let b)): a == b
         default: false
         }
     }
@@ -100,6 +131,7 @@ enum Effect: Hashable, Codable {
         switch self {
         case .colourGrade(let g): hasher.combine(0); hasher.combine(g)
         case .lut(bookmark: let d): hasher.combine(1); hasher.combine(d)
+        case .skinSmooth(let s): hasher.combine(2); hasher.combine(s)
         }
     }
 }
@@ -197,6 +229,140 @@ final class Track: Identifiable {
     /// The first free time at the tail of the track, used for ripple-append.
     var endTime: CMTime {
         clips.reduce(.zero) { CMTimeMaximum($0, $1.timelineEnd) }
+    }
+}
+
+// MARK: - Keyframes
+
+/// A type that can be linearly interpolated between two values.
+nonisolated protocol Interpolatable: Hashable, Codable {
+    static func lerp(_ a: Self, _ b: Self, t: Float) -> Self
+}
+
+extension Float: Interpolatable {
+    static func lerp(_ a: Float, _ b: Float, t: Float) -> Float {
+        a + (b - a) * t
+    }
+}
+
+/// A single point in time with an associated value.
+nonisolated struct Keyframe<T: Interpolatable>: Hashable, Codable, Identifiable {
+    let id: UUID
+    var time: CMTime
+    var value: T
+
+    init(id: UUID = UUID(), time: CMTime, value: T) {
+        self.id = id
+        self.time = time
+        self.value = value
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, timeValue, timeScale, value
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        let timeValue = try container.decode(Int64.self, forKey: .timeValue)
+        let timeScale = try container.decode(Int32.self, forKey: .timeScale)
+        time = CMTime(value: timeValue, timescale: timeScale)
+        value = try container.decode(T.self, forKey: .value)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(time.value, forKey: .timeValue)
+        try container.encode(time.timescale, forKey: .timeScale)
+        try container.encode(value, forKey: .value)
+    }
+}
+
+/// A collection of keyframes that can be evaluated at any time.
+///
+/// If `keyframes` is empty, `defaultValue` is returned for all times.
+/// Otherwise, the value is linearly interpolated between surrounding keyframes.
+nonisolated struct Keyframed<T: Interpolatable>: Hashable, Codable {
+    /// The keyframes sorted by time.
+    var keyframes: [Keyframe<T>]
+    /// The value returned when no keyframes exist.
+    var defaultValue: T
+
+    init(defaultValue: T) {
+        self.keyframes = []
+        self.defaultValue = defaultValue
+    }
+
+    init(keyframes: [Keyframe<T>], defaultValue: T) {
+        self.keyframes = keyframes.sorted { $0.time < $1.time }
+        self.defaultValue = defaultValue
+    }
+
+    /// Whether this keyframed value has any animation.
+    var isAnimated: Bool { !keyframes.isEmpty }
+
+    /// Evaluates the value at the given time.
+    ///
+    /// - If `keyframes` is empty, returns `defaultValue`.
+    /// - If `time` ≤ first keyframe's time, returns first keyframe's value.
+    /// - If `time` ≥ last keyframe's time, returns last keyframe's value.
+    /// - Otherwise, linearly interpolates between surrounding keyframes.
+    nonisolated func value(at time: CMTime) -> T {
+        guard let first = keyframes.first else { return defaultValue }
+        guard let last = keyframes.last else { return defaultValue }
+
+        if time <= first.time { return first.value }
+        if time >= last.time { return last.value }
+
+        // Binary search for the keyframe just before `time`
+        var low = 0
+        var high = keyframes.count - 1
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if keyframes[mid].time <= time {
+                low = mid
+            } else {
+                high = mid - 1
+            }
+        }
+
+        let before = keyframes[low]
+        let after = keyframes[low + 1]
+
+        let elapsed = (time - before.time).seconds
+        let duration = (after.time - before.time).seconds
+        guard duration > 0 else { return before.value }
+
+        let t = Float(elapsed / duration)
+        return T.lerp(before.value, after.value, t: min(1, max(0, t)))
+    }
+
+    /// Adds a keyframe at the given time, maintaining sorted order.
+    mutating func addKeyframe(at time: CMTime, value: T) {
+        let keyframe = Keyframe(time: time, value: value)
+        if let index = keyframes.firstIndex(where: { $0.time >= time }) {
+            if keyframes[index].time == time {
+                keyframes[index] = keyframe
+            } else {
+                keyframes.insert(keyframe, at: index)
+            }
+        } else {
+            keyframes.append(keyframe)
+        }
+    }
+
+    /// Removes a keyframe by ID.
+    mutating func removeKeyframe(id: UUID) {
+        keyframes.removeAll { $0.id == id }
+    }
+
+    /// Updates an existing keyframe's time and/or value.
+    mutating func updateKeyframe(id: UUID, time: CMTime? = nil, value: T? = nil) {
+        guard let index = keyframes.firstIndex(where: { $0.id == id }) else { return }
+        if let time { keyframes[index].time = time }
+        if let value { keyframes[index].value = value }
+        keyframes.sort { $0.time < $1.time }
     }
 }
 

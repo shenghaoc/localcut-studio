@@ -147,7 +147,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         guard let sourceBuffer = request.sourceFrame(byTrackID: layer.trackID) else { return nil }
 
         var image = CIImage(cvPixelBuffer: sourceBuffer)
-        image = applyEffectChain(image, effects: layer.effects)
+        image = applyEffectChain(image, effects: layer.effects, at: request.compositionTime)
         image = image.transformed(by: layer.transform)
 
         if layer.opacity < 1 {
@@ -215,7 +215,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     // MARK: - Effect chain
 
-    nonisolated private func applyEffectChain(_ image: CIImage, effects: [Effect]) -> CIImage {
+    nonisolated private func applyEffectChain(_ image: CIImage, effects: [Effect], at time: CMTime = .zero) -> CIImage {
         var result = image
         for effect in effects {
             switch effect {
@@ -223,6 +223,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 result = applyColourGrade(result, grade: grade)
             case .lut(bookmark: let data):
                 result = applyLUT(result, bookmarkData: data) ?? result
+            case .skinSmooth(let params):
+                result = applySkinSmooth(result, params: params, at: time) ?? result
             }
         }
         return result
@@ -257,7 +259,111 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         return result
     }
 
-    /// How long a failed LUT load is cached before another attempt: long enough to
+    // MARK: - Skin smoothing
+
+    /// Applies skin smoothing using a chroma-based skin-tone mask and guided filter.
+    nonisolated private func applySkinSmooth(_ image: CIImage, params: SkinSmoothEffect, at time: CMTime) -> CIImage? {
+        guard !params.bypass else { return nil }
+
+        let strength = params.strength.value(at: time)
+        guard strength > 0 else { return nil }
+
+        // Step 1: Generate skin-tone probability mask
+        guard let mask = skinMask(image: image, warmthBias: params.maskWarmthBias, luminanceGate: params.maskLuminanceGate) else {
+            return nil
+        }
+
+        // Step 2: Apply guided filter smoothing
+        guard let smoothed = guidedFilterSmooth(image: image, mask: mask, strength: strength) else {
+            return nil
+        }
+
+        return smoothed
+    }
+
+    /// Generates a single-channel skin-tone probability mask in [0,1].
+    ///
+    /// Uses YCbCr color space to detect skin tones based on chroma values.
+    /// The mask is 1.0 where skin is likely, 0.0 elsewhere.
+    nonisolated private func skinMask(image: CIImage, warmthBias: Float, luminanceGate: Float) -> CIImage? {
+        // Convert to YCbCr space for skin detection
+        // Skin tones cluster in a specific region of Cb-Cr space:
+        // Cb: 77-127, Cr: 133-173 (for 8-bit values)
+        // We normalize to 0-1 range for our calculations
+
+        let skinMaskKernel = CIColorKernel(source: """
+            kernel vec4 skinMask(__sample image, float warmthBias, float luminanceGate) {
+                // Convert RGB to YCbCr
+                float y = 0.299 * image.r + 0.587 * image.g + 0.114 * image.b;
+                float cb = 128.0 - 0.168736 * image.r - 0.331264 * image.g + 0.5 * image.b;
+                float cr = 128.0 + 0.5 * image.r - 0.418688 * image.g - 0.081312 * image.b;
+
+                // Normalize to 0-1
+                cb = cb / 255.0;
+                cr = cr / 255.0;
+
+                // Skin tone detection in Cb-Cr space
+                // Typical skin: Cb in [0.3, 0.5], Cr in [0.5, 0.7]
+                float cbMin = 0.3 + warmthBias * 0.05;
+                float cbMax = 0.5 + warmthBias * 0.05;
+                float crMin = 0.5 + warmthBias * 0.05;
+                float crMax = 0.7 + warmthBias * 0.05;
+
+                // Soft falloff at edges
+                float cbDist = smoothstep(cbMin - 0.05, cbMin, cb) * (1.0 - smoothstep(cbMax, cbMax + 0.05, cb));
+                float crDist = smoothstep(crMin - 0.05, crMin, cr) * (1.0 - smoothstep(crMax, crMax + 0.05, cr));
+
+                float skinProb = cbDist * crDist;
+
+                // Luminance gate: reduce probability in very dark or very bright regions
+                float lumGate = smoothstep(0.0, luminanceGate * 0.5, y) * (1.0 - smoothstep(1.0 - luminanceGate * 0.5, 1.0, y));
+                skinProb *= lumGate;
+
+                return vec4(skinProb, skinProb, skinProb, 1.0);
+            }
+            """)
+
+        guard let kernel = skinMaskKernel else { return nil }
+
+        let bias = CGFloat(warmthBias)
+        let gate = CGFloat(luminanceGate)
+        return kernel.apply(extent: image.extent, arguments: [image, bias, gate])
+    }
+
+    /// Applies guided filter smoothing to the masked region of the image.
+    ///
+    /// The guided filter preserves edges while smoothing the masked (skin) regions.
+    /// It works by:
+    /// 1. Computing local mean and variance of the image in a window
+    /// 2. Using the mask to blend between original and smoothed image
+    nonisolated private func guidedFilterSmooth(image: CIImage, mask: CIImage, strength: Float) -> CIImage? {
+        // For simplicity, we use a box blur as a proxy for guided filter
+        // A full guided filter implementation would use the image as its own guide
+        // but CIFilter doesn't have a native guided filter, so we approximate:
+        // 1. Blur the image
+        // 2. Blend original and blurred based on mask and strength
+
+        // Apply a moderate blur to the image
+        guard let blurFilter = CIFilter(name: "CIGaussianBlur") else { return nil }
+        blurFilter.setValue(image, forKey: kCIInputImageKey)
+        blurFilter.setValue(strength * 10.0, forKey: kCIInputRadiusKey) // Scale radius with strength
+        guard let blurred = blurFilter.outputImage else { return nil }
+
+        // Clip blurred image to original extent
+        let clippedBlurred = blurred.cropped(to: image.extent)
+
+        // Blend: original * (1 - mask * strength) + blurred * (mask * strength)
+        let blendKernel = CIColorKernel(source: """
+            kernel vec4 skinBlend(__sample original, __sample smoothed, __sample mask, float strength) {
+                float maskVal = mask.r * strength;
+                return mix(original, smoothed, maskVal);
+            }
+            """)
+
+        guard let kernel = blendKernel else { return nil }
+        let strengthCGFloat = CGFloat(strength)
+        return kernel.apply(extent: image.extent, arguments: [image, clippedBlurred, mask, strengthCGFloat])
+    }
     /// avoid per-frame re-resolution/logging, short enough to recover when a file on
     /// a removable/network volume (or one still being written) becomes available.
     nonisolated private static let lutRetryInterval: TimeInterval = 3
