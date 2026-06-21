@@ -243,7 +243,7 @@ final class EditorModel {
         guard url.startAccessingSecurityScopedResource() else { return }
         defer { url.stopAccessingSecurityScopedResource() }
 
-        guard let bookmark = try? url.bookmarkData(options: .suitableForBookmarkFile, includingResourceValuesForKeys: nil, relativeTo: nil),
+        guard let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil),
               let id = selectedClipID else { return }
 
         for track in allTracks {
@@ -300,18 +300,13 @@ final class EditorModel {
 
         switch edge {
         case .left:
-            let newTimelineStart = CMTime(seconds: max(0, to.seconds), preferredTimescale: 600)
+            let minTimelineStart = max(.zero, clip.timelineStart - clip.sourceStart)
+            let maxTimelineStart = clip.timelineEnd - Self.minClipDuration
+            let clampedSeconds = max(minTimelineStart.seconds, min(maxTimelineStart.seconds, to.seconds))
+            let newTimelineStart = CMTime(seconds: clampedSeconds, preferredTimescale: 600)
             let delta = newTimelineStart - clip.timelineStart
-            let newSourceStart = max(.zero, clip.sourceStart + delta)
-            let rawDuration = clip.duration - (newTimelineStart - clip.timelineStart)
-            let newDuration = max(Self.minClipDuration, rawDuration)
-            let clampedSourceEnd = newSourceStart + newDuration
-            let finalDuration: CMTime
-            if clampedSourceEnd > sourceDuration {
-                finalDuration = max(Self.minClipDuration, sourceDuration - newSourceStart)
-            } else {
-                finalDuration = newDuration
-            }
+            let newSourceStart = clip.sourceStart + delta
+            let finalDuration = clip.duration - delta
 
             applyToClip(id: id) { clip in
                 clip.sourceStart = newSourceStart
@@ -320,16 +315,11 @@ final class EditorModel {
             }
 
         case .right:
-            let newTimelineEnd = CMTime(seconds: max(0, to.seconds), preferredTimescale: 600)
-            let rawDuration = newTimelineEnd - clip.timelineStart
-            let newDuration = max(Self.minClipDuration, rawDuration)
-            let sourceEnd = clip.sourceStart + newDuration
-            let finalDuration: CMTime
-            if sourceEnd > sourceDuration {
-                finalDuration = max(Self.minClipDuration, sourceDuration - clip.sourceStart)
-            } else {
-                finalDuration = newDuration
-            }
+            let minTimelineEnd = clip.timelineStart + Self.minClipDuration
+            let maxTimelineEnd = clip.timelineStart + (sourceDuration - clip.sourceStart)
+            let clampedSeconds = max(minTimelineEnd.seconds, min(maxTimelineEnd.seconds, to.seconds))
+            let newTimelineEnd = CMTime(seconds: clampedSeconds, preferredTimescale: 600)
+            let finalDuration = newTimelineEnd - clip.timelineStart
 
             applyToClip(id: id) { clip in
                 clip.duration = finalDuration
@@ -356,7 +346,7 @@ final class EditorModel {
             t.clips.removeAll { $0.id == id }
         }
 
-        let resolved = targetTrack.nearestNonOverlappingStart(for: source.duration, desired: start)
+        let resolved = targetTrack.nearestNonOverlappingStart(for: source.duration, desired: CMTimeMaximum(.zero, start))
         var moved = source
         moved.timelineStart = resolved
         targetTrack.clips.append(moved)

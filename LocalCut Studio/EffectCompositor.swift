@@ -85,11 +85,12 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             }
         }
 
-        guard let composited = result,
-              let destination = request.renderContext.newPixelBuffer() else {
+        guard let destination = request.renderContext.newPixelBuffer() else {
             request.finish(with: AVError(.invalidVideoComposition))
             return
         }
+
+        let composited = result ?? CIImage(color: .black).cropped(to: CGRect(origin: .zero, size: renderSize))
 
         let destinationRect = CGRect(origin: .zero, size: renderSize)
         Self.sharedCIContext.render(composited, to: destination, bounds: destinationRect, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
@@ -142,18 +143,31 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     }
 
     nonisolated private func applyLUT(_ image: CIImage, bookmarkData: Data) -> CIImage? {
-        var isStale = false
-        guard let url = try? URL(resolvingBookmarkData: bookmarkData, options: .withoutUI, bookmarkDataIsStale: &isStale),
-              !isStale,
-              url.startAccessingSecurityScopedResource() else { return nil }
-        defer { url.stopAccessingSecurityScopedResource() }
+        let cached = LUTCache.shared.lut(for: bookmarkData)
+        let dim: Int
+        let cubeData: Data
 
-        guard let lutData = try? Data(contentsOf: url) else { return nil }
-        guard let result = CubeLUTParser.parse(lutData) else { return nil }
+        if let cached {
+            dim = cached.dimension
+            cubeData = cached.cubeData
+        } else {
+            var isStale = false
+            guard let url = try? URL(resolvingBookmarkData: bookmarkData,
+                                     options: [.withSecurityScope, .withoutUI],
+                                     bookmarkDataIsStale: &isStale),
+                  !isStale,
+                  url.startAccessingSecurityScopedResource() else { return nil }
+            defer { url.stopAccessingSecurityScopedResource() }
 
-        let dim = result.dimension
-        let floats = result.table
-        let cubeData = Data(bytes: floats, count: floats.count * MemoryLayout<Float>.stride)
+            guard let lutData = try? Data(contentsOf: url),
+                  let result = CubeLUTParser.parse(lutData) else { return nil }
+
+            dim = result.dimension
+            let floats = result.table
+            cubeData = Data(bytes: floats, count: floats.count * MemoryLayout<Float>.stride)
+
+            LUTCache.shared.setLut(CachedLUT(dimension: dim, cubeData: cubeData), for: bookmarkData)
+        }
 
         guard let filter = CIFilter(name: "CIColorCubeWithColorSpace") else { return nil }
         filter.setValue(image, forKey: kCIInputImageKey)
@@ -161,6 +175,31 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         filter.setValue(cubeData, forKey: "inputCubeData")
         filter.setValue(CGColorSpace(name: CGColorSpace.sRGB), forKey: "inputColorSpace")
         return filter.outputImage
+    }
+}
+
+// MARK: - LUT cache
+
+private struct CachedLUT: Sendable {
+    let dimension: Int
+    let cubeData: Data
+}
+
+private final class LUTCache: @unchecked Sendable {
+    nonisolated(unsafe) static let shared = LUTCache()
+    nonisolated(unsafe) private let lock = NSLock()
+    nonisolated(unsafe) private var cache: [Data: CachedLUT] = [:]
+
+    nonisolated func lut(for data: Data) -> CachedLUT? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache[data]
+    }
+
+    nonisolated func setLut(_ lut: CachedLUT, for data: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        cache[data] = lut
     }
 }
 
@@ -185,7 +224,7 @@ private enum CubeLUTParser {
             guard !trimmed.isEmpty else { continue }
             if trimmed.hasPrefix("#") || trimmed.hasPrefix("TITLE") { continue }
 
-            let parts = trimmed.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true).map(String.init)
+            let parts = trimmed.split(maxSplits: 2, omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace }).map(String.init)
 
             if parts[0] == "LUT_3D_SIZE", parts.count >= 2 {
                 dimension = Int(parts[1]) ?? 0
@@ -204,18 +243,12 @@ private enum CubeLUTParser {
               entries.count == dimension * dimension * dimension else { return nil }
 
         var table = [Float](repeating: 0, count: dimension * dimension * dimension * 4)
-        var idx = 0
-        for r in 0..<dimension {
-            for g in 0..<dimension {
-                for b in 0..<dimension {
-                    let entry = entries[idx]
-                    table[(r * dimension * dimension + g * dimension + b) * 4 + 0] = entry[0]
-                    table[(r * dimension * dimension + g * dimension + b) * 4 + 1] = entry[1]
-                    table[(r * dimension * dimension + g * dimension + b) * 4 + 2] = entry[2]
-                    table[(r * dimension * dimension + g * dimension + b) * 4 + 3] = 1.0
-                    idx += 1
-                }
-            }
+        for i in 0..<entries.count {
+            let entry = entries[i]
+            table[i * 4 + 0] = entry[0]
+            table[i * 4 + 1] = entry[1]
+            table[i * 4 + 2] = entry[2]
+            table[i * 4 + 3] = 1.0
         }
 
         return CubeLUTResult(dimension: dimension, table: table)

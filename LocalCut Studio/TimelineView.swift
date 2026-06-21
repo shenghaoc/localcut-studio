@@ -10,8 +10,6 @@ struct TimelineView: View {
     private let rulerHeight: CGFloat = 24
     private let laneHeight: CGFloat = 56
     private let gutterWidth: CGFloat = 56
-    private let edgeHitZone: CGFloat = 8
-    private let snapPixelThreshold: CGFloat = 8
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
 
@@ -25,8 +23,6 @@ struct TimelineView: View {
     }
 
     @State private var dragState: DragState?
-    @State private var isCursorPushed = false
-    @State private var isHoveringEdge = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -129,18 +125,111 @@ struct TimelineView: View {
         ZStack(alignment: .topLeading) {
             Color.clear
             ForEach(track.clips) { clip in
-                clipBlock(clip, kind: track.kind)
+                ClipBlockView(
+                    clip: clip,
+                    kind: track.kind,
+                    model: model,
+                    pps: pps,
+                    laneHeight: laneHeight,
+                    dragState: $dragState,
+                    commitDrag: commitDrag)
             }
         }
         .frame(height: laneHeight)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    // MARK: Clip block with drag gesture
+    // MARK: - Drag commit
 
-    private func clipBlock(_ clip: Clip, kind: TrackKind) -> some View {
-        let baseWidth = max(CGFloat(clip.duration.seconds) * pps, 2)
-        let baseX = CGFloat(clip.timelineStart.seconds) * pps
+    private func commitDrag(finalLocation location: CGPoint, at translation: CGSize) {
+        guard let state = dragState else { return }
+        defer { dragState = nil }
+
+        let snapThreshold = Double(8 / pps)
+        let snapEnabled = !NSEvent.modifierFlags.contains(.option)
+
+        switch state.kind {
+        case .trimmingLeft:
+            let deltaTime = translation.width / pps
+            let rawTimelineStart = state.initialTimelineStart + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
+            let final = snapEnabled
+                ? model.resolveSnap(candidate: rawTimelineStart, thresholdSeconds: snapThreshold)
+                : rawTimelineStart
+            model.trimClip(id: state.clipID, edge: .left, to: final)
+
+        case .trimmingRight:
+            let deltaTime = translation.width / pps
+            let rawTimelineEnd = state.initialTimelineStart + state.initialDuration + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
+            let final = snapEnabled
+                ? model.resolveSnap(candidate: rawTimelineEnd, thresholdSeconds: snapThreshold)
+                : rawTimelineEnd
+            model.trimClip(id: state.clipID, edge: .right, to: final)
+
+        case .moving:
+            let deltaTime = translation.width / pps
+            let rawStart = state.initialTimelineStart + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
+            let snapped = snapEnabled
+                ? model.resolveSnap(candidate: rawStart, thresholdSeconds: snapThreshold)
+                : rawStart
+
+            let allTracks = model.project.videoTracks + model.project.audioTracks
+            let laneY = location.y - rulerHeight
+            let rawTrackIndex = max(0, min(allTracks.count - 1, Int(laneY / laneHeight)))
+
+            let targetTrack = allTracks[rawTrackIndex]
+            let sameKindTracks: [Track] = targetTrack.kind == .video ? model.project.videoTracks : model.project.audioTracks
+            let sameKindIndex = sameKindTracks.firstIndex { $0.id == targetTrack.id } ?? 0
+
+            model.moveClip(id: state.clipID, toTrackIndex: sameKindIndex, start: snapped)
+        }
+    }
+
+    // MARK: Playhead
+
+    private var playhead: some View {
+        let x = CGFloat(model.currentTime) * pps
+        return Rectangle()
+            .fill(Color.red)
+            .frame(width: 1.5)
+            .frame(maxHeight: .infinity)
+            .offset(x: x)
+            .allowsHitTesting(false)
+    }
+
+    /// Choose a tick spacing (seconds) that stays legible at the current zoom.
+    private func tickStep() -> Double {
+        let targetPixels: CGFloat = 60
+        let raw = Double(targetPixels / pps)
+        let candidates: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300]
+        return candidates.first { $0 >= raw } ?? 600
+    }
+}
+
+// MARK: - Clip block view
+
+private struct ClipBlockView: View {
+    let clip: Clip
+    let kind: TrackKind
+    let model: EditorModel
+    let pps: CGFloat
+    let laneHeight: CGFloat
+    @Binding var dragState: DragState?
+    let commitDrag: (CGPoint, CGSize) -> Void
+
+    private let edgeHitZone: CGFloat = 8
+
+    @State private var isCursorPushed = false
+    @State private var isHoveringEdge = false
+
+    private var baseWidth: CGFloat {
+        max(CGFloat(clip.duration.seconds) * pps, 2)
+    }
+
+    private var baseX: CGFloat {
+        CGFloat(clip.timelineStart.seconds) * pps
+    }
+
+    var body: some View {
         let isSelected = model.selectedClipID == clip.id
         let baseColor: Color = kind == .video ? .blue : .green
 
@@ -210,67 +299,18 @@ struct TimelineView: View {
                         }
                     }
                     .onEnded { value in
-                        commitDrag(finalLocation: value.location, at: value.translation)
+                        commitDrag(value.location, value.translation)
                     }
             )
             .onContinuousHover(coordinateSpace: .local) { phase in
-                handleHover(phase, clipWidth: baseWidth)
+                handleHover(phase)
             }
     }
 
-    // MARK: - Drag commit
-
-    private func commitDrag(finalLocation location: CGPoint, at translation: CGSize) {
-        guard let state = dragState else { return }
-        defer { dragState = nil }
-
-        let snapThreshold = Double(snapPixelThreshold / pps)
-        let snapEnabled = !NSEvent.modifierFlags.contains(.option)
-
-        switch state.kind {
-        case .trimmingLeft:
-            let deltaTime = translation.width / pps
-            let rawTimelineStart = state.initialTimelineStart + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
-            let final = snapEnabled
-                ? model.resolveSnap(candidate: rawTimelineStart, thresholdSeconds: snapThreshold)
-                : rawTimelineStart
-            model.trimClip(id: state.clipID, edge: .left, to: final)
-
-        case .trimmingRight:
-            let deltaTime = translation.width / pps
-            let rawTimelineEnd = state.initialTimelineStart + state.initialDuration + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
-            let final = snapEnabled
-                ? model.resolveSnap(candidate: rawTimelineEnd, thresholdSeconds: snapThreshold)
-                : rawTimelineEnd
-            model.trimClip(id: state.clipID, edge: .right, to: final)
-
-        case .moving:
-            let deltaTime = translation.width / pps
-            let rawStart = state.initialTimelineStart + CMTime(seconds: Double(deltaTime), preferredTimescale: 600)
-            let snapped = snapEnabled
-                ? model.resolveSnap(candidate: rawStart, thresholdSeconds: snapThreshold)
-                : rawStart
-
-            // Determine target track index from the final Y location.
-            let allTracks = model.project.videoTracks + model.project.audioTracks
-            let laneY = location.y - rulerHeight
-            let rawTrackIndex = max(0, min(allTracks.count - 1, Int(laneY / laneHeight)))
-
-            // Map to same-kind track index.
-            let targetTrack = allTracks[rawTrackIndex]
-            let sameKindTracks: [Track] = targetTrack.kind == .video ? model.project.videoTracks : model.project.audioTracks
-            let sameKindIndex = sameKindTracks.firstIndex { $0.id == targetTrack.id } ?? 0
-
-            model.moveClip(id: state.clipID, toTrackIndex: sameKindIndex, start: snapped)
-        }
-    }
-
-    // MARK: - Hover cursor
-
-    private func handleHover(_ phase: HoverPhase, clipWidth: CGFloat) {
+    private func handleHover(_ phase: HoverPhase) {
         switch phase {
         case .active(let point):
-            let onEdge = point.x < edgeHitZone || point.x > clipWidth - edgeHitZone
+            let onEdge = point.x < edgeHitZone || point.x > baseWidth - edgeHitZone
             if onEdge != isHoveringEdge {
                 if isCursorPushed { NSCursor.pop(); isCursorPushed = false }
                 isHoveringEdge = onEdge
@@ -285,26 +325,6 @@ struct TimelineView: View {
             if isCursorPushed { NSCursor.pop(); isCursorPushed = false }
             isHoveringEdge = false
         }
-    }
-
-    // MARK: Playhead
-
-    private var playhead: some View {
-        let x = CGFloat(model.currentTime) * pps
-        return Rectangle()
-            .fill(Color.red)
-            .frame(width: 1.5)
-            .frame(maxHeight: .infinity)
-            .offset(x: x)
-            .allowsHitTesting(false)
-    }
-
-    /// Choose a tick spacing (seconds) that stays legible at the current zoom.
-    private func tickStep() -> Double {
-        let targetPixels: CGFloat = 60
-        let raw = Double(targetPixels / pps)
-        let candidates: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300]
-        return candidates.first { $0 >= raw } ?? 600
     }
 }
 
