@@ -184,23 +184,19 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     nonisolated private func crossDissolve(outgoing: CIImage, incoming: CIImage, progress: Float) -> CIImage {
         let fadedOut = scaled(outgoing, by: 1 - progress)
         let fadedIn = scaled(incoming, by: progress)
-        guard let filter = CIFilter(name: "CIAdditionCompositing") else {
-            return fadedIn.composited(over: fadedOut)
-        }
-        filter.setValue(fadedIn, forKey: kCIInputImageKey)
-        filter.setValue(fadedOut, forKey: kCIInputBackgroundImageKey)
+        let filter = CIFilter.additionCompositing()
+        filter.inputImage = fadedIn
+        filter.backgroundImage = fadedOut
         return filter.outputImage ?? fadedIn.composited(over: fadedOut)
     }
 
-    /// A directional bars-swipe transition via Core Image.
+    /// A directional bars-swipe transition via Core Image. The type-safe builtin
+    /// is created with the filter's default angle/width/bar-offset already set.
     nonisolated private func wipe(outgoing: CIImage, incoming: CIImage, progress: Float) -> CIImage {
-        guard let filter = CIFilter(name: "CIBarsSwipeTransition") else {
-            return crossDissolve(outgoing: outgoing, incoming: incoming, progress: progress)
-        }
-        filter.setDefaults()
-        filter.setValue(outgoing, forKey: kCIInputImageKey)
-        filter.setValue(incoming, forKey: "inputTargetImage")
-        filter.setValue(progress, forKey: kCIInputTimeKey)
+        let filter = CIFilter.barsSwipeTransition()
+        filter.inputImage = outgoing
+        filter.targetImage = incoming
+        filter.time = progress
         return filter.outputImage ?? crossDissolve(outgoing: outgoing, incoming: incoming, progress: progress)
     }
 
@@ -236,32 +232,26 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         var result = image
 
         if grade.exposure != 0 {
-            if let output = outputImage(named: "CIExposureAdjust", configure: { filter in
-                filter.setValue(result, forKey: kCIInputImageKey)
-                filter.setValue(grade.exposure, forKey: "inputEV")
-            }) {
-                result = output
-            }
+            let filter = CIFilter.exposureAdjust()
+            filter.inputImage = result
+            filter.ev = grade.exposure
+            result = filter.outputImage ?? result
         }
 
         if grade.contrast != 1 || grade.saturation != 1 {
-            if let output = outputImage(named: "CIColorControls", configure: { filter in
-                filter.setValue(result, forKey: kCIInputImageKey)
-                filter.setValue(grade.contrast, forKey: "inputContrast")
-                filter.setValue(grade.saturation, forKey: "inputSaturation")
-            }) {
-                result = output
-            }
+            let filter = CIFilter.colorControls()
+            filter.inputImage = result
+            filter.contrast = grade.contrast
+            filter.saturation = grade.saturation
+            result = filter.outputImage ?? result
         }
 
         if grade.temperatureOffset != 0 || grade.tintOffset != 0 {
-            if let output = outputImage(named: "CITemperatureAndTint", configure: { filter in
-                filter.setValue(result, forKey: kCIInputImageKey)
-                filter.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
-                filter.setValue(CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset)), forKey: "inputTargetNeutral")
-            }) {
-                result = output
-            }
+            let filter = CIFilter.temperatureAndTint()
+            filter.inputImage = result
+            filter.neutral = CIVector(x: 6500, y: 0)
+            filter.targetNeutral = CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset))
+            result = filter.outputImage ?? result
         }
 
         return result
@@ -296,18 +286,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     }
 
     nonisolated private func colorCube(image: CIImage, dimension: Int, cubeData: Data) -> CIImage? {
-        outputImage(named: "CIColorCubeWithColorSpace", configure: { filter in
-            filter.setValue(image, forKey: kCIInputImageKey)
-            filter.setValue(Float(dimension), forKey: "inputCubeDimension")
-            filter.setValue(cubeData, forKey: "inputCubeData")
-            filter.setValue(Self.sRGBColorSpace, forKey: "inputColorSpace")
-        })
-    }
-
-    nonisolated private func outputImage(named name: String, configure: (CIFilter) -> Void) -> CIImage? {
-        guard let filter = CIFilter(name: name) else { return nil }
-        filter.setDefaults()
-        configure(filter)
+        let filter = CIFilter.colorCubeWithColorSpace()
+        filter.inputImage = image
+        filter.cubeDimension = Float(dimension)
+        filter.cubeData = cubeData
+        filter.colorSpace = Self.sRGBColorSpace
         return filter.outputImage
     }
 }
