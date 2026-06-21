@@ -42,6 +42,48 @@ enum TrackKind: Hashable {
     case audio
 }
 
+// MARK: - Colour Grading
+
+/// Perceptual colour-adjustment parameters with neutral defaults and clamping.
+struct ColourGrade: Hashable, Codable {
+    var exposure: Float = 0        // CIExposureAdjust.inputEV, range [-2, 2]
+    var contrast: Float = 1        // CIColorControls.inputContrast, range [0.5, 1.5]
+    var saturation: Float = 1      // CIColorControls.inputSaturation, range [0, 2]
+    var temperatureOffset: Float = 0  // CITemperatureAndTint offset from 6500K, range [-4000, 4000]
+    var tintOffset: Float = 0         // CITemperatureAndTint offset from 0, range [-150, 150]
+
+    static let neutral = ColourGrade()
+
+    mutating func clamp() {
+        exposure = max(-2, min(2, exposure))
+        contrast = max(0.5, min(1.5, contrast))
+        saturation = max(0, min(2, saturation))
+        temperatureOffset = max(-4000, min(4000, temperatureOffset))
+        tintOffset = max(-150, min(150, tintOffset))
+    }
+}
+
+/// An effect that can be applied to a video clip's source frames.
+enum Effect: Hashable, Codable {
+    case colourGrade(ColourGrade)
+    case lut(bookmark: Data)
+
+    static func == (lhs: Effect, rhs: Effect) -> Bool {
+        switch (lhs, rhs) {
+        case (.colourGrade(let a), .colourGrade(let b)): a == b
+        case (.lut(bookmark: let a), .lut(bookmark: let b)): a == b
+        default: false
+        }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        switch self {
+        case .colourGrade(let g): hasher.combine(0); hasher.combine(g)
+        case .lut(bookmark: let d): hasher.combine(1); hasher.combine(d)
+        }
+    }
+}
+
 /// A single placement of (part of) a media item on a track's timeline.
 struct Clip: Identifiable, Hashable {
     let id = UUID()
@@ -56,6 +98,9 @@ struct Clip: Identifiable, Hashable {
 
     /// Per-clip opacity used when compositing video layers (0...1).
     var opacity: Float = 1
+
+    /// Ordered effect chain applied to every source frame of this clip.
+    var effects: [Effect] = []
 
     var timelineEnd: CMTime { timelineStart + duration }
 

@@ -14,18 +14,19 @@ struct BuiltComposition {
 /// (`AVPlayerItem`) and export (`AVAssetExportSession`).
 ///
 /// This is the native counterpart to the browser project's compositing engine:
-/// instead of a WebGPU pipeline we lean on `AVMutableVideoComposition`'s layer
-/// instructions to transform and stack each track.
+/// instead of a WebGPU pipeline we lean on AVFoundation composition tracks plus
+/// a custom video compositor to transform, grade, and stack each track.
 enum CompositionBuilder {
 
     enum BuildError: Error { case noVideoTrackInSource, noAudioTrackInSource }
 
     /// One placed clip on a composition track, in timeline coordinates, with the
-    /// transform/opacity to apply while it is on screen.
+    /// transform/opacity/effects to apply while it is on screen.
     private struct VideoSegment {
         let timeRange: CMTimeRange
         let transform: CGAffineTransform
         let opacity: Float
+        let effects: [Effect]
     }
 
     static func build(project: Project) async throws -> BuiltComposition? {
@@ -56,7 +57,8 @@ enum CompositionBuilder {
                 segments.append(VideoSegment(
                     timeRange: CMTimeRange(start: clip.timelineStart, duration: clip.duration),
                     transform: transform,
-                    opacity: clip.opacity))
+                    opacity: clip.opacity,
+                    effects: clip.effects))
             }
             trackSegments.append((compTrack, segments))
         }
@@ -92,9 +94,9 @@ enum CompositionBuilder {
 
     // MARK: - Video composition
 
-    /// Builds non-overlapping instructions covering the timeline. For each gap
-    /// between clip boundaries we emit one instruction whose layer instructions
-    /// describe every track segment visible during that interval.
+    /// Builds non-overlapping custom instructions covering the timeline. For
+    /// each gap between clip boundaries we emit one instruction whose layer
+    /// metadata describes every track segment visible during that interval.
     private static func makeVideoComposition(
         composition: AVComposition,
         trackSegments: [(track: AVCompositionTrack, segments: [VideoSegment])],
@@ -115,7 +117,7 @@ enum CompositionBuilder {
         }
         let boundaries = boundarySet.sorted()
 
-        var instructions: [AVVideoCompositionInstruction] = []
+        var instructions: [AVVideoCompositionInstructionProtocol] = []
         for i in 0..<(boundaries.count - 1) {
             let start = CMTime(seconds: boundaries[i], preferredTimescale: 600)
             let end = CMTime(seconds: boundaries[i + 1], preferredTimescale: 600)
@@ -124,31 +126,27 @@ enum CompositionBuilder {
 
             let midpoint = boundaries[i] + (boundaries[i + 1] - boundaries[i]) / 2
 
-            // Topmost track first so it composites in front.
-            var layerInstructions: [AVVideoCompositionLayerInstruction] = []
-            for entry in trackSegments.reversed() {
+            // Build layers bottom-to-top so the compositor composites in the correct order.
+            var layers: [CompositorLayer] = []
+            for entry in trackSegments {
                 guard let seg = entry.segments.first(where: {
                     $0.timeRange.start.seconds <= midpoint && midpoint < $0.timeRange.end.seconds
                 }) else { continue }
 
-                var layerConfig = AVVideoCompositionLayerInstruction.Configuration(trackID: entry.track.trackID)
-                layerConfig.setTransform(seg.transform, at: range.start)
-                layerConfig.setOpacity(seg.opacity, at: range.start)
-                layerInstructions.append(AVVideoCompositionLayerInstruction(configuration: layerConfig))
+                layers.append(CompositorLayer(
+                    trackID: entry.track.trackID,
+                    transform: seg.transform,
+                    opacity: seg.opacity,
+                    effects: seg.effects))
             }
 
-            let instructionConfig = AVVideoCompositionInstruction.Configuration(
-                backgroundColor: CGColor(red: 0, green: 0, blue: 0, alpha: 1),
-                enablePostProcessing: false,
-                layerInstructions: layerInstructions,
-                requiredSourceSampleDataTrackIDs: [],
-                timeRange: range)
-            instructions.append(AVVideoCompositionInstruction(configuration: instructionConfig))
+            instructions.append(EffectCompositionInstruction(timeRange: range, layers: layers))
         }
 
         var config = try await AVVideoComposition.Configuration(for: composition)
         config.renderSize = renderSize
         config.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))
+        config.customVideoCompositorClass = EffectCompositor.self
         config.instructions = instructions
         return AVVideoComposition(configuration: config)
     }

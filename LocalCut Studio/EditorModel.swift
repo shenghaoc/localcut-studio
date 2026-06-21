@@ -33,6 +33,7 @@ final class EditorModel {
 
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
+    @ObservationIgnored private var pendingRebuildTask: Task<Void, Never>?
 
     init() {
         let interval = CMTime(value: 1, timescale: 30)
@@ -52,6 +53,7 @@ final class EditorModel {
     }
 
     deinit {
+        pendingRebuildTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
     }
@@ -154,7 +156,8 @@ final class EditorModel {
                          sourceStart: clip.sourceStart + offset,
                          duration: clip.duration - offset,
                          timelineStart: playhead,
-                         opacity: clip.opacity)
+                         opacity: clip.opacity,
+                         effects: clip.effects)
 
             track.clips.replaceSubrange(index...index, with: [left, right])
             selectedClipID = left.id
@@ -175,6 +178,98 @@ final class EditorModel {
         }
     }
 
+    /// Mutates the selected clip and schedules a debounced rebuild (for continuous
+    /// drags such as colour sliders). Cancels any pending rebuild.
+    func updateSelectedClipCoalesced(_ transform: (inout Clip) -> Void) {
+        guard let id = selectedClipID else { return }
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+            transform(&track.clips[index])
+            rebuildDebounced()
+            return
+        }
+    }
+
+    private func rebuildDebounced(after delay: Duration = .milliseconds(200)) {
+        pendingRebuildTask?.cancel()
+        pendingRebuildTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled else { return }
+            await rebuild()
+        }
+    }
+
+    // MARK: - Colour grading
+
+    /// Returns the colour grade for the selected clip, inserting a neutral one if absent.
+    var selectedClipGrade: ColourGrade {
+        get {
+            guard let clip = selectedClip else { return .neutral }
+            if let effect = clip.effects.first(where: { if case .colourGrade = $0 { return true }; return false }),
+               case .colourGrade(let g) = effect {
+                return g
+            }
+            return .neutral
+        }
+        set {
+            guard let id = selectedClipID else { return }
+            for track in allTracks {
+                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                var grade = newValue
+                grade.clamp()
+                if let effectIndex = track.clips[index].effects.firstIndex(where: {
+                    if case .colourGrade = $0 { return true }; return false
+                }) {
+                    track.clips[index].effects[effectIndex] = .colourGrade(grade)
+                } else {
+                    track.clips[index].effects.append(.colourGrade(grade))
+                }
+                rebuildDebounced()
+                return
+            }
+        }
+    }
+
+    /// Removes all colour effects from the selected clip.
+    func resetClipColourEffects() {
+        guard let id = selectedClipID else { return }
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+            track.clips[index].effects.removeAll()
+            Task { await rebuild() }
+            return
+        }
+    }
+
+    /// Imports a .cube LUT file and attaches it as a LUT effect on the selected clip.
+    func importLUT(url: URL) {
+        guard let id = selectedClipID,
+              let selectedTrack = track(for: id),
+              selectedTrack.kind == .video else {
+            statusMessage = "Select a video clip before importing a LUT."
+            return
+        }
+
+        guard url.startAccessingSecurityScopedResource() else {
+            statusMessage = "Could not access \(url.lastPathComponent)."
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        guard let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) else {
+            statusMessage = "Could not store access to \(url.lastPathComponent)."
+            return
+        }
+
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+            track.clips[index].effects.append(.lut(bookmark: bookmark))
+            statusMessage = "Imported LUT \(url.lastPathComponent)."
+            Task { await rebuild() }
+            return
+        }
+    }
+
     var selectedClip: Clip? {
         guard let id = selectedClipID else { return nil }
         for track in allTracks {
@@ -186,6 +281,11 @@ final class EditorModel {
     var selectedMedia: MediaItem? {
         guard let id = selectedMediaID else { return nil }
         return project.media(for: id)
+    }
+
+    /// Finds the `Track` that contains the clip with the given ID.
+    func track(for clipID: Clip.ID) -> Track? {
+        allTracks.first { $0.clips.contains(where: { $0.id == clipID }) }
     }
 
     // MARK: - Trim & drag
@@ -229,10 +329,6 @@ final class EditorModel {
                 clip.sourceStart = clip.sourceStart + delta
                 clip.timelineStart = newTimelineStart
                 clip.duration = originalEnd - newTimelineStart
-                let sourceEnd = clip.sourceStart + clip.duration
-                if sourceEnd > sourceDuration {
-                    clip.duration = sourceDuration - clip.sourceStart
-                }
 
             case .right:
                 let maxSourceRemaining = sourceDuration - clip.sourceStart
