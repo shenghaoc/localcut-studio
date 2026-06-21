@@ -67,6 +67,11 @@ final class EditorModel {
     /// Security-scoped resources retained for the session, stopped on teardown.
     @ObservationIgnored nonisolated(unsafe) var accessedURLs: Set<URL> = []
 
+    /// Bumped on every session swap (New/Open). Async import/relink capture it
+    /// and bail if it changes across their awaits, so work started for one
+    /// document can neither leak security-scoped access nor land clips in another.
+    @ObservationIgnored var sessionGeneration = 0
+
     init() {
         // Each editor action manages its own undo group explicitly, so disable
         // run-loop-based coalescing (see registerUndo).
@@ -102,6 +107,7 @@ final class EditorModel {
     /// Loads the given files into the media bin, reading metadata and a poster
     /// frame for each. Security-scoped access is retained for the session.
     func importMedia(urls: [URL]) async {
+        let generation = sessionGeneration
         var loaded: [MediaItem] = []
         for url in urls {
             let didAccess = url.startAccessingSecurityScopedResource()
@@ -115,6 +121,16 @@ final class EditorModel {
                     item.preferredTransform = try await v.load(.preferredTransform)
                 }
                 item.hasAudio = try await !item.asset.loadTracks(withMediaType: .audio).isEmpty
+
+                // If the document was replaced (New/Open) while this file's metadata
+                // loaded, the import belongs to a session that no longer exists:
+                // release the just-started token and abandon, rather than leaking
+                // access or appending clips onto the new document. Tokens retained
+                // for earlier items were already stopped by releaseSession().
+                guard sessionGeneration == generation else {
+                    if didAccess { url.stopAccessingSecurityScopedResource() }
+                    return
+                }
 
                 // Retain access for the session and capture a persistable bookmark
                 // so the file can be re-resolved after relaunch (R1.2).

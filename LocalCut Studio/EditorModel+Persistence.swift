@@ -257,6 +257,9 @@ extension EditorModel {
     /// Stops every retained security-scoped resource and clears session state.
     /// Called before loading another document and on teardown.
     func releaseSession() {
+        // Invalidate any in-flight async import/relink so it can't leak access
+        // into, or append clips onto, the session that replaces this one.
+        sessionGeneration &+= 1
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
         accessedURLs.removeAll()
         project.mediaItems.removeAll()
@@ -473,6 +476,7 @@ extension EditorModel {
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
+        let generation = sessionGeneration
         let access = url.startAccessingSecurityScopedResource()
         guard let bookmark = try? url.bookmarkData(options: .withSecurityScope,
                                                    includingResourceValuesForKeys: nil,
@@ -498,6 +502,11 @@ extension EditorModel {
         } catch {
             if access { url.stopAccessingSecurityScopedResource() }
             statusMessage = "Could not read \(url.lastPathComponent): \(error.localizedDescription)"
+            return
+        }
+        // Bail if the document was replaced while metadata loaded (see importMedia).
+        guard sessionGeneration == generation else {
+            if access { url.stopAccessingSecurityScopedResource() }
             return
         }
         retainAccess(url, didStart: access)
