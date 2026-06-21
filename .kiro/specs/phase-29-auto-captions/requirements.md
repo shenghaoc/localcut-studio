@@ -2,8 +2,9 @@
 
 ## R1 — ASR engine
 
-- **R1.1** `SFSpeechRecognizer` with `requiresOnDeviceRecognition = true` is the engine.
-- **R1.2** When the host doesn't support on-device recognition (`requiresOnDeviceRecognition` returns `false`), the feature is hidden — no cloud fallback, no degraded path.
+- **R1.1** `SFSpeechRecognizer(locale:)` is the engine; every request additionally sets `SFSpeechRecognitionRequest.requiresOnDeviceRecognition = true`.
+- **R1.2** Availability is gated by `SFSpeechRecognizer.supportsOnDeviceRecognition` (the recognizer's static probe) BEFORE the feature is exposed. When `false`, the feature is hidden — no cloud fallback, no degraded path.
+- **R1.3** Language is chosen at recognizer init from (a) explicit user override → (b) clip asset metadata → (c) system locale. The recognizer cannot change language after init; `NLLanguageRecognizer` runs only as an after-the-fact verification flag.
 
 ## R2 — Audio extraction + windowing
 
@@ -14,7 +15,8 @@
 ## R3 — Output model
 
 - **R3.1** Output `[CaptionLine]` with `WordTiming` arrays at segment granularity — populates the Phase 30 `CaptionTrack`.
-- **R3.2** Auto language detect per segment via `NLLanguageRecognizer`; user-selectable forced language overrides detection.
+- **R3.2** Timeline timestamp mapping: `timelinePTS = clip.timelineStart + windowOffsetInClip + segment.timestamp` (and `+ segment.duration` for the range end). The same offset chain applies to every `WordTiming` and every `CaptionLine.range`. Tests assert that proposals fed back to the timeline land within ±1 frame of the spoken audio for a trimmed-clip fixture.
+- **R3.3** `NLLanguageRecognizer` runs after recognition only as a verification flag (proposal marked "likely wrong language" if it disagrees with the chosen locale); it is NOT the primary language source.
 
 ## R4 — Review-before-apply
 

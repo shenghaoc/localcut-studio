@@ -12,11 +12,10 @@ Three audio cleanup tools usable both live during monitoring and offline at rend
 
 ## Approach
 
-1. **Denoiser.** Two candidates evaluated in design.md:
-   - **Apple's Audio Unit `AUAudioUnit`-bundled noise suppression** (the same engine used by FaceTime / Voice Memos, exposed via `AVAudioEngine` on macOS 14+). Free, low-latency, integrated.
-   - **RNNoise compiled to a static library** (the browser-editor path) — known good, but adds a build dependency we'd rather avoid given the AGENTS.md rule against third-party media libraries.
-   We default to the Apple AU if it is available and stable on macOS 26 + 27; RNNoise via a thin Swift wrapper is the fallback if not.
-2. **Bus architecture.** Master bus is an `AVAudioEngine` graph: `playerNodes` → `EQ` (passthrough by default) → `denoiser node` → `gate node` → `compressor node` → `limiter node` → `meter tap` → `mainMixerNode`. Export reuses the same node graph by routing through `AVAudioEngine.manualRenderingMode = .offline`.
+1. **Denoiser.** Apple's voice-processing AU works during live monitoring only — it is gated to real-time rendering against an audio device and refuses to run in `AVAudioEngine.manualRenderingMode = .offline` (documented in WWDC19 §510). Live monitor and export therefore use DIFFERENT denoiser instances built around the SAME tuning parameters:
+   - **Live monitor:** Apple's voice-processing AU on the `AVAudioEngine` real-time graph — free, low-latency, integrated.
+   - **Export (offline render):** a vDSP-implemented spectral-subtraction denoiser sharing the same tuning surface, plus a small set of golden-frame tests asserting parity with the live AU on test signals (so the user-facing setting "denoise on" sounds the same across both paths within the documented tolerance).
+2. **Bus architecture.** Live monitor: `AVAudioEngine` graph — `playerNodes` → `EQ` (passthrough by default) → `voice-processing AU` → `gate node` → `compressor node` → `limiter node` → `meter tap` → `mainMixerNode`. Export render: a parallel offline graph swapping the voice-processing AU for the vDSP offline denoiser; the gate / compressor / limiter / meter nodes work in both modes and are reused as-is. The split is documented in `design.md` as the unavoidable consequence of Apple's voice-processing AU offline restriction.
 3. **Loudness normalisation.** EBU R128 integrated-loudness measurement is an offline pass over the export track. We compute LUFS via the standard K-weighted filter + 400 ms gated blocks (`vDSP` for the IIR filtering). The normalisation gain stage on the master bus applies a single dB delta to hit the target.
 4. **Targets.** Preset list: –14 LUFS (YouTube / general), –16 LUFS (Apple / Podcasts), –19 LUFS (broadcast), and a custom field. The chosen preset feeds Phase 39 (vertical finishing) per-platform export profiles.
 5. **Latency budget.** Document the live-monitor latency contribution per node in `design.md`. Apple's noise suppression AU is ~10 ms; our gate + compressor + limiter target ≤5 ms combined. Total live-monitor latency budget: ≤25 ms (the `bufferSize` and lookahead are bounded accordingly).

@@ -7,8 +7,8 @@
 - [ ] **T1.1** `ScreenCaptureSession` actor wrapping `SCStream` with display / window / app target.
 - [ ] **T1.2** `WebcamCaptureSession` + `MicCaptureSession` over `AVCaptureSession`.
 - [ ] **T1.3** `ContinuousWriter` per source — one `AVAssetWriter` for the whole session, real-time VideoToolbox properties, `movieFragmentInterval` set to the configured flush interval (default 2 s).
-- [ ] **T1.4** Session `manifest.json` writer; "stopped" marker on clean shutdown.
-- [ ] **T1.5** Shared `CMClock` plumbing across all writers for alignment.
+- [ ] **T1.4** Session `manifest.ndjson` writer — append-only event log; record kinds `header` / `epoch` / `source-ended` / `finalize`; forward-compatible parser ignores unknown kinds.
+- [ ] **T1.5** Shared `CMClockGetHostTimeClock()` plumbing + `sessionStartHostTime` snapshot; landing offsets clip start times by `(capturedPTS − sessionStartHostTime)`.
 
 ## Storage + recovery
 

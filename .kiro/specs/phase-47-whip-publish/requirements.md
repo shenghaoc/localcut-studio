@@ -2,9 +2,10 @@
 
 ## R1 — WHIP client
 
-- **R1.1** RFC-9725 compliant: POST offer / accept answer + ICE servers via Link headers; PATCH ICE restart; DELETE on stop.
-- **R1.2** Bearer token sent on every verb; never echoed in errors, logs, diagnostics, telemetry, or persisted alongside `ProjectDoc`.
-- **R1.3** Error mapping returns typed results (`rejected-offer` | `auth` | `not-found` | `retryable`); `400` fails fast.
+- **R1.1** RFC-9725 compliant: POST offer / accept answer + ICE servers via Link headers; PATCH ICE restart with `If-Match` ETag (§4.3.1); DELETE on stop.
+- **R1.2** ETag from the publish response is cached; every PATCH sends it as `If-Match`. The PATCH response's new ETag replaces the cached one for the next restart. Missing / stale validators yield 412 or 428; on either, the reconnect controller falls back to full re-POST as a new session.
+- **R1.3** Bearer token sent on every verb; never echoed in errors, logs, diagnostics, telemetry, or persisted alongside `ProjectDoc`.
+- **R1.4** Error mapping returns typed results (`rejected-offer` | `auth` | `not-found` | `retryable`); `400` fails fast.
 
 ## R2 — Codec + bitrate
 
@@ -29,7 +30,7 @@
 
 - **R5.1** 3 s grace on `disconnected`.
 - **R5.2** Backoff 2 / 4 / 8 / 16 / 16 s; max 5 attempts; terminal `failed` after exhaustion.
-- **R5.3** PATCH ICE restart attempted before full re-POST.
+- **R5.3** PATCH ICE restart (with `If-Match` ETag) attempted before full re-POST; 412 / 428 / 405 / 501 / restart failure all fall through to re-POST.
 - **R5.4** State changes surfaced in `PublishState` for the UI.
 
 ## R6 — Settings + secrets

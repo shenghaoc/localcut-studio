@@ -3,7 +3,7 @@
 ## R1 — Master bus inserts
 
 - **R1.1** Master bus exposes ordered inserts: denoiser → gate → compressor → limiter, each with bypass.
-- **R1.2** The same node graph is used live (player) and offline (`AVAudioEngine.manualRenderingMode = .offline`) — preview and export are sample-identical.
+- **R1.2** Live monitor and offline export use parallel `AVAudioEngine` graphs that share gate / compressor / limiter / meter nodes but swap the denoiser (Apple voice-processing AU on live; vDSP spectral-subtraction denoiser offline — the AU refuses `manualRenderingMode = .offline`). Golden-frame parity tests assert the two denoisers match on tuning-equivalent inputs within a documented tolerance.
 - **R1.3** Bypass toggles introduce no audible glitch (volume-ramped switching).
 
 ## R2 — Denoiser

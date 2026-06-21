@@ -23,7 +23,8 @@ The browser-editor restricts itself to Chrome's built-in `Translator` / `Languag
 2. **Hide-on-unavailable.** Anything other than `ready` (or `downloadable` post-user-consent) hides the entire panel. No error dialogs.
 3. **Translation pipeline.**
    - Detect source language with `LanguageDetection` on the first caption line.
-   - For each `CaptionLine`, run `TranslationSession.translate(text)` and create a mirrored `CaptionLine` with identical `CMTimeRange`.
+   - `TranslationSession` is bound at the SwiftUI view boundary via `.translationTask(_:)` — Apple gates the session on the modifier's view lifetime so the framework can show download / consent UI when needed. A pure `LanguageTranslator` actor batches caption lines into work items and hands them off; the view-owned session does the actual translate call and posts results back. This avoids the actor-owned-session pitfall (sessions outliving views or missing consent prompts).
+   - For each translated text, the actor creates a mirrored `CaptionLine` with identical `CMTimeRange`.
    - Output lands as a SECOND `CaptionTrack` on the project. Bilingual SRT/VTT export pairs them per Phase 30's sidecar path (`stem.zh.srt`, `stem.en.srt`).
 4. **Draft pipeline.**
    - Transcript → hierarchical summarisation under the Foundation Models token cap.

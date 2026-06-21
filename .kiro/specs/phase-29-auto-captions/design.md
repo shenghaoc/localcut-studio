@@ -15,11 +15,16 @@ The browser-editor ships Whisper Base / Tiny ONNX via ORT-WASM because the web p
 
 ## Approach
 
-1. **Engine.** `SFSpeechRecognizer` with `requiresOnDeviceRecognition = true`. Apple ships the ASR models with the OS; macOS 27 brings refreshed on-device models. Word-level segment timings come from `SFTranscriptionSegment.timestamp + duration` and feed `CaptionLine.words: [WordTiming]?` directly.
-2. **Audio extraction.** `AVAssetReader` pulls clip audio. A `VadGate` (energy-based, hysteresis tuned for speech) skips silence and tightens segment boundaries before recognition.
-3. **Worker.** A background `actor TranscriptionService` exposes `(asset, range, language?) -> AsyncThrowingStream<CaptionLine>` and runs windowed recognition with overlap stride. The actor isolates Speech-framework calls from the main actor.
-4. **Language.** Auto-detect via `NLLanguageRecognizer` on a first-window transcript; user can force a language in the UI.
-5. **Review-before-apply.** A modal surfaces proposed `CaptionLine`s with per-line apply / skip. Apply commits to the existing `CaptionTrack` in a single undoable transaction. Mirrors the Phase 44 silence-trim and Phase 33 reframe review patterns.
+1. **Availability probe.** Check `SFSpeechRecognizer.supportsOnDeviceRecognition` (a static property gated on chip + locale) BEFORE exposing the feature. If `false`, the feature is hidden — no cloud fallback, no degraded path. The request-side flag `SFSpeechRecognitionRequest.requiresOnDeviceRecognition = true` is set on every request as belt-and-braces, but the gate is the recognizer's static property.
+2. **Engine + locale.** `SFSpeechRecognizer(locale:)` takes the language at init and cannot change it after; the language must be chosen BEFORE recognition starts. Three sources, in order: (a) explicit user override in the inspector; (b) language read from the clip's source asset metadata where available; (c) the system locale as a documented default. Auto-detect from the transcript happens too late to be the primary path — `NLLanguageRecognizer` only runs as a verification step AFTER recognition, flagging the proposal as "likely wrong language — re-run as XX?" when it disagrees with the chosen locale. Word-level segment timings come from `SFTranscriptionSegment.timestamp + duration`.
+3. **Audio extraction + windowing.** `AVAssetReader` pulls clip audio. A `VadGate` (energy-based, hysteresis tuned for speech) skips silence and tightens segment boundaries before recognition. Each recognition window covers a known `(clipTimelineStart, windowOffsetInClip, windowDuration)` triple so step 4 can place the result correctly.
+4. **Worker.** A background `actor TranscriptionService` exposes `(asset, clip, locale) -> AsyncThrowingStream<CaptionLine>` and runs windowed recognition with overlap stride. The actor isolates Speech-framework calls from the main actor.
+5. **Timeline offset.** `SFTranscriptionSegment.timestamp` is relative to the audio buffer fed to the recognizer (window-start, NOT clip-start, NOT timeline-start). The mapping must add both offsets:
+   ```
+   timelinePTS = clip.timelineStart + windowOffsetInClip + segment.timestamp
+   ```
+   Same for `WordTiming` and `CaptionLine.range`. Apply this before the result reaches `CaptionTrack`; review modal previews validate the offset against the playhead.
+6. **Review-before-apply.** A modal surfaces proposed `CaptionLine`s with per-line apply / skip. Apply commits to the existing `CaptionTrack` in a single undoable transaction. Mirrors the Phase 44 silence-trim and Phase 33 reframe review patterns.
 
 ## Trade-offs
 
@@ -28,7 +33,7 @@ The browser-editor ships Whisper Base / Tiny ONNX via ORT-WASM because the web p
 
 ## Risks
 
-- `SFSpeechRecognizer.requiresOnDeviceRecognition` returns `false` on older Macs that don't meet Apple's on-device floor. On those hosts the feature is hidden — no cloud fallback, no degraded path.
+- `SFSpeechRecognizer.supportsOnDeviceRecognition` is `false` on older Macs and on locales that lack on-device support. On those hosts the feature is hidden — no cloud fallback, no degraded path.
 - DRM-protected audio sources fail at `AVAssetReader`; we surface this explicitly.
 
 ## Non-goals
