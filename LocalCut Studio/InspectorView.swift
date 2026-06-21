@@ -83,7 +83,9 @@ struct InspectorView: View {
             }
 
             VStack(alignment: .leading) {
-                Text("Duration \(String(format: "%.2f s", transition.duration.seconds))")
+                // Show the effective (clamped) duration so the label can't exceed
+                // the slider's ceiling after a neighbour is trimmed shorter.
+                Text("Duration \(String(format: "%.2f s", min(transition.duration.seconds, maxTransitionSeconds)))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Slider(value: transitionDurationBinding, in: minTransitionSeconds...maxTransitionSeconds)
