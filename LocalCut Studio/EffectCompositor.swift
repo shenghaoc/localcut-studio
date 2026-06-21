@@ -324,9 +324,18 @@ private struct CubeLUTResult {
 
 private enum CubeLUTParser {
 
-    nonisolated static func parse(_ data: Data) -> CubeLUTResult? {
-        guard let content = String(data: data, encoding: .utf8) else { return nil }
+    /// Largest cube size accepted (matches common .cube exports). Bounds both the
+    /// final table allocation and the pre-validation parse work below.
+    nonisolated private static let maxDimension = 64
 
+    nonisolated static func parse(_ data: Data) -> CubeLUTResult? {
+        // Reject oversized input before any work: a 64³ cube is well under ~10 MB,
+        // so a larger file can only be padding or an attempt to exhaust memory via
+        // the String / line-array / entries allocations below.
+        guard data.count <= 16 * 1024 * 1024,
+              let content = String(data: data, encoding: .utf8) else { return nil }
+
+        let maxEntries = maxDimension * maxDimension * maxDimension
         var dimension = 0
         var entries: [[Float]] = []
 
@@ -341,9 +350,8 @@ private enum CubeLUTParser {
 
             if parts[0] == "LUT_3D_SIZE", parts.count >= 2 {
                 // Bound the declared size: a crafted file could otherwise request a
-                // huge cube (dimension³·4 floats) and exhaust memory. 64 is the
-                // largest size in common .cube exports; reject anything beyond.
-                guard let size = Int(parts[1]), size > 1, size <= 64 else { return nil }
+                // huge cube (dimension³·4 floats) and exhaust memory.
+                guard let size = Int(parts[1]), size > 1, size <= maxDimension else { return nil }
                 dimension = size
                 continue
             }
@@ -351,6 +359,9 @@ private enum CubeLUTParser {
             guard let r = Float(parts[0]) else { continue }
             if parts.count >= 3, let g = Float(parts[1]), let b = Float(parts[2]) {
                 entries.append([r, g, b])
+                // Stop if the table outgrows the largest accepted cube, even when
+                // LUT_3D_SIZE is missing or declared after the data lines.
+                if entries.count > maxEntries { return nil }
             }
         }
 
