@@ -42,6 +42,8 @@ struct MediaBinView: View {
                                 .onTapGesture(count: 2) { model.addToTimeline(mediaID: item.id) }
                                 .contextMenu {
                                     Button("Add to Timeline") { model.addToTimeline(mediaID: item.id) }
+                                    Divider()
+                                    Button("Remove from Project", role: .destructive) { model.removeMedia(itemID: item.id) }
                                 }
                         }
                     }
@@ -95,7 +97,7 @@ private struct MediaRow: View {
             Spacer(minLength: 0)
         }
         .padding(6)
-        .background(isSelected ? AnyShapeStyle(.selection) : AnyShapeStyle(.clear),
+        .background(isSelected ? Color(.selectedContentBackgroundColor) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 6))
     }
 }
