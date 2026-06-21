@@ -40,6 +40,62 @@ enum CompositionBuilder {
         func contains(_ seconds: Double) -> Bool {
             timeRange.start.seconds <= seconds && seconds < timeRange.end.seconds
         }
+
+        var descriptor: VisibleSegment {
+            VisibleSegment(
+                compTrackID: compTrackID,
+                start: timeRange.start.seconds,
+                transitionStart: transitionRange?.start.seconds,
+                transitionEnd: transitionRange?.end.seconds,
+                transitionType: transitionType)
+        }
+    }
+
+    // MARK: - Render planning
+
+    /// The minimal description of a clip visible during one instruction interval,
+    /// used to decide how to composite it. Pure value type so the planning logic
+    /// is unit-testable without an `AVComposition`.
+    struct VisibleSegment {
+        let compTrackID: CMPersistentTrackID
+        /// Effective start of the clip.
+        let start: Double
+        /// The clip's incoming-transition interval, if any.
+        let transitionStart: Double?
+        let transitionEnd: Double?
+        let transitionType: TransitionType?
+    }
+
+    /// A planned composite step, by composition-track id, bottom-to-top.
+    enum PlannedUnit: Equatable {
+        case layer(CMPersistentTrackID)
+        case transition(outgoing: CMPersistentTrackID, incoming: CMPersistentTrackID, type: TransitionType)
+    }
+
+    /// Decides, for one project track, how to composite the clips visible at
+    /// `midpoint`. When transitions overlap (a chain of three or more clips), the
+    /// *topmost* active transition wins, blending the incoming clip with its
+    /// immediate predecessor; any earlier still-visible clips render underneath
+    /// so the newest clip is never dropped (which would "pop" in).
+    static func planUnits(visible: [VisibleSegment], midpoint: Double) -> [PlannedUnit] {
+        func transitionActive(_ seg: VisibleSegment) -> Bool {
+            guard let start = seg.transitionStart, let end = seg.transitionEnd else { return false }
+            return start <= midpoint && midpoint < end
+        }
+
+        if let incoming = visible.last(where: transitionActive),
+           let type = incoming.transitionType,
+           let outgoing = visible.filter({ $0.start < incoming.start }).max(by: { $0.start < $1.start }) {
+            var result: [PlannedUnit] = []
+            // Earlier clips still on screen render beneath the transition.
+            for seg in visible where seg.compTrackID != incoming.compTrackID && seg.compTrackID != outgoing.compTrackID {
+                result.append(.layer(seg.compTrackID))
+            }
+            result.append(.transition(outgoing: outgoing.compTrackID, incoming: incoming.compTrackID, type: type))
+            return result
+        }
+
+        return visible.map { .layer($0.compTrackID) }
     }
 
     static func build(project: Project) async throws -> BuiltComposition? {
@@ -177,19 +233,18 @@ enum CompositionBuilder {
             for segments in projectTrackSegments {
                 let visible = segments.filter { $0.contains(midpoint) }
                 guard !visible.isEmpty else { continue }
+                let byTrack = Dictionary(uniqueKeysWithValues: visible.map { ($0.compTrackID, $0) })
 
-                if let incoming = visible.first(where: {
-                        $0.transitionRange.map { $0.start.seconds <= midpoint && midpoint < $0.end.seconds } ?? false
-                    }),
-                   let overlap = incoming.transitionRange,
-                   let type = incoming.transitionType,
-                   let outgoing = visible.first(where: { $0.compTrackID != incoming.compTrackID }) {
-                    units.append(.transition(outgoing: outgoing.layer, incoming: incoming.layer,
-                                             type: type, overlap: overlap))
-                } else {
-                    // No active transition: stack any visible clips bottom-to-top.
-                    for seg in visible {
+                for planned in planUnits(visible: visible.map(\.descriptor), midpoint: midpoint) {
+                    switch planned {
+                    case .layer(let trackID):
+                        guard let seg = byTrack[trackID] else { continue }
                         units.append(.layer(seg.layer))
+                    case .transition(let outID, let inID, let type):
+                        guard let outSeg = byTrack[outID], let inSeg = byTrack[inID],
+                              let overlap = inSeg.transitionRange else { continue }
+                        units.append(.transition(outgoing: outSeg.layer, incoming: inSeg.layer,
+                                                 type: type, overlap: overlap))
                     }
                 }
             }

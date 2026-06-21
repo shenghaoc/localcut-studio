@@ -159,6 +159,65 @@ struct TransitionsTests {
         #expect(pa.effectiveEnd <= pc.effectiveStart)
     }
 
+    @Test("Coincident cuts across tracks merge into one (no double-ripple)")
+    func coincidentCutsMerge() {
+        let media = UUID()
+        func track(_ name: String, transition seconds: Double) -> Track {
+            let t = Track(name: name, kind: .video)
+            var b = Clip(mediaID: media, sourceStart: .zero, duration: time(5), timelineStart: time(5))
+            b.transition = Transition(duration: time(seconds))
+            t.clips = [
+                Clip(mediaID: media, sourceStart: .zero, duration: time(5), timelineStart: .zero),
+                b,
+            ]
+            return t
+        }
+        // Two video tracks both cut at t=5, with different overlaps.
+        let cuts = TransitionLayout.cuts(videoTracks: [track("V1", transition: 1), track("V2", transition: 2)])
+        #expect(cuts.count == 1)               // merged, not double-counted
+        #expect(cuts.first?.overlap == time(2)) // max of the two overlaps
+        // The merged cut shifts a later time by exactly one overlap.
+        #expect(TransitionLayout.shift(at: time(5), cuts: cuts) == time(2))
+    }
+
+    // MARK: - Render planning (chained / overlapping transitions)
+
+    private func segment(track: CMPersistentTrackID, start: Double,
+                         transition: (Double, Double, TransitionType)? = nil) -> CompositionBuilder.VisibleSegment {
+        CompositionBuilder.VisibleSegment(
+            compTrackID: track, start: start,
+            transitionStart: transition?.0, transitionEnd: transition?.1, transitionType: transition?.2)
+    }
+
+    @Test("A single visible clip plans one layer")
+    func planSingleLayer() {
+        let plan = CompositionBuilder.planUnits(visible: [segment(track: 1, start: 0)], midpoint: 2)
+        #expect(plan == [.layer(1)])
+    }
+
+    @Test("Two overlapping clips plan a transition between predecessor and incoming")
+    func planTwoClipTransition() {
+        let visible = [
+            segment(track: 1, start: 0),
+            segment(track: 2, start: 4, transition: (4, 5, .crossDissolve)),
+        ]
+        let plan = CompositionBuilder.planUnits(visible: visible, midpoint: 4.5)
+        #expect(plan == [.transition(outgoing: 1, incoming: 2, type: .crossDissolve)])
+    }
+
+    @Test("Triple overlap keeps the top clip: earlier clip renders under the latest transition")
+    func planChainedTripleOverlap() {
+        // A (track1) under, B (track2) transitions from A, C (track3) transitions from B.
+        let visible = [
+            segment(track: 1, start: 0),
+            segment(track: 2, start: 1, transition: (1, 4, .crossDissolve)),
+            segment(track: 3, start: 2, transition: (2, 5, .wipe)),
+        ]
+        let plan = CompositionBuilder.planUnits(visible: visible, midpoint: 3)
+        // Topmost active transition (B→C) wins; A is drawn underneath, C is not dropped.
+        #expect(plan == [.layer(1), .transition(outgoing: 2, incoming: 3, type: .wipe)])
+    }
+
     // MARK: - EditorModel integration (T1.4, R3, R4)
 
     private func makeModel() -> (EditorModel, Clip.ID, Clip.ID) {

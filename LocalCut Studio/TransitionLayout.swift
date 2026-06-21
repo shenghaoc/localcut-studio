@@ -59,25 +59,34 @@ enum TransitionLayout {
     }
 
     /// The project-wide set of transition cuts, derived from every video track.
-    /// Coincident cuts (e.g. the same boundary on stacked tracks) are merged by
-    /// taking the larger overlap so all tracks ripple consistently.
+    /// Cuts that coincide within `adjacencyTolerance` (e.g. the same boundary on
+    /// stacked tracks, possibly with tiny floating-point drift) are merged by
+    /// taking the larger overlap, so a shared cut never ripples a track twice.
     static func cuts(videoTracks: [Track]) -> [Cut] {
-        var overlapByCut: [Double: CMTime] = [:]
+        var rawCuts: [(time: Double, overlap: CMTime)] = []
         for track in videoTracks {
             let ordered = track.clips.sorted { $0.timelineStart < $1.timelineStart }
             var previous: Clip?
             for clip in ordered {
                 let overlap = effectiveOverlap(into: clip, previous: previous)
                 if overlap > .zero {
-                    let key = clip.timelineStart.seconds
-                    overlapByCut[key] = CMTimeMaximum(overlapByCut[key] ?? .zero, overlap)
+                    rawCuts.append((clip.timelineStart.seconds, overlap))
                 }
                 previous = clip
             }
         }
-        return overlapByCut
-            .map { Cut(time: CMTime(seconds: $0.key, preferredTimescale: 600), overlap: $0.value) }
-            .sorted { $0.time < $1.time }
+
+        var merged: [Cut] = []
+        for raw in rawCuts.sorted(by: { $0.time < $1.time }) {
+            if let last = merged.last, abs(last.time.seconds - raw.time) < adjacencyTolerance {
+                merged[merged.count - 1] = Cut(time: last.time,
+                                               overlap: CMTimeMaximum(last.overlap, raw.overlap))
+            } else {
+                merged.append(Cut(time: CMTime(seconds: raw.time, preferredTimescale: 600),
+                                  overlap: raw.overlap))
+            }
+        }
+        return merged
     }
 
     /// Total leftward ripple applied to authored time `authored`: the sum of the
