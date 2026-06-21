@@ -311,7 +311,9 @@ struct TimelineView: View {
                 }) ?? trackIndex
 
                 if !NSEvent.modifierFlags.contains(.option) {
-                    candidateStart = model.resolveSnap(candidate: candidateStart, excluding: clip.id)
+                    candidateStart = model.resolveSnap(
+                        candidate: candidateStart, excluding: clip.id,
+                        trailingEdgeOffset: clip.duration)
                 }
 
                 dragMode = .moving(clipID: clip.id, candidateStart: candidateStart,

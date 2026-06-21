@@ -192,36 +192,43 @@ final class EditorModel {
 
     enum TrimEdge { case left, right }
 
-    /// Minimum clip duration: one frame at 600 timescale.
-    private static let minClipDuration = CMTime(value: 1, timescale: 600)
+    /// One render frame at the project's frame rate — the shortest a clip can be.
+    private var minClipDuration: CMTime {
+        CMTime(value: 1, timescale: CMTimeScale(max(1, project.frameRate)))
+    }
 
-    /// Trims a clip edge to the given timeline time, clamping to source bounds
-    /// and a one-frame minimum length. Left-edge trims adjust both `sourceStart`
-    /// and `timelineStart`; right-edge trims adjust `duration` only.
+    /// Trims a clip edge to the given timeline time, clamping to source bounds,
+    /// a one-frame minimum length, and neighbouring clip boundaries on the same
+    /// track so trims never create overlaps.
     func trimClip(id: Clip.ID, edge: TrimEdge, to time: CMTime) {
         for track in allTracks {
             guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
             var clip = track.clips[index]
             guard let media = project.media(for: clip.mediaID) else { return }
             let sourceDuration = media.duration
+            let minDur = minClipDuration
+
+            let sorted = track.clips.sorted { $0.timelineStart < $1.timelineStart }
+            let sortedIndex = sorted.firstIndex(where: { $0.id == id })!
+            let prevClip = sortedIndex > 0 ? sorted[sortedIndex - 1] : nil
+            let nextClip = sortedIndex < sorted.count - 1 ? sorted[sortedIndex + 1] : nil
 
             switch edge {
             case .left:
                 let originalEnd = clip.timelineEnd
-                let originalSourceEnd = clip.sourceStart + clip.duration
                 var newTimelineStart = max(time, .zero)
-                // Can't push left edge past the source start offset (sourceStart can't go below zero).
                 let minTimelineStart = clip.timelineStart - clip.sourceStart
                 newTimelineStart = max(newTimelineStart, minTimelineStart)
-                // Can't push left edge past right edge minus min duration.
-                let maxTimelineStart = originalEnd - Self.minClipDuration
+                let maxTimelineStart = originalEnd - minDur
                 newTimelineStart = min(newTimelineStart, maxTimelineStart)
+                if let prev = prevClip {
+                    newTimelineStart = max(newTimelineStart, prev.timelineEnd)
+                }
 
                 let delta = newTimelineStart - clip.timelineStart
                 clip.sourceStart = clip.sourceStart + delta
                 clip.timelineStart = newTimelineStart
                 clip.duration = originalEnd - newTimelineStart
-                // Ensure sourceStart + duration doesn't exceed source media.
                 let sourceEnd = clip.sourceStart + clip.duration
                 if sourceEnd > sourceDuration {
                     clip.duration = sourceDuration - clip.sourceStart
@@ -230,8 +237,12 @@ final class EditorModel {
             case .right:
                 let maxSourceRemaining = sourceDuration - clip.sourceStart
                 var newDuration = time - clip.timelineStart
-                newDuration = max(newDuration, Self.minClipDuration)
+                newDuration = max(newDuration, minDur)
                 newDuration = min(newDuration, maxSourceRemaining)
+                if let next = nextClip {
+                    let maxDuration = next.timelineStart - clip.timelineStart
+                    newDuration = min(newDuration, maxDuration)
+                }
                 clip.duration = newDuration
             }
 
@@ -316,15 +327,15 @@ final class EditorModel {
         return bestStart
     }
 
-    /// Collects all snap targets: playhead position, every clip boundary, and
-    /// the timeline origin (0).
-    func snapTargets() -> [CMTime] {
+    /// Collects all snap targets: playhead position, every clip boundary
+    /// (excluding the given clip), and the timeline origin (0).
+    func snapTargets(excluding clipID: Clip.ID? = nil) -> [CMTime] {
         var targets: [CMTime] = [
             .zero,
             CMTime(seconds: currentTime, preferredTimescale: 600)
         ]
         for track in allTracks {
-            for clip in track.clips {
+            for clip in track.clips where clip.id != clipID {
                 targets.append(clip.timelineStart)
                 targets.append(clip.timelineEnd)
             }
@@ -333,29 +344,36 @@ final class EditorModel {
     }
 
     /// Returns the nearest snap target within threshold, or the candidate
-    /// itself if nothing is close enough.
-    func resolveSnap(candidate: CMTime, excluding clipID: Clip.ID? = nil, threshold: Double? = nil) -> CMTime {
+    /// itself if nothing is close enough. When `trailingEdgeOffset` is
+    /// provided, the trailing edge is also tested and the start is adjusted
+    /// so the trailing edge lands on the target.
+    func resolveSnap(candidate: CMTime, excluding clipID: Clip.ID? = nil,
+                     trailingEdgeOffset: CMTime? = nil, threshold: Double? = nil) -> CMTime {
         let thresholdSeconds = threshold ?? (8.0 / pixelsPerSecond)
-
-        var allTargets = snapTargets()
-        if let clipID {
-            for track in allTracks {
-                if let clip = track.clips.first(where: { $0.id == clipID }) {
-                    allTargets.removeAll { $0 == clip.timelineStart || $0 == clip.timelineEnd }
-                    break
-                }
-            }
-        }
+        let targets = snapTargets(excluding: clipID)
 
         var nearest = candidate
         var minDist = Double.infinity
-        for target in allTargets {
+
+        for target in targets {
             let dist = abs((candidate - target).seconds)
             if dist < thresholdSeconds, dist < minDist {
                 minDist = dist
                 nearest = target
             }
         }
+
+        if let offset = trailingEdgeOffset {
+            let trailing = candidate + offset
+            for target in targets {
+                let dist = abs((trailing - target).seconds)
+                if dist < thresholdSeconds, dist < minDist {
+                    minDist = dist
+                    nearest = target - offset
+                }
+            }
+        }
+
         return nearest
     }
 
