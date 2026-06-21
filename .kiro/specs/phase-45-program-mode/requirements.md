@@ -15,7 +15,7 @@
 ## R3 — Encoder budget
 
 - **R3.1** Shared `EncoderBudget` actor with consumers `.export`, `.isoRecord`, `.whipPublish`, `.programIso`.
-- **R3.2** Default 2 concurrent video sessions on hardware encode; 1 on software-only.
+- **R3.2** Default 4 concurrent video sessions on hardware encode (enough for the documented 2-cam + 1-screen multi-cam smoke test plus an export / publish session); 1 on software-only. Per-host probing can raise or lower the default at runtime — the budget is a conservative gate, not a guess, and the smoke test in R9.4 must succeed against the default budget on hardware-accelerated targets.
 - **R3.3** Budget exhaustion blocks start with `budgetExhausted` error before any encoder opens.
 - **R3.4** Record + stream coexistence checks against a single combined budget.
 

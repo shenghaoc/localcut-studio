@@ -2,10 +2,11 @@
 
 > Status: **Proposed**. Depends on Phase 41 + Phase 45 + `EncoderBudget`.
 
-## Dependency
+## Dependency + entitlements
 
-- [ ] **T1.1** Add GoogleWebRTC via SPM, pinned to a stable release; document size + licence in design.md and `docs/USER-GUIDE.md`.
+- [ ] **T1.1** Add GoogleWebRTC via SPM, pinned to a stable release; document size + licence (BSD-3-Clause) in design.md and `docs/USER-GUIDE.md`.
 - [ ] **T1.2** Build flag to drop the dep for users who don't need streaming.
+- [ ] **T1.3** Add `com.apple.security.network.client` to the entitlements file (sandbox blocks outgoing HTTP + WebRTC without it). Smoke-test that the publish flow makes its first POST under the sandbox.
 
 ## WHIP client
 

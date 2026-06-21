@@ -13,6 +13,7 @@ The browser-editor's v1 leans entirely on the platform's `RTCPeerConnection`. Na
 - Phase 41 (the encode pipeline whose output we tap).
 - Phase 45 (the program output is the publish source).
 - `EncoderBudget` actor (shared with Phase 45).
+- Sandbox entitlement `com.apple.security.network.client` — required for outgoing HTTP + WebRTC traffic from a sandboxed app. Added at the time this phase starts and only then (we follow the steering rule "do not add entitlements speculatively").
 
 ## Approach
 

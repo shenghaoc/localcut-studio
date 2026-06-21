@@ -7,6 +7,7 @@
 - **R1.3** Adjacent clips stay adjacent in frames after snapping; no spurious gaps or overlaps.
 - **R1.4** Fractional rates (23.976, 29.97) preserve exact rational representation.
 - **R1.5** Zero-frame clips and orphan transitions are dropped with warnings; never silently emitted.
+- **R1.6** Micro-gap collapse: gaps below `max(1 ms, 0.5 / interchangeRate)` snap to zero before emission so floating-point rounding never produces a stray 1-frame black flash on read in another NLE.
 
 ## R2 — Schema
 

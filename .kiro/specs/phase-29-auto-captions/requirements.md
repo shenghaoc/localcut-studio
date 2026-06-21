@@ -15,7 +15,7 @@
 ## R3 — Output model
 
 - **R3.1** Output `[CaptionLine]` with `WordTiming` arrays at segment granularity — populates the Phase 30 `CaptionTrack`.
-- **R3.2** Timeline timestamp mapping: `timelinePTS = clip.timelineStart + windowOffsetInClip + segment.timestamp` (and `+ segment.duration` for the range end). The same offset chain applies to every `WordTiming` and every `CaptionLine.range`. Tests assert that proposals fed back to the timeline land within ±1 frame of the spoken audio for a trimmed-clip fixture.
+- **R3.2** Timeline timestamp mapping goes through the clip's source-to-timeline evaluator so Phase 35 speed ramps are honoured: `sourceTime = clip.sourceStart + windowOffsetInClip + segment.timestamp`, then `timelinePTS = clip.mapSourceTimeToTimeline(sourceTime)`. The same chain applies to every `WordTiming` and every `CaptionLine.range`. Tests assert proposals land within ±1 frame of the spoken audio on (a) an unramped trimmed-clip fixture, and (b) a ramped clip whose speed curve covers acceleration + deceleration.
 - **R3.3** `NLLanguageRecognizer` runs after recognition only as a verification flag (proposal marked "likely wrong language" if it disagrees with the chosen locale); it is NOT the primary language source.
 
 ## R4 — Review-before-apply

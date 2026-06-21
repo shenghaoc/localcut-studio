@@ -19,11 +19,12 @@ The browser-editor ships Whisper Base / Tiny ONNX via ORT-WASM because the web p
 2. **Engine + locale.** `SFSpeechRecognizer(locale:)` takes the language at init and cannot change it after; the language must be chosen BEFORE recognition starts. Three sources, in order: (a) explicit user override in the inspector; (b) language read from the clip's source asset metadata where available; (c) the system locale as a documented default. Auto-detect from the transcript happens too late to be the primary path — `NLLanguageRecognizer` only runs as a verification step AFTER recognition, flagging the proposal as "likely wrong language — re-run as XX?" when it disagrees with the chosen locale. Word-level segment timings come from `SFTranscriptionSegment.timestamp + duration`.
 3. **Audio extraction + windowing.** `AVAssetReader` pulls clip audio. A `VadGate` (energy-based, hysteresis tuned for speech) skips silence and tightens segment boundaries before recognition. Each recognition window covers a known `(clipTimelineStart, windowOffsetInClip, windowDuration)` triple so step 4 can place the result correctly.
 4. **Worker.** A background `actor TranscriptionService` exposes `(asset, clip, locale) -> AsyncThrowingStream<CaptionLine>` and runs windowed recognition with overlap stride. The actor isolates Speech-framework calls from the main actor.
-5. **Timeline offset.** `SFTranscriptionSegment.timestamp` is relative to the audio buffer fed to the recognizer (window-start, NOT clip-start, NOT timeline-start). The mapping must add both offsets:
+5. **Timeline offset.** `SFTranscriptionSegment.timestamp` is relative to the audio buffer fed to the recognizer (window-start, NOT clip-start, NOT timeline-start). The mapping must go through the clip's source-to-timeline evaluator so that a Phase 35 speed ramp is honoured — a linear `timelineStart + offset + timestamp` would desync as soon as the clip is ramped:
    ```
-   timelinePTS = clip.timelineStart + windowOffsetInClip + segment.timestamp
+   sourceTime  = clip.sourceStart + windowOffsetInClip + segment.timestamp
+   timelinePTS = clip.mapSourceTimeToTimeline(sourceTime)   // identity when no ramp
    ```
-   Same for `WordTiming` and `CaptionLine.range`. Apply this before the result reaches `CaptionTrack`; review modal previews validate the offset against the playhead.
+   Same chain for `WordTiming` and `CaptionLine.range`. Apply before the result reaches `CaptionTrack`; the review modal previews validate the offset against the playhead. Tests cover both the unramped case (`mapSourceTimeToTimeline` is identity → matches `clip.timelineStart + windowOffsetInClip + segment.timestamp`) and the ramped case (must pass through the speed-curve evaluator).
 6. **Review-before-apply.** A modal surfaces proposed `CaptionLine`s with per-line apply / skip. Apply commits to the existing `CaptionTrack` in a single undoable transaction. Mirrors the Phase 44 silence-trim and Phase 33 reframe review patterns.
 
 ## Trade-offs
