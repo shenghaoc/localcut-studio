@@ -2,7 +2,7 @@
 
 ## R1 — Project scaffolding
 
-- **R1.1** macOS-only SwiftUI app (`SUPPORTED_PLATFORMS = macosx`), target macOS 27, product name "LocalCut Studio".
+- **R1.1** macOS-only SwiftUI app (`SUPPORTED_PLATFORMS = macosx`), target macOS 26, product name "LocalCut Studio".
 - **R1.2** Single-window three-pane workspace (media bin · preview · inspector) over a full-width timeline.
 - **R1.3** App Sandbox on; user-selected files read-write so exports can be written.
 

@@ -8,7 +8,7 @@ LocalCut Studio is a **native macOS port** of the [browser-editor](https://githu
 
 - [**Product vision**](.kiro/steering/product.md) — desktop-native NLE for mid-tier creators; performance is the product.
 - [**Architecture**](.kiro/steering/architecture.md) — AVFoundation composition pipeline, preview vs. export paths, development phases.
-- [**Technical constraints**](.kiro/steering/tech.md) — Swift 6 + SwiftUI, AVFoundation, Metal/Core Image, Xcode target on macOS 27.
+- [**Technical constraints**](.kiro/steering/tech.md) — Swift 6 + SwiftUI, AVFoundation, Metal/Core Image, Xcode target on macOS 26.
 - [**Repository structure**](.kiro/steering/structure.md) — engine vs. views, file naming, layout.
 - [**UI standards**](.kiro/steering/ui-standards.md) — native macOS look, bespoke timeline, AppKit interop where needed.
 - [**Code style**](.kiro/steering/style.md) — Swift conventions, Observation, concurrency, naming.
