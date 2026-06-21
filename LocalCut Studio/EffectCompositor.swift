@@ -357,7 +357,11 @@ private enum CubeLUTParser {
             guard !parts.isEmpty else { continue }
 
             if parts[0] == "LUT_3D_SIZE", parts.count >= 2 {
-                dimension = Int(parts[1]) ?? 0
+                // Bound the declared size: a crafted file could otherwise request a
+                // huge cube (dimension³·4 floats) and exhaust memory. 64 is the
+                // largest size in common .cube exports; reject anything beyond.
+                guard let size = Int(parts[1]), size > 1, size <= 64 else { return nil }
+                dimension = size
                 continue
             }
 
