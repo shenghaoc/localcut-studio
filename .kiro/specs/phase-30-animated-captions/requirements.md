@@ -3,7 +3,7 @@
 ## R1 — Caption data model
 
 - **R1.1** `CaptionTrack` extends the project model with an ordered list of `CaptionLine { id, range: CMTimeRange, text, words: [WordTiming]? }` plus a `CaptionStyle?` per line and a track-level default style.
-- **R1.2** `WordTiming { range: CMTimeRange, range: String }` is OPTIONAL; absence means full-line rendering only.
+- **R1.2** `WordTiming { range: CMTimeRange, word: String }` is OPTIONAL; absence means full-line rendering only.
 - **R1.3** Caption tracks survive project save/load and bundle export (depends on `feature-project-persistence`).
 - **R1.4** SRT and VTT importers populate line text + range; word timings remain `nil` (filled later by Phase 29).
 

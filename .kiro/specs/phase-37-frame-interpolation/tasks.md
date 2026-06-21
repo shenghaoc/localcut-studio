@@ -1,4 +1,4 @@
-# Tasks: Phase 37 — Optical-Flow Frame Interpolation
+# Tasks: Phase 37 — Frame Interpolation (VTFrameProcessor)
 
 > Status: **Proposed**. Depends on Phase 35, Phase 33, render cache, capability tiers; blocked on macOS 27 leaving beta.
 
@@ -9,10 +9,16 @@
 - [ ] **T1.3** Feature-detect via availability gate; report `unavailable` on Intel + pre-macOS-15.4.
 - [ ] **T1.4** `synthesise(F0, F1, tau)` API surface backed by the chosen configuration.
 
+## Pipeline
+
+- [ ] **T2.1** Zero-copy `CMSampleBuffer` → `IOSurface`-backed `CVPixelBuffer` input into `VTFrameProcessor.process(…)`; output `CVPixelBuffer` consumed directly by the compositor (no Metal-texture round-trip needed; the processor handles GPU residency).
+- [ ] **T2.2** Shared `CVPixelBufferPool` between the source reader, `VTFrameProcessor`, and the compositor to avoid allocations on the hot path.
+- [ ] **T2.3** Per-clip lifetime: spin up + tear down a `VTFrameProcessor` instance per clip-session; reset on seek and shot boundary.
+
 ## Tiling + estimate
 
-- [ ] **T3.1** `tiling.ts`-equivalent in Swift: VRAM budget → tile plan + halo.
-- [ ] **T3.2** Estimate calculator keyed by chip family; per-tile ms calibration.
+- [ ] **T3.1** Tile planner in Swift: probe-derived VRAM budget → tile plan + halo sized to the chosen configuration's documented displacement.
+- [ ] **T3.2** Estimate calculator keyed by chip family + resolution; per-frame ms calibration.
 
 ## Cache + shot guard
 

@@ -2,7 +2,7 @@
 
 ## R1 — Time model
 
-- **R1.1** `interchangeRate(doc)` picks `exportSettings.fps` when finite > 0, else most common source fps, else 30.
+- **R1.1** `interchangeRate(doc)` picks `project.frameRate` when finite > 0, else most common source fps, else 30.
 - **R1.2** Each boundary snaps independently; durations derive from `endFrames − startFrames`.
 - **R1.3** Adjacent clips stay adjacent in frames after snapping; no spurious gaps or overlaps.
 - **R1.4** Fractional rates (23.976, 29.97) preserve exact rational representation.

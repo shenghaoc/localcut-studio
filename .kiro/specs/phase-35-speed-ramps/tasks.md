@@ -12,7 +12,7 @@
 
 - [ ] **T2.1** Speed-curve evaluator: continuous bezier → output-time → source-time mapping.
 - [ ] **T2.2** Segment plan builder: keyframe pairs → ≥10 sub-segments each → `[(sourceRange, outputDuration)]`.
-- [ ] **T2.3** Extend `CompositionBuilder` to apply the segment plan to the video track via `scaleTimeRange`.
+- [ ] **T2.3** Extend `CompositionBuilder` to apply the segment plan to the video track via `AVMutableCompositionTrack.scaleTimeRange(_:toDuration:)`.
 - [ ] **T2.4** Build `AVMutableAudioMix` with `audioTimePitchAlgorithm` mirroring the same segment plan.
 - [ ] **T2.5** Snap segment boundaries to source-asset sample times; document the ±1 frame tolerance.
 

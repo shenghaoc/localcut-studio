@@ -8,7 +8,7 @@
 
 ## R2 — Composition
 
-- **R2.1** Video segments insert with `AVMutableCompositionTrack.scaleTimeRange(_:toDuration:)` per keyframe pair; eased curves approximate via ≥10 sub-segments per pair.
+- **R2.1** Video segments insert with `AVMutableCompositionTrack.scaleTimeRange(_:toDuration:)` per keyframe pair (per-track, not the composition-wide variant); eased curves approximate via ≥10 sub-segments per pair.
 - **R2.2** Audio mirrors the same segment plan on the audio track with `AVMutableAudioMix` applying the chosen `audioTimePitchAlgorithm`.
 - **R2.3** A / V sync at every keyframe boundary stays within one frame at the project's fps.
 

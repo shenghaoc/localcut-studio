@@ -1,4 +1,4 @@
-# Requirements: Phase 37 — Optical-Flow Frame Interpolation
+# Requirements: Phase 37 — Frame Interpolation (VTFrameProcessor)
 
 ## R1 — Engine
 
