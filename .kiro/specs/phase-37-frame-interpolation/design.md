@@ -17,19 +17,22 @@ The browser-editor selects **Practical-RIFE 4.25 lite (MIT)** as an ONNX model o
 
 ## Approach
 
-1. **Engine — `VTFrameProcessor`.** VideoToolbox's `VTFrameProcessor` exposes per-task configuration types we can pick from:
+1. **Engine — `VTFrameProcessor`.** VideoToolbox's `VTFrameProcessor` (class, macOS 15.4+ / Mac Catalyst 26.0+) is the engine. Lifecycle is `init()` → `startSession(configuration:)` → loop `process(...)` → `endSession()`. The configuration is set ONCE at `startSession` for the whole session — you don't switch configurations mid-session. We therefore keep a small pool of pre-configured `VTFrameProcessor` instances, one per use case:
    - `VTLowLatencyFrameInterpolationConfiguration` — pair-wise mid-frame synthesis at sub-multiples; the direct Phase 35 `synthesize` ramp path.
    - `VTFrameRateConversionConfiguration` — full clip / source frame-rate conversion with built-in interpolation; the direct export-time 24→60 path.
    - `VTOpticalFlowConfiguration` — 2-channel flow field; drives the optional motion-blur synthesis.
    - `VTMotionBlurConfiguration` — flow-driven motion blur as a single processor call (we keep flow + custom blur in the design as an alternative for fine control).
-   Each is constructed with input pixel-buffer attributes + frame supports; `VTFrameProcessor.process(…)` returns the synthesised buffer. All run on the Neural Engine on Apple Silicon.
-2. **Pipeline (zero-copy).**
+   Each conforms to `VTFrameProcessorConfiguration`. All run on the Neural Engine on Apple Silicon.
+2. **Pipeline (zero-copy via Metal command buffer).**
    ```
-   CMSampleBuffer F0,F1 → IOSurface-backed CVPixelBuffer → VTFrameProcessor.process
-                                                                       ↓
-                                                  CVPixelBuffer → compositor
+   CMSampleBuffer F0,F1 → IOSurface CVPixelBuffer
+                       wrap as VTFrameProcessorFrame (source / reference)
+                                       ↓
+                       VTFrameProcessor.process(with: MTLCommandBuffer, parameters:)
+                                       ↓
+                       VTFrameProcessorFrame.ReadOnlyFrame → CVPixelBuffer → compositor
    ```
-   No CPU pixel round-trip. `VTFrameProcessor` accepts and returns `CVPixelBuffer`s tied to the same `IOSurface`-backed pool the compositor uses.
+   `process(with:parameters:)` is the Metal variant — we enqueue the processor's work onto the same `MTLCommandBuffer` the compositor uses, so the Neural Engine + GPU stay GPU-resident with no CPU round-trip. The async-sequence and completion-handler variants exist (`process(parameters:)` and `process(parameters:completionHandler:)`) but the Metal variant is the right choice for our shared-device pipeline. Source / reference / output frames are wrapped as `VTFrameProcessorFrame` per Apple's protocol; output is delivered as `VTFrameProcessorFrame.ReadOnlyFrame` for safe in-line reading.
 3. **No model download, no manifest.** `VTFrameProcessor` ships with the OS; we feature-detect its presence (`if #available(macOS 15.4, *)`) and pick configurations by capability. There is no `template = hidden` flag; the feature is available the moment the OS version + chip meet the floor.
 4. **Tiling.** `VTFrameProcessor` accepts arbitrary input sizes; under the hood it handles tiling for memory. We pass full-resolution buffers up to 4K; on inputs where the processor reports memory pressure we fall back to a manual two-tile plan with a halo sized to the configuration's documented displacement.
 5. **Time-estimate.** Pre-run estimate from `frames × calibratedMsPerFrame` keyed by chip family + resolution; surface in the diagnostics panel and the export dialog; aim for ±30 % of actual on fixtures.

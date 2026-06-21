@@ -7,16 +7,16 @@
 
 ## Engine
 
-- [ ] **T1.1** `InterpolationEngine` actor — owns `VTFrameProcessor` instances per configuration kind.
-- [ ] **T1.2** Configuration picker: `VTLowLatencyFrameInterpolationConfiguration` for ramps; `VTFrameRateConversionConfiguration` for export upconversion; `VTOpticalFlowConfiguration` / `VTMotionBlurConfiguration` for motion blur.
-- [ ] **T1.3** Two-step availability gate: `#available(macOS 15.4, *)` OS check + runtime session-start probe (catches Intel Macs that pass the OS check but lack a Neural Engine); both failure modes report `unavailable`.
-- [ ] **T1.4** `synthesise(F0, F1, tau)` API surface backed by the chosen configuration.
+- [ ] **T1.1** `InterpolationEngine` actor — owns a small pool of `VTFrameProcessor` instances, one per configuration kind. Each instance follows the lifecycle `init()` → `startSession(configuration:)` → repeated `process(with:parameters:)` → `endSession()`.
+- [ ] **T1.2** Configuration types per use case: `VTLowLatencyFrameInterpolationConfiguration` for ramps; `VTFrameRateConversionConfiguration` for export upconversion; `VTOpticalFlowConfiguration` / `VTMotionBlurConfiguration` for motion blur. (All conform to `VTFrameProcessorConfiguration`. Configurations are NOT swapped on a live processor — a new processor + session is created per use case.)
+- [ ] **T1.3** Two-step availability gate: `#available(macOS 15.4, *)` OS check + `try startSession(configuration:)` failure handler (catches Intel Macs that pass the OS check but throw at session start); both failure modes report `unavailable`.
+- [ ] **T1.4** `synthesise(F0, F1, tau)` API surface backed by the chosen processor + configuration.
 
 ## Pipeline
 
-- [ ] **T2.1** Zero-copy `CMSampleBuffer` → `IOSurface`-backed `CVPixelBuffer` input into `VTFrameProcessor.process(…)`; output `CVPixelBuffer` consumed directly by the compositor (no Metal-texture round-trip needed; the processor handles GPU residency).
-- [ ] **T2.2** Shared `CVPixelBufferPool` between the source reader, `VTFrameProcessor`, and the compositor to avoid allocations on the hot path.
-- [ ] **T2.3** Per-clip lifetime: spin up + tear down a `VTFrameProcessor` instance per clip-session; reset on seek and shot boundary.
+- [ ] **T2.1** Zero-copy via `process(with: MTLCommandBuffer, parameters:)` — the Metal variant of `VTFrameProcessor.process`. Source / reference frames wrap as `VTFrameProcessorFrame`; output reads as `VTFrameProcessorFrame.ReadOnlyFrame`. Output frames feed the compositor without a CPU round-trip.
+- [ ] **T2.2** Shared `CVPixelBufferPool` (`IOSurface`-backed) across source reader, `VTFrameProcessor`, and compositor.
+- [ ] **T2.3** Per-clip lifetime: `init()` + `startSession(_:)` on first use; `endSession()` on seek, shot boundary, or clip switch; throwing `startSession` flips the engine to `unavailable`.
 
 ## Tiling + estimate
 

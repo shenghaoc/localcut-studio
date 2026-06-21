@@ -2,16 +2,17 @@
 
 ## R1 — Engine
 
-- **R1.1** `VTFrameProcessor` is the engine; no external model is vendored.
+- **R1.1** `VTFrameProcessor` is the engine; no external model is vendored. Lifecycle per session: `init()` → `startSession(configuration:)` → repeated `process(with:parameters:)` (Metal command-buffer variant) → `endSession()`.
 - **R1.2** Two-step availability gate:
   - **OS gate:** `if #available(macOS 15.4, *)` — fails compilation-free on older OS.
-  - **Architecture / runtime gate:** attempt to start a session with the chosen configuration; `VTFrameProcessor` reports unavailability at session start on hardware without a Neural Engine (Intel Macs pass the OS gate but fail here). Treat session-start failure as `unavailable` rather than crash.
-- **R1.3** Per-task configurations chosen by use: `VTLowLatencyFrameInterpolationConfiguration` for ramps, `VTFrameRateConversionConfiguration` for export upconversion, `VTOpticalFlowConfiguration` (or `VTMotionBlurConfiguration`) for motion blur.
+  - **Architecture / runtime gate:** call `startSession(configuration:) throws` and catch the failure — `VTFrameProcessor` throws at session start on hardware that can't run the requested configuration (Intel Macs pass the OS gate but throw here). Treat session-start failure as `unavailable` rather than crash.
+- **R1.3** A pre-configured pool of `VTFrameProcessor` instances, one per use case: `VTLowLatencyFrameInterpolationConfiguration` for ramps, `VTFrameRateConversionConfiguration` for export upconversion, `VTOpticalFlowConfiguration` (or `VTMotionBlurConfiguration`) for motion blur. Configurations are NOT swapped on a live processor — that's not supported by the API.
 
 ## R2 — Pipeline
 
-- **R2.1** Zero-copy: `IOSurface`-backed `CVPixelBuffer` → `VTFrameProcessor` → `CVPixelBuffer` → compositor; no CPU pixel round-trip.
-- **R2.2** Frame interpolation uses the same `IOSurface` pool as the compositor.
+- **R2.1** Zero-copy via the Metal variant `process(with: MTLCommandBuffer, parameters:)`; frames cross the boundary as `VTFrameProcessorFrame` (source / reference / output) and surface as `VTFrameProcessorFrame.ReadOnlyFrame`. No CPU pixel round-trip.
+- **R2.2** The processor's work enqueues onto the same `MTLCommandBuffer` the compositor uses, so the Neural Engine + GPU stay GPU-resident across the operation.
+- **R2.3** Frame interpolation uses the same `IOSurface`-backed `CVPixelBufferPool` as the compositor.
 
 ## R3 — Tiling + VRAM
 
