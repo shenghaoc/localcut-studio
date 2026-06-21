@@ -64,10 +64,13 @@ struct TimelineView: View {
             Spacer()
             Image(systemName: "minus.magnifyingglass")
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Slider(value: $model.pixelsPerSecond, in: 20...300)
                 .frame(width: 140)
+                .accessibilityLabel("Timeline zoom")
             Image(systemName: "plus.magnifyingglass")
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)

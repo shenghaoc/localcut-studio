@@ -53,6 +53,7 @@ struct PreviewView: View {
                 Image(systemName: "backward.end.fill")
             }
             .help("Go to start")
+            .accessibilityLabel("Go to start")
 
             Button {
                 model.togglePlayPause()
@@ -62,6 +63,7 @@ struct PreviewView: View {
             }
             .keyboardShortcut(.space, modifiers: [])
             .help("Play / Pause")
+            .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
 
             Text(TimeFormatting.timecode(model.currentTime))
                 .monospacedDigit()

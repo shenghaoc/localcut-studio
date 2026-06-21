@@ -21,6 +21,7 @@ struct MediaBinView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Import media…")
+                .accessibilityLabel("Import media")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
