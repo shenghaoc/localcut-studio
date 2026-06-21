@@ -57,3 +57,15 @@ Clip blocks in `TimelineView` have no `accessibilityLabel` or accessibility trai
 `applyLUT` returns nil when the bookmark is stale (line 279). The `?? result` at the call site keeps the pipeline running but silently drops the effect. The user sees the LUT in the inspector but it renders as a no-op.
 
 - **Fix**: Log `os_log(.error, ...)` so the failure is at least observable in the system log.
+
+### B10 — Thumbnail tasks strong-capture `self`
+
+`EditorModel.swift:137` and `EditorModel+Persistence.swift:315` launch `Task { await self.generateThumbnail(for: item) }` with a strong capture of `self`. If the user closes the window, the `EditorModel` is kept alive until all thumbnail tasks finish.
+
+- **Fix**: Use `[weak self]` in both thumbnail `Task` closures.
+
+### B11 — `endObserver` watches all players
+
+`EditorModel.swift:79-85` registers the end-of-playback observer with `object: nil`, meaning any `AVPlayerItem.didPlayToEndTimeNotification` from any player sets `isPlaying = false`. Currently harmless (single player), but fragile.
+
+- **Fix**: Filter in the closure to only respond when the notification's object matches `player.currentItem`.

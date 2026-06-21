@@ -11,6 +11,8 @@
 - [x] **B7** Fix export race: set `isExporting = true` before first `await` in `export(to:)`.
 - [x] **B8** Fix rebuild killing playback: capture `isPlaying` and resume after seek.
 - [x] **B9** Fix silent LUT failure: log `os_log(.error, ...)` when stale bookmark drops effect.
+- [x] **B10** Fix thumbnail Task strong-capture `self`: use `[weak self]`.
+- [x] **B11** Fix `endObserver` scope: filter notifications to match `player.currentItem`.
 
 ## Verification
 
