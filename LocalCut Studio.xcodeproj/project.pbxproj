@@ -308,6 +308,7 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "LocalCut Studio" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "LocalCut Studio/LocalCut Studio.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = YES;
@@ -337,6 +338,7 @@
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "LocalCut Studio" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "LocalCut Studio/LocalCut Studio.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = YES;

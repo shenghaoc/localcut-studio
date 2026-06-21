@@ -34,8 +34,41 @@ final class EditorModel {
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var pendingRebuildTask: Task<Void, Never>?
+    /// The in-flight preview rebuild. A new rebuild cancels the previous one so
+    /// rapid edits/undo can't land an older composition on the player last.
+    @ObservationIgnored var activeRebuildTask: Task<Void, Never>?
+
+    // MARK: Document state
+    /// The file backing the current project, or `nil` for an unsaved one.
+    var documentURL: URL?
+    /// Whether the project has unsaved changes (drives the window's edited dot).
+    var isDirty = false
+    /// Media references whose files couldn't be resolved on open; awaiting relink.
+    var unresolvedMedia: [MediaRef] = []
+
+    // MARK: Undo state
+    @ObservationIgnored let undoManager = UndoManager()
+    var canUndo = false
+    var canRedo = false
+    var undoTitle = "Undo"
+    var redoTitle = "Redo"
+    @ObservationIgnored var coalescedUndoBefore: ProjectState?
+    @ObservationIgnored var coalescedUndoName: String?
+    @ObservationIgnored var coalescedUndoTarget: AnyHashable?
+    @ObservationIgnored var coalescedCommitTask: Task<Void, Never>?
+
+    /// Monotonically increases on every mutation; lets an async save tell whether
+    /// the project changed between snapshotting its data and finishing the write.
+    @ObservationIgnored var mutationRevision = 0
+
+    /// Security-scoped resources retained for the session, stopped on teardown.
+    @ObservationIgnored nonisolated(unsafe) var accessedURLs: Set<URL> = []
 
     init() {
+        // Each editor action manages its own undo group explicitly, so disable
+        // run-loop-based coalescing (see registerUndo).
+        undoManager.groupsByEvent = false
+
         let interval = CMTime(value: 1, timescale: 30)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
@@ -54,8 +87,10 @@ final class EditorModel {
 
     deinit {
         pendingRebuildTask?.cancel()
+        activeRebuildTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
     }
 
     // MARK: - Import
@@ -63,32 +98,46 @@ final class EditorModel {
     /// Loads the given files into the media bin, reading metadata and a poster
     /// frame for each. Security-scoped access is retained for the session.
     func importMedia(urls: [URL]) async {
+        var loaded: [MediaItem] = []
         for url in urls {
             let didAccess = url.startAccessingSecurityScopedResource()
             let item = MediaItem(url: url)
             do {
-                let duration = try await item.asset.load(.duration)
-                item.duration = duration
+                item.duration = try await item.asset.load(.duration)
 
-                let videoTracks = try await item.asset.loadTracks(withMediaType: .video)
-                if let v = videoTracks.first {
+                if let v = try await item.asset.loadTracks(withMediaType: .video).first {
                     item.hasVideo = true
                     item.naturalSize = try await v.load(.naturalSize)
                     item.preferredTransform = try await v.load(.preferredTransform)
                 }
                 item.hasAudio = try await !item.asset.loadTracks(withMediaType: .audio).isEmpty
 
-                project.mediaItems.append(item)
-                statusMessage = "Imported \(item.name)."
-                Task { await self.generateThumbnail(for: item) }
+                // Retain access for the session and capture a persistable bookmark
+                // so the file can be re-resolved after relaunch (R1.2).
+                retainAccess(url, didStart: didAccess)
+                item.bookmark = try? url.bookmarkData(options: .withSecurityScope,
+                                                      includingResourceValuesForKeys: nil,
+                                                      relativeTo: nil)
+                loaded.append(item)
             } catch {
                 if didAccess { url.stopAccessingSecurityScopedResource() }
                 statusMessage = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
             }
         }
+        guard !loaded.isEmpty else { return }
+
+        // Snapshot and append synchronously (no awaits between) so a concurrent
+        // edit made while metadata loaded can't be folded into the import's
+        // undo step.
+        let before = captureState()
+        project.mediaItems.append(contentsOf: loaded)
+        registerImportUndo(name: "Import Media", before: before)
+        markDirty()
+        statusMessage = loaded.count == 1 ? "Imported \(loaded[0].name)." : "Imported \(loaded.count) items."
+        for item in loaded { Task { await self.generateThumbnail(for: item) } }
     }
 
-    private func generateThumbnail(for item: MediaItem) async {
+    func generateThumbnail(for item: MediaItem) async {
         guard item.hasVideo else { return }
         let generator = AVAssetImageGenerator(asset: item.asset)
         generator.appliesPreferredTrackTransform = true
@@ -105,23 +154,25 @@ final class EditorModel {
     /// first video and/or audio track, depending on what the media contains.
     func addToTimeline(mediaID: MediaItem.ID) {
         guard let media = project.media(for: mediaID) else { return }
-        let insertAt = project.duration
-        let fullRange = CMTimeRange(start: .zero, duration: media.duration)
+        performUndoable("Add Clip") {
+            let insertAt = project.duration
+            let fullRange = CMTimeRange(start: .zero, duration: media.duration)
 
-        if media.hasVideo, let track = project.videoTracks.first {
-            track.clips.append(Clip(mediaID: mediaID,
-                                    sourceStart: fullRange.start,
-                                    duration: fullRange.duration,
-                                    timelineStart: insertAt))
+            if media.hasVideo, let track = project.videoTracks.first {
+                track.clips.append(Clip(mediaID: mediaID,
+                                        sourceStart: fullRange.start,
+                                        duration: fullRange.duration,
+                                        timelineStart: insertAt))
+            }
+            if media.hasAudio, let track = project.audioTracks.first {
+                track.clips.append(Clip(mediaID: mediaID,
+                                        sourceStart: fullRange.start,
+                                        duration: fullRange.duration,
+                                        timelineStart: insertAt))
+            }
+            statusMessage = "Added \(media.name) to timeline."
+            scheduleRebuild()
         }
-        if media.hasAudio, let track = project.audioTracks.first {
-            track.clips.append(Clip(mediaID: mediaID,
-                                    sourceStart: fullRange.start,
-                                    duration: fullRange.duration,
-                                    timelineStart: insertAt))
-        }
-        statusMessage = "Added \(media.name) to timeline."
-        Task { await rebuild() }
     }
 
     /// All tracks, flattened, for lookups.
@@ -129,13 +180,15 @@ final class EditorModel {
 
     func deleteSelectedClip() {
         guard let id = selectedClipID else { return }
-        for track in allTracks {
-            track.clips.removeAll { $0.id == id }
+        performUndoable("Delete Clip") {
+            for track in allTracks {
+                track.clips.removeAll { $0.id == id }
+            }
+            selectedClipID = nil
+            sanitizeTransitions()
+            statusMessage = "Deleted clip."
+            scheduleRebuild()
         }
-        selectedClipID = nil
-        sanitizeTransitions()
-        statusMessage = "Deleted clip."
-        Task { await rebuild() }
     }
 
     /// Removes a media item from the project and stops its security-scoped access.
@@ -169,71 +222,72 @@ final class EditorModel {
     func splitSelectedClipAtPlayhead() {
         guard let id = selectedClipID else { return }
 
-        for track in allTracks {
-            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-            let clip = track.clips[index]
+        performUndoable("Split Clip") {
+            for track in allTracks {
+                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                let clip = track.clips[index]
 
-            // The playhead is in effective (rippled) time; convert to this clip's
-            // authored time using its constant ripple shift so the split lands at
-            // the frame the user sees.
-            let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks)
-            let placements = TransitionLayout.placements(for: track.clips, cuts: cuts)
-            let shift = placements.first(where: { $0.id == id })
-                .map { clip.timelineStart - $0.effectiveStart } ?? .zero
-            let playhead = CMTime(seconds: currentTime, preferredTimescale: 600) + shift
+                // The playhead is in effective (rippled) time; convert to this clip's
+                // authored time using its constant ripple shift so the split lands at
+                // the frame the user sees.
+                let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks)
+                let placements = TransitionLayout.placements(for: track.clips, cuts: cuts)
+                let shift = placements.first(where: { $0.id == id })
+                    .map { clip.timelineStart - $0.effectiveStart } ?? .zero
+                let playhead = CMTime(seconds: currentTime, preferredTimescale: 600) + shift
 
-            guard playhead > clip.timelineStart, playhead < clip.timelineEnd else { return }
+                guard playhead > clip.timelineStart, playhead < clip.timelineEnd else { return }
 
-            let offset = playhead - clip.timelineStart
-            var left = clip
-            left.duration = offset
+                let offset = playhead - clip.timelineStart
+                var left = clip
+                left.duration = offset
 
-            var right = clip
-            right = Clip(mediaID: clip.mediaID,
-                         sourceStart: clip.sourceStart + offset,
-                         duration: clip.duration - offset,
-                         timelineStart: playhead,
-                         opacity: clip.opacity,
-                         effects: clip.effects)
+                var right = clip
+                right = Clip(mediaID: clip.mediaID,
+                             sourceStart: clip.sourceStart + offset,
+                             duration: clip.duration - offset,
+                             timelineStart: playhead,
+                             opacity: clip.opacity,
+                             effects: clip.effects)
 
-            track.clips.replaceSubrange(index...index, with: [left, right])
-            selectedClipID = left.id
-            statusMessage = "Split clip."
-            Task { await rebuild() }
-            return
+                track.clips.replaceSubrange(index...index, with: [left, right])
+                selectedClipID = left.id
+                statusMessage = "Split clip."
+                scheduleRebuild()
+                return
+            }
         }
     }
 
-    /// Mutates the selected clip in place via the supplied closure, then rebuilds.
-    func updateSelectedClip(_ transform: (inout Clip) -> Void) {
+    /// Mutates the selected clip via the supplied closure and schedules a
+    /// debounced rebuild, coalescing a continuous gesture (opacity/colour drag)
+    /// into a single undo step labelled `actionName`.
+    func updateSelectedClipCoalesced(_ actionName: String = "Adjust Clip",
+                                     _ transform: @escaping (inout Clip) -> Void) {
         guard let id = selectedClipID else { return }
-        for track in allTracks {
-            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-            transform(&track.clips[index])
-            Task { await rebuild() }
-            return
+        performCoalescedUndoable(actionName, target: id, rebuild: .debounced) {
+            for track in allTracks {
+                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                transform(&track.clips[index])
+                return
+            }
         }
     }
 
-    /// Mutates the selected clip and schedules a debounced rebuild (for continuous
-    /// drags such as colour sliders). Cancels any pending rebuild.
-    func updateSelectedClipCoalesced(_ transform: (inout Clip) -> Void) {
-        guard let id = selectedClipID else { return }
-        for track in allTracks {
-            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-            transform(&track.clips[index])
-            rebuildDebounced()
-            return
-        }
-    }
-
-    private func rebuildDebounced(after delay: Duration = .milliseconds(200)) {
+    func rebuildDebounced(after delay: Duration = .milliseconds(200)) {
         pendingRebuildTask?.cancel()
         pendingRebuildTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
-            await rebuild()
+            scheduleRebuild()
         }
+    }
+
+    /// Starts a preview rebuild, cancelling any rebuild already in flight so the
+    /// most recent project state is the one that reaches the player.
+    func scheduleRebuild() {
+        activeRebuildTask?.cancel()
+        activeRebuildTask = Task { [weak self] in await self?.rebuild() }
     }
 
     // MARK: - Colour grading
@@ -250,19 +304,20 @@ final class EditorModel {
         }
         set {
             guard let id = selectedClipID else { return }
-            for track in allTracks {
-                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-                var grade = newValue
-                grade.clamp()
-                if let effectIndex = track.clips[index].effects.firstIndex(where: {
-                    if case .colourGrade = $0 { return true }; return false
-                }) {
-                    track.clips[index].effects[effectIndex] = .colourGrade(grade)
-                } else {
-                    track.clips[index].effects.append(.colourGrade(grade))
+            performCoalescedUndoable("Adjust Colour", target: id, rebuild: .debounced) {
+                for track in allTracks {
+                    guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                    var grade = newValue
+                    grade.clamp()
+                    if let effectIndex = track.clips[index].effects.firstIndex(where: {
+                        if case .colourGrade = $0 { return true }; return false
+                    }) {
+                        track.clips[index].effects[effectIndex] = .colourGrade(grade)
+                    } else {
+                        track.clips[index].effects.append(.colourGrade(grade))
+                    }
+                    return
                 }
-                rebuildDebounced()
-                return
             }
         }
     }
@@ -270,11 +325,13 @@ final class EditorModel {
     /// Removes all colour effects from the selected clip.
     func resetClipColourEffects() {
         guard let id = selectedClipID else { return }
-        for track in allTracks {
-            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-            track.clips[index].effects.removeAll()
-            Task { await rebuild() }
-            return
+        performUndoable("Reset Colour") {
+            for track in allTracks {
+                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                track.clips[index].effects.removeAll()
+                scheduleRebuild()
+                return
+            }
         }
     }
 
@@ -298,12 +355,14 @@ final class EditorModel {
             return
         }
 
-        for track in allTracks {
-            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-            track.clips[index].effects.append(.lut(bookmark: bookmark))
-            statusMessage = "Imported LUT \(url.lastPathComponent)."
-            Task { await rebuild() }
-            return
+        performUndoable("Import LUT") {
+            for track in allTracks {
+                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                track.clips[index].effects.append(.lut(bookmark: bookmark))
+                statusMessage = "Imported LUT \(url.lastPathComponent)."
+                scheduleRebuild()
+                return
+            }
         }
     }
 
@@ -396,23 +455,37 @@ final class EditorModel {
             return
         }
         let duration = CMTimeMinimum(Transition.defaultDuration, chainedAvailableOverlap(forClip: id))
-        setTransition(Transition(duration: duration), onClip: id)
-        selectedClipID = nil
-        selectedMediaID = nil
-        selectedTransitionClipID = id
-        statusMessage = "Added transition."
+        performUndoable("Add Transition") {
+            setTransition(Transition(duration: duration), onClip: id)
+            selectedClipID = nil
+            selectedMediaID = nil
+            selectedTransitionClipID = id
+            statusMessage = "Added transition."
+        }
     }
 
     /// Mutates the selected transition. Continuous edits (duration drag) pass
-    /// `coalesced: true` to debounce the rebuild.
+    /// `coalesced: true` to coalesce the gesture into one undo step.
     func updateSelectedTransition(coalesced: Bool = false, _ body: (inout Transition) -> Void) {
         guard let id = selectedTransitionClipID else { return }
+        if coalesced {
+            performCoalescedUndoable("Adjust Transition", target: id, rebuild: .debounced) {
+                applyToSelectedTransition(id: id, body)
+            }
+        } else {
+            performUndoable("Change Transition") {
+                applyToSelectedTransition(id: id, body)
+                scheduleRebuild()
+            }
+        }
+    }
+
+    private func applyToSelectedTransition(id: Clip.ID, _ body: (inout Transition) -> Void) {
         for track in allTracks {
             guard let index = track.clips.firstIndex(where: { $0.id == id }),
                   var transition = track.clips[index].transition else { continue }
             body(&transition)
             track.clips[index].transition = transition
-            if coalesced { rebuildDebounced() } else { Task { await rebuild() } }
             return
         }
     }
@@ -420,16 +493,18 @@ final class EditorModel {
     /// Removes the selected transition, restoring the plain cut (R3.3).
     func removeSelectedTransition() {
         guard let id = selectedTransitionClipID else { return }
-        setTransition(nil, onClip: id)
-        selectedTransitionClipID = nil
-        statusMessage = "Removed transition."
+        performUndoable("Remove Transition") {
+            setTransition(nil, onClip: id)
+            selectedTransitionClipID = nil
+            statusMessage = "Removed transition."
+        }
     }
 
     private func setTransition(_ transition: Transition?, onClip id: Clip.ID) {
         for track in allTracks {
             guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
             track.clips[index].transition = transition
-            Task { await rebuild() }
+            scheduleRebuild()
             return
         }
     }
@@ -447,51 +522,52 @@ final class EditorModel {
     /// a one-frame minimum length, and neighbouring clip boundaries on the same
     /// track so trims never create overlaps.
     func trimClip(id: Clip.ID, edge: TrimEdge, to time: CMTime) {
-        for track in allTracks {
-            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-            var clip = track.clips[index]
-            guard let media = project.media(for: clip.mediaID) else { return }
-            let sourceDuration = media.duration
-            let minDur = minClipDuration
+        performCoalescedUndoable("Trim Clip", target: id, rebuild: .immediate) {
+            for track in allTracks {
+                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                var clip = track.clips[index]
+                guard let media = project.media(for: clip.mediaID) else { return }
+                let sourceDuration = media.duration
+                let minDur = minClipDuration
 
-            let sorted = track.clips.sorted { $0.timelineStart < $1.timelineStart }
-            guard let sortedIndex = sorted.firstIndex(where: { $0.id == id }) else { return }
-            let prevClip = sortedIndex > 0 ? sorted[sortedIndex - 1] : nil
-            let nextClip = sortedIndex < sorted.count - 1 ? sorted[sortedIndex + 1] : nil
+                let sorted = track.clips.sorted { $0.timelineStart < $1.timelineStart }
+                guard let sortedIndex = sorted.firstIndex(where: { $0.id == id }) else { return }
+                let prevClip = sortedIndex > 0 ? sorted[sortedIndex - 1] : nil
+                let nextClip = sortedIndex < sorted.count - 1 ? sorted[sortedIndex + 1] : nil
 
-            switch edge {
-            case .left:
-                let originalEnd = clip.timelineEnd
-                var newTimelineStart = max(time, .zero)
-                let minTimelineStart = clip.timelineStart - clip.sourceStart
-                newTimelineStart = max(newTimelineStart, minTimelineStart)
-                let maxTimelineStart = originalEnd - minDur
-                newTimelineStart = min(newTimelineStart, maxTimelineStart)
-                if let prev = prevClip {
-                    newTimelineStart = max(newTimelineStart, prev.timelineEnd)
+                switch edge {
+                case .left:
+                    let originalEnd = clip.timelineEnd
+                    var newTimelineStart = max(time, .zero)
+                    let minTimelineStart = clip.timelineStart - clip.sourceStart
+                    newTimelineStart = max(newTimelineStart, minTimelineStart)
+                    let maxTimelineStart = originalEnd - minDur
+                    newTimelineStart = min(newTimelineStart, maxTimelineStart)
+                    if let prev = prevClip {
+                        newTimelineStart = max(newTimelineStart, prev.timelineEnd)
+                    }
+
+                    let delta = newTimelineStart - clip.timelineStart
+                    clip.sourceStart = clip.sourceStart + delta
+                    clip.timelineStart = newTimelineStart
+                    clip.duration = originalEnd - newTimelineStart
+
+                case .right:
+                    let maxSourceRemaining = sourceDuration - clip.sourceStart
+                    var newDuration = time - clip.timelineStart
+                    newDuration = max(newDuration, minDur)
+                    newDuration = min(newDuration, maxSourceRemaining)
+                    if let next = nextClip {
+                        let maxDuration = next.timelineStart - clip.timelineStart
+                        newDuration = min(newDuration, maxDuration)
+                    }
+                    clip.duration = newDuration
                 }
 
-                let delta = newTimelineStart - clip.timelineStart
-                clip.sourceStart = clip.sourceStart + delta
-                clip.timelineStart = newTimelineStart
-                clip.duration = originalEnd - newTimelineStart
-
-            case .right:
-                let maxSourceRemaining = sourceDuration - clip.sourceStart
-                var newDuration = time - clip.timelineStart
-                newDuration = max(newDuration, minDur)
-                newDuration = min(newDuration, maxSourceRemaining)
-                if let next = nextClip {
-                    let maxDuration = next.timelineStart - clip.timelineStart
-                    newDuration = min(newDuration, maxDuration)
-                }
-                clip.duration = newDuration
+                track.clips[index] = clip
+                sanitizeTransitions()
+                return
             }
-
-            track.clips[index] = clip
-            sanitizeTransitions()
-            Task { await rebuild() }
-            return
         }
     }
 
@@ -512,26 +588,27 @@ final class EditorModel {
         guard let targetTrack = allTracks.first(where: { $0.id == targetTrackID }) else { return }
         guard sourceTrack.kind == targetTrack.kind else { return }
 
-        var clip = sourceTrack.clips[sourceIndex]
-        // Moving a clip destroys its incoming-transition cut; drop it so the
-        // transition can't silently re-bind to a new neighbour at the drop site.
-        if clip.transition != nil {
-            clip.transition = nil
-            if selectedTransitionClipID == id { selectedTransitionClipID = nil }
+        performCoalescedUndoable("Move Clip", target: id, rebuild: .immediate) {
+            var clip = sourceTrack.clips[sourceIndex]
+            // Moving a clip destroys its incoming-transition cut; drop it so the
+            // transition can't silently re-bind to a new neighbour at the drop site.
+            if clip.transition != nil {
+                clip.transition = nil
+                if selectedTransitionClipID == id { selectedTransitionClipID = nil }
+            }
+            let newStart = max(start, .zero)
+            clip.timelineStart = newStart
+
+            // Remove from source before resolving overlaps on target.
+            sourceTrack.clips.remove(at: sourceIndex)
+
+            // Resolve overlaps: find a non-overlapping position on the target track.
+            clip.timelineStart = resolveOverlap(clip: clip, on: targetTrack)
+            targetTrack.clips.append(clip)
+            targetTrack.clips.sort { $0.timelineStart < $1.timelineStart }
+
+            sanitizeTransitions()
         }
-        let newStart = max(start, .zero)
-        clip.timelineStart = newStart
-
-        // Remove from source before resolving overlaps on target.
-        sourceTrack.clips.remove(at: sourceIndex)
-
-        // Resolve overlaps: find a non-overlapping position on the target track.
-        clip.timelineStart = resolveOverlap(clip: clip, on: targetTrack)
-        targetTrack.clips.append(clip)
-        targetTrack.clips.sort { $0.timelineStart < $1.timelineStart }
-
-        sanitizeTransitions()
-        Task { await rebuild() }
     }
 
     /// Finds the nearest non-overlapping position for a clip on a track.
@@ -627,6 +704,26 @@ final class EditorModel {
         return nearest
     }
 
+    // MARK: - Render settings
+
+    /// Changes the output canvas size as one undoable step.
+    func setRenderSize(_ size: CGSize) {
+        guard size != project.renderSize else { return }
+        performUndoable("Change Resolution") {
+            project.renderSize = size
+            scheduleRebuild()
+        }
+    }
+
+    /// Changes the output frame rate as one undoable step.
+    func setFrameRate(_ fps: Double) {
+        guard fps != project.frameRate else { return }
+        performUndoable("Change Frame Rate") {
+            project.frameRate = fps
+            scheduleRebuild()
+        }
+    }
+
     // MARK: - Composition / playback
 
     /// Rebuilds the preview composition from the current project state, keeping
@@ -634,7 +731,10 @@ final class EditorModel {
     func rebuild() async {
         let resumeAt = currentTime
         do {
-            guard let built = try await CompositionBuilder.build(project: project) else {
+            let result = try await CompositionBuilder.build(project: project)
+            // A newer rebuild superseded this one; don't clobber the player.
+            guard !Task.isCancelled else { return }
+            guard let built = result else {
                 player.replaceCurrentItem(with: nil)
                 totalDuration = 0
                 return

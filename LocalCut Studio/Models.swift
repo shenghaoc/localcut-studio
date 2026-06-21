@@ -12,7 +12,7 @@ import CoreGraphics
 /// browser original.
 @Observable
 final class MediaItem: Identifiable {
-    let id = UUID()
+    let id: UUID
     let url: URL
     let asset: AVURLAsset
 
@@ -23,10 +23,16 @@ final class MediaItem: Identifiable {
     var hasVideo = false
     var hasAudio = false
 
+    /// Security-scoped bookmark to `url`, created at import. Persisted in the
+    /// project document so the file can be re-resolved across launches under the
+    /// sandbox (R1.2). `nil` until a bookmark could be created.
+    var bookmark: Data?
+
     /// Poster frame shown in the media bin. Generated lazily after import.
     var thumbnail: CGImage?
 
-    init(url: URL) {
+    init(url: URL, id: UUID = UUID()) {
+        self.id = id
         self.url = url
         self.asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         self.name = url.deletingPathExtension().lastPathComponent
@@ -87,7 +93,7 @@ enum Effect: Hashable, Codable {
 // MARK: - Transitions
 
 /// The kinds of transition supported in v1.
-enum TransitionType: String, Hashable, CaseIterable, Identifiable {
+enum TransitionType: String, Hashable, Codable, CaseIterable, Identifiable {
     /// A linear opacity cross-fade between the outgoing and incoming clips.
     case crossDissolve
     /// A directional bars-swipe handled by the custom compositor.
