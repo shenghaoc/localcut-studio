@@ -329,10 +329,6 @@ final class EditorModel {
                 clip.sourceStart = clip.sourceStart + delta
                 clip.timelineStart = newTimelineStart
                 clip.duration = originalEnd - newTimelineStart
-                let sourceEnd = clip.sourceStart + clip.duration
-                if sourceEnd > sourceDuration {
-                    clip.duration = sourceDuration - clip.sourceStart
-                }
 
             case .right:
                 let maxSourceRemaining = sourceDuration - clip.sourceStart

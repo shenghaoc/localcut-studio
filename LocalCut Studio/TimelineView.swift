@@ -138,6 +138,8 @@ struct TimelineView: View {
     private func lane(for track: Track, trackIndex: Int) -> some View {
         ZStack(alignment: .topLeading) {
             Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { model.selectedClipID = nil }
             ForEach(track.clips) { clip in
                 clipBlock(clip, kind: track.kind, trackID: track.id, trackIndex: trackIndex)
             }
@@ -188,11 +190,8 @@ struct TimelineView: View {
     }
 
     private func trimHandle(edge: EditorModel.TrimEdge, clip: Clip) -> some View {
-        let isHovered: Bool = switch (edge, hoverEdge) {
-        case (.left, .left(clip.id)): true
-        case (.right, .right(clip.id)): true
-        default: false
-        }
+        let activeEdge: HoverEdge = edge == .left ? .left(clip.id) : .right(clip.id)
+        let isHovered = hoverEdge == activeEdge
 
         return Rectangle()
             .fill(isHovered ? Color.white.opacity(0.15) : Color.clear)
@@ -204,13 +203,19 @@ struct TimelineView: View {
                 default: false
                 }
                 if hovering {
-                    hoverEdge = edge == .left ? .left(clip.id) : .right(clip.id)
+                    hoverEdge = activeEdge
                     if !inTrimDrag { NSCursor.resizeLeftRight.push() }
                 } else {
-                    if hoverEdge == (edge == .left ? .left(clip.id) : .right(clip.id)) {
+                    if hoverEdge == activeEdge {
                         hoverEdge = nil
                     }
                     if !inTrimDrag { NSCursor.pop() }
+                }
+            }
+            .onDisappear {
+                if hoverEdge == activeEdge {
+                    hoverEdge = nil
+                    NSCursor.pop()
                 }
             }
             .gesture(trimDragGesture(clip: clip, edge: edge))
