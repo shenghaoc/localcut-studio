@@ -4,6 +4,8 @@ LocalCut Studio is the native macOS port of [browser-editor](https://github.com/
 
 The plan splits the upstream roadmap by ML dependency. macOS 27 is still in beta at the time of writing, so [Apple's on-device Core AI stack](https://developer.apple.com/core-ai/) (Foundation Models, Translation, Speech, Vision) — which supersedes the older Core ML framework — is out of reach for now. We ship every feature that does **not** need on-device ML first, then resume with the ML-backed features once macOS 27 leaves beta.
 
+> **Versioning note.** Apple jumped the marketing version from macOS 15 (Sequoia, 2024) to **macOS 26** (Tahoe, 2025), aligning every Apple OS marketing number with its calendar year (iOS 26, watchOS 26, etc.). macOS 27 is the 2026 release — currently in beta. The non-sequential gap between 15 and 26 is real, not a typo. `MACOSX_DEPLOYMENT_TARGET = 26.0` in `LocalCut Studio.xcodeproj` corresponds to Apple's 2025 marketing version, and `VTFrameProcessor` referenced in Phase 37 is the API introduced in macOS 15.4 (still the live API on macOS 26+).
+
 ## Version path
 
 ### v0.1.x → v0.2.0 — Non-ML phases (in order)

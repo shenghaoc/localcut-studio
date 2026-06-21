@@ -6,17 +6,16 @@
 
 - [ ] **T1.1** `ScreenCaptureSession` actor wrapping `SCStream` with display / window / app target.
 - [ ] **T1.2** `WebcamCaptureSession` + `MicCaptureSession` over `AVCaptureSession`.
-- [ ] **T1.3** `ChunkedWriter` per source — `AVAssetWriter` with real-time VideoToolbox properties.
-- [ ] **T1.4** Chunk rotation (default 30 s) with atomic close / open.
-- [ ] **T1.5** Session `manifest.json` writer; "stopped" marker on clean shutdown.
-- [ ] **T1.6** Shared `CMClock` plumbing across all writers for alignment.
+- [ ] **T1.3** `ContinuousWriter` per source — one `AVAssetWriter` for the whole session, real-time VideoToolbox properties, `movieFragmentInterval` set to the configured flush interval (default 2 s).
+- [ ] **T1.4** Session `manifest.json` writer; "stopped" marker on clean shutdown.
+- [ ] **T1.5** Shared `CMClock` plumbing across all writers for alignment.
 
 ## Storage + recovery
 
 - [ ] **T2.1** Sandbox bookmark to `~/Movies/LocalCut Recordings/`; create per-session UUID directory.
 - [ ] **T2.2** Capacity preflight + live monitor (warn at 10%, stop at 5%).
 - [ ] **T2.3** Recovery scan on launch; surface partial sessions in the media bin.
-- [ ] **T2.4** Concatenate recovered chunks into one composition source per track (lossless, no re-encode).
+- [ ] **T2.4** Recovered partial `.mov` per source loads as one composition source per track — no concatenation needed since fragments are within a single file.
 
 ## Capability gating
 
@@ -31,7 +30,7 @@
 
 ## Verification
 
-- [ ] **T5.1** Mocked-chunk 30-minute test → bounded memory.
+- [ ] **T5.1** 30-minute mocked-buffer test → bounded memory, single continuous file per source.
 - [ ] **T5.2** Mocked-crash recovery test.
 - [ ] **T5.3** Alignment test with two synthetic sources.
 - [ ] **T5.4** `xcodebuild` (Debug, macOS) green.

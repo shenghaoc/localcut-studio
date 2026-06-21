@@ -15,9 +15,9 @@
 
 ## R3 — Chunked output
 
-- **R3.1** Each track writes a fragmented `.mov` series; chunks rotate at ≤30 s (configurable).
-- **R3.2** A `manifest.json` per session lists chunks in order, with a "stopped" marker on clean shutdown.
-- **R3.3** A crash (tab kill / app kill / power) loses at most the last open chunk.
+- **R3.1** Each track writes ONE continuous fragmented `.mov` with `movieFragmentInterval` set (default 2 s); fragments flush during write rather than only at finalisation.
+- **R3.2** A `manifest.json` per session lists source IDs, file paths, encoder configs, and a "stopped" marker on clean shutdown.
+- **R3.3** A crash (app kill / power loss) leaves each source's `.mov` readable up to the last flushed fragment — loss is bounded by the fragment interval, not by a chunk boundary.
 
 ## R4 — Storage
 
@@ -33,7 +33,7 @@
 
 ## R6 — Verification
 
-- **R6.1** Mocked-chunk tests: 30-minute 1080p recording with bounded memory.
-- **R6.2** Recovery test: kill app mid-record (mocked) → next launch surfaces the partial session minus the open chunk.
+- **R6.1** 30-minute 1080p recording with bounded memory (mocked-buffer tests; no per-fragment file count growth on disk).
+- **R6.2** Recovery test: simulated process kill mid-record → next launch surfaces the partial session, with each `.mov` readable up to the last flushed fragment.
 - **R6.3** Alignment test: 2-source capture → resulting tracks aligned within one audio quantum at the start.
 - **R6.4** `xcodebuild` (Debug, macOS) green; no test count regression.

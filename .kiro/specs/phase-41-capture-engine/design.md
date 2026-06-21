@@ -4,7 +4,7 @@
 
 ## Goal
 
-Recording as a first-class source. ScreenCaptureKit for display / window / app capture; AVCaptureSession for webcam + microphone; encode-while-recording via VideoToolbox; streamed fragmented `.mov` written incrementally to a chunked file under the user-chosen location, so a crash loses at most the last chunk. Screen / webcam / mic / system audio land as SEPARATE tracks, never premixed.
+Recording as a first-class source. ScreenCaptureKit for display / window / app capture; AVCaptureSession for webcam + microphone; encode-while-recording via VideoToolbox; one continuous **fragmented** `.mov` per source streamed incrementally to disk so a crash loses at most the last un-flushed fragment, not a whole chunk. Screen / webcam / mic / system audio land as SEPARATE tracks, never premixed.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ Recording as a first-class source. ScreenCaptureKit for display / window / app c
    - **Microphone:** `AVCaptureDevice` + `AVCaptureAudioDataOutput`.
    - **System audio:** ScreenCaptureKit's `captureAudio = true` on macOS 13+; routed as a separate track.
 2. **Encode-while-record.** Each source feeds an `AVAssetWriter` configured with VideoToolbox `kVTCompressionPropertyKey_RealTime = true` and a target bitrate selected from the capability probe. Hardware encoder sessions are gated by the probe — exceeding the budget yields an explicit error before record starts.
-3. **Chunked fragmented MP4.** Each writer produces a fragmented `.mov` written via `AVAssetWriter` with `movieFragmentInterval` set to the chunk target (default 30 s) so fragments flush during write rather than only at finalisation. We rotate to a new chunk by closing one writer and opening the next, atomically. A `manifest.json` per session lists the chunks in order; recovery on next launch concatenates them losslessly via `AVMutableComposition` (no re-encode) into one timeline source per track.
+3. **Continuous fragmented MP4 per source.** Each writer produces ONE continuous fragmented `.mov` for the whole session with `AVAssetWriter.movieFragmentInterval` set (default 2 s) so the on-disk file is readable up to the last flushed fragment at any moment — including after a power loss or app kill. We do NOT close-and-reopen the writer mid-session: tearing down the encoder at 30 s intervals would risk frame drops and audio glitches at the boundary, and movieFragmentInterval already gives crash safety without it. A `manifest.json` per session records source IDs, file paths, encoder configs, and a "stopped" marker on clean shutdown; recovery reads this manifest on next launch.
 4. **Storage.** Sessions write into `~/Movies/LocalCut Recordings/<session-uuid>/` under user-selected file access (sandbox). Preflight checks `URLResourceKey.volumeAvailableCapacityForImportantUsage`. A live monitor warns at 10% remaining and stops gracefully at 5%.
 5. **Track alignment.** All writers use a shared `CMClock` (`CMClockGetHostTimeClock()`) so timestamps are mutually aligned within one audio quantum (≈ 21 µs at 48 kHz). On stop, the resulting `Project` lands the tracks at their captured presentation timestamps, not at zero — the alignment is preserved.
 6. **Recovery.** On launch, scan `~/Movies/LocalCut Recordings/` for sessions whose `manifest.json` ends without a "stopped" marker. Offer them in the media bin as "Recovered session — N s recovered".
@@ -30,7 +30,7 @@ Recording as a first-class source. ScreenCaptureKit for display / window / app c
 
 - ScreenCaptureKit (post-macOS 12.3) over legacy `CGDisplayStream`: better app / window targeting, lower CPU, system-audio support.
 - Fragmented `.mov` over `.mkv`: AVFoundation writes and reads `.mov` natively; `.mkv` would need an external library.
-- 30 s chunks balance recovery loss vs. file count; configurable.
+- One continuous fragmented file per source over chunked rotation: `movieFragmentInterval` flushes a fragment every N seconds (default 2 s), so the on-disk file is already crash-safe up to the last flush. Rotation by close-and-reopen would risk drops at every boundary for no extra safety benefit.
 
 ## Risks
 

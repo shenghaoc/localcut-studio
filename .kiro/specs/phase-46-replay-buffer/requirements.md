@@ -9,7 +9,7 @@
 ## R2 — Disk spill
 
 - **R2.1** When memory budget would be exceeded, oldest keyframe-aligned GOPs spill to `Caches/ReplayBuffer/<session-uuid>/`.
-- **R2.2** Spill files are sandbox-correct (inside an already-granted user folder).
+- **R2.2** Spill files live inside the app container's Caches directory (`FileManager` `.cachesDirectory` in `.userDomainMask`) — full read/write access under the App Sandbox without any user-selected folder or security-scoped bookmark.
 - **R2.3** In-memory index covers spilled chunks; saves can read across the boundary.
 
 ## R3 — Save command

@@ -8,7 +8,7 @@
 ## R2 — Pipeline
 
 - **R2.1** Zero-copy: `IOSurface`-backed `CVPixelBuffer` from `AVAssetReader` → Vision → alpha texture → compositor.
-- **R2.2** Effect modes: `remove` (alpha), `replace` (alpha + background source), `blur` (mask-driven gaussian).
+- **R2.2** Effect modes: `remove` (alpha), `replace` (alpha + background source — the background must be inserted as a real clip on a track below the matted clip so `AVVideoCompositing` can read both frames via `request.sourceFrame(byTrackID:)`), `blur` (mask-driven gaussian).
 - **R2.3** Preview runs at proxy resolution; export runs at full project resolution.
 
 ## R3 — Stability

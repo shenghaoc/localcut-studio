@@ -25,7 +25,8 @@ Person matting as a per-clip effect, zero-copy through the existing AVFoundation
               Compositor matte / blur passes (CIKernel or Metal compute)
    ```
    No CPU pixel round-trip. `IOSurface`-backed `CVPixelBuffer` from the asset reader is fed directly to Vision; the alpha output is sampled into the compositor's Metal-backed `CIContext`.
-3. **Effect modes.** `remove` (alpha → transparency), `replace` (alpha key over any timeline source as background), `blur` (mask-driven gaussian on the inverse alpha).
+3. **Effect modes.** `remove` (alpha → transparency, no source frame needed beyond the matted clip itself), `replace` (alpha key over a background source), `blur` (mask-driven gaussian on the inverse alpha).
+   - `replace` mode requires the background source to be a clip on a track in the composition placed UNDER the matted clip — a custom `AVVideoCompositing` can only read frames the composition fed it (`request.sourceFrame(byTrackID:)`); it cannot decode an arbitrary asset on the fly. The inspector's "background" picker therefore creates / inserts a real clip behind the matted clip rather than referencing media by id alone; the resulting composition has the alpha-keyed compositing instruction reference both source track IDs.
 4. **Preview vs export.** Preview runs at proxy resolution if `feature-colour-grading`'s proxy path is wired; export runs at full project resolution. A guided-upsample Metal compute pass optionally refines model-resolution alpha to full size.
 5. **Capability gating.** Hosts that can't sustain realtime preview on their hardware see an explicit "export-only" downgrade rather than a silent hang.
 
