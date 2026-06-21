@@ -19,7 +19,9 @@ struct InspectorView: View {
             Divider()
 
             Form {
-                if let clip = model.selectedClip {
+                if let transition = model.selectedTransition {
+                    transitionSection(transition)
+                } else if let clip = model.selectedClip {
                     clipSection(clip)
                     if clipIsVideo(clip) {
                         colourSection
@@ -67,6 +69,59 @@ struct InspectorView: View {
                     in: 0...1)
             }
         }
+    }
+
+    // MARK: - Transition
+
+    @ViewBuilder
+    private func transitionSection(_ transition: Transition) -> some View {
+        Section("Transition") {
+            Picker("Type", selection: transitionTypeBinding) {
+                ForEach(TransitionType.allCases) { type in
+                    Text(type.displayName).tag(type)
+                }
+            }
+
+            VStack(alignment: .leading) {
+                // Show the effective (clamped) duration so the label can't exceed
+                // the slider's ceiling after a neighbour is trimmed shorter.
+                Text("Duration \(String(format: "%.2f s", min(transition.duration.seconds, maxTransitionSeconds)))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Slider(value: transitionDurationBinding, in: minTransitionSeconds...maxTransitionSeconds)
+            }
+
+            Button(role: .destructive) {
+                model.removeSelectedTransition()
+            } label: {
+                Label("Remove Transition", systemImage: "trash")
+            }
+            .controlSize(.small)
+        }
+    }
+
+    /// Shortest allowed transition (one render frame at the project frame rate).
+    private var minTransitionSeconds: Double { 1.0 / max(1, model.project.frameRate) }
+
+    /// Longest allowed transition: the available overlap, never below the min.
+    private var maxTransitionSeconds: Double {
+        max(model.selectedTransitionMaxDuration.seconds, minTransitionSeconds + 0.01)
+    }
+
+    private var transitionTypeBinding: Binding<TransitionType> {
+        Binding(
+            get: { model.selectedTransition?.type ?? .crossDissolve },
+            set: { newValue in model.updateSelectedTransition { $0.type = newValue } })
+    }
+
+    private var transitionDurationBinding: Binding<Double> {
+        Binding(
+            get: { min(model.selectedTransition?.duration.seconds ?? 0, maxTransitionSeconds) },
+            set: { newValue in
+                model.updateSelectedTransition(coalesced: true) {
+                    $0.duration = CMTime(seconds: newValue, preferredTimescale: 600)
+                }
+            })
     }
 
     // MARK: - Colour Grading

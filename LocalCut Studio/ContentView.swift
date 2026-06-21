@@ -54,14 +54,26 @@ struct EditorView: View {
             .disabled(model.selectedClipID == nil)
             .help("Split clip at playhead")
 
+            Button {
+                model.addTransitionToSelectedClip()
+            } label: {
+                Label("Transition", systemImage: "square.filled.and.line.vertical.and.square.filled")
+            }
+            .disabled(!model.canAddTransitionAtSelection)
+            .help("Add a transition at the selected clip's cut")
+
             Button(role: .destructive) {
-                model.deleteSelectedClip()
+                if model.selectedTransitionClipID != nil {
+                    model.removeSelectedTransition()
+                } else {
+                    model.deleteSelectedClip()
+                }
             } label: {
                 Label("Delete", systemImage: "trash")
             }
-            .disabled(model.selectedClipID == nil)
+            .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             .keyboardShortcut(.delete, modifiers: [])
-            .help("Delete selected clip")
+            .help("Delete selected clip or transition")
 
             Spacer()
 

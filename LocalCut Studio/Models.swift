@@ -84,6 +84,55 @@ enum Effect: Hashable, Codable {
     }
 }
 
+// MARK: - Transitions
+
+/// The kinds of transition supported in v1.
+enum TransitionType: String, Hashable, CaseIterable, Identifiable {
+    /// A linear opacity cross-fade between the outgoing and incoming clips.
+    case crossDissolve
+    /// A directional bars-swipe handled by the custom compositor.
+    case wipe
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .crossDissolve: "Cross Dissolve"
+        case .wipe: "Wipe"
+        }
+    }
+
+    /// SF Symbol used for the timeline glyph and inspector.
+    var symbolName: String {
+        switch self {
+        case .crossDissolve: "circle.lefthalf.filled"
+        case .wipe: "arrow.left.and.right.righttriangle.left.righttriangle.right"
+        }
+    }
+}
+
+/// A transition placed at the cut where its owning (trailing) clip meets the
+/// immediately-preceding adjacent clip on the same video track.
+///
+/// `duration` is the *requested* length; the actually-rendered overlap is
+/// derived at build time and clamped to the available length of the two
+/// neighbouring clips (see `TransitionLayout`). The overlap is never stored on
+/// the clips themselves — adjacent clips stay butt-joined in authored time.
+struct Transition: Identifiable, Hashable {
+    let id: UUID
+    var type: TransitionType
+    var duration: CMTime
+
+    init(id: UUID = UUID(), type: TransitionType = .crossDissolve, duration: CMTime) {
+        self.id = id
+        self.type = type
+        self.duration = duration
+    }
+
+    /// Sensible default transition length (0.5s, R4.2), clamped to overlap when applied.
+    static let defaultDuration = CMTime(value: 1, timescale: 2)
+}
+
 /// A single placement of (part of) a media item on a track's timeline.
 struct Clip: Identifiable, Hashable {
     let id = UUID()
@@ -101,6 +150,10 @@ struct Clip: Identifiable, Hashable {
 
     /// Ordered effect chain applied to every source frame of this clip.
     var effects: [Effect] = []
+
+    /// A transition into this clip from the preceding adjacent clip, if any.
+    /// The trailing clip owns the transition; the overlap is derived, not stored.
+    var transition: Transition?
 
     var timelineEnd: CMTime { timelineStart + duration }
 

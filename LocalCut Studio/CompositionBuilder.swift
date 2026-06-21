@@ -7,6 +7,7 @@ import CoreGraphics
 struct BuiltComposition {
     let composition: AVComposition
     let videoComposition: AVVideoComposition?
+    let audioMix: AVAudioMix?
     let duration: Double
 }
 
@@ -20,59 +21,191 @@ enum CompositionBuilder {
 
     enum BuildError: Error { case noVideoTrackInSource, noAudioTrackInSource }
 
-    /// One placed clip on a composition track, in timeline coordinates, with the
-    /// transform/opacity/effects to apply while it is on screen.
+    /// One placed clip on a composition track, in *effective* (rippled) timeline
+    /// coordinates, with the transform/opacity/effects to apply while on screen.
+    /// `transitionRange`/`transitionType` are set on the incoming clip of a
+    /// transition so the compositor can blend it with its predecessor.
     private struct VideoSegment {
+        let compTrackID: CMPersistentTrackID
         let timeRange: CMTimeRange
         let transform: CGAffineTransform
         let opacity: Float
         let effects: [Effect]
+        let transitionRange: CMTimeRange?
+        let transitionType: TransitionType?
+
+        var layer: CompositorLayer {
+            CompositorLayer(trackID: compTrackID, transform: transform, opacity: opacity, effects: effects)
+        }
+
+        func contains(_ seconds: Double) -> Bool {
+            timeRange.start.seconds <= seconds && seconds < timeRange.end.seconds
+        }
+
+        var descriptor: VisibleSegment {
+            VisibleSegment(
+                compTrackID: compTrackID,
+                start: timeRange.start.seconds,
+                transitionStart: transitionRange?.start.seconds,
+                transitionEnd: transitionRange?.end.seconds,
+                transitionType: transitionType)
+        }
+    }
+
+    // MARK: - Render planning
+
+    /// The minimal description of a clip visible during one instruction interval,
+    /// used to decide how to composite it. Pure value type so the planning logic
+    /// is unit-testable without an `AVComposition`.
+    struct VisibleSegment {
+        let compTrackID: CMPersistentTrackID
+        /// Effective start of the clip.
+        let start: Double
+        /// The clip's incoming-transition interval, if any.
+        let transitionStart: Double?
+        let transitionEnd: Double?
+        let transitionType: TransitionType?
+    }
+
+    /// A planned composite step, by composition-track id, bottom-to-top.
+    enum PlannedUnit: Equatable {
+        case layer(CMPersistentTrackID)
+        case transition(outgoing: CMPersistentTrackID, incoming: CMPersistentTrackID, type: TransitionType)
+    }
+
+    /// Decides, for one project track, how to composite the clips visible at
+    /// `midpoint`. When transitions overlap (a chain of three or more clips), the
+    /// *topmost* active transition wins, blending the incoming clip with its
+    /// immediate predecessor; any earlier still-visible clips render underneath
+    /// so the newest clip is never dropped (which would "pop" in).
+    static func planUnits(visible: [VisibleSegment], midpoint: Double) -> [PlannedUnit] {
+        func transitionActive(_ seg: VisibleSegment) -> Bool {
+            guard let start = seg.transitionStart, let end = seg.transitionEnd else { return false }
+            return start <= midpoint && midpoint < end
+        }
+
+        if let incoming = visible.last(where: transitionActive),
+           let type = incoming.transitionType,
+           let outgoing = visible.filter({ $0.start < incoming.start }).max(by: { $0.start < $1.start }) {
+            var result: [PlannedUnit] = []
+            // Earlier clips still on screen render beneath the transition.
+            for seg in visible where seg.compTrackID != incoming.compTrackID && seg.compTrackID != outgoing.compTrackID {
+                result.append(.layer(seg.compTrackID))
+            }
+            result.append(.transition(outgoing: outgoing.compTrackID, incoming: incoming.compTrackID, type: type))
+            return result
+        }
+
+        return visible.map { .layer($0.compTrackID) }
     }
 
     static func build(project: Project) async throws -> BuiltComposition? {
         let composition = AVMutableComposition()
         let renderSize = project.renderSize
 
-        // Each project video track maps to one composition track so its clips
-        // share a layer. `trackSegments` preserves bottom-to-top order.
-        var trackSegments: [(track: AVCompositionTrack, segments: [VideoSegment])] = []
+        // Project-wide transition cuts ripple every track so linked A/V stays
+        // in sync; the rendered timeline shortens by the total overlap.
+        let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks)
+
+        // Each project video track expands into a pool of composition tracks so a
+        // transition's two clips can overlap on screen (A/B-roll). Clips are
+        // packed greedily onto the first free composition track, so overlapping
+        // clips never share one — robust to any chain of transitions.
+        // `projectTrackSegments` preserves bottom-to-top order.
+        var projectTrackSegments: [[VideoSegment]] = []
 
         for projectTrack in project.videoTracks {
-            guard let compTrack = composition.addMutableTrack(
-                withMediaType: .video,
-                preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+            // Each pool entry tracks a composition track and the effective end of
+            // its last-placed piece.
+            var pool: [(track: AVMutableCompositionTrack, lastEnd: CMTime)] = []
 
             var segments: [VideoSegment] = []
-            for clip in projectTrack.clips {
+            let ordered = projectTrack.clips.sorted { $0.timelineStart < $1.timelineStart }
+            let overlaps = TransitionLayout.orderedOverlaps(ordered)
+            for (clipIndex, clip) in ordered.enumerated() {
                 guard let media = project.media(for: clip.mediaID), media.hasVideo else { continue }
                 let sourceTracks = try await media.asset.loadTracks(withMediaType: .video)
                 guard let sourceTrack = sourceTracks.first else { continue }
-
-                try compTrack.insertTimeRange(clip.timeRangeInSource, of: sourceTrack, at: clip.timelineStart)
 
                 let transform = fitTransform(
                     naturalSize: media.naturalSize,
                     preferredTransform: media.preferredTransform,
                     into: renderSize)
-                segments.append(VideoSegment(
-                    timeRange: CMTimeRange(start: clip.timelineStart, duration: clip.duration),
-                    transform: transform,
-                    opacity: clip.opacity,
-                    effects: clip.effects))
+
+                // A clip may be split into pieces where it spans another track's
+                // transition cut; each piece is packed onto the first free track.
+                for piece in TransitionLayout.pieces(for: clip, overlap: overlaps[clipIndex], cuts: cuts) {
+                    let start = piece.effectiveStart
+                    let poolIndex: Int
+                    if let free = pool.firstIndex(where: { $0.lastEnd <= start }) {
+                        poolIndex = free
+                    } else {
+                        guard let newTrack = composition.addMutableTrack(
+                            withMediaType: .video,
+                            preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                        pool.append((newTrack, .zero))
+                        poolIndex = pool.count - 1
+                    }
+                    let compTrack = pool[poolIndex].track
+                    try compTrack.insertTimeRange(piece.sourceRange, of: sourceTrack, at: start)
+                    pool[poolIndex].lastEnd = piece.effectiveEnd
+
+                    segments.append(VideoSegment(
+                        compTrackID: compTrack.trackID,
+                        timeRange: CMTimeRange(start: start, duration: piece.duration),
+                        transform: transform,
+                        opacity: clip.opacity,
+                        effects: clip.effects,
+                        transitionRange: piece.transitionRange,
+                        transitionType: piece.overlap > .zero ? clip.transition?.type : nil))
+                }
             }
-            trackSegments.append((compTrack, segments))
+            projectTrackSegments.append(segments)
         }
 
+        // Audio: split clips at cuts and place each piece on its own composition
+        // track so rippled overlaps mix instead of corrupting one track, then
+        // crossfade the overlaps so transitions stay smooth and in sync.
+        var audioMixParameters: [AVMutableAudioMixInputParameters] = []
+        var hasAudioCrossfade = false
         for projectTrack in project.audioTracks where !projectTrack.isMuted {
-            guard let compTrack = composition.addMutableTrack(
-                withMediaType: .audio,
-                preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-
-            for clip in projectTrack.clips {
+            var placed: [(track: AVMutableCompositionTrack, piece: TransitionLayout.Piece)] = []
+            let ordered = projectTrack.clips.sorted { $0.timelineStart < $1.timelineStart }
+            for clip in ordered {
                 guard let media = project.media(for: clip.mediaID), media.hasAudio else { continue }
                 let sourceTracks = try await media.asset.loadTracks(withMediaType: .audio)
                 guard let sourceTrack = sourceTracks.first else { continue }
-                try compTrack.insertTimeRange(clip.timeRangeInSource, of: sourceTrack, at: clip.timelineStart)
+                for piece in TransitionLayout.pieces(for: clip, overlap: .zero, cuts: cuts) {
+                    guard let compTrack = composition.addMutableTrack(
+                        withMediaType: .audio,
+                        preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                    try compTrack.insertTimeRange(piece.sourceRange, of: sourceTrack, at: piece.effectiveStart)
+                    placed.append((compTrack, piece))
+                }
+            }
+
+            placed.sort { $0.piece.effectiveStart < $1.piece.effectiveStart }
+            for index in placed.indices {
+                let piece = placed[index].piece
+                let params = AVMutableAudioMixInputParameters(track: placed[index].track)
+                let leadOverlap = index > 0
+                    ? CMTimeMaximum(.zero, placed[index - 1].piece.effectiveEnd - piece.effectiveStart) : .zero
+                let trailOverlap = index < placed.count - 1
+                    ? CMTimeMaximum(.zero, piece.effectiveEnd - placed[index + 1].piece.effectiveStart) : .zero
+
+                if leadOverlap > .zero {
+                    params.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1,
+                                         timeRange: CMTimeRange(start: piece.effectiveStart, duration: leadOverlap))
+                    hasAudioCrossfade = true
+                } else {
+                    params.setVolume(1, at: piece.effectiveStart)
+                }
+                if trailOverlap > .zero {
+                    params.setVolumeRamp(fromStartVolume: 1, toEndVolume: 0,
+                                         timeRange: CMTimeRange(start: piece.effectiveEnd - trailOverlap, duration: trailOverlap))
+                    hasAudioCrossfade = true
+                }
+                audioMixParameters.append(params)
             }
         }
 
@@ -81,38 +214,53 @@ enum CompositionBuilder {
 
         let videoComposition = try await makeVideoComposition(
             composition: composition,
-            trackSegments: trackSegments,
+            projectTrackSegments: projectTrackSegments,
             totalDuration: totalDuration,
             renderSize: renderSize,
             frameRate: project.frameRate)
 
+        let audioMix: AVAudioMix?
+        if hasAudioCrossfade {
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = audioMixParameters
+            audioMix = mix
+        } else {
+            audioMix = nil
+        }
+
         return BuiltComposition(
             composition: composition,
             videoComposition: videoComposition,
+            audioMix: audioMix,
             duration: totalDuration.seconds)
     }
 
     // MARK: - Video composition
 
     /// Builds non-overlapping custom instructions covering the timeline. For
-    /// each gap between clip boundaries we emit one instruction whose layer
-    /// metadata describes every track segment visible during that interval.
+    /// each interval between segment boundaries we emit one instruction whose
+    /// render units describe what each project track shows — a single layer, or
+    /// a transition blend of its two overlapping clips.
     private static func makeVideoComposition(
         composition: AVComposition,
-        trackSegments: [(track: AVCompositionTrack, segments: [VideoSegment])],
+        projectTrackSegments: [[VideoSegment]],
         totalDuration: CMTime,
         renderSize: CGSize,
         frameRate: Double) async throws -> AVVideoComposition? {
 
-        let hasAnySegment = trackSegments.contains { !$0.segments.isEmpty }
+        let hasAnySegment = projectTrackSegments.contains { !$0.isEmpty }
         guard hasAnySegment else { return nil }
 
-        // Collect and sort every distinct boundary time.
+        // Collect and sort every distinct boundary time, including overlap edges.
         var boundarySet = Set<Double>([0, totalDuration.seconds])
-        for entry in trackSegments {
-            for seg in entry.segments {
+        for segments in projectTrackSegments {
+            for seg in segments {
                 boundarySet.insert(seg.timeRange.start.seconds)
                 boundarySet.insert(seg.timeRange.end.seconds)
+                if let overlap = seg.transitionRange {
+                    boundarySet.insert(overlap.start.seconds)
+                    boundarySet.insert(overlap.end.seconds)
+                }
             }
         }
         let boundaries = boundarySet.sorted()
@@ -126,21 +274,28 @@ enum CompositionBuilder {
 
             let midpoint = boundaries[i] + (boundaries[i + 1] - boundaries[i]) / 2
 
-            // Build layers bottom-to-top so the compositor composites in the correct order.
-            var layers: [CompositorLayer] = []
-            for entry in trackSegments {
-                guard let seg = entry.segments.first(where: {
-                    $0.timeRange.start.seconds <= midpoint && midpoint < $0.timeRange.end.seconds
-                }) else { continue }
+            // Build units bottom-to-top so the compositor composites correctly.
+            var units: [RenderUnit] = []
+            for segments in projectTrackSegments {
+                let visible = segments.filter { $0.contains(midpoint) }
+                guard !visible.isEmpty else { continue }
+                let byTrack = Dictionary(uniqueKeysWithValues: visible.map { ($0.compTrackID, $0) })
 
-                layers.append(CompositorLayer(
-                    trackID: entry.track.trackID,
-                    transform: seg.transform,
-                    opacity: seg.opacity,
-                    effects: seg.effects))
+                for planned in planUnits(visible: visible.map(\.descriptor), midpoint: midpoint) {
+                    switch planned {
+                    case .layer(let trackID):
+                        guard let seg = byTrack[trackID] else { continue }
+                        units.append(.layer(seg.layer))
+                    case .transition(let outID, let inID, let type):
+                        guard let outSeg = byTrack[outID], let inSeg = byTrack[inID],
+                              let overlap = inSeg.transitionRange else { continue }
+                        units.append(.transition(outgoing: outSeg.layer, incoming: inSeg.layer,
+                                                 type: type, overlap: overlap))
+                    }
+                }
             }
 
-            instructions.append(EffectCompositionInstruction(timeRange: range, layers: layers))
+            instructions.append(EffectCompositionInstruction(timeRange: range, units: units))
         }
 
         var config = try await AVVideoComposition.Configuration(for: composition)
