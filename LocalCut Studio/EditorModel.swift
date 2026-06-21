@@ -147,7 +147,7 @@ final class EditorModel {
             let ordered = track.clips.sorted { $0.timelineStart < $1.timelineStart }
             for (position, clip) in ordered.enumerated() where clip.transition != nil {
                 let adjacent = position > 0 &&
-                    abs((clip.timelineStart - ordered[position - 1].timelineEnd).seconds) < 0.001
+                    abs((clip.timelineStart - ordered[position - 1].timelineEnd).seconds) < TransitionLayout.adjacencyTolerance
                 if !adjacent, let index = track.clips.firstIndex(where: { $0.id == clip.id }) {
                     track.clips[index].transition = nil
                     if selectedTransitionClipID == clip.id { selectedTransitionClipID = nil }
@@ -343,8 +343,20 @@ final class EditorModel {
         let previous = ordered[index - 1]
         let clip = ordered[index]
         let gap = abs((clip.timelineStart - previous.timelineEnd).seconds)
-        guard gap < 0.001 else { return nil }
+        guard gap < TransitionLayout.adjacencyTolerance else { return nil }
         return (track, previous, clip)
+    }
+
+    /// The overlap available to `clipID`'s incoming transition, matching the
+    /// render-time clamp: the predecessor's head is already consumed by *its* own
+    /// transition, so only its remaining tail (and this clip's length) is free.
+    private func chainedAvailableOverlap(forClip clipID: Clip.ID) -> CMTime {
+        guard let context = adjacentPredecessor(of: clipID) else { return .zero }
+        let ordered = context.track.clips.sorted { $0.timelineStart < $1.timelineStart }
+        let overlaps = TransitionLayout.orderedOverlaps(ordered)
+        guard let index = ordered.firstIndex(where: { $0.id == clipID }) else { return .zero }
+        let availableTail = CMTimeMaximum(context.previous.duration - overlaps[index - 1], .zero)
+        return CMTimeMinimum(context.clip.duration, availableTail)
     }
 
     /// Whether a transition can be added at the current clip selection: a video
@@ -357,12 +369,12 @@ final class EditorModel {
         return true
     }
 
-    /// The largest overlap available to the selected transition — the shorter of
-    /// its two neighbouring clips. Drives the inspector's duration ceiling.
+    /// The largest overlap available to the selected transition, accounting for
+    /// chained transitions. Drives the inspector's duration ceiling so it matches
+    /// what the render will actually allow.
     var selectedTransitionMaxDuration: CMTime {
-        guard let id = selectedTransitionClipID,
-              let context = adjacentPredecessor(of: id) else { return .zero }
-        return CMTimeMinimum(context.previous.duration, context.clip.duration)
+        guard let id = selectedTransitionClipID else { return .zero }
+        return chainedAvailableOverlap(forClip: id)
     }
 
     /// Adds a default cross-dissolve at the selected clip's incoming cut,
@@ -374,8 +386,7 @@ final class EditorModel {
             statusMessage = "Select a video clip that follows another to add a transition."
             return
         }
-        let maxOverlap = CMTimeMinimum(context.previous.duration, context.clip.duration)
-        let duration = CMTimeMinimum(Transition.defaultDuration, maxOverlap)
+        let duration = CMTimeMinimum(Transition.defaultDuration, chainedAvailableOverlap(forClip: id))
         setTransition(Transition(duration: duration), onClip: id)
         selectedClipID = nil
         selectedMediaID = nil

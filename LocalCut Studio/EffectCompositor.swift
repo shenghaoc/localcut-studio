@@ -156,7 +156,13 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             opacityFilter.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(layer.opacity))
             image = opacityFilter.outputImage ?? image
         }
-        return image
+
+        // Normalise to the render canvas (transparent letterbox) so transition
+        // filters and blends see matching extents even across clips of different
+        // aspect ratios or orientations.
+        let renderRect = CGRect(origin: .zero, size: request.renderContext.size)
+        let canvas = CIImage(color: .clear).cropped(to: renderRect)
+        return image.composited(over: canvas).cropped(to: renderRect)
     }
 
     // MARK: - Transitions

@@ -166,32 +166,34 @@ struct TimelineView: View {
     }
 
     /// A selectable glyph drawn over the overlap region at a transition's cut.
+    @ViewBuilder
     private func transitionGlyph(_ placement: TransitionLayout.Placement) -> some View {
-        let overlap = placement.transitionRange!
-        let x = CGFloat(overlap.start.seconds) * pps
-        let width = max(CGFloat(overlap.duration.seconds) * pps, 12)
-        let isSelected = model.selectedTransitionClipID == placement.clip.id
-        let type = placement.clip.transition?.type ?? .crossDissolve
-        return RoundedRectangle(cornerRadius: 4)
-            .fill(Color.orange.opacity(isSelected ? 0.5 : 0.3))
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(isSelected ? Color.accentColor : Color.orange.opacity(0.8),
-                                  lineWidth: isSelected ? 2 : 1))
-            .overlay(
-                Image(systemName: type.symbolName)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white))
-            .frame(width: width, height: laneHeight - 16)
-            .offset(x: x, y: 8)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                model.selectedClipID = nil
-                model.selectedMediaID = nil
-                model.selectedTransitionClipID = placement.clip.id
-            }
-            .accessibilityLabel("\(type.displayName) transition")
-            .accessibilityAddTraits(.isButton)
+        if let overlap = placement.transitionRange {
+            let x = CGFloat(overlap.start.seconds) * pps
+            let width = max(CGFloat(overlap.duration.seconds) * pps, 12)
+            let isSelected = model.selectedTransitionClipID == placement.clip.id
+            let type = placement.clip.transition?.type ?? .crossDissolve
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.orange.opacity(isSelected ? 0.5 : 0.3))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(isSelected ? Color.accentColor : Color.orange.opacity(0.8),
+                                      lineWidth: isSelected ? 2 : 1))
+                .overlay(
+                    Image(systemName: type.symbolName)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white))
+                .frame(width: width, height: laneHeight - 16)
+                .offset(x: x, y: 8)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    model.selectedClipID = nil
+                    model.selectedMediaID = nil
+                    model.selectedTransitionClipID = placement.clip.id
+                }
+                .accessibilityLabel("\(type.displayName) transition")
+                .accessibilityAddTraits(.isButton)
+        }
     }
 
     // MARK: - Clip block with trim/drag interaction

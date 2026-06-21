@@ -44,7 +44,8 @@ enum TransitionLayout {
     }
 
     /// Tolerance (seconds) for treating two clips as adjacent despite rounding.
-    private static let adjacencyTolerance = 0.001
+    /// Also the smallest piece worth creating when splitting at a cut.
+    static let adjacencyTolerance = 0.001
 
     /// The clamped overlap for `clip`'s incoming transition given its authored
     /// predecessor. Zero unless a transition exists *and* the clips are adjacent.
@@ -88,8 +89,11 @@ enum TransitionLayout {
         let start = clip.timelineStart
         let end = clip.timelineEnd
 
+        // Only split at cuts comfortably inside the span; a cut within tolerance
+        // of either boundary would yield a degenerate sub-frame piece.
         var bounds: [CMTime] = [start]
-        for cut in cuts where cut.time > start && cut.time < end {
+        for cut in cuts where cut.time.seconds > start.seconds + adjacencyTolerance
+            && cut.time.seconds < end.seconds - adjacencyTolerance {
             bounds.append(cut.time)
         }
         bounds.append(end)
