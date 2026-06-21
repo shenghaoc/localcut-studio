@@ -24,7 +24,7 @@
 ### B — Overlays
 
 1. **Animated images.** `ImageIO` decodes animated PNG / GIF / WebP / AVIF into a frame array with per-frame durations. We do not buffer the entire animation in RAM for long sources — instead we keep a sliding window keyed on the request time, decoded on demand by the worker.
-2. **Lottie.** `lottie-ios` (Airbnb / community-maintained, satisfies AGENTS.md library criteria) renders into a `CALayer` driven off-screen by a Metal layer renderer that we sample into a `CIImage` per frame. Alternative considered: a WASM `rlottie` build — rejected because we have a native option that integrates with `CADisplayLink`-class timing.
+2. **Lottie.** `lottie-ios` (originally Airbnb, now community-maintained as `airbnb/lottie-ios`) renders into a `CALayer` driven off-screen by a Metal layer renderer that we sample into a `CIImage` per frame. Third-party dep justification (Phase 38 is the second of two such deps in the plan, alongside `GoogleWebRTC` in Phase 47): Apache-2.0 licence, organisational backing, active maintenance, no native Apple equivalent — `CAEmitterLayer` / `CAAnimation` / SwiftUI animation cover nothing of Lottie's After Effects JSON model, and writing one from scratch would dwarf the rest of the spec. Alternative considered: `rlottie` (Samsung) via a Swift wrapper — rejected because timing fidelity against `CADisplayLink` is worse and the WGSL-equivalent path would need a custom Metal renderer.
 3. **Alpha videos.** Standard `AVURLAsset` import; the compositor honours alpha by sampling RGBA and multiplying the layer instruction's opacity. We require the source to be a codec that AVFoundation can decode with alpha (ProRes 4444 + HEVC with alpha).
 
 ### Compositor integration
@@ -33,7 +33,7 @@
 
 ## Trade-offs
 
-- `lottie-ios` is a third-party dep; we justify it via AGENTS.md criteria (active development, organisational backing). Alternatives (rlottie via WASM) require more glue and lose timing fidelity.
+- `lottie-ios` is a third-party dep — see the in-place justification under "Lottie" above; this and `GoogleWebRTC` (Phase 47) are the only non-Apple media deps in the roadmap.
 - Animated AVIF decoding via `ImageIO` requires macOS 13+ and we're on 26 — fine.
 - A look preset that references a missing LUT degrades to "neutral colour cube + warning" rather than failing the project load.
 

@@ -2,7 +2,7 @@
 
 ## R1 — Availability gating
 
-- **R1.1** Probe `Translation.LanguageAvailability` for the requested pair and `LanguageModel.isAvailable` (FoundationModels) at startup.
+- **R1.1** Probe `Translation.LanguageAvailability` for the requested pair and the Foundation Models availability state at startup (exact `FoundationModels` symbol verified against shipping macOS 27 docs at implementation time).
 - **R1.2** When either is `unavailable`, the entire language-tools surface is hidden (no error, no nag).
 - **R1.3** `downloadable` exposes a download button with displayed size; `downloading` shows progress.
 - **R1.4** No other feature depends on this phase being available.

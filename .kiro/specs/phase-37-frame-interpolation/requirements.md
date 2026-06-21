@@ -3,7 +3,9 @@
 ## R1 — Engine
 
 - **R1.1** `VTFrameProcessor` is the engine; no external model is vendored.
-- **R1.2** Feature-detect via `if #available(macOS 15.4, *)`; the feature reports `unavailable` on older OS or on Intel Macs.
+- **R1.2** Two-step availability gate:
+  - **OS gate:** `if #available(macOS 15.4, *)` — fails compilation-free on older OS.
+  - **Architecture / runtime gate:** attempt to start a session with the chosen configuration; `VTFrameProcessor` reports unavailability at session start on hardware without a Neural Engine (Intel Macs pass the OS gate but fail here). Treat session-start failure as `unavailable` rather than crash.
 - **R1.3** Per-task configurations chosen by use: `VTLowLatencyFrameInterpolationConfiguration` for ramps, `VTFrameRateConversionConfiguration` for export upconversion, `VTOpticalFlowConfiguration` (or `VTMotionBlurConfiguration`) for motion blur.
 
 ## R2 — Pipeline

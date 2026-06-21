@@ -4,7 +4,7 @@
 
 ## Goal
 
-Per-clip keyframed speed curves (0.25× – 4×) with a bezier curve editor, video and audio scheduled correctly through one render path. Audio uses pitch-preserving time-stretch via `AVAudioMix.audioTimePitchAlgorithm`. Frame interpolation for ultra-smooth slow motion is deferred to Phase 37 (Core AI). Cache invalidation rules for render cache when a ramp changes.
+Per-clip keyframed speed curves (0.25× – 4×) with a bezier curve editor, video and audio scheduled correctly through one render path. Audio uses pitch-preserving time-stretch via `AVMutableAudioMixInputParameters.audioTimePitchAlgorithm` (set per-track-input, applied through the audio mix). Frame interpolation for ultra-smooth slow motion is deferred to Phase 37. Cache invalidation rules for render cache when a ramp changes.
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ Per-clip keyframed speed curves (0.25× – 4×) with a bezier curve editor, vid
 
 1. **Speed curve.** Per-clip `[Keyframe<Float>]` of speed in `[0.25, 4.0]`. Time mapping: integrate the speed curve to get output-time → source-time. We store both the speed curve (authoring) and a sequence of per-track `AVMutableCompositionTrack.scaleTimeRange(_:toDuration:)` calls that approximate it segment-by-segment (a piecewise-constant-speed approximation between keyframes — applied per-track because composition-wide scaling would warp every track uniformly, not just the ramped clip).
 2. **Video pipeline.** Split the clip at every keyframe into segments. For each segment compute the source duration / output duration ratio; insert each segment into the composition's video track with `AVMutableCompositionTrack.scaleTimeRange(_:toDuration:)` to produce the target output duration. Continuous easing curves between keyframes are approximated by N sub-segments (default N=10 per keyframe pair; tunable based on perceived smoothness vs. instruction count cost).
-3. **Audio pipeline.** Mirror the same segment plan on the audio track. Apply `AVMutableAudioMix` with `audioTimePitchAlgorithm = .timeDomain` (default; lowest-latency WSOLA-class) or `.spectral` (phase-vocoder, better on tonal content) — chosen per-clip with `.timeDomain` as the default. A "preserve pitch" toggle controls whether the pitch algorithm is applied at all; off = pitch slides with speed (chipmunk effect on purpose).
+3. **Audio pipeline.** Mirror the same segment plan on the audio track. Build an `AVMutableAudioMixInputParameters(track:)` per audio track, set `audioTimePitchAlgorithm` on each (`.timeDomain` default — lowest-latency WSOLA-class; or `.spectral` — phase-vocoder, better on tonal content), and attach to `AVMutableAudioMix.inputParameters`. A "preserve pitch" toggle controls whether the algorithm is applied at all; off = pitch slides with speed (chipmunk effect on purpose).
 4. **Inspector.** Bezier curve editor: x-axis = output time, y-axis = speed. Standard handle drag with shift-snap and right-click reset. A read-only output-duration field updates live.
 5. **Cache invalidation.** When a ramp changes, invalidate render-cache entries for the affected clip's output time range. Audio stretch is computed by AVFoundation at playback / export time and doesn't need a separate cache — but the WSOLA window length determines the latency budget surfaced in diagnostics.
 6. **Export parity.** Both `AVPlayerItem` and `AVAssetExportSession` consume the same composition + audio mix; preview and export remain pixel- and sample-aligned.

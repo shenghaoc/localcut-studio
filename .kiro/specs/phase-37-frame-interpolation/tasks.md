@@ -1,12 +1,15 @@
 # Tasks: Phase 37 — Frame Interpolation (VTFrameProcessor)
 
-> Status: **Proposed**. Depends on Phase 35, Phase 33, render cache, capability tiers; blocked on macOS 27 leaving beta.
+> Status: **Proposed**. Depends on Phase 35, Phase 33, render cache, capability tiers.
+> **Blocked on macOS 27 leaving beta** — the underlying `VTFrameProcessor` API
+> is available from macOS 15.4 onward, but this phase is held so every ML-tier
+> feature shares one minimum-OS baseline (see ROADMAP.md).
 
 ## Engine
 
 - [ ] **T1.1** `InterpolationEngine` actor — owns `VTFrameProcessor` instances per configuration kind.
 - [ ] **T1.2** Configuration picker: `VTLowLatencyFrameInterpolationConfiguration` for ramps; `VTFrameRateConversionConfiguration` for export upconversion; `VTOpticalFlowConfiguration` / `VTMotionBlurConfiguration` for motion blur.
-- [ ] **T1.3** Feature-detect via availability gate; report `unavailable` on Intel + pre-macOS-15.4.
+- [ ] **T1.3** Two-step availability gate: `#available(macOS 15.4, *)` OS check + runtime session-start probe (catches Intel Macs that pass the OS check but lack a Neural Engine); both failure modes report `unavailable`.
 - [ ] **T1.4** `synthesise(F0, F1, tau)` API surface backed by the chosen configuration.
 
 ## Pipeline

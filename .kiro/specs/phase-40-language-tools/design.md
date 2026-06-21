@@ -18,7 +18,7 @@ The browser-editor restricts itself to Chrome's built-in `Translator` / `Languag
 
 1. **Availability probe.** Before exposing any UI, the probe checks:
    - `Translation.LanguageAvailability` for the requested pair (e.g. `zh-Hans → en`).
-   - `LanguageModel.isAvailable` (`FoundationModels` framework) for the draft pipeline. Both APIs report `downloadable | downloading | ready | unavailable`.
+   - The Foundation Models availability state for the draft pipeline. **Exact API surface TBD** — verify against the shipping `FoundationModels` framework docs at implementation time. As of macOS 26 beta the surface used was `SystemLanguageModel.default.availability` returning an `.available | .unavailable(reason:)` enum; the macOS 27 release may rename or restructure this. Both Translation and Foundation Models report something like `downloadable | downloading | ready | unavailable`.
    - Hardware floor: Apple Silicon M-series + ≥ 8 GB unified memory for Foundation Models (Apple's published floor); Translation works on all Apple Silicon.
 2. **Hide-on-unavailable.** Anything other than `ready` (or `downloadable` post-user-consent) hides the entire panel. No error dialogs.
 3. **Translation pipeline.**

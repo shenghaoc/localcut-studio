@@ -88,6 +88,17 @@ The ML phases (29, 31, 32b, 33, 37, 40) each name the specific Apple framework o
 
 Note on Phase 37: VideoToolbox's `VTFrameProcessor` (macOS 15.4+) ships native frame interpolation, frame-rate conversion, optical flow, and motion blur on the Neural Engine — Phase 37 uses it directly rather than vendoring a Core AI port of RIFE.
 
+## Third-party dependencies
+
+The roadmap introduces exactly **two** non-Apple runtime libraries; both are justified in-place in the spec that introduces them:
+
+| Library | Phase | Why it can't be Apple-native |
+|---|---|---|
+| [`lottie-ios`](https://github.com/airbnb/lottie-ios) (Apache-2.0) | [Phase 38](./phase-38-look-packs/) | Lottie's After Effects JSON model has no Apple equivalent — `CAEmitterLayer` / `CAAnimation` / SwiftUI animation cover nothing of it. Writing a renderer from scratch would dwarf the spec. |
+| [`GoogleWebRTC`](https://webrtc.github.io/webrtc-org/native-code/ios/) (BSD-3-Clause) | [Phase 47](./phase-47-whip-publish/) | Apple ships WebRTC inside `WKWebView` only; it is not exposed as a standalone framework usable from AppKit / SwiftUI. WHIP requires `RTCPeerConnection`. |
+
+Every other ML / media path uses an Apple-provided API — no vendored on-device models anywhere in the roadmap.
+
 ## Source-of-truth note
 
 The canonical source for each phase's intent is the **shipped** spec in the upstream [browser-editor](https://github.com/shenghaoc/browser-editor) repo's `.kiro/specs/phase-NN-*/`. When implementing a phase here, cross-reference the upstream `design.md` for concrete decisions (model choice + provenance, parameter ranges, container formats, exact heuristics) — the macOS specs in this folder paraphrase those decisions for the AVFoundation / Metal / Core AI stack but do not duplicate every tuning constant.
