@@ -178,18 +178,26 @@ private struct WindowConfigurator: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
+        let view = WindowTrackingView()
         let coordinator = context.coordinator
-        DispatchQueue.main.async { coordinator.attach(to: view.window) }
+        // viewDidMoveToWindow fires exactly when the view joins the window
+        // hierarchy — no polling or DispatchQueue races.
+        view.onWindowChanged = { [weak coordinator] window in coordinator?.attach(to: window) }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         let coordinator = context.coordinator
         coordinator.model = model
-        DispatchQueue.main.async {
-            coordinator.attach(to: nsView.window)
-            coordinator.sync()
+        coordinator.attach(to: nsView.window)
+    }
+
+    /// An `NSView` that reports when it is attached to (or removed from) a window.
+    private final class WindowTrackingView: NSView {
+        var onWindowChanged: ((NSWindow?) -> Void)?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            onWindowChanged?(window)
         }
     }
 
@@ -222,7 +230,12 @@ private struct WindowConfigurator: NSViewRepresentable {
         }
 
         func windowShouldClose(_ sender: NSWindow) -> Bool {
-            model.confirmCloseSynchronously()
+            guard model.confirmCloseSynchronously() else { return false }
+            // Respect SwiftUI's own close decision if it has one.
+            if let previousDelegate, previousDelegate.responds(to: #selector(windowShouldClose(_:))) {
+                return previousDelegate.windowShouldClose?(sender) ?? true
+            }
+            return true
         }
 
         // Forward any delegate calls we don't implement to SwiftUI's delegate.

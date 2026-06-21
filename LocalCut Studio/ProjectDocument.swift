@@ -24,8 +24,7 @@ struct CMTimeCode: Codable, Equatable {
 
     init(_ time: CMTime) {
         // Persist only numeric times; non-numeric (indefinite/invalid) collapse to zero.
-        if time.flags.contains(.valid) && !time.flags.contains(.indefinite)
-            && !time.flags.contains(.positiveInfinity) && !time.flags.contains(.negativeInfinity) {
+        if time.isNumeric {
             self.value = time.value
             self.timescale = time.timescale
         } else {

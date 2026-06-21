@@ -338,6 +338,10 @@ extension EditorModel {
     }
 
     private func write(to url: URL) async {
+        // The destination may be a security-scoped URL (panel/bookmark); access
+        // must be held for the duration of the write under the sandbox.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try encodedDocument()
             // Atomic write so a failure never corrupts the previous file (R4.1).
@@ -354,6 +358,8 @@ extension EditorModel {
     /// before `windowShouldClose` returns. The document is small JSON, so the
     /// atomic write on the main actor is acceptable here.
     func writeSynchronously(to url: URL) -> Bool {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let data = try encodedDocument()
             try data.write(to: url, options: .atomic)
