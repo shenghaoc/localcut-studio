@@ -9,6 +9,7 @@ struct TimelineView: View {
     private let rulerHeight: CGFloat = 24
     private let laneHeight: CGFloat = 56
     private let gutterWidth: CGFloat = 56
+    private let edgeZoneWidth: CGFloat = 8
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
 
@@ -19,6 +20,22 @@ struct TimelineView: View {
 
     private var tracks: [Track] {
         model.project.videoTracks + model.project.audioTracks
+    }
+
+    // MARK: - Drag state
+
+    enum DragMode: Equatable {
+        case trimmingLeft(clipID: Clip.ID, candidate: CMTime)
+        case trimmingRight(clipID: Clip.ID, candidate: CMTime)
+        case moving(clipID: Clip.ID, candidateStart: CMTime, sourceTrackID: Track.ID, targetTrackIndex: Int)
+    }
+
+    @State private var dragMode: DragMode?
+    @State private var hoverEdge: HoverEdge?
+
+    enum HoverEdge: Equatable {
+        case left(Clip.ID)
+        case right(Clip.ID)
     }
 
     var body: some View {
@@ -79,9 +96,9 @@ struct TimelineView: View {
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
                     ruler
-                    ForEach(tracks) { track in
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { trackIndex, track in
                         Divider()
-                        lane(for: track)
+                        lane(for: track, trackIndex: trackIndex)
                     }
                 }
                 playhead
@@ -118,40 +135,221 @@ struct TimelineView: View {
         )
     }
 
-    private func lane(for track: Track) -> some View {
+    private func lane(for track: Track, trackIndex: Int) -> some View {
         ZStack(alignment: .topLeading) {
             Color.clear
             ForEach(track.clips) { clip in
-                clipBlock(clip, kind: track.kind)
+                clipBlock(clip, kind: track.kind, trackID: track.id, trackIndex: trackIndex)
             }
         }
         .frame(height: laneHeight)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    private func clipBlock(_ clip: Clip, kind: TrackKind) -> some View {
-        let width = max(CGFloat(clip.duration.seconds) * pps, 2)
-        let x = CGFloat(clip.timelineStart.seconds) * pps
+    // MARK: - Clip block with trim/drag interaction
+
+    private func clipBlock(_ clip: Clip, kind: TrackKind, trackID: Track.ID, trackIndex: Int) -> some View {
+        let displayValues = clipDisplayValues(clip, trackIndex: trackIndex)
+        let width = displayValues.width
+        let x = displayValues.x
         let isSelected = model.selectedClipID == clip.id
         let baseColor: Color = kind == .video ? .blue : .green
 
-        return RoundedRectangle(cornerRadius: 6)
-            .fill(baseColor.opacity(0.35))
-            .overlay(alignment: .leading) {
-                Text(model.project.media(for: clip.mediaID)?.name ?? "Clip")
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .padding(.horizontal, 6)
-                    .foregroundStyle(.primary)
+        return ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(baseColor.opacity(isDragging(clip.id) ? 0.2 : 0.35))
+                .overlay(alignment: .leading) {
+                    Text(model.project.media(for: clip.mediaID)?.name ?? "Clip")
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                        .foregroundStyle(.primary)
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(isSelected ? Color.accentColor : baseColor.opacity(0.6),
+                                      lineWidth: isSelected ? 2 : 1))
+
+            // Edge zones for trim handles
+            HStack(spacing: 0) {
+                trimHandle(edge: .left, clip: clip)
+                Spacer(minLength: 0)
+                trimHandle(edge: .right, clip: clip)
             }
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isSelected ? Color.accentColor : baseColor.opacity(0.6),
-                                  lineWidth: isSelected ? 2 : 1))
-            .frame(width: width, height: laneHeight - 8)
-            .offset(x: x, y: 4)
-            .onTapGesture { model.selectedClipID = clip.id }
+        }
+        .frame(width: width, height: laneHeight - 8)
+        .offset(x: x, y: displayValues.yOffset)
+        .opacity(displayValues.opacity)
+        .onTapGesture { model.selectedClipID = clip.id }
+        .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex))
+        .onHover { hovering in
+            if !hovering { hoverEdge = nil }
+        }
     }
+
+    private func trimHandle(edge: EditorModel.TrimEdge, clip: Clip) -> some View {
+        let isHovered: Bool = switch (edge, hoverEdge) {
+        case (.left, .left(clip.id)): true
+        case (.right, .right(clip.id)): true
+        default: false
+        }
+
+        return Rectangle()
+            .fill(isHovered ? Color.white.opacity(0.15) : Color.clear)
+            .frame(width: edgeZoneWidth)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                let inTrimDrag: Bool = switch dragMode {
+                case .trimmingLeft, .trimmingRight: true
+                default: false
+                }
+                if hovering {
+                    hoverEdge = edge == .left ? .left(clip.id) : .right(clip.id)
+                    if !inTrimDrag { NSCursor.resizeLeftRight.push() }
+                } else {
+                    if hoverEdge == (edge == .left ? .left(clip.id) : .right(clip.id)) {
+                        hoverEdge = nil
+                    }
+                    if !inTrimDrag { NSCursor.pop() }
+                }
+            }
+            .gesture(trimDragGesture(clip: clip, edge: edge))
+    }
+
+    // MARK: - Display values with drag offset
+
+    private struct ClipDisplayValues {
+        let width: CGFloat
+        let x: CGFloat
+        let yOffset: CGFloat
+        let opacity: Double
+    }
+
+    private func clipDisplayValues(_ clip: Clip, trackIndex: Int) -> ClipDisplayValues {
+        guard let mode = dragMode else {
+            let width = max(CGFloat(clip.duration.seconds) * pps, 2)
+            let x = CGFloat(clip.timelineStart.seconds) * pps
+            return ClipDisplayValues(width: width, x: x, yOffset: 4, opacity: 1)
+        }
+
+        switch mode {
+        case .trimmingLeft(let id, let candidate) where id == clip.id:
+            let candidateEnd = clip.timelineEnd
+            let displayStart = candidate
+            let displayDuration = candidateEnd - displayStart
+            let width = max(CGFloat(displayDuration.seconds) * pps, 2)
+            let x = CGFloat(displayStart.seconds) * pps
+            return ClipDisplayValues(width: width, x: x, yOffset: 4, opacity: 1)
+
+        case .trimmingRight(let id, let candidate) where id == clip.id:
+            let displayDuration = candidate - clip.timelineStart
+            let width = max(CGFloat(displayDuration.seconds) * pps, 2)
+            let x = CGFloat(clip.timelineStart.seconds) * pps
+            return ClipDisplayValues(width: width, x: x, yOffset: 4, opacity: 1)
+
+        case .moving(let id, let candidateStart, _, let targetIdx) where id == clip.id:
+            let width = max(CGFloat(clip.duration.seconds) * pps, 2)
+            let x = CGFloat(candidateStart.seconds) * pps
+            let trackDelta = targetIdx - trackIndex
+            let yOffset: CGFloat = 4 + CGFloat(trackDelta) * (laneHeight + 1)
+            return ClipDisplayValues(width: width, x: x, yOffset: yOffset, opacity: 0.7)
+
+        default:
+            let width = max(CGFloat(clip.duration.seconds) * pps, 2)
+            let x = CGFloat(clip.timelineStart.seconds) * pps
+            return ClipDisplayValues(width: width, x: x, yOffset: 4, opacity: 1)
+        }
+    }
+
+    private func isDragging(_ clipID: Clip.ID) -> Bool {
+        switch dragMode {
+        case .trimmingLeft(let id, _), .trimmingRight(let id, _), .moving(let id, _, _, _):
+            id == clipID
+        case nil:
+            false
+        }
+    }
+
+    // MARK: - Gestures
+
+    private func trimDragGesture(clip: Clip, edge: EditorModel.TrimEdge) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                let baseX: CGFloat = switch edge {
+                case .left: CGFloat(clip.timelineStart.seconds) * pps
+                case .right: CGFloat(clip.timelineEnd.seconds) * pps
+                }
+                let newX = baseX + value.translation.width
+                var candidate = CMTime(seconds: max(0, Double(newX / pps)), preferredTimescale: 600)
+
+                // Snap unless Option is held.
+                if !NSEvent.modifierFlags.contains(.option) {
+                    candidate = model.resolveSnap(candidate: candidate, excluding: clip.id)
+                }
+
+                switch edge {
+                case .left:
+                    candidate = min(candidate, clip.timelineEnd)
+                    dragMode = .trimmingLeft(clipID: clip.id, candidate: candidate)
+                case .right:
+                    candidate = max(candidate, clip.timelineStart)
+                    dragMode = .trimmingRight(clipID: clip.id, candidate: candidate)
+                }
+            }
+            .onEnded { _ in
+                commitDrag()
+            }
+    }
+
+    private func bodyDragGesture(clip: Clip, kind: TrackKind, trackID: Track.ID, trackIndex: Int) -> some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { value in
+                let originalX = CGFloat(clip.timelineStart.seconds) * pps
+                let newX = originalX + value.translation.width
+                var candidateStart = CMTime(seconds: max(0, Double(newX / pps)), preferredTimescale: 600)
+
+                // Constrain vertical drag to same-kind tracks only.
+                let trackDelta = Int(round(value.translation.height / (laneHeight + 1)))
+                let rawIndex = trackIndex + trackDelta
+                let sameKindIndices = tracks.indices.filter { tracks[$0].kind == kind }
+                let targetIndex = sameKindIndices.min(by: {
+                    abs($0 - rawIndex) < abs($1 - rawIndex)
+                }) ?? trackIndex
+
+                if !NSEvent.modifierFlags.contains(.option) {
+                    candidateStart = model.resolveSnap(
+                        candidate: candidateStart, excluding: clip.id,
+                        trailingEdgeOffset: clip.duration)
+                }
+
+                dragMode = .moving(clipID: clip.id, candidateStart: candidateStart,
+                                   sourceTrackID: trackID, targetTrackIndex: targetIndex)
+            }
+            .onEnded { _ in
+                commitDrag()
+            }
+    }
+
+    private func commitDrag() {
+        guard let mode = dragMode else { return }
+        dragMode = nil
+
+        switch mode {
+        case .trimmingLeft(let id, let candidate):
+            NSCursor.pop()
+            model.trimClip(id: id, edge: .left, to: candidate)
+
+        case .trimmingRight(let id, let candidate):
+            NSCursor.pop()
+            model.trimClip(id: id, edge: .right, to: candidate)
+
+        case .moving(let id, let candidateStart, _, let targetIndex):
+            let targetTrack = tracks[targetIndex]
+            model.moveClip(id: id, toTrack: targetTrack.id, start: candidateStart)
+        }
+    }
+
+    // MARK: - Playhead
 
     private var playhead: some View {
         let x = CGFloat(model.currentTime) * pps
