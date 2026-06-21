@@ -214,6 +214,7 @@ struct TimelineView: View {
         // expression past the Swift type-checker's time budget.
         let clipName = model.project.media(for: clip.mediaID)?.name
         let nameLabel: Text = clipName.map(Text.init) ?? Text("Clip")
+        let valueLabel = Text("Starts \(TimeFormatting.timecode(clip.timelineStart.seconds)), \(TimeFormatting.timecode(clip.duration.seconds)) long")
 
         return ZStack {
             RoundedRectangle(cornerRadius: 6)
@@ -246,7 +247,7 @@ struct TimelineView: View {
         }
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
         .accessibilityLabel(nameLabel)
-        .accessibilityValue("Starts \(TimeFormatting.timecode(clip.timelineStart.seconds)), \(TimeFormatting.timecode(clip.duration.seconds)) long")
+        .accessibilityValue(valueLabel)
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { hovering in

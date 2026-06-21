@@ -87,6 +87,9 @@ final class EditorModel {
         endObserver = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.didPlayToEndTimeNotification,
             object: nil, queue: .main) { [weak self] notification in
+            // Read the (non-Sendable) notification on the delivery queue (.main)
+            // before entering assumeIsolated; capturing it inside the isolated
+            // closure would be a Swift 6 "sending risks data races" error.
             guard notification.object as? AVPlayerItem == self?.player.currentItem else { return }
             MainActor.assumeIsolated {
                 self?.isPlaying = false
