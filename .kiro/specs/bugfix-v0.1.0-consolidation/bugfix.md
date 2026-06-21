@@ -38,4 +38,22 @@ Clip blocks in `TimelineView` have no `accessibilityLabel` or accessibility trai
 
 `LUTCache` uses `NSLock` + `@unchecked Sendable` + `nonisolated(unsafe)`. `OSAllocatedUnfairLock` (macOS 13+) is the modern Swift 6 primitive for thread-safe caches and offers better performance.
 
-- **Fix**: Replace with `OSAllocatedUnfairLock`.
+- **Fix**: Replace with `OSAllocatedUnfairLock(initialState:)` using `withLock`; remove `@unchecked` since the lock + `Sendable` inner struct make the class implicitly `Sendable`.
+
+### B7 — Export race (TOCTOU)
+
+`export(to:)` sets `isExporting = true` at line 802 — after the first `await` at line 788. A second call can slip past the `guard !isExporting` while the first is suspended at the `await`.
+
+- **Fix**: Move `isExporting = true` before the first `await`. Add `isExporting = false` on the early-return paths before the `defer`.
+
+### B8 — Rebuild kills playback
+
+`rebuild()` replaces the `AVPlayerItem` but never checks `isPlaying` to resume. After any edit, playback silently stops.
+
+- **Fix**: Capture `wasPlaying` before the rebuild; call `player.play()` after the seek if it was true.
+
+### B9 — Silent LUT bookmark failure
+
+`applyLUT` returns nil when the bookmark is stale (line 279). The `?? result` at the call site keeps the pipeline running but silently drops the effect. The user sees the LUT in the inspector but it renders as a no-op.
+
+- **Fix**: Log `os_log(.error, ...)` so the failure is at least observable in the system log.
