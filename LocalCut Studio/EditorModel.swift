@@ -784,6 +784,9 @@ final class EditorModel {
             guard let built = result else {
                 player.replaceCurrentItem(with: nil)
                 totalDuration = 0
+                // No preview left to play; clear the flag so a later rebuild that
+                // re-creates an item (undo, add clip) doesn't silently auto-resume.
+                isPlaying = false
                 return
             }
             let item = AVPlayerItem(asset: built.composition)
@@ -835,6 +838,14 @@ final class EditorModel {
             isExporting = false
             exportProgress = nil
         }
+        // Hold security-scoped access to every source file for the whole export,
+        // independent of the editable session. A redo (or any session change) that
+        // revokes the session's access mid-export — which the removeMedia guard
+        // can't intercept, since UndoManager replays snapshots directly — must not
+        // pull a source file out from under the in-flight write.
+        let exportSources = Set(project.mediaItems.map(\.url))
+        let heldSources = exportSources.filter { $0.startAccessingSecurityScopedResource() }
+        defer { for source in heldSources { source.stopAccessingSecurityScopedResource() } }
         do {
             guard let built = try await CompositionBuilder.build(project: project) else {
                 statusMessage = "Nothing to export."

@@ -257,35 +257,45 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         return result
     }
 
+    /// How long a failed LUT load is cached before another attempt: long enough to
+    /// avoid per-frame re-resolution/logging, short enough to recover when a file on
+    /// a removable/network volume (or one still being written) becomes available.
+    nonisolated private static let lutRetryInterval: TimeInterval = 3
+
     nonisolated private func applyLUT(_ image: CIImage, bookmarkData: Data) -> CIImage? {
-        switch LUTCache.shared.entry(forBookmark: bookmarkData) {
+        let prior = LUTCache.shared.entry(forBookmark: bookmarkData)
+        switch prior {
         case .loaded(let cached):
             return colorCube(image: image, dimension: cached.dimension, cubeData: cached.cubeData)
-        case .failed:
-            // Already known unusable — don't re-resolve or re-log on every frame.
-            return nil
+        case .failed(let when):
+            // Retry transient failures after a cooldown; otherwise skip silently so
+            // a broken LUT doesn't re-resolve or re-log on every rendered frame.
+            guard Date().timeIntervalSince(when) >= Self.lutRetryInterval else { return nil }
         case nil:
             break
         }
 
         guard let cached = loadLUT(bookmarkData: bookmarkData) else {
-            LUTCache.shared.setEntry(.failed, forBookmark: bookmarkData)
+            // Log only on the first failure for this bookmark, not on each retry.
+            if case .some(.failed) = prior {} else {
+                os_log(.error, "LUT bookmark unreadable — skipping LUT effect (will retry)")
+            }
+            LUTCache.shared.setEntry(.failed(Date()), forBookmark: bookmarkData)
             return nil
         }
         LUTCache.shared.setEntry(.loaded(cached), forBookmark: bookmarkData)
         return colorCube(image: image, dimension: cached.dimension, cubeData: cached.cubeData)
     }
 
-    /// Resolves and parses a LUT bookmark once. Returns nil (logging once for an
-    /// unreachable bookmark) when the file can't be read or parsed; the caller
-    /// caches the outcome so this isn't repeated per rendered frame.
+    /// Resolves and parses a LUT bookmark once. Returns nil when the file can't be
+    /// reached, read, or parsed; the caller caches the outcome (with a retry
+    /// cooldown) so this isn't repeated on every rendered frame.
     nonisolated private func loadLUT(bookmarkData: Data) -> CachedLUT? {
         var isStale = false
         guard let url = try? URL(resolvingBookmarkData: bookmarkData,
                                  options: [.withSecurityScope, .withoutUI],
                                  bookmarkDataIsStale: &isStale),
               !isStale else {
-            os_log(.error, "LUT bookmark stale or unresolvable — skipping LUT effect")
             return nil
         }
 
@@ -321,7 +331,7 @@ private struct CachedLUT: Sendable {
 /// re-resolved nor re-logged on every rendered frame.
 private enum LUTEntry: Sendable {
     case loaded(CachedLUT)
-    case failed
+    case failed(Date)
 }
 
 private final class LUTCache: Sendable {
