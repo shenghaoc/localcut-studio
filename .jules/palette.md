@@ -11,3 +11,7 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 
 **Learning:** Clip blocks are custom-drawn `RoundedRectangle`s positioned by time; by default they're decorative to assistive tech, and selection is conveyed by border colour alone.
 **Action:** Give each clip an `accessibilityLabel` of media name + start + duration, add `.isSelected` trait when selected, and pair the selection colour with the border so state isn't colour-only.
+
+## 2025-01-20 - Custom layout sliders need explicit accessibility labels
+**Learning:** In SwiftUI, when a `Slider` is placed adjacent to a `Text` label in a custom layout (like `VStack`), VoiceOver treats them as separate elements. The user will navigate to the slider and hear a generic "slider" announcement without knowing what it controls.
+**Action:** Always add an `.accessibilityLabel` directly to the `Slider` view itself when it doesn't have an implicitly linked label, and make sure `.accessibilityValue` is set if the displayed textual value format deviates from the default announcement or is contained in an adjacent text element.

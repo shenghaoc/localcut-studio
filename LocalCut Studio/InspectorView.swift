@@ -67,6 +67,8 @@ struct InspectorView: View {
                         get: { Double(clip.opacity) },
                         set: { newValue in model.updateSelectedClipCoalesced("Adjust Opacity") { $0.opacity = Float(newValue) } }),
                     in: 0...1)
+                .accessibilityLabel("Opacity")
+                .accessibilityValue("\(Int(clip.opacity * 100))%")
             }
         }
     }
@@ -89,6 +91,7 @@ struct InspectorView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Slider(value: transitionDurationBinding, in: minTransitionSeconds...maxTransitionSeconds)
+                    .accessibilityLabel("Transition Duration")
             }
 
             Button(role: .destructive) {
@@ -158,6 +161,8 @@ struct InspectorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Slider(value: value, in: range, step: step)
+                .accessibilityLabel(label)
+                .accessibilityValue(display)
         }
     }
 
