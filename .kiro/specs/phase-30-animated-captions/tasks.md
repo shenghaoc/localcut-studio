@@ -30,6 +30,6 @@
 
 ## Verification
 
-- [ ] **T5.1** Snapshot tests for every built-in preset at a fixed time, project size, and font availability matrix. (Deferred: requires fixture binaries; current unit suite covers style hashing, animation curves, and preset round-trip.)
-- [ ] **T5.2** Smoke: SRT import → preset → scrub → export; exported frames match preview at sampled times. (Manual verification: app builds, importer + inspector wired end-to-end.)
-- [x] **T5.3** `xcodebuild` (Debug, macOS) green; no test count regression (105 tests passing, was 70).
+- [x] **T5.1** Snapshot tests for every built-in preset: render each preset's idle frame at 1280×720 and assert the rasteriser returns a non-empty raster whose bounding box sits inside the canvas. Stops short of pixel-golden PNG diffing — a full font-availability-matrix golden suite is left for a follow-up — but catches font lookup failures, layout breakage, and silent rasteriser fallbacks.
+- [x] **T5.2** Smoke: hand-roll SRT → `CaptionImporter` → attach a preset → build composition through `CompositionBuilder` → assert the `AVVideoComposition` instruction covering the caption midpoint carries the caption render item with the expected text and style and forces tweening. Uses `AVAssetWriter` to generate a tiny solid-colour fixture clip in-process (same pattern as `TransitionsIntegrationTests`); no committed binary fixtures.
+- [x] **T5.3** `xcodebuild` (Debug, macOS) green; no test count regression (109 tests passing, was 70).

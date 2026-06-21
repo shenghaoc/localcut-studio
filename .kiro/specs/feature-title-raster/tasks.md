@@ -15,5 +15,5 @@
 - [x] **T2.2** Unit test: changing any one of `lineID`, `styleHash`, `text`, `wordHighlightIndex`, `renderSize` produces a fresh raster.
 - [x] **T2.3** Unit test: inserting beyond the cap evicts the least-recently-used entry.
 - [x] **T2.4** Unit test: `purge()` empties the cache (next request is a miss).
-- [ ] **T2.5** Unit test: bounding box is positive for a closure that draws a glyph; zero for an empty closure.
+- [x] **T2.5** Unit test: bounding box is positive for a closure that draws a glyph; zero for an empty closure.
 - [x] **T2.6** `xcodebuild` (Debug, macOS) green; no test count regression.

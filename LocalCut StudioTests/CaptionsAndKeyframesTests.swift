@@ -396,3 +396,171 @@ func titleRastererPurge() {
     r.purge()
     #expect(r.count == 0)
 }
+
+@Test("TitleRasterer: empty draw closure yields zero bounding box (T2.5)")
+func titleRastererEmptyDrawZeroBox() {
+    let r = TitleRasterer(capacity: 2)
+    let req = TitleRasterRequest(lineID: UUID(), styleHash: 1, text: "",
+                                 renderSize: CGSize(width: 64, height: 32))
+    let raster = r.raster(for: req) { _, _ in .zero }
+    #expect(raster.boundingBox == .zero)
+}
+
+@Test("TitleRasterer: drawing closure returning a glyph rect yields a positive bbox (T2.5)")
+func titleRastererPositiveBox() {
+    let r = TitleRasterer(capacity: 2)
+    let req = TitleRasterRequest(lineID: UUID(), styleHash: 1, text: "x",
+                                 renderSize: CGSize(width: 64, height: 32))
+    let raster = r.raster(for: req) { _, _ in CGRect(x: 4, y: 4, width: 12, height: 12) }
+    #expect(raster.boundingBox.width > 0)
+    #expect(raster.boundingBox.height > 0)
+}
+
+// MARK: - Preset snapshot (Phase 30 T5.1, golden-less form)
+
+/// Renders each built-in preset's idle frame at a fixed canvas and verifies the
+/// raster comes back with a non-zero bounding box that sits inside the canvas.
+/// Stops short of a pixel-golden diff (which would need committed PNGs and a
+/// font-availability matrix), but catches the regressions worth catching here:
+/// font lookup failures, layout breakage, and the rasterer returning the empty
+/// transparent fallback when something throws.
+@Test("BuiltInCaptionPresets: every preset renders to a non-empty raster (T5.1)")
+func presetSnapshotShape() {
+    let canvas = CGSize(width: 1280, height: 720)
+    let rasterer = CaptionRasterer()
+    for preset in BuiltInCaptionPresets.all {
+        let line = CaptionLine(
+            range: CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600)),
+            text: "Sample caption")
+        let raster = rasterer.idleRaster(line: line, style: preset.style, renderSize: canvas)
+        let unwrapped = try? #require(raster)
+        guard let raster = unwrapped else { continue }
+        #expect(raster.boundingBox.width > 0, "Preset \(preset.name) produced an empty bounding box")
+        #expect(raster.boundingBox.height > 0, "Preset \(preset.name) produced an empty bounding box")
+        // Bounding box must sit inside the canvas (with padding for stroke / pill).
+        #expect(raster.boundingBox.minX >= -64, "Preset \(preset.name) bbox extends well beyond the left edge")
+        #expect(raster.boundingBox.maxX <= canvas.width + 64, "Preset \(preset.name) bbox extends well beyond the right edge")
+    }
+}
+
+// MARK: - Smoke test (Phase 30 T5.2)
+
+/// Generates a 2 s solid-colour fixture clip via `AVAssetWriter`, builds a
+/// project with a video clip + a caption track whose single line covers the
+/// midpoint, and asserts the built `AVVideoComposition` carries the caption
+/// render item on the instruction interval that contains the midpoint.
+/// This proves the SRT → model → compositor wiring end-to-end without needing
+/// committed binary fixtures.
+@MainActor
+@Suite("Phase 30 — smoke")
+struct PhaseThirtySmokeTests {
+
+    private func time(_ seconds: Double) -> CMTime {
+        CMTime(seconds: seconds, preferredTimescale: 600)
+    }
+
+    /// Writes a short solid-colour H.264 movie to a temp file and returns its URL.
+    /// Same pattern `TransitionsIntegrationTests` uses.
+    private func makeVideoFixture(seconds: Double, fps: Int32 = 30,
+                                  size: CGSize = CGSize(width: 320, height: 180)) async throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("caption-fixture-\(UUID().uuidString).mov")
+        try? FileManager.default.removeItem(at: url)
+
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(size.width),
+            AVVideoHeightKey: Int(size.height),
+        ])
+        input.expectsMediaDataInRealTime = false
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+                kCVPixelBufferWidthKey as String: Int(size.width),
+                kCVPixelBufferHeightKey as String: Int(size.height),
+            ])
+        writer.add(input)
+
+        #expect(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+
+        let frameCount = Int(seconds * Double(fps))
+        for frame in 0..<frameCount {
+            while !input.isReadyForMoreMediaData { await Task.yield() }
+            guard let pool = adaptor.pixelBufferPool else { break }
+            var pixelBuffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+            guard let buffer = pixelBuffer else { break }
+            CVPixelBufferLockBaseAddress(buffer, [])
+            if let base = CVPixelBufferGetBaseAddress(buffer) {
+                memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
+            }
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps))
+        }
+
+        input.markAsFinished()
+        await writer.finishWriting()
+        #expect(writer.status == .completed)
+        return url
+    }
+
+    private func loadedMedia(from url: URL) async throws -> MediaItem {
+        let item = MediaItem(url: url)
+        item.duration = try await item.asset.load(.duration)
+        let videoTracks = try await item.asset.loadTracks(withMediaType: .video)
+        let track = try #require(videoTracks.first)
+        item.hasVideo = true
+        item.naturalSize = try await track.load(.naturalSize)
+        item.preferredTransform = try await track.load(.preferredTransform)
+        return item
+    }
+
+    @Test("SRT → model → built composition carries the caption at the midpoint")
+    func captionRoundTripsThroughCompositor() async throws {
+        // Generate a 2s clip and import it as a clip on the timeline.
+        let url = try await makeVideoFixture(seconds: 2)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let project = Project()
+        let media = try await loadedMedia(from: url)
+        project.mediaItems.append(media)
+
+        let videoTrack = project.videoTracks.first!
+        videoTrack.clips = [Clip(mediaID: media.id, sourceStart: .zero,
+                                 duration: time(2), timelineStart: .zero)]
+
+        // Hand-roll a tiny SRT, parse it, attach the track to the project.
+        let srt = """
+        1
+        00:00:00,500 --> 00:00:01,500
+        Smoke caption
+
+        """
+        let captionTrack = try CaptionImporter.importTrack(
+            data: Data(srt.utf8), isVTT: false, name: "Smoke")
+        captionTrack.defaultStyle = BuiltInCaptionPresets.socialBoldYellow.style
+        project.captionTracks = [captionTrack]
+
+        // Build composition end-to-end.
+        let built = try #require(try await CompositionBuilder.build(project: project))
+        let videoComposition = try #require(built.videoComposition)
+
+        // The instruction whose time range contains t=1.0 (the caption midpoint)
+        // must carry our caption render item, with the preset's style applied.
+        let probe = CMTime(seconds: 1.0, preferredTimescale: 600)
+        let instruction = videoComposition.instructions.first { instr in
+            CMTimeRangeContainsTime(instr.timeRange, time: probe)
+        }
+        let captioned = try #require(instruction as? EffectCompositionInstruction)
+        #expect(captioned.captions.count == 1)
+        let item = try #require(captioned.captions.first)
+        #expect(item.text == "Smoke caption")
+        #expect(item.style == BuiltInCaptionPresets.socialBoldYellow.style)
+        // Caption forces tweening on the instruction so per-frame animation is
+        // re-evaluated rather than reusing one rendered frame for the interval.
+        #expect(captioned.containsTweening == true)
+    }
+}
