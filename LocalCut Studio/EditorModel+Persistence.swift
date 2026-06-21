@@ -128,7 +128,7 @@ extension EditorModel {
         mutate()
         markDirty()
         switch mode {
-        case .immediate: Task { await rebuild() }
+        case .immediate: scheduleRebuild()
         case .debounced: rebuildDebounced()
         }
         scheduleCoalescedCommit()
@@ -170,7 +170,7 @@ extension EditorModel {
                 model.applyState(before)
                 model.markDirty()
                 model.registerUndo(name: name, before: after, after: before)
-                Task { await model.rebuild() }
+                model.scheduleRebuild()
                 model.refreshUndoFlags()
             }
         }
@@ -242,8 +242,10 @@ extension EditorModel {
         unresolvedMedia = []
         undoManager.removeAllActions()
         coalescedCommitTask?.cancel()
+        activeRebuildTask?.cancel()
         coalescedUndoBefore = nil
         coalescedUndoName = nil
+        coalescedUndoTarget = nil
     }
 
     /// Reads and opens a `.lcstudio` document. The file read happens off the main

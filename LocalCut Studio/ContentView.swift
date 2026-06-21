@@ -213,7 +213,16 @@ private struct WindowConfigurator: NSViewRepresentable {
         }
 
         func attach(to window: NSWindow?) {
-            guard let window else { return }
+            guard let window else {
+                // Detached: hand the delegate back to SwiftUI so its window
+                // lifecycle keeps working after this view goes away.
+                if let current = self.window, current.delegate === self {
+                    current.delegate = previousDelegate
+                }
+                self.window = nil
+                previousDelegate = nil
+                return
+            }
             if window !== self.window {
                 self.window = window
                 if window.delegate !== self {

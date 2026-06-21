@@ -34,6 +34,9 @@ final class EditorModel {
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var pendingRebuildTask: Task<Void, Never>?
+    /// The in-flight preview rebuild. A new rebuild cancels the previous one so
+    /// rapid edits/undo can't land an older composition on the player last.
+    @ObservationIgnored var activeRebuildTask: Task<Void, Never>?
 
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.
@@ -84,6 +87,7 @@ final class EditorModel {
 
     deinit {
         pendingRebuildTask?.cancel()
+        activeRebuildTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
@@ -167,7 +171,7 @@ final class EditorModel {
                                         timelineStart: insertAt))
             }
             statusMessage = "Added \(media.name) to timeline."
-            Task { await rebuild() }
+            scheduleRebuild()
         }
     }
 
@@ -183,7 +187,7 @@ final class EditorModel {
             selectedClipID = nil
             sanitizeTransitions()
             statusMessage = "Deleted clip."
-            Task { await rebuild() }
+            scheduleRebuild()
         }
     }
 
@@ -240,7 +244,7 @@ final class EditorModel {
                 track.clips.replaceSubrange(index...index, with: [left, right])
                 selectedClipID = left.id
                 statusMessage = "Split clip."
-                Task { await rebuild() }
+                scheduleRebuild()
                 return
             }
         }
@@ -266,8 +270,15 @@ final class EditorModel {
         pendingRebuildTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
-            await rebuild()
+            scheduleRebuild()
         }
+    }
+
+    /// Starts a preview rebuild, cancelling any rebuild already in flight so the
+    /// most recent project state is the one that reaches the player.
+    func scheduleRebuild() {
+        activeRebuildTask?.cancel()
+        activeRebuildTask = Task { [weak self] in await self?.rebuild() }
     }
 
     // MARK: - Colour grading
@@ -309,7 +320,7 @@ final class EditorModel {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 track.clips[index].effects.removeAll()
-                Task { await rebuild() }
+                scheduleRebuild()
                 return
             }
         }
@@ -340,7 +351,7 @@ final class EditorModel {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 track.clips[index].effects.append(.lut(bookmark: bookmark))
                 statusMessage = "Imported LUT \(url.lastPathComponent)."
-                Task { await rebuild() }
+                scheduleRebuild()
                 return
             }
         }
@@ -455,7 +466,7 @@ final class EditorModel {
         } else {
             performUndoable("Change Transition") {
                 applyToSelectedTransition(id: id, body)
-                Task { await rebuild() }
+                scheduleRebuild()
             }
         }
     }
@@ -484,7 +495,7 @@ final class EditorModel {
         for track in allTracks {
             guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
             track.clips[index].transition = transition
-            Task { await rebuild() }
+            scheduleRebuild()
             return
         }
     }
@@ -691,7 +702,7 @@ final class EditorModel {
         guard size != project.renderSize else { return }
         performUndoable("Change Resolution") {
             project.renderSize = size
-            Task { await rebuild() }
+            scheduleRebuild()
         }
     }
 
@@ -700,7 +711,7 @@ final class EditorModel {
         guard fps != project.frameRate else { return }
         performUndoable("Change Frame Rate") {
             project.frameRate = fps
-            Task { await rebuild() }
+            scheduleRebuild()
         }
     }
 
@@ -711,7 +722,10 @@ final class EditorModel {
     func rebuild() async {
         let resumeAt = currentTime
         do {
-            guard let built = try await CompositionBuilder.build(project: project) else {
+            let result = try await CompositionBuilder.build(project: project)
+            // A newer rebuild superseded this one; don't clobber the player.
+            guard !Task.isCancelled else { return }
+            guard let built = result else {
                 player.replaceCurrentItem(with: nil)
                 totalDuration = 0
                 return
