@@ -66,6 +66,18 @@ struct DocumentCommands: Commands {
                 .keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(!model.canRedo)
         }
+        // Edit-menu entry for Add Transition mirrors the toolbar button so
+        // keyboard-driven workflows + the menu bar both reach the same action.
+        CommandMenu("Timeline") {
+            Button("Split Clip at Playhead") { model.splitSelectedClipAtPlayhead() }
+                .keyboardShortcut("k", modifiers: .command)
+                .disabled(model.selectedClipID == nil)
+            Button("Add Transition at Selected Cut") { model.addTransitionToSelectedClip() }
+                .keyboardShortcut("t", modifiers: .command)
+                .disabled(!model.canAddTransitionAtSelection)
+            Button("Remove Transition") { model.removeSelectedTransition() }
+                .disabled(model.selectedTransitionClipID == nil)
+        }
     }
 }
 

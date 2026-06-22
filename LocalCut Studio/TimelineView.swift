@@ -371,6 +371,21 @@ struct TimelineView: View {
             model.selectedTransitionClipID = nil
             model.selectedMarkerID = nil
         }
+        .contextMenu {
+            Button("Split at Playhead") {
+                model.selectedClipID = clip.id
+                model.splitSelectedClipAtPlayhead()
+            }
+            Button("Add Transition Before This Clip") {
+                model.addTransition(toClipID: clip.id)
+            }
+            .disabled(!model.canAddTransition(toClipID: clip.id))
+            Divider()
+            Button("Delete Clip", role: .destructive) {
+                model.selectedClipID = clip.id
+                model.deleteSelectedClip()
+            }
+        }
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
         .accessibilityLabel(nameLabel)
         .accessibilityValue(valueLabel)
