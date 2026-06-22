@@ -11,7 +11,7 @@
 ## Fingerprints
 
 - [x] **T2.1** Add `Fingerprint.sha256(of: URL)` (`CryptoKit.SHA256`, streamed in 256 KB chunks).
-- [x] **T2.2** Add `FingerprintIndex` Codable type (`[bundleRelativePath: hex digest]`); the index serialises sorted-key JSON for stable diffs.
+- [x] **T2.2** Add `FingerprintIndex` Codable type (`[bundleRelativePath: hex digest]`); the index serialises sorted-key JSON for stable diffs. (Determinism guarantee finished under [`bugfix-fingerprint-index-determinism`](../bugfix-fingerprint-index-determinism/tasks.md) — the manual sort alone wasn't sufficient on macOS 26.)
 
 ## Bundle I/O
 
