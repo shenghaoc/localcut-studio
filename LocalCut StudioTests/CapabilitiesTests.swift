@@ -240,6 +240,18 @@ func metalEffectChainUnknownAS() {
     #expect(verdict.tier == .baseline)
 }
 
+@Test("Metal effect chain: Apple Silicon M2 with 8 GiB → accelerated")
+func metalEffectChainLowMemAS() {
+    let c = Capabilities(
+        chip: .appleSilicon(generation: 2),
+        unifiedMemoryBytes: 8 * 1024 * 1024 * 1024,
+        videoEncoderCount: 1,
+        osVersion: Capabilities.OSVersion(major: 26, minor: 0))
+    let verdict = c.tier(for: .metalEffectChain)
+    #expect(verdict.tier == .accelerated)
+    #expect(verdict.reason.contains("M2"))
+}
+
 @Test("Metal effect chain: M-series with ≥16 GiB → pro")
 func metalEffectChainPro() {
     let m2 = Capabilities(
