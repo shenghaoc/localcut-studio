@@ -25,9 +25,12 @@ extension EditorModel {
             let panel = NSOpenPanel()
             panel.allowedContentTypes = [.lcStudioProjectBundle, .lcStudioProject]
             panel.allowsMultipleSelection = false
-            // A `.lcbundle` is a directory (UTType.package), so the panel needs
-            // to allow directory selection for the bundle case.
-            panel.canChooseDirectories = true
+            // `.lcbundle` conforms to `.package`, so the panel treats it as a
+            // single double-clickable item. We do NOT enable
+            // `canChooseDirectories`: doing so lets the user pick arbitrary
+            // folders (Desktop, Documents) that have no `project.json` and
+            // would fail to open.
+            panel.canChooseDirectories = false
             panel.canChooseFiles = true
             guard panel.runModal() == .OK, let url = panel.url else { return }
             await open(url: url)

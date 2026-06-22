@@ -245,6 +245,14 @@ struct ProjectBundleTests {
         #expect(model.canUndo == undoableBefore)
         #expect(model.undoTitle == undoTitleBefore)
 
+        // After Convert succeeds the live MediaItem in the converted model
+        // points at the bundled copy (not the original external file) so a
+        // subsequent move/delete of the original doesn't break preview/export.
+        let bundledItemURL = bundleURL.appendingPathComponent("assets/\(media.id.uuidString).mov")
+        #expect(model.project.mediaItems.first?.url.standardizedFileURL
+                == bundledItemURL.standardizedFileURL)
+        #expect(model.project.mediaItems.first?.bookmark == nil)
+
         // 3. Reopen the bundle from scratch in a separate model.
         let reopener = EditorModel()
         await reopener.open(url: bundleURL)
@@ -259,6 +267,100 @@ struct ProjectBundleTests {
         #expect(reopener.project.mediaItems.count == 1)
         // The reopened media item must point at the bundled copy, not the source.
         #expect(reopener.project.mediaItems.first?.bundleRelativePath != nil)
+        #expect(reopener.project.mediaItems.first?.url.standardizedFileURL
+                == bundledItemURL.standardizedFileURL)
+    }
+
+    // MARK: - P0 regression: source == destination must not delete the only copy
+
+    @Test("Bundle save with source URL equal to bundled destination keeps the file (review P0)")
+    func bundleSaveSourceEqualsDestinationNoDestroy() throws {
+        let tmp = try makeTempDirectory("samepath")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Reopened.lcbundle")
+        try FileManager.default.createDirectory(at: bundleURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: bundleURL.appendingPathComponent("assets"),
+            withIntermediateDirectories: true)
+
+        let mediaID = UUID()
+        let relative = ProjectBundleLayout.assetRelativePath(mediaID: mediaID,
+                                                             sourceExtension: "mov")
+        // Put the asset directly at the bundled destination — this mimics the
+        // state after the user reopens a bundle: MediaItem.url points inside.
+        let bundledFile = bundleURL.appendingPathComponent(relative)
+        let bytes = Data(repeating: 0x77, count: 32)
+        try bytes.write(to: bundledFile)
+        let originalDigest = try Fingerprint.sha256(of: bundledFile)
+
+        // No previous fingerprints index — the fast path's stored-digest
+        // branch is NOT taken; without the source==destination guard, the
+        // write would delete the only copy and then try to copy from it.
+        let document = sampleDocument(mediaID: mediaID,
+                                      bundleRelativePath: relative,
+                                      captionTrackID: UUID())
+        let bundled = [
+            ProjectBundle.BundledMedia(mediaID: mediaID,
+                                       sourceURL: bundledFile,
+                                       bundleRelativePath: relative)
+        ]
+        let index = try ProjectBundle.write(
+            projectJSON: try document.encoded(),
+            to: bundleURL,
+            bundledMedia: bundled,
+            previousFingerprints: FingerprintIndex())
+        #expect(FileManager.default.fileExists(atPath: bundledFile.path))
+        let afterDigest = try Fingerprint.sha256(of: bundledFile)
+        #expect(originalDigest == afterDigest)
+        #expect(index.entries[relative] == originalDigest)
+    }
+
+    // MARK: - Path safety: bundleRelativePath escape rejected
+
+    @Test("Bundle write rejects bundleRelativePath that escapes the bundle directory")
+    func bundleWriteRejectsUnsafePath() throws {
+        let tmp = try makeTempDirectory("unsafepath")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Hostile.lcbundle")
+        let source = try writeAsset([0x00], name: "source.bin", in: tmp)
+
+        let document = sampleDocument(mediaID: UUID(),
+                                      bundleRelativePath: "../escape.mov",
+                                      captionTrackID: UUID())
+        let bundled = [
+            ProjectBundle.BundledMedia(
+                mediaID: UUID(),
+                sourceURL: source,
+                bundleRelativePath: "../escape.mov")
+        ]
+        #expect(throws: ProjectBundle.WriteError.self) {
+            _ = try ProjectBundle.write(
+                projectJSON: try document.encoded(),
+                to: bundleURL,
+                bundledMedia: bundled,
+                previousFingerprints: FingerprintIndex())
+        }
+        // Other unsafe shapes are also caught.
+        #expect(ProjectBundleLayout.isSafeAssetRelativePath("assets/ok.mov") == true)
+        #expect(ProjectBundleLayout.isSafeAssetRelativePath("../escape.mov") == false)
+        #expect(ProjectBundleLayout.isSafeAssetRelativePath("assets/../escape.mov") == false)
+        #expect(ProjectBundleLayout.isSafeAssetRelativePath("assets/sub/file.mov") == false)
+        #expect(ProjectBundleLayout.isSafeAssetRelativePath("/etc/passwd") == false)
+        #expect(ProjectBundleLayout.isSafeAssetRelativePath("assets/") == false)
+    }
+
+    // MARK: - Fingerprint JSON shape (review P2)
+
+    @Test("fingerprints.json is a top-level path → digest map, not nested under 'entries'")
+    func fingerprintIndexJSONTopLevel() throws {
+        let index = FingerprintIndex(entries: ["assets/a.mov": "deadbeef"])
+        let data = try index.encoded()
+        let parsed = try JSONSerialization.jsonObject(with: data)
+        let dict = parsed as? [String: Any]
+        #expect(dict != nil)
+        // The map sits at the JSON root: there is no `entries` wrapper key.
+        #expect(dict?["entries"] == nil)
+        #expect((dict?["assets/a.mov"] as? String) == "deadbeef")
     }
 
     // MARK: - T6.4 — mixed copied + bookmarked media

@@ -376,45 +376,58 @@ extension EditorModel {
     }
 
     /// Reads and opens either a `.lcstudio` document or a `.lcbundle` package.
-    /// The file read happens off the main actor; reconstruction (which touches
-    /// the player/model) happens back on it.
+    /// The file read and any fingerprint verification happen off the main
+    /// actor; reconstruction (which touches the player/model) happens back on
+    /// it.
     ///
     /// Sandbox note: for a `.lcbundle`, the outer URL's security-scoped access
     /// is retained for the lifetime of the session — see `load(document:…)`'s
     /// post-`releaseSession` retain. The bundle's grant covers every file
     /// inside, and bundled `MediaRef`s do not carry their own bookmarks.
     func open(url: URL) async {
-        // Start access for the bundle directory or single-file document. For
-        // bundles, the access is *not* stopped here — `load(document:…)` moves
-        // ownership of the start into the new session (post-`releaseSession`)
-        // so further reads off `assets/<id>.<ext>` keep working. For
-        // single-file documents the local defer stops it after the JSON read.
+        // Start access for the bundle directory or single-file document. For a
+        // bundle, ownership of this start is *transferred* to the new session
+        // (post-`releaseSession`) so further reads off `assets/<id>.<ext>` keep
+        // working past `open()`'s return. The `didTransferAccess` guard makes
+        // sure a read/decode failure still stops the scope here — otherwise an
+        // open-failure path would leak a kernel-level access for the rest of
+        // the process.
         let initialAccess = url.startAccessingSecurityScopedResource()
         let isBundle = ProjectBundle.isBundle(url: url)
+        var didTransferAccess = false
         defer {
-            if !isBundle, initialAccess {
+            if initialAccess, !didTransferAccess {
                 url.stopAccessingSecurityScopedResource()
             }
         }
         do {
             if isBundle {
                 let bundleURL = url
-                let raw = try await Task.detached {
-                    try ProjectBundle.readData(url: bundleURL)
+                // Both the metadata read AND the fingerprint verification run
+                // off the main actor. The verification SHA's every asset; on
+                // large projects this is the slowest step of the open path.
+                let (raw, mismatches) = try await Task.detached {
+                    let data = try ProjectBundle.readData(url: bundleURL)
+                    let parsedFingerprints = data.fingerprintsJSON
+                        .flatMap { try? FingerprintIndex(data: $0) }
+                        ?? FingerprintIndex()
+                    let mismatched = ProjectBundle.mismatches(in: bundleURL,
+                                                              against: parsedFingerprints)
+                    return (data, mismatched)
                 }.value
                 let contents = try ProjectBundle.decode(raw)
-                let mismatches = ProjectBundle.mismatches(in: url, against: contents.fingerprints)
-                lastBundleFingerprints = contents.fingerprints
                 // Hand the bundle's outer access into the freshly-reset session
                 // via `load`, which retains it after `releaseSession()`.
                 await load(document: contents.document, from: url, bundleURL: url,
                            bundleAccessDidStart: initialAccess,
+                           bundleFingerprints: contents.fingerprints,
                            externallyEditedAssets: mismatches)
+                didTransferAccess = initialAccess
             } else {
                 let data = try await Task.detached { try Data(contentsOf: url) }.value
                 let document = try ProjectDocument(data: data)
-                lastBundleFingerprints = FingerprintIndex()
                 await load(document: document, from: url, bundleURL: nil,
+                           bundleFingerprints: FingerprintIndex(),
                            externallyEditedAssets: [])
             }
         } catch {
@@ -436,14 +449,24 @@ extension EditorModel {
     /// reset session can take ownership of that start (`releaseSession` clears
     /// the previous session's accessedURLs first; we re-insert ours after).
     ///
+    /// `bundleFingerprints` is the index parsed from the bundle's
+    /// `fingerprints.json`. We adopt it **after** `releaseSession()` (which
+    /// resets the cache to empty) so the next bundle save's fast path can use
+    /// it; assigning before `releaseSession` would wipe the value.
+    ///
     /// `externallyEditedAssets` lists bundle-relative paths whose SHA-256 no
     /// longer matches the recorded fingerprint; the loader surfaces a status
     /// note so the user knows their media drifted underneath the project.
     func load(document: ProjectDocument, from url: URL?,
               bundleURL: URL? = nil,
               bundleAccessDidStart: Bool = false,
+              bundleFingerprints: FingerprintIndex = FingerprintIndex(),
               externallyEditedAssets: [String] = []) async {
         releaseSession()
+
+        // Order matters: releaseSession() clears `lastBundleFingerprints`, so
+        // the freshly-parsed index has to be assigned *after* it.
+        lastBundleFingerprints = bundleFingerprints
 
         // Hand the bundle's outer security-scoped access into the new session.
         // `releaseSession()` cleared the previous session's accessedURLs, so
@@ -630,15 +653,23 @@ extension EditorModel {
     /// stored fingerprint, so repeat saves don't re-touch media that hasn't
     /// changed (R3.2).
     private func writeBundle(to bundleURL: URL) async {
+        // Hold the bundle URL's access for the lifetime of the session if
+        // we're adopting it as the document URL (a Save As to a new bundle, or
+        // a Save to an existing bundle whose access we may have lost between
+        // documents). The session-end teardown pairs the stop. The local defer
+        // only fires on failure.
         let scoped = bundleURL.startAccessingSecurityScopedResource()
-        defer { if scoped { bundleURL.stopAccessingSecurityScopedResource() } }
+        var didTransferAccess = false
+        defer {
+            if scoped, !didTransferAccess {
+                bundleURL.stopAccessingSecurityScopedResource()
+            }
+        }
         do {
             let savedRevision = mutationRevision
-            // Decide which media are *bundled* (default for everything currently
-            // resolved on disk) vs *external-only* (kept via bookmark). The
-            // current heuristic: any resolved MediaItem is bundled. The
-            // "Don't copy" import path will set `bundleRelativePath = nil`
-            // explicitly on the item to opt out.
+            // Items the user wants bundled (default: every imported MediaItem)
+            // get a bundle-relative path stamped on them; the rest stay
+            // external-only and continue to use security-scoped bookmarks.
             let bundledMedia: [ProjectBundle.BundledMedia] = project.mediaItems.compactMap { item in
                 let relative = bundleRelativePath(for: item)
                 guard let relative else { return nil }
@@ -657,6 +688,23 @@ extension EditorModel {
                                         previousFingerprints: previous)
             }.value
             lastBundleFingerprints = index
+
+            // Re-point bundled MediaItems to the bundled copy and drop their
+            // bookmark — the bundle URL is the grant. This is idempotent: a
+            // Save to an already-opened bundle finds `item.url` already at the
+            // bundled path; a Save As from a `.lcstudio` (or a different
+            // bundle) repoints to the new location.
+            for item in project.mediaItems {
+                guard let relative = item.bundleRelativePath else { continue }
+                let bundled = bundleURL.appendingPathComponent(relative)
+                if item.url.standardizedFileURL != bundled.standardizedFileURL {
+                    item.repoint(to: bundled)
+                }
+                item.bookmark = nil
+            }
+            retainAccess(bundleURL, didStart: scoped)
+            didTransferAccess = scoped
+
             adoptSaved(url: bundleURL, cleanIfRevision: savedRevision)
             statusMessage = "Saved \(bundleURL.lastPathComponent)."
         } catch {
@@ -732,11 +780,16 @@ extension EditorModel {
     }
 
     /// Bundle-relative path for `item` if it should be copied into the bundle.
-    /// Returns `nil` for items the user has explicitly opted out of bundling
-    /// (their `bundleRelativePath` is left `nil` by the import path).
+    /// Returns `nil` for items the user has opted out of bundling (the
+    /// `wantsBundling` flag on `MediaItem`); those remain external-only and
+    /// continue to use security-scoped bookmarks.
+    ///
+    /// The `wantsBundling` flag — not the `bundleRelativePath`'s nil-ness — is
+    /// the source of truth here: `bundleRelativePath == nil` is also the state
+    /// of a freshly-imported item that has not yet been placed in any bundle,
+    /// which is *different* from "the user said don't copy".
     private func bundleRelativePath(for item: MediaItem) -> String? {
-        // When the item already carries an explicit choice (set by a future
-        // "Don't copy" import option), respect it. Otherwise default to bundling.
+        guard item.wantsBundling else { return nil }
         if let existing = item.bundleRelativePath { return existing }
         let ext = item.url.pathExtension
         return ProjectBundleLayout.assetRelativePath(mediaID: item.id, sourceExtension: ext)
@@ -872,13 +925,28 @@ extension EditorModel {
     /// or `undoManager.removeAllActions()`, so every edit made before the
     /// conversion is still undoable afterwards.
     func convertToBundle(to bundleURL: URL) async {
+        // The Save panel grants access; for the bundle to remain readable past
+        // this function (so preview/export keep working in the same session)
+        // we hold the start and let `releaseSession`-on-next-swap pair the
+        // stop. The local `defer` only fires on the failure paths below.
         let scoped = bundleURL.startAccessingSecurityScopedResource()
-        defer { if scoped { bundleURL.stopAccessingSecurityScopedResource() } }
+        var didTransferAccess = false
+        defer {
+            if scoped, !didTransferAccess {
+                bundleURL.stopAccessingSecurityScopedResource()
+            }
+        }
         do {
             // Stamp a bundle-relative path onto every currently-resolved media
-            // item so the document JSON we produce already references the
-            // bundled copies (the ones we're about to write).
+            // item the user wants bundled. Items with `wantsBundling == false`
+            // stay external-only; their `bundleRelativePath` is cleared so a
+            // previous bundle session's stale value can't leak into the new
+            // document.
             let bundledMedia: [ProjectBundle.BundledMedia] = project.mediaItems.compactMap { item in
+                guard item.wantsBundling else {
+                    item.bundleRelativePath = nil
+                    return nil
+                }
                 let ext = item.url.pathExtension
                 let relative = ProjectBundleLayout.assetRelativePath(
                     mediaID: item.id, sourceExtension: ext)
@@ -895,7 +963,28 @@ extension EditorModel {
                                         previousFingerprints: previous)
             }.value
             lastBundleFingerprints = index
+
+            // Re-point every bundled MediaItem at its newly-written copy in
+            // assets/. Without this, preview/export would keep reading from
+            // the original external file, and moving/deleting that original
+            // would break the project even though the bundle is self-contained.
+            // Bookmarks for bundled items are cleared — the bundle's outer
+            // URL is the grant for everything inside.
+            for item in project.mediaItems {
+                guard let relative = item.bundleRelativePath else { continue }
+                item.repoint(to: bundleURL.appendingPathComponent(relative))
+                item.bookmark = nil
+            }
+            // Retain the bundle URL's access for the rest of the session so
+            // future reads off `assets/` keep working; releaseSession() pairs
+            // the stop on the next document swap.
+            retainAccess(bundleURL, didStart: scoped)
+            didTransferAccess = scoped
+
             adoptSaved(url: bundleURL)
+            // The MediaItem URLs changed — refresh the preview composition so
+            // playback reads from the bundled copies.
+            await rebuild()
             statusMessage = "Converted to bundle — original .lcstudio left in place."
         } catch {
             statusMessage = "Convert failed: \(error.localizedDescription)"

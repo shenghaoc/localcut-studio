@@ -140,8 +140,15 @@ extension CGAffineTransform {
 @Observable
 final class MediaItem: Identifiable {
     let id: UUID
-    let url: URL
-    let asset: AVURLAsset
+    /// Source URL of the media. Mutable so that `Convert to Bundle…` can
+    /// re-point the item at its bundled copy (`bundleURL/assets/<id>.<ext>`)
+    /// after a successful conversion; otherwise preview/export would keep
+    /// reading the external original and the bundle would not be
+    /// self-contained until the user closes and reopens.
+    private(set) var url: URL
+    /// The asset paired with `url`. Re-created in `repoint(to:)` so an updated
+    /// `url` is actually used by AVFoundation for the next composition rebuild.
+    private(set) var asset: AVURLAsset
 
     var name: String
     var duration: CMTime = .zero
@@ -156,10 +163,18 @@ final class MediaItem: Identifiable {
     /// lives inside the project bundle (the bundle's outer URL is the grant).
     var bookmark: Data?
 
-    /// Bundle-relative path (`assets/<id>.<ext>`) when this media is copied into
-    /// the current `.lcbundle` project. `nil` for media that lives outside the
-    /// bundle (legacy `.lcstudio` documents and the "Don't copy" import path).
+    /// Bundle-relative path (`assets/<id>.<ext>`) when this media has been
+    /// copied into the current `.lcbundle` project. `nil` for media that has
+    /// not been placed in a bundle yet (legacy `.lcstudio` documents) or that
+    /// the user has explicitly opted out of bundling (see `wantsBundling`).
     var bundleRelativePath: String?
+
+    /// Whether this media should be **copied into** the bundle on the next
+    /// bundle save. Defaults to `true` — the standard "include media in the
+    /// project" expectation. A future "Don't copy" import option flips this
+    /// to `false`, which the bundle save path then honours by leaving the
+    /// ref external (bookmark-resolved) instead of stamping a bundled path.
+    var wantsBundling: Bool = true
 
     /// Poster frame shown in the media bin. Generated lazily after import.
     var thumbnail: CGImage?
@@ -169,6 +184,16 @@ final class MediaItem: Identifiable {
         self.url = url
         self.asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         self.name = url.deletingPathExtension().lastPathComponent
+    }
+
+    /// Re-points the item at a new URL. Used after `Convert to Bundle…`
+    /// succeeds, to swap external source URLs over to their bundled copies.
+    /// The cached metadata (`duration`, `naturalSize`, etc.) is unchanged —
+    /// the bundled copy has byte-identical content to the source so the
+    /// values stay valid; only `url` and `asset` need to be refreshed.
+    func repoint(to newURL: URL) {
+        self.url = newURL
+        self.asset = AVURLAsset(url: newURL, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
     }
 
     var durationSeconds: Double { duration.seconds.isFinite ? duration.seconds : 0 }

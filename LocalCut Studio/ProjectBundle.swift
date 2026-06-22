@@ -47,13 +47,28 @@ nonisolated enum Fingerprint {
 }
 
 /// On-disk fingerprint index keyed by bundle-relative path (`assets/<id>.<ext>`).
-/// Serialised with sorted keys so a re-save with no fingerprint changes produces
-/// byte-identical JSON.
+///
+/// Serialised as a **top-level JSON object** (`{ "assets/<id>.<ext>": "<hex>" }`)
+/// — the documented bundle-format shape — *not* nested under an `entries` field.
+/// The custom Codable below flattens the single stored property so the on-disk
+/// JSON matches the spec exactly.
 nonisolated struct FingerprintIndex: Codable, Equatable, Sendable {
     var entries: [String: String]
 
     init(entries: [String: String] = [:]) {
         self.entries = entries
+    }
+
+    /// Decodes a top-level `{ path: digest }` map.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.entries = try container.decode([String: String].self)
+    }
+
+    /// Encodes the entries map at the JSON root.
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(entries)
     }
 
     func encoded() throws -> Data {
@@ -87,6 +102,25 @@ nonisolated enum ProjectBundleLayout {
     static func assetRelativePath(mediaID: UUID, sourceExtension: String) -> String {
         let ext = sourceExtension.isEmpty ? "" : ".\(sourceExtension)"
         return "\(assetsSubdirectory)/\(mediaID.uuidString)\(ext)"
+    }
+
+    /// Validates that `relative` stays under `assets/` inside the bundle: the
+    /// path must start with `assets/`, contain no `..` components, and resolve
+    /// to a single file directly under `assets/`. Returns `false` for anything
+    /// a hand-edited or hostile `project.json` could use to escape the bundle.
+    static func isSafeAssetRelativePath(_ relative: String) -> Bool {
+        // Reject absolute paths outright.
+        if relative.hasPrefix("/") { return false }
+        let components = relative.split(separator: "/", omittingEmptySubsequences: false)
+        // Expect exactly `assets/<filename>` — two non-empty components.
+        guard components.count == 2,
+              components[0] == Substring(assetsSubdirectory),
+              !components[1].isEmpty else { return false }
+        // No `.`/`..` traversal in the filename component.
+        if components[1] == "." || components[1] == ".." { return false }
+        // No nested slashes or backslashes that the split missed (defence in depth).
+        if components[1].contains("/") || components[1].contains("\\") { return false }
+        return true
     }
 }
 
@@ -124,6 +158,11 @@ nonisolated enum ProjectBundle {
 
     /// Decodes raw bundle data into a document + fingerprint index. A missing
     /// or corrupt `fingerprints.json` is tolerated (the next save regenerates).
+    ///
+    /// `@MainActor`-isolated because `ProjectDocument.init(data:)` runs there
+    /// under the module's default-isolation policy. The enum is otherwise
+    /// `nonisolated` so the IO/write/hash methods can run on detached tasks.
+    @MainActor
     static func decode(_ raw: ProjectBundleData) throws -> ProjectBundleContents {
         let document = try ProjectDocument(data: raw.projectJSON)
         let fingerprints = raw.fingerprintsJSON.flatMap { try? FingerprintIndex(data: $0) }
@@ -131,8 +170,9 @@ nonisolated enum ProjectBundle {
         return ProjectBundleContents(document: document, fingerprints: fingerprints)
     }
 
-    /// Convenience: synchronous read + decode for callers that don't need to
-    /// hop actors (tests, the synchronous close prompt).
+    /// Convenience: synchronous read + decode for callers on the main actor
+    /// (tests, the synchronous close prompt).
+    @MainActor
     static func read(url bundleURL: URL) throws -> ProjectBundleContents {
         try decode(readData(url: bundleURL))
     }
@@ -173,12 +213,33 @@ nonisolated enum ProjectBundle {
         }
     }
 
+    /// Errors raised by `ProjectBundle.write`.
+    enum WriteError: Error, LocalizedError {
+        case unsafeRelativePath(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .unsafeRelativePath(let path):
+                return "Bundle reference \"\(path)\" escapes the bundle directory."
+            }
+        }
+    }
+
     /// Writes a `.lcbundle` to `bundleURL`. Steps:
     ///
     /// 1. Create `bundleURL` and `assets/` if missing.
-    /// 2. For each `bundledMedia` entry: if the previously-recorded fingerprint
-    ///    matches the source's current SHA-256, skip the copy (fast path);
-    ///    otherwise copy the file (APFS clones on the same volume).
+    /// 2. For each `bundledMedia` entry:
+    ///    - Skip if `sourceURL` already IS the destination (the project was
+    ///      reopened from this bundle — the only existing copy is the one we'd
+    ///      otherwise delete-and-recopy from itself; this is the P0 fix).
+    ///    - Skip if the source's current SHA matches the stored fingerprint
+    ///      AND the destination's current SHA also matches (the bundled copy
+    ///      hasn't been edited externally either) — the fast path.
+    ///    - If the source is unreachable but the destination still matches the
+    ///      stored fingerprint, treat the cached bundle copy as authoritative
+    ///      (covers the "user unplugged the source drive" case).
+    ///    - Otherwise: copy to a temp neighbour file first, then move into
+    ///      place — so a mid-flight failure can't leave the destination empty.
     /// 3. Compute fresh fingerprints for every file under `assets/`.
     /// 4. Write `fingerprints.json` and `project.json` atomically.
     ///
@@ -193,6 +254,12 @@ nonisolated enum ProjectBundle {
                       to bundleURL: URL,
                       bundledMedia: [BundledMedia],
                       previousFingerprints: FingerprintIndex) throws -> FingerprintIndex {
+        // Path-safety pass first, so a hostile `project.json` can't make us
+        // touch anything outside `assets/` before we even open a file handle.
+        for media in bundledMedia where !ProjectBundleLayout.isSafeAssetRelativePath(media.bundleRelativePath) {
+            throw WriteError.unsafeRelativePath(media.bundleRelativePath)
+        }
+
         let fm = FileManager.default
         try fm.createDirectory(at: bundleURL, withIntermediateDirectories: true)
         let assetsURL = bundleURL.appendingPathComponent(ProjectBundleLayout.assetsSubdirectory)
@@ -200,23 +267,51 @@ nonisolated enum ProjectBundle {
 
         for media in bundledMedia {
             let destination = bundleURL.appendingPathComponent(media.bundleRelativePath)
-            // Fast path: the source's current SHA matches the previously-stored
-            // fingerprint for this destination AND the destination already
-            // exists. We can leave the copy in place untouched.
-            let storedDigest = previousFingerprints.entries[media.bundleRelativePath]
-            if let storedDigest,
-               fm.fileExists(atPath: destination.path),
-               let sourceDigest = try? Fingerprint.sha256(of: media.sourceURL),
-               sourceDigest == storedDigest {
+
+            // P0: source IS destination. Reopening a bundle leaves the runtime
+            // MediaItem pointed at the bundled copy; the next save would
+            // otherwise delete-and-recopy from a file we just removed. The only
+            // existing copy of the user's media would be lost.
+            if media.sourceURL.standardizedFileURL == destination.standardizedFileURL {
                 continue
             }
-            // Replace any stale copy.
-            if fm.fileExists(atPath: destination.path) {
-                try fm.removeItem(at: destination)
+
+            let storedDigest = previousFingerprints.entries[media.bundleRelativePath]
+            let sourceDigest = try? Fingerprint.sha256(of: media.sourceURL)
+            let destinationExists = fm.fileExists(atPath: destination.path)
+            let destinationDigest = destinationExists
+                ? try? Fingerprint.sha256(of: destination)
+                : nil
+
+            // Fast path: source AND destination both still match what we
+            // recorded last save. Recomputing both digests prevents a silent
+            // accept of an externally-edited bundled copy.
+            if let storedDigest,
+               sourceDigest == storedDigest,
+               destinationDigest == storedDigest {
+                continue
             }
-            // copyItem on APFS already uses a clonefile-style fast path when
-            // source and destination are on the same volume.
-            try fm.copyItem(at: media.sourceURL, to: destination)
+
+            // Source unreachable (e.g. external drive unplugged), but the
+            // destination still matches the stored fingerprint — keep the
+            // bundled copy and move on. Without this, an unplugged source
+            // would crash the entire save.
+            if sourceDigest == nil,
+               let storedDigest,
+               destinationDigest == storedDigest {
+                continue
+            }
+
+            // Copy via a temp neighbour file, then atomically replace the
+            // destination — a mid-flight crash leaves the previous destination
+            // (if any) intact rather than partially-written or empty.
+            let temp = destination.appendingPathExtension("tmp-\(UUID().uuidString)")
+            try fm.copyItem(at: media.sourceURL, to: temp)
+            if destinationExists {
+                _ = try fm.replaceItemAt(destination, withItemAt: temp)
+            } else {
+                try fm.moveItem(at: temp, to: destination)
+            }
         }
 
         // Re-fingerprint the assets directory from scratch — anything left
