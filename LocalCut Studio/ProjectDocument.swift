@@ -141,24 +141,22 @@ struct ProjectDocument: Codable, Equatable {
 
 // MARK: - Audio master bus persistence (P16, schema v3+)
 
-/// Codable snapshot of the project's master-bus parameters. Schema-version is
-/// embedded so future field additions stay forward-compatible.
+/// Codable snapshot of the project's master-bus parameters. Forward-compat
+/// is handled by the outer `ProjectDocument.schemaVersion` (matches the
+/// `CaptionTrackDoc` pattern — no inner version needed).
 struct AudioBusDoc: Codable, Equatable {
-    var schemaVersion: Int
     var masterGain: Float
     var trackInputs: [TrackInputDoc]
 
-    init(schemaVersion: Int = 1, masterGain: Float = 1, trackInputs: [TrackInputDoc] = []) {
-        self.schemaVersion = schemaVersion
+    init(masterGain: Float = 1, trackInputs: [TrackInputDoc] = []) {
         self.masterGain = masterGain
         self.trackInputs = trackInputs
     }
 
-    private enum CodingKeys: String, CodingKey { case schemaVersion, masterGain, trackInputs }
+    private enum CodingKeys: String, CodingKey { case masterGain, trackInputs }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         masterGain = try c.decodeIfPresent(Float.self, forKey: .masterGain) ?? 1
         trackInputs = try c.decodeIfPresent([TrackInputDoc].self, forKey: .trackInputs) ?? []
     }

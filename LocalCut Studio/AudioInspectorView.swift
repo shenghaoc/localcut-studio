@@ -41,10 +41,23 @@ struct AudioInspectorView: View {
             // lets audio-thread tap writes flow through to the meter without
             // forcing the bus to mirror its snapshot onto an `@Observable`
             // property on every audio block.
-            SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
-                MeterStrip(snapshot: model.audioBus.meterSnapshot)
-                    .frame(height: 18)
-                    .accessibilityLabel("Master output meter")
+            //
+            // The live bus isn't wired into the `AVPlayer` preview path until
+            // Phase 36, so until then the snapshot stays silent. Two flat
+            // bars would look like broken audio rather than "not connected"
+            // — surface a clear placeholder while `isLiveRunning == false`
+            // and only render the live meter once the bus is engaged.
+            if model.audioBus.isLiveRunning {
+                SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
+                    MeterStrip(snapshot: model.audioBus.meterSnapshot)
+                        .frame(height: 18)
+                        .accessibilityLabel("Master output meter")
+                }
+            } else {
+                Text("Live metering available once the bus is connected.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Live metering not connected")
             }
 
             ForEach(model.project.audioTracks) { track in

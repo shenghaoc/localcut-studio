@@ -50,9 +50,14 @@
 - [x] **T4.1** Add `AudioInspectorView` rendered in `InspectorView` next to the
   `Captions` section, showing the master gain slider + the two-channel
   peak/RMS meter driven by the bus's `AudioMeterSnapshot`.
-- [x] **T4.2** Add per-track pan/gain controls inside the existing track
-  grouping; add per-clip fade-in / fade-out controls inside the clip section
-  when an audio clip is selected.
+- [x] **T4.2** Add per-track gain controls inside the existing track grouping;
+  add per-clip fade-in / fade-out controls inside the clip section when an
+  audio clip is selected. **Per-track pan is deferred to Phase 36** — the
+  model field is persisted and undoable, but applying it requires the bus
+  to own the audio rendering path (`AVAudioMixerNode.pan` on the live graph
+  + a panner node on the offline graph). Surfacing a pan slider before that
+  wiring exists would mislead users that the value was applied. Tracked in
+  R5.2 as the only partially-deferred sub-requirement.
 - [x] **T4.3** All slider labels carry the parameter's current numeric value
   (dB for gain, ±1 for pan) for accessibility.
 

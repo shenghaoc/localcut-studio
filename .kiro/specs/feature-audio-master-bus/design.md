@@ -235,7 +235,8 @@ matching the existing pattern:
 struct AudioBusDoc: Codable, Hashable {
     var masterGain: Float = 1
     var trackInputs: [TrackInputDoc] = []
-    var schemaVersion: Int = 1
+    // Forward-compat is handled by the outer `ProjectDocument.schemaVersion`
+    // (matches `CaptionTrackDoc` — no inner version field needed).
 }
 
 struct TrackInputDoc: Codable, Hashable {

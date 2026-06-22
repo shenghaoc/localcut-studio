@@ -947,9 +947,11 @@ nonisolated struct TrackInput: Identifiable, Hashable, Codable, Sendable {
 /// transition crossfade ramps already written by `CompositionBuilder`. An empty
 /// envelope leaves the existing audio mix bit-identical to the pre-bus path.
 nonisolated struct VolumeEnvelope: Hashable, Codable, Sendable {
-    /// A linear ramp between two volumes over a clip-relative time range.
-    /// `range` is in the clip's effective (rippled) timeline coordinates and
-    /// is clamped to the clip's range at render time.
+    /// A linear ramp between two volumes over a **clip-relative** time range
+    /// (`range.start == .zero` is the clip's first frame). The composition
+    /// builder shifts it onto each piece's effective timeline position at
+    /// render time, so the automation moves with the clip on drag / trim /
+    /// split and is clamped to the clip's duration.
     nonisolated struct Ramp: Hashable, Codable, Sendable {
         var range: CMTimeRange
         var fromVolume: Float
