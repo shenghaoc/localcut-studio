@@ -225,7 +225,7 @@ struct TimelineView: View {
                 .overlay(MarkerDiamond().stroke(strokeColor, lineWidth: strokeWidth))
                 .frame(width: markerGlyphSize, height: markerGlyphSize)
                 .contentShape(Rectangle())
-                .onTapGesture { selectMarker(marker.id) }
+                .onTapGesture { model.selectMarker(id: marker.id) }
                 .popover(isPresented: Binding(
                     get: { renamingMarkerID == marker.id },
                     set: { newValue in if !newValue { commitRenameIfActive(); renamingMarkerID = nil } }
@@ -238,16 +238,6 @@ struct TimelineView: View {
         }
         .frame(width: labelWidth, alignment: .center)
         .offset(x: x - labelWidth / 2, y: 0)
-    }
-
-    /// Selecting a marker is mutually exclusive with the clip / transition
-    /// selection so Delete and the inspector always act on one focused thing
-    /// (Gemini review #4 / Codex review #2).
-    private func selectMarker(_ id: TimelineMarker.ID) {
-        model.selectedMarkerID = id
-        model.selectedClipID = nil
-        model.selectedTransitionClipID = nil
-        model.selectedMediaID = nil
     }
 
     @ViewBuilder
@@ -579,7 +569,7 @@ struct TimelineView: View {
 
 /// A four-pointed diamond drawn for each marker glyph.
 private struct MarkerDiamond: Shape {
-    func path(in rect: CGRect) -> Path {
+    nonisolated func path(in rect: CGRect) -> Path {
         var p = Path()
         let midX = rect.midX
         let midY = rect.midY

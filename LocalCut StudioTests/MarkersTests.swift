@@ -225,6 +225,32 @@ struct MarkersEditorTests {
         #expect(model.selectedMarkerID == id)
     }
 
+    @Test("selectMarker(id:) clears clip / transition / media focus on every UI surface (post-revision review P1)")
+    func selectMarkerFunnelExclusivity() {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        media.duration = CMTime(seconds: 5, preferredTimescale: 600)
+        model.project.mediaItems.append(media)
+        let clip = Clip(mediaID: media.id, sourceStart: .zero,
+                        duration: CMTime(seconds: 5, preferredTimescale: 600),
+                        timelineStart: .zero)
+        model.project.videoTracks.first!.clips.append(clip)
+        model.project.markers = [TimelineMarker(
+            time: CMTime(seconds: 1, preferredTimescale: 600), name: "M")]
+        let markerID = model.project.markers[0].id
+
+        // Pretend the user previously selected a clip + media (inspector
+        // shows them), then taps a marker row in the inspector.
+        model.selectedClipID = clip.id
+        model.selectedMediaID = media.id
+        model.selectMarker(id: markerID)
+
+        #expect(model.selectedMarkerID == markerID)
+        #expect(model.selectedClipID == nil)
+        #expect(model.selectedTransitionClipID == nil)
+        #expect(model.selectedMediaID == nil)
+    }
+
     @Test("Adding a marker clears clip / transition / media focus (Gemini review #4, Codex review #2)")
     func markerSelectionIsMutuallyExclusive() {
         let model = EditorModel()

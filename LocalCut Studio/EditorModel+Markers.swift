@@ -20,7 +20,7 @@ extension EditorModel {
             let time = CMTime(seconds: currentTime, preferredTimescale: 600)
             let marker = TimelineMarker(time: time, name: defaultMarkerName())
             insertMarkerSorted(marker)
-            focusMarker(marker.id)
+            selectMarker(id: marker.id)
             statusMessage = "Added marker at \(TimeFormatting.timecode(time.seconds))."
         }
     }
@@ -71,7 +71,22 @@ extension EditorModel {
         currentTime = seconds
         player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
                     toleranceBefore: .zero, toleranceAfter: .zero)
-        focusMarker(id)
+        selectMarker(id: id)
+    }
+
+    /// Mutually-exclusive marker selection: clears the clip / transition /
+    /// media focus so Delete and the inspector always act on one focused thing
+    /// (Gemini review #4-#6, Codex review #2 + post-revision review).
+    ///
+    /// The one funnel every UI surface should call instead of setting
+    /// `selectedMarkerID` directly. Internal helpers (`addMarkerAtPlayhead`,
+    /// `seekToMarker`) and view code (TimelineView, MarkersInspectorView) all
+    /// route through here to keep the exclusivity invariant in one place.
+    func selectMarker(id: TimelineMarker.ID) {
+        selectedMarkerID = id
+        selectedClipID = nil
+        selectedTransitionClipID = nil
+        selectedMediaID = nil
     }
 
     // MARK: - Helpers
@@ -84,16 +99,6 @@ extension EditorModel {
         } else {
             project.markers.append(marker)
         }
-    }
-
-    /// Mutually-exclusive marker selection: clears the clip / transition /
-    /// media focus so Delete and the inspector always act on one thing
-    /// (Gemini review #4-#6, Codex review #2).
-    private func focusMarker(_ id: TimelineMarker.ID) {
-        selectedMarkerID = id
-        selectedClipID = nil
-        selectedTransitionClipID = nil
-        selectedMediaID = nil
     }
 
     /// "Marker", "Marker 2", "Marker 3", … so two consecutive M presses don't

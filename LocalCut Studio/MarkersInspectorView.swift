@@ -58,6 +58,10 @@ struct MarkersInspectorView: View {
             (model.selectedMarkerID == marker.id ? Color.accentColor.opacity(0.08) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 4)))
         .contentShape(Rectangle())
-        .onTapGesture { model.selectedMarkerID = marker.id }
+        // Funnel through `selectMarker(id:)` so the row tap honours the same
+        // mutual-exclusivity contract as every other marker-selection path
+        // (review feedback on the original revision: a bare assignment here
+        // would leave clip / transition / media selection stale).
+        .onTapGesture { model.selectMarker(id: marker.id) }
     }
 }
