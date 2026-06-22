@@ -1,5 +1,4 @@
 import SwiftUI
-import Combine
 
 /// One of the scope panels the user can switch between.
 enum ScopeKind: String, CaseIterable, Identifiable {
@@ -27,54 +26,46 @@ enum ScopeKind: String, CaseIterable, Identifiable {
 struct ScopesView: View {
     let sampler: ScopeSampler
     @State private var kind: ScopeKind = .waveform
-    @State private var latest: ScopeSample?
-
-    /// 30 Hz timer that pulls the latest sample from the sampler onto the
-    /// SwiftUI view. The sampler is fully nonisolated (the compositor writes
-    /// to it from off-main), so the view can't observe its `@Observable`
-    /// storage directly — it polls instead.
-    private let refresh = Timer.publish(every: ScopeSampler.minIntervalSeconds,
-                                        on: .main, in: .common).autoconnect()
 
     init(sampler: ScopeSampler = .shared) {
         self.sampler = sampler
     }
 
     var body: some View {
-        VStack(spacing: 6) {
-            HStack {
-                Picker("", selection: $kind) {
-                    ForEach(ScopeKind.allCases) { scope in
-                        Text(scope.displayName).tag(scope)
+        SwiftUI.TimelineView(.animation(minimumInterval: ScopeSampler.minIntervalSeconds)) { _ in
+            let latest = sampler.snapshot.sample
+            VStack(spacing: 6) {
+                HStack {
+                    Picker("", selection: $kind) {
+                        ForEach(ScopeKind.allCases) { scope in
+                            Text(scope.displayName).tag(scope)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .accessibilityLabel("Scope kind")
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 6)
+
+                Canvas { context, size in
+                    switch kind {
+                    case .waveform:
+                        drawWaveform(into: context, size: size, sample: latest)
+                    case .vectorscope:
+                        drawVectorscope(into: context, size: size, sample: latest)
                     }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .accessibilityLabel("Scope kind")
+                .background(Color.black)
+                .cornerRadius(4)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
+                .accessibilityLabel(kind == .waveform ? "Waveform scope" : "Vectorscope")
             }
-            .padding(.horizontal, 8)
-            .padding(.top, 6)
-
-            Canvas { context, size in
-                switch kind {
-                case .waveform:
-                    drawWaveform(into: context, size: size, sample: latest)
-                case .vectorscope:
-                    drawVectorscope(into: context, size: size, sample: latest)
-                }
-            }
-            .background(Color.black)
-            .cornerRadius(4)
-            .padding(.horizontal, 8)
-            .padding(.bottom, 8)
-            .accessibilityLabel(kind == .waveform ? "Waveform scope" : "Vectorscope")
-        }
-        .frame(minWidth: 200, idealWidth: 240, minHeight: 160, idealHeight: 220)
-        .background(.regularMaterial)
-        .onAppear { sampler.setEnabled(true) }
-        .onDisappear { sampler.setEnabled(false) }
-        .onReceive(refresh) { _ in
-            latest = sampler.snapshot.sample
+            .frame(minWidth: 200, idealWidth: 240, minHeight: 160, idealHeight: 220)
+            .background(.regularMaterial)
+            .onAppear { sampler.setEnabled(true) }
+            .onDisappear { sampler.setEnabled(false) }
         }
     }
 

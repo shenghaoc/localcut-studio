@@ -98,7 +98,7 @@ final class ScopeSampler: @unchecked Sendable {
     /// Called once per frame by `EffectCompositor.startRequest(_:)`. Returns
     /// true when the gate allows a sample (panel visible AND ≥ 1/30 s since
     /// the previous sample).
-    nonisolated func shouldSample(now: TimeInterval = CFAbsoluteTimeGetCurrent()) -> Bool {
+    nonisolated func shouldSample(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
         state.withLock { current in
             guard current.enabled else { return false }
             if now - current.lastSampleAt < Self.minIntervalSeconds { return false }
@@ -240,45 +240,38 @@ final class ScopeSampler: @unchecked Sendable {
         }
 
         let grid = Self.vectorscopeGridSize
-        let cellW = extent.width / CGFloat(grid)
-        let cellH = extent.height / CGFloat(grid)
+        // Scale the image down to grid×grid in one GPU pass, then read back
+        // the entire grid in a single `context.render` call — avoids 64
+        // sequential GPU-to-CPU round-trips that the per-cell `areaAverage`
+        // loop would cause.
+        let normalised = image
+            .transformed(by: CGAffineTransform(translationX: -extent.origin.x,
+                                               y: -extent.origin.y))
+            .transformed(by: CGAffineTransform(scaleX: CGFloat(grid) / extent.width,
+                                               y: CGFloat(grid) / extent.height))
+
+        var pixels = [Float](repeating: 0, count: grid * grid * 4)
+        let bytesPerRow = grid * 4 * MemoryLayout<Float>.size
+        let outRect = CGRect(x: 0, y: 0, width: grid, height: grid)
+        pixels.withUnsafeMutableBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            context.render(normalised, toBitmap: base, rowBytes: bytesPerRow,
+                           bounds: outRect, format: .RGBAf, colorSpace: colorSpace)
+        }
 
         var result: [VectorPoint] = []
         result.reserveCapacity(grid * grid)
-
         for row in 0..<grid {
             for col in 0..<grid {
-                let cell = CGRect(
-                    x: extent.origin.x + CGFloat(col) * cellW,
-                    y: extent.origin.y + CGFloat(row) * cellH,
-                    width: cellW, height: cellH)
-                let rgb = averageRGB(image: image, rect: cell, context: context, colorSpace: colorSpace)
-                let (u, v) = rgbToUV(rgb)
+                let offset = (row * grid + col) * 4
+                let r = max(0, pixels[offset + 0])
+                let g = max(0, pixels[offset + 1])
+                let b = max(0, pixels[offset + 2])
+                let (u, v) = rgbToUV((r, g, b))
                 result.append(VectorPoint(u: u, v: v))
             }
         }
         return result
-    }
-
-    /// Reads one cell average via `CIFilter.areaAverage` (1×1 output image).
-    /// `.RGBAf` so cell averages don't get quantised to 8-bit before we
-    /// convert to UV.
-    private nonisolated func averageRGB(image: CIImage, rect: CGRect, context: CIContext,
-                                        colorSpace: CGColorSpace) -> (r: Float, g: Float, b: Float) {
-        let filter = CIFilter.areaAverage()
-        filter.inputImage = image
-        filter.extent = rect
-        guard let output = filter.outputImage else { return (0, 0, 0) }
-
-        var pixel: [Float] = [0, 0, 0, 0]
-        let bytesPerRow = 4 * MemoryLayout<Float>.size
-        let outRect = CGRect(x: 0, y: 0, width: 1, height: 1)
-        pixel.withUnsafeMutableBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            context.render(output, toBitmap: base, rowBytes: bytesPerRow,
-                           bounds: outRect, format: .RGBAf, colorSpace: colorSpace)
-        }
-        return (max(0, pixel[0]), max(0, pixel[1]), max(0, pixel[2]))
     }
 
     /// BT.601 RGB → UV chroma. Returns offsets in [-0.5, 0.5]; (0, 0) ≡ neutral
