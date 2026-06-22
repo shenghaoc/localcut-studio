@@ -218,7 +218,7 @@ struct InspectorView: View {
                     .accessibilityHidden(true)
                 Slider(
                     value: Binding(
-                        get: { Double(skinSmooth.strength.defaultValue) },
+                        get: { Double(model.selectedClipSkinSmooth.strength.defaultValue) },
                         set: { newValue in
                             model.updateSelectedClipSkinSmooth { smooth in
                                 smooth.strength.defaultValue = Float(newValue)
@@ -237,7 +237,7 @@ struct InspectorView: View {
                         .accessibilityHidden(true)
                     Slider(
                         value: Binding(
-                            get: { Double(skinSmooth.maskWarmthBias) },
+                            get: { Double(model.selectedClipSkinSmooth.maskWarmthBias) },
                             set: { newValue in
                                 model.updateSelectedClipSkinSmooth { smooth in
                                     smooth.maskWarmthBias = Float(newValue)
@@ -256,7 +256,7 @@ struct InspectorView: View {
                         .accessibilityHidden(true)
                     Slider(
                         value: Binding(
-                            get: { Double(skinSmooth.maskLuminanceGate) },
+                            get: { Double(model.selectedClipSkinSmooth.maskLuminanceGate) },
                             set: { newValue in
                                 model.updateSelectedClipSkinSmooth { smooth in
                                     smooth.maskLuminanceGate = Float(newValue)
@@ -270,7 +270,7 @@ struct InspectorView: View {
             }
 
             Toggle("Bypass", isOn: Binding(
-                get: { skinSmooth.bypass },
+                get: { model.selectedClipSkinSmooth.bypass },
                 set: { newValue in
                     model.updateSelectedClipSkinSmooth { smooth in
                         smooth.bypass = newValue
