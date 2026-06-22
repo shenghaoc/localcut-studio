@@ -51,9 +51,11 @@ nonisolated enum Fingerprint {
 /// Serialised as a **top-level JSON object** (`{ "assets/<id>.<ext>": "<hex>" }`)
 /// — the documented bundle-format shape — *not* nested under an `entries` field.
 /// The custom Codable below flattens the single stored property and writes the
-/// keys in sorted order itself so a re-save without changes produces
-/// byte-identical JSON, independent of any `JSONEncoder.outputFormatting`
-/// quirks around `singleValueContainer`-encoded dictionaries.
+/// keys in sorted order itself, sidestepping the `singleValueContainer`-encoded
+/// dictionary sorting gap. `encoded()` additionally sets `.sortedKeys` on the
+/// encoder because macOS 26 Foundation's rewritten `JSONEncoder` does not
+/// preserve keyed-container `container.encode(...)` call order without that
+/// flag — see `encoded()` for why both guards are kept (belt and braces).
 nonisolated struct FingerprintIndex: Codable, Equatable, Sendable {
     var entries: [String: String]
 
@@ -93,7 +95,18 @@ nonisolated struct FingerprintIndex: Codable, Equatable, Sendable {
 
     func encoded() throws -> Data {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = .prettyPrinted
+        // Belt and braces: the manual `entries.keys.sorted()` loop in
+        // `encode(to:)` above orders the keys we hand to the keyed container,
+        // and `.sortedKeys` tells `JSONEncoder` to emit those keys in sorted
+        // order on the way out. Swift Foundation's rewritten `JSONEncoder`
+        // (macOS 26) does NOT preserve the order of `container.encode(...)`
+        // calls for keyed containers without `.sortedKeys`, so the manual
+        // sort alone can permute on re-encode; `.sortedKeys` alone would work
+        // for `[String: String]` today but would silently regress if a
+        // future path swapped to a non-string-keyed shape that the encoder
+        // doesn't auto-sort. Keeping both makes byte-identity a stable
+        // guarantee across Foundation revisions.
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(self)
     }
 
