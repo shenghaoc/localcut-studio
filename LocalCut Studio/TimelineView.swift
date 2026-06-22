@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import AVFoundation
 
 /// The multi-track timeline: a time ruler, one lane per track, clip blocks, and a
@@ -6,10 +7,13 @@ import AVFoundation
 struct TimelineView: View {
     @Bindable var model: EditorModel
 
-    private let rulerHeight: CGFloat = 24
+    private let rulerHeight: CGFloat = 36
     private let laneHeight: CGFloat = 56
     private let gutterWidth: CGFloat = 56
     private let edgeZoneWidth: CGFloat = 8
+    private let markerGlyphSize: CGFloat = 12
+    @State private var renamingMarkerID: TimelineMarker.ID?
+    @State private var renameDraft: String = ""
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
 
@@ -54,6 +58,27 @@ struct TimelineView: View {
                 timelineScroller
             }
         }
+        .background(MarkerKeyHandler(onAdd: { model.addMarkerAtPlayhead() },
+                                     onRename: { beginRenamingSelectedMarker() },
+                                     onDelete: { deleteSelectedMarkerIfAny() }))
+    }
+
+    /// Opens the rename popover for the selected marker; no-op when none is
+    /// selected. Called from the Shift+M key handler.
+    private func beginRenamingSelectedMarker() {
+        guard let marker = model.selectedMarker else { return }
+        renameDraft = marker.name
+        renamingMarkerID = marker.id
+    }
+
+    /// Deletes the selected marker; returns whether anything was deleted so the
+    /// Delete handler can decide whether to consume the key. When no marker is
+    /// selected the existing clip / transition delete shortcut keeps firing.
+    @discardableResult
+    private func deleteSelectedMarkerIfAny() -> Bool {
+        guard let id = model.selectedMarkerID else { return false }
+        model.removeMarker(id: id)
+        return true
     }
 
     // MARK: Header
@@ -117,31 +142,111 @@ struct TimelineView: View {
     }
 
     private var ruler: some View {
-        Canvas { context, size in
-            let step = tickStep()
-            var t = 0.0
-            while CGFloat(t) * pps <= size.width {
-                let x = CGFloat(t) * pps
-                let isMajor = (t.truncatingRemainder(dividingBy: step * 5) < 0.0001)
-                var line = Path()
-                line.move(to: CGPoint(x: x, y: isMajor ? 6 : 12))
-                line.addLine(to: CGPoint(x: x, y: rulerHeight))
-                context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
-                if isMajor {
-                    let text = Text(TimeFormatting.timecode(t)).font(.system(size: 9)).foregroundStyle(.secondary)
-                    context.draw(text, at: CGPoint(x: x + 2, y: 6), anchor: .topLeading)
+        let markers = model.project.markers
+        let selectedMarkerID = model.selectedMarkerID
+        return ZStack(alignment: .topLeading) {
+            Canvas { context, size in
+                let step = tickStep()
+                // Ticks sit in the lower half of the ruler so the marker band
+                // above them stays visually distinct.
+                let tickTop = rulerHeight - 12
+                var t = 0.0
+                while CGFloat(t) * pps <= size.width {
+                    let x = CGFloat(t) * pps
+                    let isMajor = (t.truncatingRemainder(dividingBy: step * 5) < 0.0001)
+                    var line = Path()
+                    line.move(to: CGPoint(x: x, y: isMajor ? tickTop : tickTop + 6))
+                    line.addLine(to: CGPoint(x: x, y: rulerHeight))
+                    context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
+                    if isMajor {
+                        let text = Text(TimeFormatting.timecode(t)).font(.system(size: 9)).foregroundStyle(.secondary)
+                        context.draw(text, at: CGPoint(x: x + 2, y: tickTop), anchor: .topLeading)
+                    }
+                    t += step
                 }
-                t += step
+            }
+            ForEach(markers) { marker in
+                markerGlyph(marker, isSelected: marker.id == selectedMarkerID)
             }
         }
         .frame(height: rulerHeight)
         .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    model.seek(toSeconds: Double(value.location.x / pps))
+        .gesture(rulerScrubGesture)
+    }
+
+    /// Scrub gesture that also clears the marker selection on a fresh press, so
+    /// dragging the playhead off a marker glyph releases focus from it.
+    private var rulerScrubGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if model.selectedMarkerID != nil {
+                    // A click on the ruler background (not on a glyph) clears
+                    // the marker selection; the glyph's own tap gesture wins
+                    // when the press lands on the glyph itself.
+                    model.selectedMarkerID = nil
                 }
-        )
+                model.seek(toSeconds: Double(value.location.x / pps))
+            }
+    }
+
+    /// One marker glyph + label drawn at the marker's `time`. The popover
+    /// reopens whenever `renamingMarkerID` matches this marker's id.
+    @ViewBuilder
+    private func markerGlyph(_ marker: TimelineMarker, isSelected: Bool) -> some View {
+        let x = CGFloat(marker.time.seconds) * pps
+        let fill: Color = marker.colour.map { Color(cgColor: $0.cgColor) } ?? Color.accentColor
+        let strokeColor: Color = isSelected ? .accentColor : .black.opacity(0.4)
+        let strokeWidth: CGFloat = isSelected ? 2 : 1
+        VStack(spacing: 1) {
+            Text(marker.name)
+                .font(.system(size: 9))
+                .lineLimit(1)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(.regularMaterial.opacity(0.8)))
+            MarkerDiamond()
+                .fill(fill)
+                .overlay(MarkerDiamond().stroke(strokeColor, lineWidth: strokeWidth))
+                .frame(width: markerGlyphSize, height: markerGlyphSize)
+        }
+        .frame(width: max(markerGlyphSize, 60), alignment: .center)
+        .offset(x: x - max(markerGlyphSize, 60) / 2, y: 0)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.selectedMarkerID = marker.id
+        }
+        .popover(isPresented: Binding(
+            get: { renamingMarkerID == marker.id },
+            set: { newValue in if !newValue { commitRenameIfActive(); renamingMarkerID = nil } }
+        )) {
+            markerRenamePopover(marker)
+        }
+        .accessibilityLabel("Marker \(marker.name) at \(TimeFormatting.timecode(marker.time.seconds))")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func markerRenamePopover(_ marker: TimelineMarker) -> some View {
+        HStack(spacing: 8) {
+            TextField("Name", text: $renameDraft)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 160)
+                .onSubmit { commitRenameIfActive(); renamingMarkerID = nil }
+            Button("Done") {
+                commitRenameIfActive()
+                renamingMarkerID = nil
+            }
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(10)
+    }
+
+    private func commitRenameIfActive() {
+        guard let id = renamingMarkerID else { return }
+        model.renameMarker(id: id, to: renameDraft)
     }
 
     private func lane(for track: Track, trackIndex: Int) -> some View {
@@ -442,5 +547,111 @@ struct TimelineView: View {
         let raw = Double(targetPixels / pps)
         let candidates: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300]
         return candidates.first { $0 >= raw } ?? 600
+    }
+}
+
+// MARK: - Marker glyph + keyboard
+
+/// A four-pointed diamond drawn for each marker glyph.
+private struct MarkerDiamond: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let midX = rect.midX
+        let midY = rect.midY
+        p.move(to: CGPoint(x: midX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: midY))
+        p.addLine(to: CGPoint(x: midX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: midY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// AppKit local-event monitor that adds / renames / deletes markers from the
+/// timeline keyboard shortcuts. The monitor lives for the lifetime of the
+/// timeline view; it defers to any text-input first responder so typing into
+/// caption / inspector fields isn't stolen.
+///
+/// `Delete` only consumes the event when there is a selected marker — when
+/// none is selected, the event falls through to the existing toolbar
+/// `.keyboardShortcut(.delete, modifiers: [])` that drives clip / transition
+/// deletion. That's the contract the spec calls out (R4.5).
+private struct MarkerKeyHandler: NSViewRepresentable {
+    let onAdd: () -> Void
+    let onRename: () -> Void
+    let onDelete: () -> Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.onAdd = onAdd
+        context.coordinator.onRename = onRename
+        context.coordinator.onDelete = onDelete
+        context.coordinator.install()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onAdd = onAdd
+        context.coordinator.onRename = onRename
+        context.coordinator.onDelete = onDelete
+    }
+
+    @MainActor
+    final class Coordinator {
+        var onAdd: (() -> Void)?
+        var onRename: (() -> Void)?
+        var onDelete: (() -> Bool)?
+        // `nonisolated(unsafe)` so `deinit` can clear it without hopping actors;
+        // mutation only happens via `install`, called on the main actor, so the
+        // unsafety here is a compiler-visible footnote rather than a real race.
+        nonisolated(unsafe) private var monitor: Any?
+
+        func install() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                MainActor.assumeIsolated {
+                    // `handle` returns nil to consume the event. `?? event`
+                    // would mask that nil and accidentally pass the keystroke
+                    // through, so branch on `self` explicitly: only pass the
+                    // event through when no coordinator is left to claim it.
+                    guard let self else { return Optional(event) }
+                    return self.handle(event)
+                }
+            }
+        }
+
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+        }
+
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            // Anything other than plain or Shift modifiers (Command/Option/etc.)
+            // belongs to a different command; never swallow those.
+            let stripped = event.modifierFlags
+                .intersection(.deviceIndependentFlagsMask)
+                .subtracting([.shift, .capsLock, .numericPad, .function])
+            guard stripped.isEmpty else { return event }
+            // Don't steal keys from any first responder that owns a text input
+            // (rename popovers, inspector fields, the caption editor).
+            if let responder = NSApp.keyWindow?.firstResponder,
+               responder is NSText || responder is NSTextField || responder is NSTextView {
+                return event
+            }
+
+            let chars = event.charactersIgnoringModifiers ?? ""
+            let shift = event.modifierFlags.contains(.shift)
+            // Delete / Backspace: only consume when a marker is selected so
+            // the existing clip / transition delete shortcut keeps firing.
+            let isDelete = (event.keyCode == 0x33 || event.keyCode == 0x75)
+
+            if chars == "m" || chars == "M" {
+                if shift { onRename?() } else { onAdd?() }
+                return nil
+            }
+            if isDelete, onDelete?() == true { return nil }
+            return event
+        }
     }
 }

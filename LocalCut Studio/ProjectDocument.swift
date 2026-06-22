@@ -55,11 +55,12 @@ struct TransformCode: Codable, Equatable {
 /// values plus security-scoped bookmarks instead of live `AVURLAsset`s, and a
 /// `schemaVersion` for forward-compatible decoding (R4.2).
 struct ProjectDocument: Codable, Equatable {
-    /// Bumped when the on-disk schema changes incompatibly. v2 adds
-    /// `captionTracks`; a v1 build would otherwise open a v2 file and silently
-    /// strip the caption tracks on the next save, so the version guard in
-    /// `EditorModel.load(document:from:)` keeps v1 builds from overwriting.
-    static let currentSchemaVersion = 2
+    /// Bumped when the on-disk schema changes incompatibly. v2 added
+    /// `captionTracks`; v3 adds `markers`. A v2-or-older build would otherwise
+    /// open a v3 file and silently strip the markers on the next save, so the
+    /// newer-schema guard in `EditorModel.load(document:from:)` keeps older
+    /// builds from overwriting.
+    static let currentSchemaVersion = 3
     /// File extension for project documents.
     static let fileExtension = "lcstudio"
 
@@ -72,6 +73,7 @@ struct ProjectDocument: Codable, Equatable {
     var videoTracks: [TrackDoc]
     var audioTracks: [TrackDoc]
     var captionTracks: [CaptionTrackDoc]
+    var markers: [TimelineMarker]
 
     init(schemaVersion: Int = ProjectDocument.currentSchemaVersion,
          name: String,
@@ -81,7 +83,8 @@ struct ProjectDocument: Codable, Equatable {
          media: [MediaRef],
          videoTracks: [TrackDoc],
          audioTracks: [TrackDoc],
-         captionTracks: [CaptionTrackDoc] = []) {
+         captionTracks: [CaptionTrackDoc] = [],
+         markers: [TimelineMarker] = []) {
         self.schemaVersion = schemaVersion
         self.name = name
         self.renderWidth = renderWidth
@@ -91,10 +94,12 @@ struct ProjectDocument: Codable, Equatable {
         self.videoTracks = videoTracks
         self.audioTracks = audioTracks
         self.captionTracks = captionTracks
+        self.markers = markers
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, name, renderWidth, renderHeight, frameRate, media, videoTracks, audioTracks, captionTracks
+        case schemaVersion, name, renderWidth, renderHeight, frameRate,
+             media, videoTracks, audioTracks, captionTracks, markers
     }
 
     // Lenient decoding: missing fields fall back to defaults and unknown keys are
@@ -110,6 +115,7 @@ struct ProjectDocument: Codable, Equatable {
         videoTracks = try c.decodeIfPresent([TrackDoc].self, forKey: .videoTracks) ?? []
         audioTracks = try c.decodeIfPresent([TrackDoc].self, forKey: .audioTracks) ?? []
         captionTracks = try c.decodeIfPresent([CaptionTrackDoc].self, forKey: .captionTracks) ?? []
+        markers = try c.decodeIfPresent([TimelineMarker].self, forKey: .markers) ?? []
     }
 }
 
@@ -249,7 +255,8 @@ extension ProjectDocument {
             media: project.mediaItems.map(MediaRef.init(item:)),
             videoTracks: project.videoTracks.map(TrackDoc.init(track:)),
             audioTracks: project.audioTracks.map(TrackDoc.init(track:)),
-            captionTracks: project.captionTracks.map(CaptionTrackDoc.init(track:)))
+            captionTracks: project.captionTracks.map(CaptionTrackDoc.init(track:)),
+            markers: project.markers)
     }
 }
 
