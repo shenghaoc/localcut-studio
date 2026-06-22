@@ -93,7 +93,18 @@ nonisolated struct FingerprintIndex: Codable, Equatable, Sendable {
 
     func encoded() throws -> Data {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = .prettyPrinted
+        // Belt and braces: the manual `entries.keys.sorted()` loop in
+        // `encode(to:)` above orders the keys we hand to the keyed container,
+        // and `.sortedKeys` tells `JSONEncoder` to emit those keys in sorted
+        // order on the way out. Swift Foundation's rewritten `JSONEncoder`
+        // (macOS 26) does NOT preserve the order of `container.encode(...)`
+        // calls for keyed containers without `.sortedKeys`, so the manual
+        // sort alone can permute on re-encode; `.sortedKeys` alone would work
+        // for `[String: String]` today but would silently regress if a
+        // future path swapped to a non-string-keyed shape that the encoder
+        // doesn't auto-sort. Keeping both makes byte-identity a stable
+        // guarantee across Foundation revisions.
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(self)
     }
 
