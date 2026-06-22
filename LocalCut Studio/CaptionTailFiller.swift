@@ -35,11 +35,13 @@ nonisolated enum CaptionTailFiller {
     /// `minimumDuration`. Regenerates the file when the cached version is
     /// missing or too short.
     ///
-    /// Concurrent callers requesting the same key are coordinated by writing
+    /// Concurrent callers requesting the same key are isolated by writing
     /// to a unique per-call temp path and then atomically replacing the
     /// cached file. If two rebuilds race (e.g. an export overlapping a
     /// preview rebuild), the last-rename-wins; neither caller ever sees a
-    /// half-written file underneath them. Codex P2 (serialise generation).
+    /// half-written file underneath them. Two cold-start callers may both
+    /// generate the full filler — the trade-off (redundant work vs.
+    /// coordinator complexity) is acceptable for a ~5 s encode.
     static func asset(renderSize: CGSize,
                       frameRate: Double,
                       minimumDuration: CMTime) async throws -> AVURLAsset {

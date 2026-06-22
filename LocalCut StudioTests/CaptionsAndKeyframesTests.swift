@@ -778,18 +778,21 @@ struct PhaseThirtySmokeTests {
         try? FileManager.default.removeItem(at: url)
 
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        // H.264 rejects odd dimensions; mask the low bit off after rounding.
+        let w = max(2, Int(size.width.rounded()) & ~1)
+        let h = max(2, Int(size.height.rounded()) & ~1)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Int(size.width),
-            AVVideoHeightKey: Int(size.height),
+            AVVideoWidthKey: w,
+            AVVideoHeightKey: h,
         ])
         input.expectsMediaDataInRealTime = false
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(
             assetWriterInput: input,
             sourcePixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-                kCVPixelBufferWidthKey as String: Int(size.width),
-                kCVPixelBufferHeightKey as String: Int(size.height),
+                kCVPixelBufferWidthKey as String: w,
+                kCVPixelBufferHeightKey as String: h,
             ])
         writer.add(input)
 
@@ -812,10 +815,10 @@ struct PhaseThirtySmokeTests {
             guard let buffer = pixelBuffer else { break }
             CVPixelBufferLockBaseAddress(buffer, [])
             if let base = CVPixelBufferGetBaseAddress(buffer) {
-                memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
+                memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * h)
             }
             CVPixelBufferUnlockBaseAddress(buffer, [])
-            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps))
+            guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else { break }
         }
 
         input.markAsFinished()
