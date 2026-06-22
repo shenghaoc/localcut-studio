@@ -798,8 +798,15 @@ struct PhaseThirtySmokeTests {
 
         let frameCount = Int(seconds * Double(fps))
         for frame in 0..<frameCount {
-            while !input.isReadyForMoreMediaData { await Task.yield() }
-            guard let pool = adaptor.pixelBufferPool else { break }
+            // Bail out if the writer entered a non-`.writing` status so a
+            // failure mid-loop surfaces as a clean test failure instead of
+            // hanging on `isReadyForMoreMediaData` forever (Claude bot P1 #2).
+            while !input.isReadyForMoreMediaData {
+                guard writer.status == .writing else { break }
+                await Task.yield()
+            }
+            guard writer.status == .writing,
+                  let pool = adaptor.pixelBufferPool else { break }
             var pixelBuffer: CVPixelBuffer?
             CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
             guard let buffer = pixelBuffer else { break }

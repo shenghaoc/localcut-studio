@@ -70,6 +70,11 @@ nonisolated enum CaptionTailFiller {
             // create their own `AVAssetWriter` against the same path.
             // (gemini-code-assist review #1).
             while let existing = inFlight[url] {
+                // Discard the prior task's outcome on purpose — the next loop
+                // iteration (or the freshly-started task below) re-evaluates
+                // the cache against our `needed`, so an earlier failure
+                // shouldn't propagate to a caller that can still satisfy its
+                // request from a regenerate.
                 _ = try? await existing.value
             }
             let task = Task<URL, Error> {
@@ -118,10 +123,19 @@ nonisolated enum CaptionTailFiller {
             .appendingPathComponent("CaptionTailFillers", isDirectory: true)
         try FileManager.default.createDirectory(
             at: dir, withIntermediateDirectories: true)
-        let w = Int(renderSize.width.rounded())
-        let h = Int(renderSize.height.rounded())
+        // Cache key must match what `generate` actually writes so a render
+        // size of e.g. 319×180 doesn't yield a filename that disagrees with
+        // the file's even-clamped frame size (Claude bot review P1 #1).
+        let (w, h) = evenDimensions(renderSize)
         let fps = Int(frameRate.rounded())
         return dir.appendingPathComponent("filler-\(w)x\(h)-\(fps)fps.mov")
+    }
+
+    /// Even-rounded width × height suitable for H.264. Both call sites
+    /// (`cacheURL` and `generate`) must agree.
+    private static func evenDimensions(_ size: CGSize) -> (Int, Int) {
+        (max(2, Int(size.width.rounded())  & ~1),
+         max(2, Int(size.height.rounded()) & ~1))
     }
 
     private static func generate(at url: URL,
@@ -132,9 +146,9 @@ nonisolated enum CaptionTailFiller {
 
         // H.264 (and most hardware video encoders) require even dimensions;
         // mask the low bit off after rounding rather than fail later inside
-        // the writer (gemini-code-assist review #2).
-        let width = max(2, Int(renderSize.width.rounded()) & ~1)
-        let height = max(2, Int(renderSize.height.rounded()) & ~1)
+        // the writer (gemini-code-assist review #2). Shared helper keeps
+        // `cacheURL` and `generate` aligned (Claude bot review P1 #1).
+        let (width, height) = evenDimensions(renderSize)
         let fps = max(1.0, frameRate)
         let fpsTimescale = CMTimeScale(max(1, Int(fps.rounded())))
         let frameCount = max(1, Int((seconds * fps).rounded()))
@@ -161,6 +175,10 @@ nonisolated enum CaptionTailFiller {
         writer.startSession(atSourceTime: .zero)
 
         for frame in 0..<frameCount {
+            // Forward cancellation early — `expectsMediaDataInRealTime = false`
+            // keeps `isReadyForMoreMediaData` mostly true, so `Task.yield()`
+            // rarely fires (Claude bot review Minor).
+            try Task.checkCancellation()
             // Spin until the input can accept more data, but bail out if the
             // writer transitions out of `.writing` — otherwise a writer
             // failure mid-loop would hang this task forever
@@ -182,7 +200,10 @@ nonisolated enum CaptionTailFiller {
             }
             CVPixelBufferUnlockBaseAddress(buffer, [])
             let pts = CMTime(value: CMTimeValue(frame), timescale: fpsTimescale)
-            adaptor.append(buffer, withPresentationTime: pts)
+            // Surface a dropped append immediately so a partial encode doesn't
+            // hide behind the post-loop `.completed` check (Claude bot review
+            // Minor).
+            guard adaptor.append(buffer, withPresentationTime: pts) else { break }
         }
         videoInput.markAsFinished()
 

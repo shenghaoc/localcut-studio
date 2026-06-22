@@ -218,12 +218,15 @@ enum CompositionBuilder {
         // Extend the composition to cover any caption tail that runs past the
         // last AV clip. `insertEmptyTimeRange` does not reliably push
         // `composition.duration` forward, so we insert a cached black-frame
-        // filler asset instead — see `CaptionTailFiller`. The compositor still
-        // emits captions-over-black for the tail interval (no clip segment is
-        // recorded for the filler track, so `units` stays empty there).
+        // filler asset instead — see `CaptionTailFiller`. The filler's track
+        // doubles as the *required source* for tail instructions so AVFoundation
+        // actually schedules the compositor across that interval; without a
+        // required source the export pipeline hangs waiting for a frame.
         let captionEnd = captionTracks.reduce(CMTime.zero) {
             CMTimeMaximum($0, $1.endTime)
         }
+        var fillerTailRange: CMTimeRange?
+        var fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
         if captionEnd > composition.duration {
             let tailStart = composition.duration
             let tailDuration = captionEnd - tailStart
@@ -239,6 +242,8 @@ enum CompositionBuilder {
                 let sourceRange = CMTimeRange(start: .zero, duration: tailDuration)
                 try fillerCompTrack.insertTimeRange(
                     sourceRange, of: fillerVideoSource, at: tailStart)
+                fillerTrackID = fillerCompTrack.trackID
+                fillerTailRange = CMTimeRange(start: tailStart, duration: tailDuration)
             }
         }
 
@@ -251,7 +256,9 @@ enum CompositionBuilder {
             captionTracks: captionTracks,
             totalDuration: totalDuration,
             renderSize: renderSize,
-            frameRate: project.frameRate)
+            frameRate: project.frameRate,
+            fillerTrackID: fillerTrackID,
+            fillerTailRange: fillerTailRange)
 
         let audioMix: AVAudioMix?
         if hasAudioCrossfade {
@@ -281,7 +288,9 @@ enum CompositionBuilder {
         captionTracks: [CaptionTrack],
         totalDuration: CMTime,
         renderSize: CGSize,
-        frameRate: Double) async throws -> AVVideoComposition? {
+        frameRate: Double,
+        fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid,
+        fillerTailRange: CMTimeRange? = nil) async throws -> AVVideoComposition? {
 
         let hasAnySegment = projectTrackSegments.contains { !$0.isEmpty }
         guard hasAnySegment else { return nil }
@@ -337,6 +346,24 @@ enum CompositionBuilder {
                                                  type: type, overlap: overlap))
                     }
                 }
+            }
+
+            // Tail intervals (past the last AV clip) have no clip segment, but
+            // the export pipeline still needs a `requiredSourceTrackIDs` entry
+            // to schedule the compositor — surface the filler as a layer so
+            // its track ID flows into the instruction. The layer renders as
+            // black; captions composite on top.
+            if units.isEmpty,
+               let tail = fillerTailRange,
+               fillerTrackID != kCMPersistentTrackID_Invalid,
+               tail.containsTime(CMTime(seconds: midpoint, preferredTimescale: 600)) {
+                units.append(.layer(CompositorLayer(
+                    trackID: fillerTrackID,
+                    transform: .identity,
+                    opacity: 1,
+                    effects: [],
+                    showSkinMask: false,
+                    clipStartTime: tail.start)))
             }
 
             let captionsForInterval = activeCaptionItems(
