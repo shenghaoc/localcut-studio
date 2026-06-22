@@ -34,16 +34,14 @@ struct AudioInspectorView: View {
                     .accessibilityValue(formattedGain(model.project.masterGain))
             }
 
-            // TimelineView re-renders on a fixed cadence so audio-thread tap
-            // writes (which don't trigger Observation) still drive a live
-            // meter — without forcing the bus to mirror the snapshot onto
-            // an `@Observable` property on every audio block. Explicit
-            // `AnimationTimelineSchedule` because `.animation(...)`'s
-            // dot-shorthand sometimes fails to infer `TimelineSchedule` from
-            // `TimelineView`'s generic and falls back onto unrelated types in
-            // scope (build failed with "type 'EditorModel' has no member
-            // 'animation'" on Xcode 26.5).
-            TimelineView(AnimationTimelineSchedule(minimumInterval: 1.0 / 30.0)) { _ in
+            // SwiftUI.TimelineView (fully qualified — the repo also defines
+            // a `TimelineView` struct for the editor's timeline lane, which
+            // would otherwise win name resolution and route this call to its
+            // `init(model:)` instead). Driving repaints on a fixed cadence
+            // lets audio-thread tap writes flow through to the meter without
+            // forcing the bus to mirror its snapshot onto an `@Observable`
+            // property on every audio block.
+            SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
                 MeterStrip(snapshot: model.audioBus.meterSnapshot)
                     .frame(height: 18)
                     .accessibilityLabel("Master output meter")
