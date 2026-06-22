@@ -9,7 +9,7 @@
 
 ## R2 — Style engine
 
-- **R2.1** `CaptionStyle` covers font (name + size + weight), fill colour, stroke colour + width, shadow (offset + blur + colour), glow (colour + radius), background pill (colour + corner radius + padding), enter/exit animations + durations.
+- **R2.1** `CaptionStyle` covers font (PostScript name + size — weight is encoded in the name itself; `CTFontCreateWithName` doesn't take a separate weight), fill colour, stroke colour + width, shadow (offset + blur + colour), glow (colour + radius), background pill (colour + corner radius + padding), enter/exit animations + durations.
 - **R2.2** Every style parameter has a documented default; missing values fall back to track defaults, then to a built-in identity style.
 - **R2.3** A `CaptionStyle` is keyframable on the line for `fillColour`, `scale`, `offset`, `opacity`, `letterSpacing`.
 

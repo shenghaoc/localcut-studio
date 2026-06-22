@@ -8,17 +8,20 @@ Add a styling engine over caption tracks: stroke, fill, shadow, glow, per-line b
 
 ## Prerequisites
 
-- Caption track model + SRT/VTT sidecar I/O (not yet specced — derive a `CaptionTrack` of `CaptionLine { range: CMTimeRange, text: String, words: [WordTiming]? }` from the SRT/VTT importer, persisted via `feature-project-persistence`).
-- Title raster path (not yet specced — a cached `CIImage` / Metal texture rasteriser that draws styled text once per line and reuses it across frames).
-- Keyframes (not yet specced — `Keyframe<T>` and an evaluator) so style parameters (slide offset, scale, opacity, colour) animate.
-- `feature-colour-grading`'s custom `AVVideoCompositing` is the integration point: caption rasters layer above clip layers.
+All five infrastructure deps are now specced. The first three land in the same change-set as Phase 30 on this branch; the latter two are already on `main`.
+
+- [`feature-keyframes`](../feature-keyframes/) (P15) — `Keyframe<T>`, `Keyframed<T>`, `Interpolatable`, binary-search evaluator. Phase 30's keyframable style parameters (`fillColour`, `scale`, `offset`, `opacity`, `letterSpacing` — see R2.3) ride on top.
+- [`feature-caption-tracks`](../feature-caption-tracks/) (P22) — `CaptionTrack` / `CaptionLine` / `WordTiming` model, SRT and VTT importers, Codable round-trip via `ProjectDocument`.
+- [`feature-title-raster`](../feature-title-raster/) (P14) — `TitleRasterer` that draws Core Text attributed strings into a render-canvas-sized BGRA bitmap with an LRU cache.
+- [`feature-colour-grading`](../feature-colour-grading/) — shipped; the custom `AVVideoCompositing` (`EffectCompositor`) is the integration point: caption rasters layer above clip layers.
+- [`feature-project-persistence`](../feature-project-persistence/) — shipped; caption tracks and per-line `CaptionStyle` overrides round-trip through the existing Codable document (R1.3).
 
 ## Approach
 
 1. **Style model.** `CaptionStyle` value type — font (PostScript name + size), fill, stroke (colour + width), shadow (offset, blur), glow, background pill (colour, radius, padding), and an `enterAnimation` / `exitAnimation` enum with parameters. Each track or each line can hold a style; line-level overrides win.
 2. **Preset library.** A versioned JSON file format (`CaptionPresetV1`) stored under `Library/Application Support/LocalCut Studio/CaptionPresets/`. ≥10 built-in presets ship in the app bundle and are read-only; user presets sit alongside, importable/exportable via `.fileImporter` / `NSSavePanel`. No network.
 3. **Raster path.** `CaptionRasterer` produces a `CGImage` per line per state (idle vs animating). Idle frames cache by (line id, style hash). Animating frames render on demand. Text uses Core Text for proper attributed runs (stroke + fill + shadow per glyph run). Word-level highlight is a second pass with per-word attribute change, also cached.
-4. **Animation.** Enter/exit are time-based curves driven by `(currentTime - lineStart) / enterDuration` etc. Pop = scale + opacity; bounce = damped spring; slide = translate from edge; typewriter = mask-progress 0→1 per character. All evaluated in the compositor at frame request time — deterministic and frame-accurate.
+4. **Animation.** Enter/exit are time-based curves driven by `(currentTime - lineStart) / enterDuration` etc. Pop = scale + opacity; bounce = damped spring; slide = translate from edge; typewriter = mask-progress 0→1 per character. All evaluated in the compositor at frame request time — deterministic and frame-accurate. When the configured `enterDuration + exitDuration` would extend past a line's own duration, both values are scaled DOWN proportionally per-line inside `CaptionAnimation.evaluate`; the style object itself stays untouched (it's reused across lines of varying lengths and the inspector keeps showing the user's authored values).
 5. **Compositor integration.** Extend the `EffectCompositor` (from `feature-colour-grading`) so each frame request fetches the active `CaptionLine` set, asks `CaptionRasterer` for the appropriate raster, applies animation transforms, and composites above clip layers honouring track ordering.
 6. **Sidecar export.** Burn-in remains the default (style is project-level). SRT/VTT sidecar export stays plain text — no style — and the export menu states this plainly.
 
@@ -33,6 +36,10 @@ Add a styling engine over caption tracks: stroke, fill, shadow, glow, per-line b
 - Font availability across macOS versions: presets must reference fonts shipped with the system; absent fonts fall back with a visible warning.
 - Sub-pixel positioning during animation can cause shimmer; snap to pixel grid on integer time positions, ease only in between.
 - Bundle round-trip must include any user font referenced as an embedded asset, or pin to a system font name with a fallback policy.
+
+## Known limitations
+
+- **Caption tails past the last AV clip are truncated.** If a caption ends after every video clip ends, preview and export stop at the AV duration rather than the caption end. `AVMutableComposition.insertEmptyTimeRange` did not reliably extend `composition.duration` in our test runs on macOS 26; the correct fix is to insert a placeholder source media (tiny black/silent `.mov`) into the composition for the tail, tracked as a follow-up. Most projects keep at least one AV clip running until the final caption fades, so this is not commonly hit in practice.
 
 ## Non-goals
 

@@ -16,6 +16,14 @@ struct ProjectState: Equatable {
         var clips: [Clip]
     }
 
+    struct CaptionTrackSnapshot: Equatable {
+        let trackID: UUID
+        var name: String
+        var isMuted: Bool
+        var defaultStyle: CaptionStyle
+        var lines: [CaptionLine]
+    }
+
     var name: String
     var media: [MediaItem]
     var unresolvedMedia: [MediaRef]
@@ -23,6 +31,7 @@ struct ProjectState: Equatable {
     var frameRate: Double
     var videoTracks: [TrackClips]
     var audioTracks: [TrackClips]
+    var captionTracks: [CaptionTrackSnapshot]
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
 
@@ -34,6 +43,7 @@ struct ProjectState: Equatable {
             && lhs.frameRate == rhs.frameRate
             && lhs.videoTracks == rhs.videoTracks
             && lhs.audioTracks == rhs.audioTracks
+            && lhs.captionTracks == rhs.captionTracks
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
     }
@@ -59,6 +69,11 @@ extension EditorModel {
             },
             audioTracks: project.audioTracks.map {
                 ProjectState.TrackClips(trackID: $0.id, name: $0.name, isMuted: $0.isMuted, clips: $0.clips)
+            },
+            captionTracks: project.captionTracks.map {
+                ProjectState.CaptionTrackSnapshot(
+                    trackID: $0.id, name: $0.name, isMuted: $0.isMuted,
+                    defaultStyle: $0.defaultStyle, lines: $0.lines)
             },
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID)
@@ -86,6 +101,35 @@ extension EditorModel {
                 track.clips = snapshot.clips
             }
         }
+        // Caption tracks: restore existing-by-id, drop tracks not in the snapshot,
+        // and append any from the snapshot that the current project doesn't yet have
+        // (an undo that brings back a deleted track). `uniquingKeysWith` rather
+        // than `uniqueKeysWithValues` so a corrupted document with duplicate
+        // track ids degrades to a missed restore instead of a process crash.
+        var existing: [UUID: CaptionTrack] = Dictionary(
+            project.captionTracks.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
+        var restored: [CaptionTrack] = []
+        for snapshot in state.captionTracks {
+            if let track = existing.removeValue(forKey: snapshot.trackID) {
+                track.name = snapshot.name
+                track.isMuted = snapshot.isMuted
+                track.defaultStyle = snapshot.defaultStyle
+                track.replaceLines(snapshot.lines)
+                restored.append(track)
+            } else {
+                // A previously-deleted track returns with its original UUID, so
+                // any redoable command captured against that identity still
+                // resolves the track after undo brings it back.
+                let track = CaptionTrack(id: snapshot.trackID,
+                                         name: snapshot.name,
+                                         lines: snapshot.lines)
+                track.isMuted = snapshot.isMuted
+                track.defaultStyle = snapshot.defaultStyle
+                restored.append(track)
+            }
+        }
+        project.captionTracks = restored
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         reconcileAccessedURLs()
@@ -244,6 +288,7 @@ extension EditorModel {
         project.frameRate = 30
         project.videoTracks = [Track(name: "V1", kind: .video)]
         project.audioTracks = [Track(name: "A1", kind: .audio)]
+        project.captionTracks = []
         documentURL = nil
         isDirty = false
         unresolvedMedia = []
@@ -267,6 +312,7 @@ extension EditorModel {
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
         accessedURLs.removeAll()
         project.mediaItems.removeAll()
+        project.captionTracks.removeAll()
         selectedClipID = nil
         selectedMediaID = nil
         selectedTransitionClipID = nil
@@ -320,6 +366,7 @@ extension EditorModel {
 
         project.videoTracks = makeTracks(from: document.videoTracks, kind: .video, fallbackName: "V1")
         project.audioTracks = makeTracks(from: document.audioTracks, kind: .audio, fallbackName: "A1")
+        project.captionTracks = document.captionTracks.map { $0.makeTrack() }
 
         // A document from a newer schema would lose its future-only fields if we
         // re-saved it as the current version, so don't adopt its URL — Save then
