@@ -1,6 +1,6 @@
 # Design: Diagnostics Panel (P25 native equivalent)
 
-> Status: **Proposed**. Infrastructure prerequisite for Phase 37 (frame interpolation), Phase 41 (capture engine), and Phase 46 (replay buffer).
+> Status: **Implemented**. Infrastructure prerequisite for Phase 37 (frame interpolation), Phase 41 (capture engine), and Phase 46 (replay buffer).
 
 ## Goal
 

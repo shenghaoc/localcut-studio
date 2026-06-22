@@ -1,6 +1,6 @@
 # Requirements: Diagnostics Panel
 
-> Status: **Proposed**. Prerequisite for Phase 37, 41, 46.
+> Status: **Implemented**. Prerequisite for Phase 37, 41, 46.
 
 ## R1 — Probes
 

@@ -69,7 +69,6 @@ The following infrastructure was implied by browser phases referenced in the pro
 | Markers (P10) | `TimelineMarker` model + ruler rendering + add/remove/keyboard | 34, 44 |
 | Audio master bus (P16) | `AVAudioEngine` master with meters, pan, fades | 35, 36, 46 |
 | Colour management + scopes (P21) | Working-space tagged pixel buffers + waveform/vectorscope overlay | 38 |
-| Capability tiers (P8/P26) | A probe that picks accelerated vs baseline based on chip, RAM, encoder count | 37, 41, 45 |
 | Export presets / render queue (P17/P24) | Preset + queue model on top of `AVAssetExportSession` / `AVAssetWriter` | 39 |
 | Project bundles (P23) | Bundle directory format with `project.json` + `assets/` + fingerprints | 30, 34, 38, 48 |
 
