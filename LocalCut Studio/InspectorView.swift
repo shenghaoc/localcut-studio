@@ -215,6 +215,7 @@ struct InspectorView: View {
                 Text("Strength \(Int(skinSmooth.strength.defaultValue * 100))%")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Slider(
                     value: Binding(
                         get: { Double(skinSmooth.strength.defaultValue) },
@@ -225,6 +226,7 @@ struct InspectorView: View {
                         }),
                     in: 0...1)
                 .accessibilityLabel("Strength")
+                .accessibilityValue("\(Int(skinSmooth.strength.defaultValue * 100))%")
             }
 
             DisclosureGroup("Advanced") {
@@ -232,6 +234,7 @@ struct InspectorView: View {
                     Text("Mask Warmth \(String(format: "%+.2f", skinSmooth.maskWarmthBias))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     Slider(
                         value: Binding(
                             get: { Double(skinSmooth.maskWarmthBias) },
@@ -243,12 +246,14 @@ struct InspectorView: View {
                         in: -1...1,
                         step: 0.05)
                     .accessibilityLabel("Mask Warmth")
+                    .accessibilityValue(String(format: "%+.2f", skinSmooth.maskWarmthBias))
                 }
 
                 VStack(alignment: .leading) {
                     Text("Luminance Gate \(String(format: "%.2f", skinSmooth.maskLuminanceGate))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     Slider(
                         value: Binding(
                             get: { Double(skinSmooth.maskLuminanceGate) },
@@ -260,6 +265,7 @@ struct InspectorView: View {
                         in: 0...1,
                         step: 0.05)
                     .accessibilityLabel("Luminance Gate")
+                    .accessibilityValue(String(format: "%.2f", skinSmooth.maskLuminanceGate))
                 }
             }
 
