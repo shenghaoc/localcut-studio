@@ -311,6 +311,10 @@ extension EditorModel {
         isPlaying = false
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
         accessedURLs.removeAll()
+        // Drop every cached post-effect frame: the replacement document brings
+        // new clip ids whose keys would never collide, but the prior bytes
+        // would sit at the back of the LRU until natural eviction.
+        RenderCache.shared.purge()
         project.mediaItems.removeAll()
         project.captionTracks.removeAll()
         selectedClipID = nil

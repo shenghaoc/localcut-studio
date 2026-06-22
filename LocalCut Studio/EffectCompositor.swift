@@ -9,6 +9,9 @@ import os
 // MARK: - Layer metadata for the compositor
 
 struct CompositorLayer {
+    /// Originating clip; used as part of the `RenderCache` key so the cached
+    /// post-effect-chain image is invalidated when the clip's effects mutate.
+    let clipID: UUID
     let trackID: CMPersistentTrackID
     let transform: CGAffineTransform
     let opacity: Float
@@ -16,6 +19,12 @@ struct CompositorLayer {
     let showSkinMask: Bool
     /// The clip's start time on the timeline, used to compute clip-local time for keyframe evaluation.
     let clipStartTime: CMTime
+    /// The piece's range within the source media, used to compute source time
+    /// for the render cache key so repeated source frames hit the same entry.
+    let sourceRange: CMTimeRange
+    /// The piece's range on the composition timeline, paired with `sourceRange`
+    /// to map composition time → source time.
+    let timeRange: CMTimeRange
 }
 
 /// One caption line scheduled inside a composition instruction. Carries everything
@@ -177,22 +186,41 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         var image = CIImage(cvPixelBuffer: sourceBuffer)
 
-        // Compute clip-local time for keyframe evaluation
+        // Skin-smooth strength is keyframed in clip-local time.
         let clipLocalTime = request.compositionTime - layer.clipStartTime
 
-        // Apply effect chain, optionally showing skin mask for debugging
-        if layer.showSkinMask {
-            // Find skin smooth params and show mask instead of smoothed image
-            if let skinSmooth = layer.effects.first(where: { if case .skinSmooth = $0 { return true }; return false }),
-               case .skinSmooth(let params) = skinSmooth {
-                if let mask = skinMask(image: image, warmthBias: params.maskWarmthBias, luminanceGate: params.maskLuminanceGate) {
-                    image = mask
-                }
-            } else {
-                image = applyEffectChain(image, effects: layer.effects, at: clipLocalTime)
+        if layer.showSkinMask,
+           let skinSmooth = layer.effects.first(where: {
+               if case .skinSmooth = $0 { return true }; return false
+           }),
+           case .skinSmooth(let params) = skinSmooth {
+            // Debug visualisation: show the skin-tone mask in place of the
+            // smoothed frame. Bypass the cache so a normal preview after a
+            // mask-toggle isn't served the mask image.
+            if let mask = skinMask(image: image,
+                                   warmthBias: params.maskWarmthBias,
+                                   luminanceGate: params.maskLuminanceGate) {
+                image = mask
             }
         } else {
-            image = applyEffectChain(image, effects: layer.effects, at: clipLocalTime)
+            // Map composition time → source time so the cache key is stable
+            // across repeated source-frame requests (speed ramps, frame
+            // interpolation) and unique per source frame (no collisions
+            // across pieces of the same clip).
+            let cacheKey: RenderCacheKey? = layer.effects.isEmpty ? nil : {
+                let rel = (request.compositionTime - layer.timeRange.start).seconds
+                let tDur = layer.timeRange.duration.seconds
+                let sDur = layer.sourceRange.duration.seconds
+                let srcSec = layer.sourceRange.start.seconds + (tDur > 0 ? rel * sDur / tDur : 0)
+                let sourceTime = CMTime(seconds: srcSec, preferredTimescale: RenderCacheKey.normalisedTimescale)
+                return RenderCacheKey(
+                    clipID: layer.clipID,
+                    effectChainHash: layer.effects.renderCacheHash,
+                    time: sourceTime,
+                    renderSize: request.renderContext.size)
+            }()
+            image = applyEffectChain(image, effects: layer.effects,
+                                     cacheKey: cacheKey, at: clipLocalTime)
         }
 
         image = image.transformed(by: layer.transform)
@@ -359,19 +387,61 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     // MARK: - Effect chain
 
-    nonisolated private func applyEffectChain(_ image: CIImage, effects: [Effect], at time: CMTime = .zero) -> CIImage {
+    nonisolated private func applyEffectChain(_ image: CIImage,
+                                              effects: [Effect],
+                                              cacheKey: RenderCacheKey?,
+                                              at time: CMTime = .zero) -> CIImage {
+        if effects.isEmpty { return image }
+        if let cacheKey, let cached = RenderCache.shared.image(for: cacheKey) {
+            return cached
+        }
+        let sourceExtent = image.extent
         var result = image
+        var allEffectsApplied = true
         for effect in effects {
             switch effect {
             case .colourGrade(let grade):
                 result = applyColourGrade(result, grade: grade)
             case .lut(bookmark: let data):
-                result = applyLUT(result, bookmarkData: data) ?? result
+                if let next = applyLUT(result, bookmarkData: data) {
+                    result = next
+                } else {
+                    // Transient failure (file unreadable) — the `LUTCache`
+                    // retry cool-down decides when to re-attempt. Caching the
+                    // un-LUT'ed image now would freeze that for every later
+                    // request at this key, defeating the retry path.
+                    allEffectsApplied = false
+                }
             case .skinSmooth(let params):
+                // Returning nil here is deterministic (bypass, strength == 0,
+                // kernel unavailable) — safe to cache as-is.
                 result = applySkinSmooth(result, params: params, at: time) ?? result
             }
         }
-        return result
+        // Materialise into a CGImage-backed CIImage before caching: a lazy
+        // CIImage filter graph would still force `CIContext.render` to
+        // re-evaluate the colour / LUT / skin-smooth kernels on every hit, so
+        // Phase 35 / 37's repeated-frame requests would still pay the work
+        // this cache exists to avoid. Skip caching when an effect failed (see
+        // above) and when the source extent is degenerate.
+        guard let cacheKey, allEffectsApplied,
+              !sourceExtent.isInfinite, !sourceExtent.isNull, !sourceExtent.isEmpty,
+              let materialised = materialise(result, extent: sourceExtent) else {
+            return result
+        }
+        RenderCache.shared.setImage(materialised, for: cacheKey)
+        return materialised
+    }
+
+    /// Forces evaluation of `image` over `extent` by routing it through the
+    /// shared `CIContext`. The returned CIImage is backed by a static CGImage,
+    /// so a later `CIContext.render` only reuploads the texture instead of
+    /// re-running the per-clip kernel chain.
+    nonisolated private func materialise(_ image: CIImage, extent: CGRect) -> CIImage? {
+        guard let cg = Self.sharedCIContext.createCGImage(image, from: extent) else {
+            return nil
+        }
+        return CIImage(cgImage: cg)
     }
 
     nonisolated private func applyColourGrade(_ image: CIImage, grade: ColourGrade) -> CIImage {

@@ -318,7 +318,14 @@ final class EditorModel {
         performCoalescedUndoable(actionName, target: id, rebuild: .debounced) {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                // Snapshot the pre-transform effects so we only drop cached
+                // frames when `effects` actually changed — opacity drags
+                // shouldn't invalidate, even though they flow through here.
+                let effectsBefore = track.clips[index].effects
                 transform(&track.clips[index])
+                if track.clips[index].effects != effectsBefore {
+                    RenderCache.shared.invalidate(clipID: id)
+                }
                 return
             }
         }
@@ -366,6 +373,7 @@ final class EditorModel {
                     } else {
                         track.clips[index].effects.append(.colourGrade(grade))
                     }
+                    RenderCache.shared.invalidate(clipID: id)
                     return
                 }
             }
@@ -379,6 +387,7 @@ final class EditorModel {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 track.clips[index].effects.removeAll()
+                RenderCache.shared.invalidate(clipID: id)
                 scheduleRebuild()
                 return
             }
@@ -409,6 +418,7 @@ final class EditorModel {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 track.clips[index].effects.append(.lut(bookmark: bookmark))
+                RenderCache.shared.invalidate(clipID: id)
                 statusMessage = "Imported LUT \(url.lastPathComponent)."
                 scheduleRebuild()
                 return
@@ -442,6 +452,7 @@ final class EditorModel {
                     } else {
                         track.clips[index].effects.append(.skinSmooth(smooth))
                     }
+                    RenderCache.shared.invalidate(clipID: id)
                     return
                 }
             }
@@ -468,6 +479,7 @@ final class EditorModel {
                     smooth.clamp()
                     track.clips[index].effects.append(.skinSmooth(smooth))
                 }
+                RenderCache.shared.invalidate(clipID: id)
                 return
             }
         }
@@ -480,6 +492,7 @@ final class EditorModel {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 track.clips[index].effects.removeAll { if case .skinSmooth = $0 { return true }; return false }
+                RenderCache.shared.invalidate(clipID: id)
                 scheduleRebuild()
                 return
             }
@@ -831,6 +844,7 @@ final class EditorModel {
         guard size != project.renderSize else { return }
         performUndoable("Change Resolution") {
             project.renderSize = size
+            RenderCache.shared.invalidate(notMatchingRenderSize: size)
             scheduleRebuild()
         }
     }

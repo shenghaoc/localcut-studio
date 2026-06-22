@@ -58,14 +58,14 @@ These currently-proposed feature specs are **prerequisites** for many of the pha
 | [feature-keyframes](./feature-keyframes/) | `Keyframed<T>` + `Interpolatable` + binary-search evaluator | 30, 32a, 35, 38, 43 |
 | [feature-caption-tracks](./feature-caption-tracks/) | `CaptionTrack` model + SRT/VTT importers + persistence | 30, 44 |
 | [feature-title-raster](./feature-title-raster/) | Core Text rasteriser with LRU cache | 30, 38 |
+| [feature-render-cache](./feature-render-cache/) | Post-effect-chain `CIImage` cache keyed on (clip id, effect chain hash, time, render size) under Caches/ | 35, 37 |
 
-The following infrastructure was implied by browser phases referenced in the prompts (P10 markers, P14 GPU title raster, P15 keyframes, P16 audio buses, P17/24 export expansion, P19 proxy/render cache, P21 colour management, P22 caption tracks, P25 diagnostics, P26 capability tiers). The first three (P14 / P15 / P22) are now specced above. The rest are **not yet specced** for the native port and each spec calls out the ones it needs in its design `Prerequisites` section. Spec them as they become blocking; do not pre-spec speculatively.
+The following infrastructure was implied by browser phases referenced in the prompts (P10 markers, P14 GPU title raster, P15 keyframes, P16 audio buses, P17/24 export expansion, P19 proxy/render cache, P21 colour management, P22 caption tracks, P25 diagnostics, P26 capability tiers). The first four (P14 / P15 / P19 / P22) are now specced above. The rest are **not yet specced** for the native port and each spec calls out the ones it needs in its design `Prerequisites` section. Spec them as they become blocking; do not pre-spec speculatively.
 
 | Open infra | Native equivalent | First needed by |
 |---|---|---|
 | Markers (P10) | `TimelineMarker` model + ruler rendering + add/remove/keyboard | 34, 44 |
 | Audio master bus (P16) | `AVAudioEngine` master with meters, pan, fades | 35, 36, 46 |
-| Render cache (P19) | Frame cache keyed on (clip id, effect chain hash, time) under Caches/ | 35, 37 |
 | Colour management + scopes (P21) | Working-space tagged pixel buffers + waveform/vectorscope overlay | 38 |
 | Diagnostics (P25) | Single-pane perf/probe panel (CPU, GPU, decoder count) | 37, 41, 46 |
 | Capability tiers (P8/P26) | A probe that picks accelerated vs baseline based on chip, RAM, encoder count | 37, 41, 45 |

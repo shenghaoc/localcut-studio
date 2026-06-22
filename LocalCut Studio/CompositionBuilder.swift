@@ -32,6 +32,7 @@ enum CompositionBuilder {
     /// `transitionRange`/`transitionType` are set on the incoming clip of a
     /// transition so the compositor can blend it with its predecessor.
     private struct VideoSegment {
+        let clipID: UUID
         let compTrackID: CMPersistentTrackID
         let timeRange: CMTimeRange
         let transform: CGAffineTransform
@@ -41,9 +42,10 @@ enum CompositionBuilder {
         let transitionType: TransitionType?
         let showSkinMask: Bool
         let clipStartTime: CMTime
+        let sourceRange: CMTimeRange
 
         var layer: CompositorLayer {
-            CompositorLayer(trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipStartTime: clipStartTime)
+            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipStartTime: clipStartTime, sourceRange: sourceRange, timeRange: timeRange)
         }
 
         func contains(_ seconds: Double) -> Bool {
@@ -159,6 +161,7 @@ enum CompositionBuilder {
                     pool[poolIndex].lastEnd = piece.effectiveEnd
 
                     segments.append(VideoSegment(
+                        clipID: clip.id,
                         compTrackID: compTrack.trackID,
                         timeRange: CMTimeRange(start: start, duration: piece.duration),
                         transform: transform,
@@ -167,7 +170,8 @@ enum CompositionBuilder {
                         transitionRange: piece.transitionRange,
                         transitionType: piece.overlap > .zero ? clip.transition?.type : nil,
                         showSkinMask: showSkinMask,
-                        clipStartTime: clip.timelineStart))
+                        clipStartTime: clip.timelineStart,
+                        sourceRange: piece.sourceRange))
                 }
             }
             projectTrackSegments.append(segments)
@@ -404,12 +408,15 @@ enum CompositionBuilder {
                fillerTrackID != kCMPersistentTrackID_Invalid,
                tail.containsTime(CMTime(seconds: midpoint, preferredTimescale: 600)) {
                 units.append(.layer(CompositorLayer(
+                    clipID: UUID(),  // filler; no real clip
                     trackID: fillerTrackID,
                     transform: .identity,
                     opacity: 1,
                     effects: [],
                     showSkinMask: false,
-                    clipStartTime: tail.start)))
+                    clipStartTime: tail.start,
+                    sourceRange: tail,
+                    timeRange: tail)))
             }
 
             let captionsForInterval = activeCaptionItems(
