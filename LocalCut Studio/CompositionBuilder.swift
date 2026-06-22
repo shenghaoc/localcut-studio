@@ -248,7 +248,7 @@ enum CompositionBuilder {
 
         var fillerTailRange: CMTimeRange?
         var fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
-        if captionEnd > lastVideoEnd {
+        if captionEnd.isNumeric, lastVideoEnd.isNumeric, captionEnd > lastVideoEnd {
             let tailStart = lastVideoEnd
             let tailDuration = captionEnd - tailStart
             // Generate at most `fillerChunkSeconds` of source media; longer
@@ -273,6 +273,7 @@ enum CompositionBuilder {
                 var remaining = tailDuration
                 while remaining > .zero {
                     let chunk = CMTimeMinimum(fillerAssetDuration, remaining)
+                    guard chunk > .zero else { break }
                     try fillerCompTrack.insertTimeRange(
                         CMTimeRange(start: .zero, duration: chunk),
                         of: fillerVideoSource,

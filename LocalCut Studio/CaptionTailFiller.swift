@@ -132,8 +132,12 @@ nonisolated enum CaptionTailFiller {
     /// Even-rounded width × height suitable for H.264. Both call sites
     /// (`cacheURL` and `generate`) must agree.
     private static func evenDimensions(_ size: CGSize) -> (Int, Int) {
-        (max(2, Int(size.width.rounded())  & ~1),
-         max(2, Int(size.height.rounded()) & ~1))
+        guard size.width.isFinite, size.height.isFinite,
+              size.width > 0, size.height > 0 else {
+            return (2, 2)
+        }
+        return (max(2, Int(size.width.rounded())  & ~1),
+                max(2, Int(size.height.rounded()) & ~1))
     }
 
     private static func generate(at url: URL,
@@ -172,6 +176,8 @@ nonisolated enum CaptionTailFiller {
         writer.startSession(atSourceTime: .zero)
 
         for frame in 0..<frameCount {
+            // Allow rapid undo/redo to tear down a half-written filler quickly.
+            try Task.checkCancellation()
             // Spin until the input can accept more data, but bail out if the
             // writer transitions out of `.writing` — otherwise a writer
             // failure mid-loop would hang this task forever.
@@ -179,11 +185,15 @@ nonisolated enum CaptionTailFiller {
                 if writer.status != .writing { break }
                 await Task.yield()
             }
-            guard writer.status == .writing,
-                  let pool = adaptor.pixelBufferPool else { break }
+            guard writer.status == .writing else { break }
+            guard let pool = adaptor.pixelBufferPool else {
+                throw FillerError.writerStartFailed
+            }
             var pixelBuffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
-            guard let buffer = pixelBuffer else { break }
+            let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+            guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
+                throw FillerError.writerStartFailed
+            }
             CVPixelBufferLockBaseAddress(buffer, [])
             if let base = CVPixelBufferGetBaseAddress(buffer) {
                 // H.264 drops the alpha channel, so all-zero bytes are

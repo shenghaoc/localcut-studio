@@ -929,4 +929,51 @@ struct PhaseThirtySmokeTests {
         #expect(captioned.captions.contains { $0.text == "Past the end" })
     }
 
+    /// Exports the same 1 s AV clip + 1.5 s caption project and verifies the
+    /// exported file's duration extends past the AV end, proving the filler
+    /// extension survives the full `AVAssetExportSession` pipeline.
+    @Test("Exported file extends past the AV end for a caption tail")
+    func exportedFileCarriesCaptionTail() async throws {
+        let url = try await makeVideoFixture(seconds: 1)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let project = Project()
+        project.renderSize = CGSize(width: 320, height: 180)
+
+        let media = try await loadedMedia(from: url)
+        project.mediaItems.append(media)
+
+        let videoTrack = project.videoTracks.first!
+        videoTrack.clips = [Clip(mediaID: media.id, sourceStart: .zero,
+                                 duration: time(1), timelineStart: .zero)]
+
+        let captionTrack = CaptionTrack(name: "Tail")
+        captionTrack.addLine(CaptionLine(
+            range: CMTimeRange(start: time(0.5), duration: time(1.0)),
+            text: "Past the end"))
+        project.captionTracks = [captionTrack]
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+
+        let exportURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("caption-tail-export-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: exportURL) }
+
+        let session = try #require(AVAssetExportSession(
+            asset: built.composition,
+            presetName: AVAssetExportPresetHighestQuality))
+        session.videoComposition = built.videoComposition
+        session.audioMix = built.audioMix
+        try await session.export(to: exportURL, as: .mov)
+
+        // Verify the exported file's video track extends past the 1 s AV clip.
+        let exported = AVURLAsset(url: exportURL)
+        let videoTracks = try await exported.loadTracks(withMediaType: .video)
+        let exportedVideoTrack = try #require(videoTracks.first,
+                                              "Exported file has no video track")
+        let exportedDuration = try await exportedVideoTrack.load(.timeRange).end
+        #expect(exportedDuration.seconds > 1.0 + 1.0 / 30.0,
+                "Expected exported video track to extend past AV end, got \(exportedDuration.seconds) s")
+    }
+
 }
