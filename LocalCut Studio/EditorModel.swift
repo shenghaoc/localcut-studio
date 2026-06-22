@@ -42,8 +42,12 @@ final class EditorModel {
 
     // Status / export
     var statusMessage = "Import media to begin."
-    var exportProgress: Double?
-    var isExporting = false
+
+    /// Serial render queue, owned for the lifetime of the editor. Loaded once
+    /// during init so a queue saved by the previous session resumes cleanly.
+    /// Replaces the legacy `isExporting` / `exportProgress` fields — progress
+    /// now lives on `renderQueue.totalProgress` and the per-job rows.
+    let renderQueue: RenderQueue
 
     // Skin smoothing debug
     var showSkinMask = false
@@ -114,6 +118,10 @@ final class EditorModel {
     @ObservationIgnored var sessionGeneration = 0
 
     init() {
+        // Initialise the render queue first — it's the one `let` without an
+        // inline default, so it must be set before any other access on self.
+        self.renderQueue = RenderQueue()
+
         // Each editor action manages its own undo group explicitly, so disable
         // run-loop-based coalescing (see registerUndo).
         undoManager.groupsByEvent = false
@@ -150,6 +158,11 @@ final class EditorModel {
                 self?.isPlaying = false
             }
         }
+
+        // Restore any jobs persisted from the previous session and resume the
+        // runner (running jobs are rewound to queued; stale bookmarks flip to
+        // failed — see RenderQueue.reconcile).
+        renderQueue.load()
     }
 
     deinit {
@@ -274,12 +287,11 @@ final class EditorModel {
     /// Removes a media item and its orphaned clips, then stops its security-scoped access.
     func removeMedia(itemID: MediaItem.ID) {
         guard let media = project.media(for: itemID) else { return }
-        // An in-flight export reads the source files through its own composition
-        // snapshot; revoking the security scope mid-export would fail the write.
-        guard !isExporting else {
-            statusMessage = "Finish exporting before removing media."
-            return
-        }
+        // A running render job opens its own access token from the snapshot's
+        // bookmark (`RenderQueue.reconstructProject`), independent of the
+        // editor's security-scoped access — so removing media live is safe
+        // even mid-render. The legacy single-shot export guarded with
+        // `isExporting`; the queue replaces it.
         performUndoable("Remove Media") {
             project.mediaItems.removeAll { $0.id == itemID }
             releaseAccessIfUnused(for: media.url)
@@ -1000,64 +1012,24 @@ final class EditorModel {
 
     // MARK: - Export
 
+    /// Toolbar/menu Export shortcut. Captures a security-scoped bookmark for
+    /// the chosen destination, snapshots the project, and enqueues a job with
+    /// the default preset (`BuiltInExportPresets.defaultPreset`). The
+    /// `RenderQueue` runner picks it up immediately and reports progress
+    /// through `renderQueue.totalProgress` instead of the legacy
+    /// `exportProgress` field.
     func export(to url: URL) async {
-        guard !isExporting else { return }
-        isExporting = true
-        exportProgress = 0
-        statusMessage = "Exporting…"
-        defer {
-            isExporting = false
-            exportProgress = nil
-        }
-        // Hold security-scoped access to every source file for the whole export,
-        // independent of the editable session. A redo (or any session change) that
-        // revokes the session's access mid-export — which the removeMedia guard
-        // can't intercept, since UndoManager replays snapshots directly — must not
-        // pull a source file out from under the in-flight write.
-        let exportSources = Set(project.mediaItems.map(\.url))
-        let heldSources = exportSources.filter { $0.startAccessingSecurityScopedResource() }
-        // For bundled projects the per-file start above returns `false` (no
-        // grant needed — the bundle directory is the grant). The export
-        // therefore retains its OWN start on the bundle URL: if the user
-        // opens a different document mid-export, `releaseSession()` stops
-        // the model's `bundleAccessURL`, but this independent ref-count keeps
-        // the kernel grant alive until the export finishes.
-        let heldBundle: URL? = bundleAccessURL.flatMap { url in
-            url.startAccessingSecurityScopedResource() ? url : nil
-        }
-        defer {
-            for source in heldSources { source.stopAccessingSecurityScopedResource() }
-            heldBundle?.stopAccessingSecurityScopedResource()
-        }
-        do {
-            guard let built = try await CompositionBuilder.build(project: project) else {
-                statusMessage = "Nothing to export."
-                return
-            }
-            guard let session = AVAssetExportSession(asset: built.composition,
-                                                     presetName: AVAssetExportPresetHighestQuality) else {
-                statusMessage = "Could not create export session."
-                return
-            }
-            session.videoComposition = built.videoComposition
-            session.audioMix = built.audioMix
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
-            try? FileManager.default.removeItem(at: url)
-
-            let progressTask = Task { [weak self] in
-                for await state in session.states(updateInterval: 0.25) {
-                    if case .exporting(let progress) = state {
-                        await MainActor.run { self?.exportProgress = progress.fractionCompleted }
-                    }
-                }
-            }
-
-            defer { progressTask.cancel() }
-
-            try await session.export(to: url, as: .mov)
-            statusMessage = "Exported \(url.lastPathComponent)."
-        } catch {
-            statusMessage = "Export failed: \(error.localizedDescription)"
+        guard let bookmark = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil) else {
+            statusMessage = "Could not access \(url.lastPathComponent)."
+            return
         }
+        renderQueue.enqueueWithDefaultPreset(outputURL: url, project: project, bookmark: bookmark)
+        statusMessage = "Queued \(url.lastPathComponent) with \(BuiltInExportPresets.defaultPreset.name)."
     }
 }
