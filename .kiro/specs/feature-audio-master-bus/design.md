@@ -77,32 +77,32 @@ final class AudioMasterBus {
     /// Single source of truth for the bus's user-facing parameters.
     /// `MainActor` because edits are driven by inspector / undo on the main
     /// thread; sample-rate-isolated DSP state lives in the audio nodes.
-    private(set) var masterGain: Float          // linear, 0…2 (≈ −∞…+6 dB)
-    private(set) var trackInputs: [TrackInput]  // one per project audio track
-
     /// Snapshot updated on the audio thread, read by SwiftUI for the meter.
     /// The snapshot value type is `Sendable`; the audio thread writes through
-    /// an `OSAllocatedUnfairLock` and the main thread reads under the same lock.
-    private(set) var meterSnapshot: AudioMeterSnapshot
+    /// an `OSAllocatedUnfairLock` and the main thread reads under the same
+    /// lock via a computed accessor.
+    var meterSnapshot: AudioMeterSnapshot { get }
 
     init()
 
     // Live + offline graph lifecycle.
-    func prepareLive() throws            // starts the live engine
+    func prepareLive()                   // starts the live engine, swallows errors via lastStartError
     func teardownLive()                  // stops the live engine, removes taps
     func prepareOffline(format: AVAudioFormat,
                         maximumFrameCount: AVAudioFrameCount) throws
     func renderOfflineBlock(into buffer: AVAudioPCMBuffer) throws
-                                         -> AVAudioEngine.ManualRenderingStatus
+                                         -> AVAudioEngineManualRenderingStatus
     func teardownOffline()
-
-    // Mutations — all undoable through EditorModel.
-    func setMasterGain(_ linear: Float)
-    func setTrackPan(_ pan: Float, trackID: Track.ID)
-    func setTrackGain(_ linear: Float, trackID: Track.ID)
-    func setClipVolumeEnvelope(_ envelope: VolumeEnvelope, clipID: Clip.ID)
 }
 ```
+
+Bus parameters live on `Project` (master gain + per-track inputs) and per-clip
+envelopes ride on `Clip.volumeEnvelope`; the `AudioMasterBus` runtime engine
+reads them through `AudioBusMixing` helpers when `CompositionBuilder` builds
+audio mix parameters. Mutators on `EditorModel` (`setMasterGain`,
+`setTrackInput`, `setClipVolumeEnvelope`) route through the existing
+`performUndoable` / `performCoalescedUndoable` machinery so bus edits join the
+same undo stack as every other project mutation.
 
 ```swift
 struct TrackInput: Identifiable, Hashable {
