@@ -37,8 +37,13 @@ struct AudioInspectorView: View {
             // TimelineView re-renders on a fixed cadence so audio-thread tap
             // writes (which don't trigger Observation) still drive a live
             // meter — without forcing the bus to mirror the snapshot onto
-            // an `@Observable` property on every audio block.
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { _ in
+            // an `@Observable` property on every audio block. Explicit
+            // `AnimationTimelineSchedule` because `.animation(...)`'s
+            // dot-shorthand sometimes fails to infer `TimelineSchedule` from
+            // `TimelineView`'s generic and falls back onto unrelated types in
+            // scope (build failed with "type 'EditorModel' has no member
+            // 'animation'" on Xcode 26.5).
+            TimelineView(AnimationTimelineSchedule(minimumInterval: 1.0 / 30.0)) { _ in
                 MeterStrip(snapshot: model.audioBus.meterSnapshot)
                     .frame(height: 18)
                     .accessibilityLabel("Master output meter")
@@ -166,7 +171,9 @@ struct AudioClipFadesInspectorView: View {
     }
 
     @ViewBuilder
-    private func fadeRow(label: String, seconds: Double, set: @escaping (Double) -> Void) -> some View {
+    private func fadeRow(label: String,
+                         seconds: Double,
+                         set: @escaping @Sendable (Double) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label).font(.caption.bold())
