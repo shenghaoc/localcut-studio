@@ -128,12 +128,12 @@ struct ProjectBundleTests {
             "assets/a.mov": "cafef00d",
         ])
         let data = try index.encoded()
-        // Sorted-key JSON puts assets/a.mov before assets/b.mov.
-        let json = String(data: data, encoding: .utf8) ?? ""
-        let aIndex = json.range(of: "assets/a.mov")?.lowerBound
-        let bIndex = json.range(of: "assets/b.mov")?.lowerBound
-        #expect(aIndex != nil && bIndex != nil)
-        if let aIndex, let bIndex { #expect(aIndex < bIndex) }
+        // Re-encoding the same value twice produces byte-identical output: the
+        // encoder sorts keys itself before emitting. A substring-position
+        // check on the raw JSON would be fragile here because JSONEncoder
+        // escapes `/` as `\/` in the output.
+        let again = try index.encoded()
+        #expect(data == again)
 
         let decoded = try FingerprintIndex(data: data)
         #expect(decoded == index)
