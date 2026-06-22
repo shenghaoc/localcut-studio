@@ -26,19 +26,32 @@ nonisolated enum CaptionImporter {
     }
 
     /// Detects format from the URL extension; defaults to SRT. Constructs a
-    /// `CaptionTrack`, so must run on the main actor (the model is
-    /// MainActor-isolated). Callers wanting off-main reads should use
-    /// `parseLines(data:isVTT:)` instead.
+    /// `CaptionTrack` (main-actor-isolated by the project's default actor
+    /// setting), so this helper itself must run on the main actor. The file
+    /// read is synchronous — large sidecars would stall the UI.
+    ///
+    /// Production code routes through `EditorModel.importCaptionTrack(from:)`,
+    /// which offloads `Data(contentsOf:)` + `parseLines(data:isVTT:)` to a
+    /// detached task and constructs the `CaptionTrack` only after the parse
+    /// completes. This overload is retained for fixtures (where blocking on a
+    /// tiny in-memory parse is fine); the `deprecated` marker keeps future
+    /// production callers from accidentally adopting it.
+    @available(*, deprecated, message: "Use EditorModel.importCaptionTrack(from:) or parseLines(data:isVTT:) on a detached task. This overload blocks the main actor on file IO + parsing and is kept only for test fixtures.")
     @MainActor
     static func importTrack(from url: URL, name: String? = nil) throws -> CaptionTrack {
         let data = try Data(contentsOf: url)
         let isVTT = url.pathExtension.lowercased() == "vtt"
-        return try importTrack(
-            data: data,
-            isVTT: isVTT,
-            name: name ?? url.deletingPathExtension().lastPathComponent)
+        let lines = try parseLines(data: data, isVTT: isVTT)
+        return CaptionTrack(
+            name: name ?? url.deletingPathExtension().lastPathComponent,
+            lines: lines)
     }
 
+    /// Test-fixture convenience that synchronously parses in-memory bytes and
+    /// builds a `CaptionTrack`. Marked deprecated because production code must
+    /// not adopt the synchronous path — use `parseLines(data:isVTT:)` and build
+    /// the track on the main actor afterwards.
+    @available(*, deprecated, message: "Use parseLines(data:isVTT:) and construct CaptionTrack(name:lines:) explicitly. This overload is kept only for in-memory test fixtures.")
     @MainActor
     static func importTrack(data: Data, isVTT: Bool, name: String) throws -> CaptionTrack {
         let lines = try parseLines(data: data, isVTT: isVTT)

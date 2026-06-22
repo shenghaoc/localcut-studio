@@ -106,9 +106,9 @@ func srtSingleCue() throws {
     Hello world
 
     """
-    let track = try CaptionImporter.importTrack(data: Data(raw.utf8), isVTT: false, name: "T")
-    #expect(track.lines.count == 1)
-    let line = track.lines[0]
+    let lines = try CaptionImporter.parseLines(data: Data(raw.utf8), isVTT: false)
+    #expect(lines.count == 1)
+    let line = lines[0]
     #expect(line.text == "Hello world")
     #expect(line.range.start.seconds == 1)
     #expect(abs(line.range.end.seconds - 4.5) < 1e-6)
@@ -143,7 +143,7 @@ func srtMalformedSkipped() throws {
 func srtNonUTF8() {
     let bytes: [UInt8] = [0xFF, 0xFE, 0xFD]
     #expect(throws: CaptionImporter.ImportError.self) {
-        _ = try CaptionImporter.importTrack(data: Data(bytes), isVTT: false, name: "X")
+        _ = try CaptionImporter.parseLines(data: Data(bytes), isVTT: false)
     }
 }
 
@@ -158,9 +158,9 @@ func srtTolerantOfBOM() throws {
     First
 
     """.utf8))
-    let track = try CaptionImporter.importTrack(data: Data(bytes), isVTT: false, name: "T")
-    #expect(track.lines.count == 1)
-    #expect(track.lines[0].text == "First")
+    let lines = try CaptionImporter.parseLines(data: Data(bytes), isVTT: false)
+    #expect(lines.count == 1)
+    #expect(lines[0].text == "First")
 }
 
 @Test("VTT: tolerates a leading UTF-8 BOM before WEBVTT")
@@ -173,8 +173,8 @@ func vttTolerantOfBOM() throws {
     Hi
 
     """.utf8))
-    let track = try CaptionImporter.importTrack(data: Data(bytes), isVTT: true, name: "T")
-    #expect(track.lines.count == 1)
+    let lines = try CaptionImporter.parseLines(data: Data(bytes), isVTT: true)
+    #expect(lines.count == 1)
 }
 
 @Test("VTT: tab separator between end timestamp and cue settings is accepted")
@@ -192,7 +192,7 @@ func vttTabSeparator() throws {
 func vttHeaderRequired() {
     let raw = "00:00:01.000 --> 00:00:02.000\nNo header\n"
     #expect(throws: CaptionImporter.ImportError.self) {
-        _ = try CaptionImporter.importTrack(data: Data(raw.utf8), isVTT: true, name: "T")
+        _ = try CaptionImporter.parseLines(data: Data(raw.utf8), isVTT: true)
     }
 }
 
@@ -532,6 +532,67 @@ func animationSlideVerticalDirection() {
     #expect(topAtStart.translation.height > 0)
 }
 
+@Test("Animation: enter + exit longer than line scale to fit, preventing overlap (Claude bot final review)")
+func animationDurationsScaleToFitLine() {
+    var style = CaptionStyle()
+    style.enterAnimation = .pop
+    style.exitAnimation = .fade
+    // Configured 2 s enter + 1 s exit on a 1.5 s line. Without scaling, the
+    // exit window would begin at end - 1.0 = 0.5 s (overlapping the enter,
+    // which doesn't finish until end of line). With scaling, total = 3 s,
+    // so each value halves to 1.0 s / 0.5 s respectively — they meet exactly
+    // at t = 1.0 s with no overlap.
+    style.enterDuration = 2.0
+    style.exitDuration = 1.0
+
+    let start = CMTime.zero
+    let end = CMTime(seconds: 1.5, preferredTimescale: 600)
+
+    // At t = 1.0 s: scaled enter has just completed (so pop scale ≈ 1, opacity ≈ 1)
+    // and scaled exit is just beginning (so fade opacity = 1). Without the
+    // scaling fix, exit would have eaten half the opacity already.
+    let atSeam = CaptionAnimation.evaluate(
+        currentTime: CMTime(seconds: 1.0, preferredTimescale: 600),
+        lineStart: start, lineEnd: end, style: style)
+    #expect(atSeam.opacity > 0.95)
+    #expect(atSeam.scale > 0.95)
+}
+
+@Test("Animation: scaling preserves the enter / exit ratio")
+func animationDurationsScaleRatio() {
+    var style = CaptionStyle()
+    style.enterAnimation = .pop
+    style.exitAnimation = .pop
+    style.enterDuration = 2.0
+    style.exitDuration = 1.0  // ratio 2:1, total 3
+    let start = CMTime.zero
+    let end = CMTime(seconds: 1.5, preferredTimescale: 600)  // line 1.5, scale = 0.5
+
+    // After scaling: enter = 1.0, exit = 0.5. So exit begins at 1.0 (end - 0.5).
+    // Probe just before the exit boundary; only enter should be at full scale.
+    let beforeExit = CaptionAnimation.evaluate(
+        currentTime: CMTime(value: 999, timescale: 1000), // 0.999 s
+        lineStart: start, lineEnd: end, style: style)
+    #expect(beforeExit.opacity > 0.95)
+}
+
+@Test("Animation: durations that already fit are untouched")
+func animationDurationsNoScalingWhenFits() {
+    var style = CaptionStyle()
+    style.enterAnimation = .pop
+    style.exitAnimation = .fade
+    style.enterDuration = 0.25
+    style.exitDuration = 0.25  // total 0.5 vs 2 s line — no scaling.
+    let start = CMTime.zero
+    let end = CMTime(seconds: 2, preferredTimescale: 600)
+
+    // At t = 0.25 s the enter window has just finished — pop sits at full scale.
+    let postEnter = CaptionAnimation.evaluate(
+        currentTime: CMTime(seconds: 0.25, preferredTimescale: 600),
+        lineStart: start, lineEnd: end, style: style)
+    #expect(postEnter.scale > 0.95)
+}
+
 @Test("Animation: fade exit drives opacity to zero at line end")
 func animationFadeExit() {
     var style = CaptionStyle()
@@ -553,6 +614,28 @@ func presetRoundTrip() throws {
     let data = try CaptionPresetIO.encode(preset)
     let back = try CaptionPresetIO.decode(data)
     #expect(back == preset)
+}
+
+@Test("CaptionPresetIO.decode: surfaces the underlying decoder message on malformed JSON (Claude bot final review)")
+func presetDecodeSurfacesUnderlyingError() {
+    let garbage = Data("definitely not json".utf8)
+    var caught: CaptionPresetIO.IOError?
+    do {
+        _ = try CaptionPresetIO.decode(garbage)
+    } catch let error as CaptionPresetIO.IOError {
+        caught = error
+    } catch {
+        // Other errors are fine for the test outcome; we just want IOError.
+    }
+    guard case .decodeFailed(let detail) = caught else {
+        Issue.record("expected IOError.decodeFailed, got \(String(describing: caught))")
+        return
+    }
+    #expect(detail != nil)
+    #expect(!(detail ?? "").isEmpty)
+    // The user-facing description should embed that detail rather than the
+    // generic fallback message.
+    #expect((caught?.errorDescription ?? "").contains(detail ?? "💥"))
 }
 
 @Test("CaptionPresetV1: rejects unknown version")
@@ -766,8 +849,8 @@ struct PhaseThirtySmokeTests {
         Smoke caption
 
         """
-        let captionTrack = try CaptionImporter.importTrack(
-            data: Data(srt.utf8), isVTT: false, name: "Smoke")
+        let captionLines = try CaptionImporter.parseLines(data: Data(srt.utf8), isVTT: false)
+        let captionTrack = CaptionTrack(name: "Smoke", lines: captionLines)
         captionTrack.defaultStyle = BuiltInCaptionPresets.socialBoldYellow.style
         project.captionTracks = [captionTrack]
 

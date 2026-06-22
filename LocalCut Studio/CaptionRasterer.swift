@@ -266,6 +266,16 @@ nonisolated enum CaptionAnimation {
     /// Evaluates the visual state for a line at `currentTime` (project clock).
     /// `lineStart` and `lineEnd` are the line's range edges. `style` supplies
     /// the enter / exit kinds and durations.
+    ///
+    /// If the configured `enterDuration + exitDuration` would extend past the
+    /// line's own duration the two values are scaled DOWN proportionally so
+    /// they fit. The style object itself is left untouched (it is reused across
+    /// caption lines of varying lengths and `clamp()` cannot know the
+    /// per-line duration), and the inspector keeps showing the user's authored
+    /// values. The scaling only applies at evaluation time, per line, so a
+    /// 2 s caption with `enterDuration = 2 s` + `exitDuration = 1 s` plays a
+    /// 1.33 s enter followed by a 0.67 s exit instead of overlapping into a
+    /// simultaneous pop-in + fade-out.
     static func evaluate(currentTime: CMTime,
                          lineStart: CMTime,
                          lineEnd: CMTime,
@@ -275,9 +285,17 @@ nonisolated enum CaptionAnimation {
         let end = lineEnd.seconds
         guard end > start else { return CaptionAnimationFrame() }
 
+        let lineDuration = end - start
+        var enter = style.enterDuration
+        var exit = style.exitDuration
+        let totalAnimation = enter + exit
+        if totalAnimation > lineDuration && totalAnimation > 0 {
+            let scale = lineDuration / totalAnimation
+            enter *= scale
+            exit *= scale
+        }
+
         var frame = CaptionAnimationFrame()
-        let enter = style.enterDuration
-        let exit = style.exitDuration
 
         // Enter window.
         if enter > 0 {

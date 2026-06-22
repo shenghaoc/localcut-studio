@@ -243,12 +243,22 @@ enum BuiltInCaptionPresets {
 enum CaptionPresetIO {
     enum IOError: Error, LocalizedError {
         case unsupportedVersion(String)
-        case decodeFailed
+        /// Underlying decoder description (e.g. "Expected to decode String but
+        /// found a number instead"). Optional because the case shape must
+        /// support future paths that don't have a concrete decoder error, but
+        /// every current throw site populates it.
+        case decodeFailed(underlyingError: String?)
 
         var errorDescription: String? {
             switch self {
-            case .unsupportedVersion(let v): "Preset format version \(v) isn't supported by this build."
-            case .decodeFailed: "The preset file isn't valid JSON."
+            case .unsupportedVersion(let v):
+                "Preset format version \(v) isn't supported by this build."
+            case .decodeFailed(let detail):
+                if let detail, !detail.isEmpty {
+                    "The preset file isn't valid JSON: \(detail)"
+                } else {
+                    "The preset file isn't valid JSON."
+                }
             }
         }
     }
@@ -263,8 +273,14 @@ enum CaptionPresetIO {
     }
 
     static func decode(_ data: Data) throws -> CaptionPresetV1 {
-        guard let preset = try? JSONDecoder().decode(CaptionPresetV1.self, from: data) else {
-            throw IOError.decodeFailed
+        // Surface the decoder's specific message (missing field, wrong type,
+        // truncated JSON) so a malformed preset gives the user actionable
+        // feedback instead of just "isn't valid JSON".
+        let preset: CaptionPresetV1
+        do {
+            preset = try JSONDecoder().decode(CaptionPresetV1.self, from: data)
+        } catch {
+            throw IOError.decodeFailed(underlyingError: error.localizedDescription)
         }
         guard preset.version == "1" else {
             throw IOError.unsupportedVersion(preset.version)
