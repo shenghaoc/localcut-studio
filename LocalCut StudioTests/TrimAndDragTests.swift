@@ -68,7 +68,7 @@ struct TrimAndDragTests {
     }
 
     @Test("Trim left edge stops at previous clip boundary")
-    func trimLeftClampsToNeighbour() {
+    func trimLeftClampsToNeighbour() throws {
         let model = EditorModel()
         let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
         media.duration = time(20)
@@ -84,7 +84,7 @@ struct TrimAndDragTests {
 
         model.trimClip(id: clip2.id, edge: .left, to: time(3))
 
-        let trimmed = track.clips.first { $0.id == clip2.id }!
+        let trimmed = try #require(track.clips.first { $0.id == clip2.id })
         #expect(trimmed.timelineStart == time(5))
     }
 
@@ -123,7 +123,7 @@ struct TrimAndDragTests {
     }
 
     @Test("Trim right edge stops at next clip boundary")
-    func trimRightClampsToNeighbour() {
+    func trimRightClampsToNeighbour() throws {
         let model = EditorModel()
         let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
         media.duration = time(20)
@@ -139,7 +139,7 @@ struct TrimAndDragTests {
 
         model.trimClip(id: clip1.id, edge: .right, to: time(8))
 
-        let trimmed = track.clips.first { $0.id == clip1.id }!
+        let trimmed = try #require(track.clips.first { $0.id == clip1.id })
         #expect(trimmed.duration == time(5))
     }
 
@@ -179,7 +179,7 @@ struct TrimAndDragTests {
     }
 
     @Test("Move resolves overlap by snapping to nearest gap")
-    func moveResolvesOverlap() {
+    func moveResolvesOverlap() throws {
         let model = EditorModel()
         let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
         media.duration = time(20)
@@ -196,7 +196,7 @@ struct TrimAndDragTests {
 
         model.moveClip(id: clip2.id, toTrack: track.id, start: time(2))
 
-        let moved = track.clips.first { $0.id == clip2.id }!
+        let moved = try #require(track.clips.first { $0.id == clip2.id })
         #expect(moved.timelineStart == time(5))
     }
 

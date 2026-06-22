@@ -79,13 +79,13 @@ struct TransitionsTests {
     // MARK: - Effective placement / time ranges (T1.4, R2.3)
 
     @Test("Placements ripple the trailing clip earlier by the overlap")
-    func placementsRippleByOverlap() {
+    func placementsRippleByOverlap() throws {
         let (a, b) = makeAdjacentPair(transition: 1)
         let cuts = TransitionLayout.cuts(videoTracks: [videoTrack([a, b])])
         let placements = TransitionLayout.placements(for: [a, b], cuts: cuts)
 
-        let pa = placements.first { $0.id == a.id }!
-        let pb = placements.first { $0.id == b.id }!
+        let pa = try #require(placements.first { $0.id == a.id })
+        let pb = try #require(placements.first { $0.id == b.id })
 
         #expect(pa.effectiveStart == .zero)
         #expect(pa.effectiveEnd == time(5))
@@ -95,44 +95,44 @@ struct TransitionsTests {
     }
 
     @Test("Transition range is the overlap interval [effectiveStart, +overlap]")
-    func transitionRangeMatchesOverlap() {
+    func transitionRangeMatchesOverlap() throws {
         let (a, b) = makeAdjacentPair(transition: 1)
         let cuts = TransitionLayout.cuts(videoTracks: [videoTrack([a, b])])
         let placements = TransitionLayout.placements(for: [a, b], cuts: cuts)
-        let pb = placements.first { $0.id == b.id }!
+        let pb = try #require(placements.first { $0.id == b.id })
 
-        let range = pb.transitionRange!
+        let range = try #require(pb.transitionRange)
         #expect(range.start == time(4))
         #expect(range.duration == time(1))
         #expect(range.end == time(5))
         // The outgoing clip still covers up to 5, so they overlap on [4, 5].
-        let pa = placements.first { $0.id == a.id }!
+        let pa = try #require(placements.first { $0.id == a.id })
         #expect(pa.effectiveEnd == time(5))
     }
 
     @Test("Outgoing clip without a transition has no transition range")
-    func outgoingHasNoTransitionRange() {
+    func outgoingHasNoTransitionRange() throws {
         let (a, b) = makeAdjacentPair(transition: 1)
         let cuts = TransitionLayout.cuts(videoTracks: [videoTrack([a, b])])
         let placements = TransitionLayout.placements(for: [a, b], cuts: cuts)
-        let pa = placements.first { $0.id == a.id }!
+        let pa = try #require(placements.first { $0.id == a.id })
         #expect(pa.transitionRange == nil)
     }
 
     @Test("Linked audio ripples identically to video so A/V stays in sync")
-    func audioRipplesWithVideo() {
+    func audioRipplesWithVideo() throws {
         let (a, b) = makeAdjacentPair(transition: 1)
         let videoCuts = TransitionLayout.cuts(videoTracks: [videoTrack([a, b])])
         // Audio clips share the same boundaries but carry no transition.
         let audioA = Clip(mediaID: UUID(), sourceStart: .zero, duration: time(5), timelineStart: .zero)
         let audioB = Clip(mediaID: UUID(), sourceStart: .zero, duration: time(5), timelineStart: time(5))
         let audioPlacements = TransitionLayout.placements(for: [audioA, audioB], cuts: videoCuts)
-        let pb = audioPlacements.first { $0.id == audioB.id }!
+        let pb = try #require(audioPlacements.first { $0.id == audioB.id })
         #expect(pb.effectiveStart == time(4)) // same ripple as the video B
     }
 
     @Test("Chained transitions ripple cumulatively without negative ranges")
-    func chainedTransitionsRippleCumulatively() {
+    func chainedTransitionsRippleCumulatively() throws {
         let media = UUID()
         let a = Clip(mediaID: media, sourceStart: .zero, duration: time(4), timelineStart: .zero)
         var b = Clip(mediaID: media, sourceStart: .zero, duration: time(4), timelineStart: time(4))
@@ -144,9 +144,9 @@ struct TransitionsTests {
         let cuts = TransitionLayout.cuts(videoTracks: [track])
         let placements = TransitionLayout.placements(for: [a, b, c], cuts: cuts)
 
-        let pa = placements.first { $0.id == a.id }!
-        let pb = placements.first { $0.id == b.id }!
-        let pc = placements.first { $0.id == c.id }!
+        let pa = try #require(placements.first { $0.id == a.id })
+        let pb = try #require(placements.first { $0.id == b.id })
+        let pc = try #require(placements.first { $0.id == c.id })
 
         #expect(pa.effectiveStart == .zero)        // [0, 4]
         #expect(pb.effectiveStart == time(3))      // 4 - 1  → [3, 7]
@@ -250,7 +250,7 @@ struct TransitionsTests {
     }
 
     @Test("Adjacent transition windows never overlap (chained clamp)")
-    func chainedTransitionsClampAgainstSharedHandle() {
+    func chainedTransitionsClampAgainstSharedHandle() throws {
         // Three 5s clips with 4s transitions at both cuts. The middle clip's
         // incoming window already consumes 4s of its 5s, leaving 1s for the next.
         let media = UUID()
@@ -262,13 +262,15 @@ struct TransitionsTests {
 
         let cuts = TransitionLayout.cuts(videoTracks: [videoTrack([a, b, c])])
         let placements = TransitionLayout.placements(for: [a, b, c], cuts: cuts)
-        let pb = placements.first { $0.id == b.id }!
-        let pc = placements.first { $0.id == c.id }!
+        let pb = try #require(placements.first { $0.id == b.id })
+        let pc = try #require(placements.first { $0.id == c.id })
 
         #expect(pb.overlap == time(4))
         #expect(pc.overlap == time(1)) // clamped: 5 - 4 already used by B's incoming
         // The two transition windows abut but do not overlap.
-        #expect(pb.transitionRange!.end <= pc.transitionRange!.start)
+        let pbRange = try #require(pb.transitionRange)
+        let pcRange = try #require(pc.transitionRange)
+        #expect(pbRange.end <= pcRange.start)
     }
 
     // MARK: - EditorModel integration (T1.4, R3, R4)

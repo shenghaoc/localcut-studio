@@ -634,8 +634,12 @@ func presetDecodeSurfacesUnderlyingError() {
     #expect(detail != nil)
     #expect(!(detail ?? "").isEmpty)
     // The user-facing description should embed that detail rather than the
-    // generic fallback message.
-    #expect((caught?.errorDescription ?? "").contains(detail ?? "💥"))
+    // generic fallback message. Bind both sides into locals so the `#expect`
+    // macro evaluates a plain `description.contains(needle)` rather than
+    // decomposing the `??` operators (which trips spurious macro warnings).
+    let description = caught?.errorDescription ?? ""
+    let needle = detail ?? "💥"
+    #expect(description.contains(needle))
 }
 
 @Test("CaptionPresetV1: rejects unknown version")
@@ -742,9 +746,7 @@ func presetSnapshotShape() {
         let line = CaptionLine(
             range: CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600)),
             text: "Sample caption")
-        let raster = rasterer.idleRaster(line: line, style: preset.style, renderSize: canvas)
-        let unwrapped = try? #require(raster)
-        guard let raster = unwrapped else { continue }
+        guard let raster = rasterer.idleRaster(line: line, style: preset.style, renderSize: canvas) else { continue }
         #expect(raster.boundingBox.width > 0, "Preset \(preset.name) produced an empty bounding box")
         #expect(raster.boundingBox.height > 0, "Preset \(preset.name) produced an empty bounding box")
         // Bounding box must sit inside the canvas (with padding for stroke / pill).

@@ -21,3 +21,8 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 
 **Learning:** Similar to other custom layout sliders, the Strength, Mask Warmth, and Luminance Gate sliders in the Beauty section of the Inspector announced generic values and had redundant visual text read by VoiceOver.
 **Action:** Hid the visual labels with `.accessibilityHidden(true)` and added `.accessibilityValue` to the sliders directly to ensure a clean VoiceOver experience, matching the existing accessible slider pattern.
+
+## 2026-06-23 — One slider row component, not five copies
+
+**Learning:** Five inspector slider builders (colour grade, beauty, transition duration, track gain, clip fades) had each re-implemented the caption + `monospacedDigit` + accessibility-label/value pairing, drifting apart over time (one hid the caption from VoiceOver, another didn't).
+**Action:** Use the shared `LabeledSliderRow` (generic over `BinaryFloatingPoint`, `.inline` vs `.leadingTrailing` caption styles). It bakes in the journal's rule — hide the redundant visual caption (`.accessibilityHidden`) on inline rows and voice the slider via `.accessibilityLabel`/`.accessibilityValue`. New sliders adopt it instead of hand-rolling the layout. Note: a `Binding`'s `set` that mutates the `@MainActor` model must be `@escaping @MainActor` (not `@Sendable`) — a global-actor closure is implicitly Sendable AND keeps the isolation.

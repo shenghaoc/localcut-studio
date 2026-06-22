@@ -95,17 +95,15 @@ struct InspectorView: View {
                 }
             }
 
-            VStack(alignment: .leading) {
-                // Show the effective (clamped) duration so the label can't exceed
-                // the slider's ceiling after a neighbour is trimmed shorter.
-                Text("Duration \(String(format: "%.2f s", min(transition.duration.seconds, maxTransitionSeconds)))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                Slider(value: transitionDurationBinding, in: minTransitionSeconds...maxTransitionSeconds)
-                    .accessibilityLabel("Transition Duration")
-                    .accessibilityValue(String(format: "%.2f seconds", min(transition.duration.seconds, maxTransitionSeconds)))
-            }
+            // Show the effective (clamped) duration so the label can't exceed
+            // the slider's ceiling after a neighbour is trimmed shorter.
+            LabeledSliderRow(
+                label: "Duration",
+                spokenLabel: "Transition Duration",
+                display: String(format: "%.2f s", min(transition.duration.seconds, maxTransitionSeconds)),
+                spokenValue: String(format: "%.2f seconds", min(transition.duration.seconds, maxTransitionSeconds)),
+                value: transitionDurationBinding,
+                range: minTransitionSeconds...maxTransitionSeconds)
 
             Button(role: .destructive) {
                 model.removeSelectedTransition()
@@ -145,16 +143,18 @@ struct InspectorView: View {
     @ViewBuilder
     private var colourSection: some View {
         Section("Colour") {
-            colourSlider(label: "Exposure", value: colourGradeBinding(\.exposure),
-                         range: Float(-2)...Float(2), step: Float(0.05), display: String(format: "%+.2f", model.selectedClipGrade.exposure))
-            colourSlider(label: "Contrast", value: colourGradeBinding(\.contrast),
-                         range: Float(0.5)...Float(1.5), step: Float(0.05), display: String(format: "%.2f", model.selectedClipGrade.contrast))
-            colourSlider(label: "Saturation", value: colourGradeBinding(\.saturation),
-                         range: Float(0)...Float(2), step: Float(0.05), display: String(format: "%.2f", model.selectedClipGrade.saturation))
-            colourSlider(label: "Temp offset", accessibilityLabel: "Temperature Offset", value: colourGradeBinding(\.temperatureOffset),
-                         range: Float(-4000)...Float(4000), step: Float(100), display: "\(String(format: "%+.0f", model.selectedClipGrade.temperatureOffset))K")
-            colourSlider(label: "Tint offset", accessibilityLabel: "Tint Offset", value: colourGradeBinding(\.tintOffset),
-                         range: Float(-150)...Float(150), step: Float(10), display: String(format: "%+.0f", model.selectedClipGrade.tintOffset))
+            LabeledSliderRow(label: "Exposure", display: String(format: "%+.2f", model.selectedClipGrade.exposure),
+                             value: colourGradeBinding(\.exposure), range: -2...2, step: 0.05)
+            LabeledSliderRow(label: "Contrast", display: String(format: "%.2f", model.selectedClipGrade.contrast),
+                             value: colourGradeBinding(\.contrast), range: 0.5...1.5, step: 0.05)
+            LabeledSliderRow(label: "Saturation", display: String(format: "%.2f", model.selectedClipGrade.saturation),
+                             value: colourGradeBinding(\.saturation), range: 0...2, step: 0.05)
+            LabeledSliderRow(label: "Temp offset", spokenLabel: "Temperature Offset",
+                             display: "\(String(format: "%+.0f", model.selectedClipGrade.temperatureOffset))K",
+                             value: colourGradeBinding(\.temperatureOffset), range: -4000...4000, step: 100)
+            LabeledSliderRow(label: "Tint offset", spokenLabel: "Tint Offset",
+                             display: String(format: "%+.0f", model.selectedClipGrade.tintOffset),
+                             value: colourGradeBinding(\.tintOffset), range: -150...150, step: 10)
 
             HStack {
                 Button("Import LUT…") { showLUTImporter = true }
@@ -164,23 +164,6 @@ struct InspectorView: View {
                 Button("Reset") { model.resetClipColourEffects() }
                     .controlSize(.small)
             }
-        }
-    }
-
-    @ViewBuilder
-    /// - Parameter accessibilityLabel: Spoken label for VoiceOver; defaults to
-    ///   the visible `label` but lets callers spell out abbreviations (e.g.
-    ///   "Temp offset" → "Temperature Offset").
-    private func colourSlider(label: String, accessibilityLabel: String? = nil, value: Binding<Float>, range: ClosedRange<Float>, step: Float, display: String) -> some View {
-        VStack(alignment: .leading) {
-            // Visual label only; hidden so VoiceOver reads just the slider.
-            Text("\(label)  \(display)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Slider(value: value, in: range, step: step)
-                .accessibilityLabel(accessibilityLabel ?? label)
-                .accessibilityValue(display)
         }
     }
 
@@ -213,28 +196,28 @@ struct InspectorView: View {
     @ViewBuilder
     private var beautySection: some View {
         Section("Beauty") {
-            beautySlider(
+            LabeledSliderRow(
                 label: "Strength",
+                display: "\(Int(model.selectedClipSkinSmooth.strength.defaultValue * 100))%",
                 value: skinSmoothBinding(\.strength.defaultValue),
-                range: Float(0)...Float(1),
-                display: "\(Int(model.selectedClipSkinSmooth.strength.defaultValue * 100))%"
+                range: 0...1
             )
 
             DisclosureGroup("Advanced") {
-                beautySlider(
+                LabeledSliderRow(
                     label: "Mask Warmth",
+                    display: String(format: "%+.2f", model.selectedClipSkinSmooth.maskWarmthBias),
                     value: skinSmoothBinding(\.maskWarmthBias),
-                    range: Float(-1)...Float(1),
-                    step: Float(0.05),
-                    display: String(format: "%+.2f", model.selectedClipSkinSmooth.maskWarmthBias)
+                    range: -1...1,
+                    step: 0.05
                 )
 
-                beautySlider(
+                LabeledSliderRow(
                     label: "Luminance Gate",
+                    display: String(format: "%.2f", model.selectedClipSkinSmooth.maskLuminanceGate),
                     value: skinSmoothBinding(\.maskLuminanceGate),
-                    range: Float(0)...Float(1),
-                    step: Float(0.05),
-                    display: String(format: "%.2f", model.selectedClipSkinSmooth.maskLuminanceGate)
+                    range: 0...1,
+                    step: 0.05
                 )
             }
 
@@ -259,25 +242,6 @@ struct InspectorView: View {
                 Button("Reset") { model.resetClipSkinSmooth() }
                     .controlSize(.small)
                 Spacer()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func beautySlider(label: String, value: Binding<Float>, range: ClosedRange<Float>, step: Float? = nil, display: String) -> some View {
-        VStack(alignment: .leading) {
-            Text("\(label) \(display)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            if let step {
-                Slider(value: value, in: range, step: step)
-                    .accessibilityLabel(label)
-                    .accessibilityValue(display)
-            } else {
-                Slider(value: value, in: range)
-                    .accessibilityLabel(label)
-                    .accessibilityValue(display)
             }
         }
     }

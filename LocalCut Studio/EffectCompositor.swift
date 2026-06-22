@@ -527,83 +527,51 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     }
 
     nonisolated private func applyColourGrade(_ image: CIImage, grade: ColourGrade) -> CIImage {
-        var result = image
-
-        if grade.exposure != 0 {
-            let filter = CIFilter.exposureAdjust()
-            filter.inputImage = result
-            filter.ev = grade.exposure
-            result = filter.outputImage ?? result
-        }
-
-        if grade.contrast != 1 || grade.saturation != 1 {
-            let filter = CIFilter.colorControls()
-            filter.inputImage = result
-            filter.contrast = grade.contrast
-            filter.saturation = grade.saturation
-            result = filter.outputImage ?? result
-        }
-
-        if grade.temperatureOffset != 0 || grade.tintOffset != 0 {
-            let filter = CIFilter.temperatureAndTint()
-            filter.inputImage = result
-            filter.neutral = CIVector(x: 6500, y: 0)
-            filter.targetNeutral = CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset))
-            result = filter.outputImage ?? result
-        }
-
-        return result
+        return image
+            .applying(when: grade.exposure != 0) {
+                let filter = CIFilter.exposureAdjust()
+                filter.inputImage = $0
+                filter.ev = grade.exposure
+                return filter.outputImage
+            }
+            .applying(when: grade.contrast != 1 || grade.saturation != 1) {
+                let filter = CIFilter.colorControls()
+                filter.inputImage = $0
+                filter.contrast = grade.contrast
+                filter.saturation = grade.saturation
+                return filter.outputImage
+            }
+            .applying(when: grade.temperatureOffset != 0 || grade.tintOffset != 0) {
+                let filter = CIFilter.temperatureAndTint()
+                filter.inputImage = $0
+                filter.neutral = CIVector(x: 6500, y: 0)
+                filter.targetNeutral = CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset))
+                return filter.outputImage
+            }
     }
 
     // MARK: - Skin smoothing kernels
 
     /// Skin-tone probability mask kernel — compiled once, reused across all frames.
-    private static let skinMaskKernel: CIColorKernel? = {
-        CIColorKernel(source: """
-            kernel vec4 skinMask(__sample image, float warmthBias, float luminanceGate) {
-                // Unpremultiply to get true colors for YCbCr conversion
-                float alpha = image.a;
-                vec3 rgb = alpha > 0.0 ? image.rgb / alpha : vec3(0.0);
-
-                // YCbCr conversion (normalized 0-1 inputs, 0-1 outputs)
-                float y = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
-                float cb = 0.5 - 0.168736 * rgb.r - 0.331264 * rgb.g + 0.5 * rgb.b;
-                float cr = 0.5 + 0.5 * rgb.r - 0.418688 * rgb.g - 0.081312 * rgb.b;
-
-                // Skin tone detection in Cb-Cr space
-                // Typical skin: Cb in [0.3, 0.5], Cr in [0.5, 0.7]
-                float cbMin = 0.3 + warmthBias * 0.05;
-                float cbMax = 0.5 + warmthBias * 0.05;
-                float crMin = 0.5 + warmthBias * 0.05;
-                float crMax = 0.7 + warmthBias * 0.05;
-
-                // Soft falloff at edges
-                float cbDist = smoothstep(cbMin - 0.05, cbMin, cb) * (1.0 - smoothstep(cbMax, cbMax + 0.05, cb));
-                float crDist = smoothstep(crMin - 0.05, crMin, cr) * (1.0 - smoothstep(crMax, crMax + 0.05, cr));
-
-                float skinProb = cbDist * crDist;
-
-                // Luminance gate: reduce probability in very dark or very bright regions
-                float lumGate = smoothstep(0.0, luminanceGate * 0.5, y) * (1.0 - smoothstep(1.0 - luminanceGate * 0.5, 1.0, y));
-                skinProb *= lumGate;
-
-                // Scale by alpha to prevent transparent regions from accumulating skin probability
-                skinProb *= alpha;
-
-                return vec4(skinProb, skinProb, skinProb, alpha);
-            }
-            """)
-    }()
+    /// Backed by the Metal source in `SkinSmoothKernels.ci.metal`.
+    private static let skinMaskKernel: CIColorKernel? = makeColorKernel(named: "skinMask")
 
     /// Blend kernel for compositing smoothed image over original using mask — compiled once.
-    private static let skinBlendKernel: CIColorKernel? = {
-        CIColorKernel(source: """
-            kernel vec4 skinBlend(__sample original, __sample smoothed, __sample mask, float strength) {
-                float maskVal = mask.r * strength;
-                return mix(original, smoothed, maskVal);
-            }
-            """)
-    }()
+    private static let skinBlendKernel: CIColorKernel? = makeColorKernel(named: "skinBlend")
+
+    /// Loads a named Core Image colour kernel from the app's default Metal
+    /// library (the kernels in `SkinSmoothKernels.ci.metal`). A load failure
+    /// degrades skin smoothing to a no-op — logged once at static init — rather
+    /// than crashing the render path.
+    private static func makeColorKernel(named name: String) -> CIColorKernel? {
+        guard let libraryURL = Bundle.main.url(forResource: "default", withExtension: "metallib"),
+              let libraryData = try? Data(contentsOf: libraryURL),
+              let kernel = try? CIColorKernel(functionName: name, fromMetalLibraryData: libraryData) else {
+            os_log(.error, "Skin-smoothing Core Image kernel failed to load — effect disabled")
+            return nil
+        }
+        return kernel
+    }
 
     // MARK: - Skin smoothing
 
@@ -812,5 +780,18 @@ private enum CubeLUTParser {
         }
 
         return CubeLUTResult(dimension: dimension, table: table)
+    }
+}
+
+// MARK: - Filter-chain plumbing
+
+private extension CIImage {
+    /// Routes the image through `transform` when `condition` holds, otherwise
+    /// passes it through unchanged. A `nil` result from `transform` falls back
+    /// to the input — collapsing the repeated "set `inputImage` / take
+    /// `outputImage ?? prior`" boilerplate into one chainable step.
+    nonisolated func applying(when condition: Bool, _ transform: (CIImage) -> CIImage?) -> CIImage {
+        guard condition else { return self }
+        return transform(self) ?? self
     }
 }
