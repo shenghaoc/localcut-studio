@@ -1,6 +1,75 @@
 import Foundation
 import AVFoundation
 import CoreGraphics
+import CoreVideo
+
+// MARK: - Working colour space
+
+/// The project's working colour space. Tags the compositor's `CIContext`
+/// `workingColorSpace` and every output `CVPixelBuffer` so downstream
+/// `AVAssetExportSession` / `AVAssetWriter` carry it through.
+///
+/// sRGB is the default and the path all v1 grading was tuned against; the
+/// wider-gamut spaces are configurable for advanced finishing but not yet
+/// validated against a calibrated reference (see [design](../../.kiro/specs/feature-colour-management/design.md#risks)).
+nonisolated enum WorkingColourSpace: String, Codable, Hashable, Sendable, CaseIterable, Identifiable {
+    case sRGB
+    case displayP3
+    case rec709
+    case rec2020
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .sRGB: "sRGB"
+        case .displayP3: "Display P3"
+        case .rec709: "Rec. 709"
+        case .rec2020: "Rec. 2020"
+        }
+    }
+
+    /// `CGColorSpace` used as the `CIContext.workingColorSpace` and the
+    /// render-time `colorSpace` argument.
+    var cgColorSpace: CGColorSpace {
+        let name: CFString
+        switch self {
+        case .sRGB: name = CGColorSpace.sRGB
+        case .displayP3: name = CGColorSpace.displayP3
+        case .rec709: name = CGColorSpace.itur_709
+        case .rec2020: name = CGColorSpace.itur_2020
+        }
+        return CGColorSpace(name: name) ?? CGColorSpaceCreateDeviceRGB()
+    }
+
+    /// Value for the `kCVImageBufferColorPrimariesKey` attachment.
+    var cvColorPrimaries: CFString {
+        switch self {
+        case .sRGB, .rec709: kCVImageBufferColorPrimaries_ITU_R_709_2
+        case .displayP3: kCVImageBufferColorPrimaries_P3_D65
+        case .rec2020: kCVImageBufferColorPrimaries_ITU_R_2020
+        }
+    }
+
+    /// Value for the `kCVImageBufferTransferFunctionKey` attachment. Display P3
+    /// uses the sRGB transfer (the IEC 61966-2-1 piecewise curve), matching
+    /// what `CGColorSpace.displayP3` declares.
+    var cvTransferFunction: CFString {
+        switch self {
+        case .sRGB, .displayP3: kCVImageBufferTransferFunction_sRGB
+        case .rec709: kCVImageBufferTransferFunction_ITU_R_709_2
+        case .rec2020: kCVImageBufferTransferFunction_ITU_R_2020
+        }
+    }
+
+    /// Value for the `kCVImageBufferYCbCrMatrixKey` attachment.
+    var cvYCbCrMatrix: CFString {
+        switch self {
+        case .sRGB, .displayP3, .rec709: kCVImageBufferYCbCrMatrix_ITU_R_709_2
+        case .rec2020: kCVImageBufferYCbCrMatrix_ITU_R_2020
+        }
+    }
+}
 
 // MARK: - Metadata Sanitization
 
@@ -855,6 +924,9 @@ final class Project {
     var renderSize = CGSize(width: 1920, height: 1080)
     /// Output frame rate (frames per second).
     var frameRate: Double = 30
+    /// Working colour space used by the compositor's `CIContext` and stamped
+    /// onto every output `CVPixelBuffer` attachment.
+    var workingColourSpace: WorkingColourSpace = .sRGB
 
     init() {
         videoTracks = [Track(name: "V1", kind: .video)]

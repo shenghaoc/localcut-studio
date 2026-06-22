@@ -64,11 +64,16 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let passthroughTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
     let units: [RenderUnit]
     let captions: [CaptionRenderItem]
+    /// Working colour space — drives the per-space `CIContext` choice and the
+    /// output buffer's colour-tag attachments.
+    let workingColourSpace: WorkingColourSpace
 
-    init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = []) {
+    init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = [],
+         workingColourSpace: WorkingColourSpace = .sRGB) {
         self.timeRange = timeRange
         self.units = units
         self.captions = captions
+        self.workingColourSpace = workingColourSpace
         // A transition tweens its layers across the interval. Captions also tween
         // (per-frame animation transform), so any caption forces tweening too.
         containsTweening = !captions.isEmpty || units.contains {
@@ -83,20 +88,68 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
 final class EffectCompositor: NSObject, AVVideoCompositing {
 
-    private static let sRGBColorSpace: CGColorSpace = {
-        CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-    }()
+    /// Per-working-space `CIContext` cache. `CIContext.workingColorSpace` is
+    /// constructor-only, so we hold one context per space rather than juggle
+    /// per-render conversions. The cache survives composition rebuilds.
+    /// `uncheckedState:` because `CIContext` is not `Sendable`; the lock is
+    /// the synchronisation, not the type system.
+    private static let contextCache = OSAllocatedUnfairLock<[WorkingColourSpace: CIContext]>(uncheckedState: [:])
 
-    private static let sharedCIContext: CIContext = {
-        if let device = MTLCreateSystemDefaultDevice() {
-            return CIContext(mtlDevice: device, options: [.workingColorSpace: sRGBColorSpace])
+    nonisolated static func context(for space: WorkingColourSpace) -> CIContext {
+        contextCache.withLock { cache in
+            if let existing = cache[space] { return existing }
+            let cs = space.cgColorSpace
+            let ctx: CIContext
+            if let device = MTLCreateSystemDefaultDevice() {
+                ctx = CIContext(mtlDevice: device, options: [.workingColorSpace: cs])
+            } else {
+                ctx = CIContext(options: [.workingColorSpace: cs])
+            }
+            cache[space] = ctx
+            return ctx
         }
-        return CIContext(options: [.workingColorSpace: sRGBColorSpace])
-    }()
+    }
+
+    /// Tags `buffer` with the colour primaries / transfer function / YCbCr
+    /// matrix attachments matching `space`, so the export writer (which copies
+    /// the destination buffer's attachments onto the encoded frame) writes a
+    /// colour-tagged movie. `.shouldPropagate` keeps the tags attached when the
+    /// buffer is copied internally by AVFoundation.
+    nonisolated static func applyColourAttachments(_ space: WorkingColourSpace, to buffer: CVPixelBuffer) {
+        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey,
+                              space.cvColorPrimaries, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey,
+                              space.cvTransferFunction, .shouldPropagate)
+        CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey,
+                              space.cvYCbCrMatrix, .shouldPropagate)
+    }
 
     /// Shared rasteriser so the cache survives across composition rebuilds and
     /// frame requests. Internally thread-safe (uses `OSAllocatedUnfairLock`).
     private static let sharedCaptionRasterer = CaptionRasterer()
+
+    /// Empties the shared caption-raster cache. Called when the project's
+    /// working colour space changes — cached rasters were rendered in the
+    /// previous space and must be re-rendered in the new one (R1.3).
+    nonisolated static func purgeCaptionRasterCache() {
+        sharedCaptionRasterer.purge()
+    }
+
+    /// Diagnostic accessor for tests covering R6.1.
+    nonisolated static var captionRasterCacheCount: Int {
+        sharedCaptionRasterer.count
+    }
+
+    /// Test-only seam: populate the shared raster cache for one line + style at
+    /// the given render size. Returns whether an entry was inserted.
+    @discardableResult
+    nonisolated static func _testPopulateCaptionRasterCache(line: CaptionLine,
+                                                            style: CaptionStyle,
+                                                            renderSize: CGSize) -> Bool {
+        let before = sharedCaptionRasterer.count
+        _ = sharedCaptionRasterer.idleRaster(line: line, style: style, renderSize: renderSize)
+        return sharedCaptionRasterer.count > before
+    }
 
     nonisolated var sourcePixelBufferAttributes: [String: any Sendable]? {
         [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
@@ -126,6 +179,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
 
         let renderSize = request.renderContext.size
+        let space = instruction.workingColourSpace
+        let ciContext = Self.context(for: space)
         var result: CIImage?
 
         for unit in instruction.units {
@@ -155,7 +210,20 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let composited = result?.composited(over: black) ?? black
 
         let destinationRect = CGRect(origin: .zero, size: renderSize)
-        Self.sharedCIContext.render(composited, to: destination, bounds: destinationRect, colorSpace: Self.sRGBColorSpace)
+        let outputColorSpace = space.cgColorSpace
+        ciContext.render(composited, to: destination, bounds: destinationRect, colorSpace: outputColorSpace)
+
+        // Tag the output buffer so the export pipeline writes a colour-tagged
+        // movie instead of silently flattening to sRGB (R2.2).
+        Self.applyColourAttachments(space, to: destination)
+
+        // Feed the scopes sampler on a 30 Hz cap; the sampler shortcuts to a
+        // no-op when its panel is hidden, so this is free in the common case.
+        if ScopeSampler.shared.shouldSample() {
+            let sample = ScopeSampler.shared.sample(image: composited, context: ciContext,
+                                                    colorSpace: outputColorSpace)
+            ScopeSampler.shared.publish(sample)
+        }
 
         request.finish(withComposedVideoFrame: destination)
     }
@@ -644,7 +712,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         filter.inputImage = image
         filter.cubeDimension = Float(dimension)
         filter.cubeData = cubeData
-        filter.colorSpace = Self.sRGBColorSpace
+        // .cube files are authored against sRGB, irrespective of the project's
+        // working space — the LUT's input axes are sRGB code values.
+        filter.colorSpace = WorkingColourSpace.sRGB.cgColorSpace
         return filter.outputImage
     }
 }

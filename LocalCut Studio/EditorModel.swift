@@ -30,6 +30,9 @@ final class EditorModel {
     // Timeline view state
     var pixelsPerSecond: Double = 80
 
+    // Scopes panel (colour-management feature) — session-only UI flag, not persisted.
+    var showScopes: Bool = false
+
     // Status / export
     var statusMessage = "Import media to begin."
     var exportProgress: Double?
@@ -887,6 +890,18 @@ final class EditorModel {
         guard fps != project.frameRate else { return }
         performUndoable("Change Frame Rate") {
             project.frameRate = fps
+            scheduleRebuild()
+        }
+    }
+
+    /// Changes the project's working colour space as one undoable step. Purges
+    /// the title-raster cache so cached captions re-render in the new space
+    /// (R1.3) and rebuilds the preview so the new buffer tagging takes effect.
+    func setWorkingColourSpace(_ space: WorkingColourSpace) {
+        guard space != project.workingColourSpace else { return }
+        performUndoable("Change Working Space") {
+            project.workingColourSpace = space
+            EffectCompositor.purgeCaptionRasterCache()
             scheduleRebuild()
         }
     }

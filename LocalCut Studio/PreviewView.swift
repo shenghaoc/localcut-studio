@@ -25,18 +25,28 @@ struct PreviewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack {
-                Color.black
-                if model.player.currentItem != nil {
-                    PreviewPlayerView(player: model.player)
-                } else {
-                    ContentUnavailableView(
-                        "No Preview",
-                        systemImage: "film.stack",
-                        description: Text("Add a clip to the timeline to see it here."))
-                    .foregroundStyle(.white.opacity(0.6))
+            HStack(spacing: 0) {
+                ZStack {
+                    Color.black
+                    if model.player.currentItem != nil {
+                        PreviewPlayerView(player: model.player)
+                    } else {
+                        ContentUnavailableView(
+                            "No Preview",
+                            systemImage: "film.stack",
+                            description: Text("Add a clip to the timeline to see it here."))
+                        .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                .layoutPriority(1)
+
+                if model.showScopes {
+                    ScopesView()
+                        .frame(minWidth: 200, idealWidth: 240)
+                        .transition(.move(edge: .trailing))
                 }
             }
+            .animation(.default, value: model.showScopes)
 
             transportBar
                 .padding(.horizontal, 12)

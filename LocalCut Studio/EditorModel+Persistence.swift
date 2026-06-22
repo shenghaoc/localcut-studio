@@ -29,6 +29,7 @@ struct ProjectState: Equatable {
     var unresolvedMedia: [MediaRef]
     var renderSize: CGSize
     var frameRate: Double
+    var workingColourSpace: WorkingColourSpace
     var videoTracks: [TrackClips]
     var audioTracks: [TrackClips]
     var captionTracks: [CaptionTrackSnapshot]
@@ -43,6 +44,7 @@ struct ProjectState: Equatable {
             && lhs.unresolvedMedia == rhs.unresolvedMedia
             && lhs.renderSize == rhs.renderSize
             && lhs.frameRate == rhs.frameRate
+            && lhs.workingColourSpace == rhs.workingColourSpace
             && lhs.videoTracks == rhs.videoTracks
             && lhs.audioTracks == rhs.audioTracks
             && lhs.captionTracks == rhs.captionTracks
@@ -70,6 +72,7 @@ extension EditorModel {
             unresolvedMedia: unresolvedMedia,
             renderSize: project.renderSize,
             frameRate: project.frameRate,
+            workingColourSpace: project.workingColourSpace,
             videoTracks: project.videoTracks.map {
                 ProjectState.TrackClips(trackID: $0.id, name: $0.name, isMuted: $0.isMuted, clips: $0.clips)
             },
@@ -95,6 +98,12 @@ extension EditorModel {
         unresolvedMedia = state.unresolvedMedia
         project.renderSize = state.renderSize
         project.frameRate = state.frameRate
+        if project.workingColourSpace != state.workingColourSpace {
+            project.workingColourSpace = state.workingColourSpace
+            // Cached rasters were rendered in the previous space; drop them so
+            // an undo across a Change Working Space step re-rasterises correctly.
+            EffectCompositor.purgeCaptionRasterCache()
+        }
         for snapshot in state.videoTracks {
             if let track = project.videoTracks.first(where: { $0.id == snapshot.trackID }) {
                 track.name = snapshot.name
@@ -300,6 +309,7 @@ extension EditorModel {
         project.name = "Untitled"
         project.renderSize = CGSize(width: 1920, height: 1080)
         project.frameRate = 30
+        project.workingColourSpace = .sRGB
         project.videoTracks = [Track(name: "V1", kind: .video)]
         project.audioTracks = [Track(name: "A1", kind: .audio)]
         project.captionTracks = []
@@ -370,6 +380,7 @@ extension EditorModel {
         project.name = url?.deletingPathExtension().lastPathComponent ?? document.name
         project.renderSize = CGSize(width: document.renderWidth, height: document.renderHeight)
         project.frameRate = document.frameRate
+        project.workingColourSpace = document.workingColourSpace
 
         var unresolved: [MediaRef] = []
         var refreshedBookmark = false

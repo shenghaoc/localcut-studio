@@ -301,7 +301,8 @@ enum CompositionBuilder {
             renderSize: renderSize,
             frameRate: project.frameRate,
             fillerTrackID: fillerTrackID,
-            fillerTailRange: fillerTailRange)
+            fillerTailRange: fillerTailRange,
+            workingColourSpace: project.workingColourSpace)
 
         let audioMix: AVAudioMix?
         if hasAudioCrossfade {
@@ -333,7 +334,8 @@ enum CompositionBuilder {
         renderSize: CGSize,
         frameRate: Double,
         fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid,
-        fillerTailRange: CMTimeRange? = nil) async throws -> AVVideoComposition? {
+        fillerTailRange: CMTimeRange? = nil,
+        workingColourSpace: WorkingColourSpace) async throws -> AVVideoComposition? {
 
         // The filler counts as "something to render" for the tail interval, so
         // a caption-only or audio-only-with-captions project still gets a
@@ -422,7 +424,8 @@ enum CompositionBuilder {
             let captionsForInterval = activeCaptionItems(
                 in: captionTracks, midpoint: midpoint)
             instructions.append(EffectCompositionInstruction(
-                timeRange: range, units: units, captions: captionsForInterval))
+                timeRange: range, units: units, captions: captionsForInterval,
+                workingColourSpace: workingColourSpace))
         }
 
         var config = try await AVVideoComposition.Configuration(for: composition)
@@ -430,6 +433,12 @@ enum CompositionBuilder {
         config.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))
         config.customVideoCompositorClass = EffectCompositor.self
         config.instructions = instructions
+        // Declare the working-space tags on the AVVideoComposition itself so the
+        // export pipeline copies them onto the encoded movie metadata even before
+        // the per-frame buffer attachments arrive (R2.2).
+        config.colorPrimaries = workingColourSpace.cvColorPrimaries as String
+        config.colorTransferFunction = workingColourSpace.cvTransferFunction as String
+        config.colorYCbCrMatrix = workingColourSpace.cvYCbCrMatrix as String
         return AVVideoComposition(configuration: config)
     }
 
