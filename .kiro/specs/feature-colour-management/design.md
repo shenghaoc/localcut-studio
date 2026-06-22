@@ -25,9 +25,9 @@ Give the project an explicit **working colour space** that follows every frame t
 | sRGB (default) | `CGColorSpace.sRGB` | `ITU_R_709_2` | `sRGB` | `ITU_R_709_2` |
 | Display P3 | `CGColorSpace.displayP3` | `P3_D65` | `sRGB` | `ITU_R_709_2` |
 | Rec.709 | `CGColorSpace.itur_709` | `ITU_R_709_2` | `ITU_R_709_2` | `ITU_R_709_2` |
-| Rec.2020 | `CGColorSpace.itur_2020` | `ITU_R_2020` | `ITU_R_2020` | `ITU_R_2020` |
+| Rec.2020 (SDR) | `CGColorSpace.itur_2020` | `ITU_R_2020` | `ITU_R_709_2` | `ITU_R_709_2` |
 
-These mappings are conservative SDR choices — HDR transfer functions (PQ, HLG) and Rec.2020 non-constant-luminance matrix variations are out of scope for v1; Rec.2020 here means SDR Rec.2020 only. Phase 39's vertical-finishing spec or a future HDR spec can extend the table without breaking the on-disk format.
+Rec.2020 here means **SDR Rec.2020 only**: only the *gamut* primaries are widened; the transfer function and YCbCr matrix stay on the BT.709 SDR values that AVFoundation reliably round-trips through pixel-buffer attachments. HDR transfer functions (PQ / HLG) and constant-luminance Rec.2020 matrix variants are out of scope for v1; Phase 39's vertical-finishing spec or a future HDR spec can extend the table without breaking the on-disk format.
 
 ## Compositor hookup
 

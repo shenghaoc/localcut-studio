@@ -53,20 +53,24 @@ nonisolated enum WorkingColourSpace: String, Codable, Hashable, Sendable, CaseIt
 
     /// Value for the `kCVImageBufferTransferFunctionKey` attachment. Display P3
     /// uses the sRGB transfer (the IEC 61966-2-1 piecewise curve), matching
-    /// what `CGColorSpace.displayP3` declares.
+    /// what `CGColorSpace.displayP3` declares. Rec.2020 here is **SDR Rec.2020
+    /// only** — the practical SDR delivery transfer is BT.709/BT.1886, not
+    /// the little-used `ITU_R_2020` constant (which AVFoundation doesn't
+    /// round-trip cleanly on output buffer attachments in our pipeline). HDR
+    /// (PQ / HLG) is out of scope for v1.
     var cvTransferFunction: CFString {
         switch self {
         case .sRGB, .displayP3: kCVImageBufferTransferFunction_sRGB
-        case .rec709: kCVImageBufferTransferFunction_ITU_R_709_2
-        case .rec2020: kCVImageBufferTransferFunction_ITU_R_2020
+        case .rec709, .rec2020: kCVImageBufferTransferFunction_ITU_R_709_2
         }
     }
 
-    /// Value for the `kCVImageBufferYCbCrMatrixKey` attachment.
+    /// Value for the `kCVImageBufferYCbCrMatrixKey` attachment. SDR Rec.2020
+    /// uses the BT.709 YCbCr matrix here (constant-luminance Rec.2020 with
+    /// its own matrix is out of scope for v1); only the primaries differ.
     var cvYCbCrMatrix: CFString {
         switch self {
-        case .sRGB, .displayP3, .rec709: kCVImageBufferYCbCrMatrix_ITU_R_709_2
-        case .rec2020: kCVImageBufferYCbCrMatrix_ITU_R_2020
+        case .sRGB, .displayP3, .rec709, .rec2020: kCVImageBufferYCbCrMatrix_ITU_R_709_2
         }
     }
 }

@@ -87,28 +87,21 @@ func pixelBufferColourAttachmentsDisplayP3() {
     #expect(primaries == kCVImageBufferColorPrimaries_P3_D65 as String)
 }
 
-@Test("applyColourAttachments tags a pixel buffer with Rec.2020 primaries/transfer/matrix")
+@Test("applyColourAttachments tags a pixel buffer with Rec.2020 primaries (BT.709 transfer + matrix)")
 func pixelBufferColourAttachmentsRec2020() {
     guard let buffer = makePixelBuffer(width: 64, height: 36) else {
         Issue.record("Could not allocate test pixel buffer")
         return
     }
     EffectCompositor.applyColourAttachments(.rec2020, to: buffer)
-    // The mapping the compositor wrote, in the same form the OS exposes via
-    // CFString-as-String bridging — so any mismatch in the assertion below
-    // also surfaces in the failure message.
     let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
     let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil) as? String
     let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
-    let expectedPrimaries = kCVImageBufferColorPrimaries_ITU_R_2020 as String
-    let expectedTransfer = kCVImageBufferTransferFunction_ITU_R_2020 as String
-    let expectedMatrix = kCVImageBufferYCbCrMatrix_ITU_R_2020 as String
-    #expect(primaries == expectedPrimaries,
-            "primaries: got \(primaries ?? "nil"), expected \(expectedPrimaries)")
-    #expect(transfer == expectedTransfer,
-            "transfer: got \(transfer ?? "nil"), expected \(expectedTransfer)")
-    #expect(matrix == expectedMatrix,
-            "matrix: got \(matrix ?? "nil"), expected \(expectedMatrix)")
+    // SDR Rec.2020: primaries identify the gamut; transfer + matrix use the
+    // BT.709 SDR values (see WorkingColourSpace.cvTransferFunction docs).
+    #expect(primaries == kCVImageBufferColorPrimaries_ITU_R_2020 as String)
+    #expect(transfer == kCVImageBufferTransferFunction_ITU_R_709_2 as String)
+    #expect(matrix == kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
 }
 
 // MARK: - R6.3 — scope sampler waveform is non-empty for a non-black frame
