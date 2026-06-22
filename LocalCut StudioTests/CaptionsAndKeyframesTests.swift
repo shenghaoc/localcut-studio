@@ -887,13 +887,7 @@ struct PhaseThirtySmokeTests {
     /// composition runs to the caption's true end and a video-composition
     /// instruction covers the tail interval. Mirrors the limitation that
     /// `phase-30-animated-captions/design.md` previously documented.
-    ///
-    /// Disabled while we triage a CI test-phase hang on macos-26; the
-    /// production code path is exercised by the (currently manual) scrub
-    /// described in the spec's acceptance criteria. Re-enable once the hang
-    /// is root-caused.
-    @Test("Composition extends past the last AV clip when a caption tail runs longer",
-          .disabled("Triage: macos-26 CI test phase hangs for 30 min with no test output"))
+    @Test("Composition extends past the last AV clip when a caption tail runs longer")
     func compositionExtendsForCaptionTail() async throws {
         let url = try await makeVideoFixture(seconds: 1)
         defer { try? FileManager.default.removeItem(at: url) }

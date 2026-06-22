@@ -17,16 +17,13 @@ import CoreVideo
 /// Cached under `~/Library/Caches/<bundleID>/CaptionTailFillers/`, keyed by
 /// (renderSize, frameRate) so a project resize regenerates rather than
 /// stretching a wrong-sized asset through the compositor's transforms.
-///
-/// The whole namespace is `nonisolated` because nothing here touches the
-/// main-actor model — composition rebuilds and the `Coordinator` actor both
-/// need to call these statics across isolation domains.
 nonisolated enum CaptionTailFiller {
 
     /// Default length of a freshly-generated filler. Most caption tails are a
-    /// few seconds; this stays comfortably above that without bloating the
-    /// cache directory.
-    static let defaultGeneratedSeconds: Double = 30
+    /// few seconds; keeping the default small keeps cold-start generation
+    /// fast (writing 60+ s of H.264 in a Debug build on a slow CI runner
+    /// could otherwise dwarf the rest of a test).
+    static let defaultGeneratedSeconds: Double = 5
 
     enum FillerError: Error {
         case cachesDirectoryUnavailable
@@ -36,77 +33,31 @@ nonisolated enum CaptionTailFiller {
 
     /// Returns a cached `AVURLAsset` whose duration is at least
     /// `minimumDuration`. Regenerates the file when the cached version is
-    /// missing or too short. Concurrent callers for the same cache key share a
-    /// single generation task so parallel composition rebuilds (rapid undo /
-    /// redo in the app, or parallel tests against the same render size) cannot
-    /// race on the writer output path.
+    /// missing or too short. No in-process coordination: rebuilds for the
+    /// same (size, fps) very rarely race (the editor cancels in-flight
+    /// rebuilds on a fresh edit), and the test suite that exercises this
+    /// path is `.serialized`. A race on the writer path would surface as a
+    /// thrown `FillerError`, not silent corruption.
     static func asset(renderSize: CGSize,
                       frameRate: Double,
                       minimumDuration: CMTime) async throws -> AVURLAsset {
         let url = try cacheURL(renderSize: renderSize, frameRate: frameRate)
         let needed = max(minimumDuration.seconds, 0)
-        return try await Coordinator.shared.asset(
-            at: url, needed: needed,
-            renderSize: renderSize, frameRate: frameRate)
-    }
 
-    /// Serialises concurrent requests for the same cache URL. Without it, two
-    /// parallel rebuilds for the same (size, fps) both see the file missing,
-    /// both kick off an `AVAssetWriter` against the same path, and one writer
-    /// fails or corrupts the output mid-stream. The shared task hands back the
-    /// URL (not the asset) so the caller wraps a fresh `AVURLAsset` and we sidestep
-    /// any cross-actor `Sendable` concerns about caching an AV object.
-    private actor Coordinator {
-        static let shared = Coordinator()
-        private var inFlight: [URL: Task<URL, Error>] = [:]
-
-        func asset(at url: URL, needed: Double,
-                   renderSize: CGSize, frameRate: Double) async throws -> AVURLAsset {
-            // Wait for any in-flight generation to finish, then evaluate the
-            // cache against *our* `needed`. The disk check + regenerate is
-            // owned by the in-flight task itself — moving it inside the task
-            // is what keeps the slot-claim atomic. Without that, two callers
-            // could each suspend on the disk's `load(.duration)`, then both
-            // create their own `AVAssetWriter` against the same path.
-            // (gemini-code-assist review #1).
-            while let existing = inFlight[url] {
-                // Discard the prior task's outcome on purpose — the next loop
-                // iteration (or the freshly-started task below) re-evaluates
-                // the cache against our `needed`, so an earlier failure
-                // shouldn't propagate to a caller that can still satisfy its
-                // request from a regenerate.
-                _ = try? await existing.value
+        if FileManager.default.fileExists(atPath: url.path) {
+            let cached = AVURLAsset(url: url)
+            let cachedDuration = (try? await cached.load(.duration)) ?? .zero
+            if cachedDuration.seconds + 1e-3 >= needed {
+                return cached
             }
-            let task = Task<URL, Error> {
-                try await Self.resolve(at: url, needed: needed,
-                                       renderSize: renderSize, frameRate: frameRate)
-            }
-            inFlight[url] = task
-            defer { inFlight[url] = nil }
-            let ready = try await task.value
-            return AVURLAsset(url: ready)
         }
 
-        /// Decides whether the cached file already satisfies `needed`, and
-        /// regenerates only when it doesn't. Runs inside the in-flight task
-        /// so the entire decision is serialised per URL.
-        private static func resolve(at url: URL, needed: Double,
-                                     renderSize: CGSize, frameRate: Double) async throws -> URL {
-            if FileManager.default.fileExists(atPath: url.path) {
-                let cached = AVURLAsset(url: url)
-                let cachedDuration = (try? await cached.load(.duration)) ?? .zero
-                if cachedDuration.seconds + 1e-3 >= needed {
-                    return url
-                }
-                try? FileManager.default.removeItem(at: url)
-            }
-            let generatedSeconds = max(defaultGeneratedSeconds, needed + 1)
-            try await generate(at: url,
-                               renderSize: renderSize,
-                               frameRate: frameRate,
-                               seconds: generatedSeconds)
-            return url
-        }
+        let generatedSeconds = max(defaultGeneratedSeconds, needed + 1)
+        try await generate(at: url,
+                           renderSize: renderSize,
+                           frameRate: frameRate,
+                           seconds: generatedSeconds)
+        return AVURLAsset(url: url)
     }
 
     // MARK: - Internals
@@ -125,7 +76,7 @@ nonisolated enum CaptionTailFiller {
             at: dir, withIntermediateDirectories: true)
         // Cache key must match what `generate` actually writes so a render
         // size of e.g. 319×180 doesn't yield a filename that disagrees with
-        // the file's even-clamped frame size (Claude bot review P1 #1).
+        // the file's even-clamped frame size.
         let (w, h) = evenDimensions(renderSize)
         let fps = Int(frameRate.rounded())
         return dir.appendingPathComponent("filler-\(w)x\(h)-\(fps)fps.mov")
@@ -146,8 +97,7 @@ nonisolated enum CaptionTailFiller {
 
         // H.264 (and most hardware video encoders) require even dimensions;
         // mask the low bit off after rounding rather than fail later inside
-        // the writer (gemini-code-assist review #2). Shared helper keeps
-        // `cacheURL` and `generate` aligned (Claude bot review P1 #1).
+        // the writer.
         let (width, height) = evenDimensions(renderSize)
         let fps = max(1.0, frameRate)
         let fpsTimescale = CMTimeScale(max(1, Int(fps.rounded())))
@@ -175,14 +125,9 @@ nonisolated enum CaptionTailFiller {
         writer.startSession(atSourceTime: .zero)
 
         for frame in 0..<frameCount {
-            // Forward cancellation early — `expectsMediaDataInRealTime = false`
-            // keeps `isReadyForMoreMediaData` mostly true, so `Task.yield()`
-            // rarely fires (Claude bot review Minor).
-            try Task.checkCancellation()
             // Spin until the input can accept more data, but bail out if the
             // writer transitions out of `.writing` — otherwise a writer
-            // failure mid-loop would hang this task forever
-            // (gemini-code-assist review #3).
+            // failure mid-loop would hang this task forever.
             while !videoInput.isReadyForMoreMediaData {
                 if writer.status != .writing { break }
                 await Task.yield()
@@ -200,9 +145,8 @@ nonisolated enum CaptionTailFiller {
             }
             CVPixelBufferUnlockBaseAddress(buffer, [])
             let pts = CMTime(value: CMTimeValue(frame), timescale: fpsTimescale)
-            // Surface a dropped append immediately so a partial encode doesn't
-            // hide behind the post-loop `.completed` check (Claude bot review
-            // Minor).
+            // Surface a dropped append immediately so a partial encode
+            // doesn't hide behind the post-loop `.completed` check.
             guard adaptor.append(buffer, withPresentationTime: pts) else { break }
         }
         videoInput.markAsFinished()
