@@ -739,14 +739,17 @@ func titleRastererPositiveBox() {
 /// font lookup failures, layout breakage, and the rasterer returning the empty
 /// transparent fallback when something throws.
 @Test("BuiltInCaptionPresets: every preset renders to a non-empty raster (T5.1)")
-func presetSnapshotShape() {
+func presetSnapshotShape() throws {
     let canvas = CGSize(width: 1280, height: 720)
     let rasterer = CaptionRasterer()
     for preset in BuiltInCaptionPresets.all {
         let line = CaptionLine(
             range: CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600)),
             text: "Sample caption")
-        guard let raster = rasterer.idleRaster(line: line, style: preset.style, renderSize: canvas) else { continue }
+        // A nil raster means the preset stopped rasterizing (font/layout failure) —
+        // that's the regression this test guards, so fail rather than skip.
+        let raster = try #require(rasterer.idleRaster(line: line, style: preset.style, renderSize: canvas),
+                                  "Preset \(preset.name) failed to rasterize")
         #expect(raster.boundingBox.width > 0, "Preset \(preset.name) produced an empty bounding box")
         #expect(raster.boundingBox.height > 0, "Preset \(preset.name) produced an empty bounding box")
         // Bounding box must sit inside the canvas (with padding for stroke / pill).

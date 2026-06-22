@@ -564,7 +564,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// degrades skin smoothing to a no-op — logged once at static init — rather
     /// than crashing the render path.
     private static func makeColorKernel(named name: String) -> CIColorKernel? {
-        guard let libraryURL = Bundle.main.url(forResource: "default", withExtension: "metallib"),
+        // `Bundle(for:)` — not `Bundle.main` — so the metallib resolves from the
+        // bundle that actually contains `EffectCompositor` (robust under a test
+        // host, plug-in, or extension where `.main` isn't the code's bundle).
+        guard let libraryURL = Bundle(for: EffectCompositor.self).url(forResource: "default", withExtension: "metallib"),
               let libraryData = try? Data(contentsOf: libraryURL),
               let kernel = try? CIColorKernel(functionName: name, fromMetalLibraryData: libraryData) else {
             os_log(.error, "Skin-smoothing Core Image kernel failed to load — effect disabled")
