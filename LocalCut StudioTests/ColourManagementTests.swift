@@ -160,6 +160,27 @@ func legacyDocumentDecodesAsSRGB() throws {
     #expect(decoded.workingColourSpace == .sRGB)
 }
 
+@Test("Unknown workingColourSpace value falls back to sRGB instead of throwing")
+func unknownWorkingSpaceDecodesAsSRGB() throws {
+    // A document from a hypothetical future schema with a wider-gamut case.
+    // The open path must not fail outright — the `schemaVersion > current`
+    // guard then runs and the user gets a safe fallback.
+    let json = """
+    {
+      "schemaVersion": 99,
+      "workingColourSpace": "futureSpace",
+      "renderWidth": 1920,
+      "renderHeight": 1080,
+      "frameRate": 30,
+      "media": [],
+      "videoTracks": [],
+      "audioTracks": []
+    }
+    """
+    let decoded = try ProjectDocument(data: Data(json.utf8))
+    #expect(decoded.workingColourSpace == .sRGB)
+}
+
 }
 
 // MARK: - Sampler gate (serialized — touches ScopeSampler.shared)
@@ -168,21 +189,42 @@ func legacyDocumentDecodesAsSRGB() throws {
 struct ScopeSamplerGateTests {
 
     @Test("ScopeSampler shouldSample short-circuits when disabled")
-    func samplerGateRespectsEnabled() async {
-        await MainActor.run { ScopeSampler.shared.setEnabled(false) }
+    func samplerGateRespectsEnabled() {
+        ScopeSampler.shared.setEnabled(false)
         #expect(ScopeSampler.shared.shouldSample() == false)
     }
 
     @Test("ScopeSampler gate honours the 30 Hz cap")
-    func samplerGateThrottles() async {
-        await MainActor.run { ScopeSampler.shared.setEnabled(true) }
+    func samplerGateThrottles() {
+        ScopeSampler.shared.setEnabled(true)
 
         let now: TimeInterval = 1000
         #expect(ScopeSampler.shared.shouldSample(now: now) == true)
         #expect(ScopeSampler.shared.shouldSample(now: now + 0.001) == false)
         #expect(ScopeSampler.shared.shouldSample(now: now + 1) == true)
 
-        await MainActor.run { ScopeSampler.shared.setEnabled(false) }
+        // Restore disabled-by-default so peer tests don't see a hot sampler.
+        ScopeSampler.shared.setEnabled(false)
+    }
+
+    @Test("ScopeSampler.publish drops out-of-order samples")
+    func samplerDropsStaleSamples() {
+        ScopeSampler.shared.setEnabled(false)
+        // Two samples, the second older than the first by `generatedAt`.
+        let newer = ScopeSample(waveform: [], vectorscope: [],
+                                generatedAt: Date(timeIntervalSince1970: 2000))
+        let older = ScopeSample(waveform: [], vectorscope: [],
+                                generatedAt: Date(timeIntervalSince1970: 1000))
+
+        ScopeSampler.shared.publish(newer)
+        let revisionAfterNewer = ScopeSampler.shared.snapshot.revision
+
+        ScopeSampler.shared.publish(older)
+        let snapshot = ScopeSampler.shared.snapshot
+        // Older arrival should not overwrite the newer sample and should not
+        // bump the revision.
+        #expect(snapshot.sample?.generatedAt == newer.generatedAt)
+        #expect(snapshot.revision == revisionAfterNewer)
     }
 }
 

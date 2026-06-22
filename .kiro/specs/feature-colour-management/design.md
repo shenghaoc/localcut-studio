@@ -12,8 +12,11 @@ Give the project an explicit **working colour space** that follows every frame t
 2. **The compositor switches on it**, not the global static. `EffectCompositor.sharedCIContext` becomes a per-space cache (keyed by `WorkingColourSpace`) so a project edit doesn't have to throw away an existing context. The compositor reads the space from the `EffectCompositionInstruction` it's already handed.
 3. **Output buffers carry the tag**. Every `CVPixelBuffer` produced by `startRequest(_:)` gets `kCVImageBufferColorPrimariesKey` / `kCVImageBufferTransferFunctionKey` / `kCVImageBufferYCbCrMatrixKey` attachments matching the working space, so the downstream `AVAssetExportSession` / `AVAssetWriter` writes a colour-tagged movie instead of silently flattening to sRGB.
 4. **Title-raster cache invalidates on space change**. A cached caption raster was rendered against a specific working space; changing the space must purge it. The existing `TitleRasterer.purge()` seam covers this — `setWorkingColourSpace(_:)` calls it.
-5. **Scopes sample the compositor, throttled**. A `ScopeSampler` shared instance receives each rendered `CIImage`; it gates itself to ≤30 Hz so a 60 fps preview only doubles render cost once, and only when the panel is visible (`enabled = false` is a fast no-op). It uses `CIFilter.areaHistogram` and `CIFilter.areaAverage` over a small grid to produce per-column luma histograms (waveform) and per-cell UV averages (vectorscope).
-6. **`ScopesView` is a SwiftUI panel** rendered with `Canvas`: one waveform-style histogram per X-column, one UV scatter for chroma. The view subscribes to the sampler's latest sample (Observation), redrawing only when a new sample is published — never on every frame.
+5. **Scopes sample the compositor, throttled**. A `ScopeSampler` shared instance receives each rendered `CIImage`; it gates itself to ≤30 Hz so a 60 fps preview only doubles render cost once, and only when the panel is visible (`enabled = false` is a fast no-op). The sampler is **fully nonisolated** (`nonisolated(unsafe) static let shared`, lock-guarded state); the compositor reaches it from off-main, so anchoring it to `MainActor` would force the entire sampling path through the main actor.
+6. **Waveform via a luma-only image**. RGB is folded into the R channel (BT.709 weights) before `CIFilter.areaHistogram` runs, so the histogram reports a true luma distribution rather than three independent R/G/B histograms a downstream weighted-sum can't reassemble.
+7. **Float readback**. Histogram results are read with `.RGBAf` so per-bin pixel counts (routinely > 1.0 for any slice with > 1 px/bin) aren't clamped to 8-bit values.
+8. **Out-of-order publish drop**. `publish(_:)` compares the incoming sample's `generatedAt` to the stored sample and silently drops older arrivals — AVFoundation dispatches frame requests concurrently, so two `publish` calls can race and an older frame must not overwrite a newer one.
+9. **`ScopesView` is a SwiftUI panel** rendered with `Canvas`. The sampler holds no SwiftUI / Observation state (it can't, given it's reached from off-main); the view pulls a `(sample, revision)` snapshot from `ScopeSampler.shared` on a `TimelineView(.animation(minimumInterval: 1/30))` tick.
 
 ## Working space → CV constants
 
@@ -61,36 +64,33 @@ The CIContext cache is a `OSAllocatedUnfairLock`-guarded dictionary; one Metal c
 
 ```swift
 final class ScopeSampler: @unchecked Sendable {
-    static let shared = ScopeSampler()
-    private static let minIntervalSeconds = 1.0 / 30.0
+    nonisolated(unsafe) static let shared = ScopeSampler()
+    nonisolated static let minIntervalSeconds = 1.0 / 30.0
 
-    struct Sample {
-        var waveform: [WaveformColumn]   // one per X-column slice
-        var vectorscope: [VectorPoint]   // one per UV-grid cell
-        var generatedAt: Date
-    }
-
-    func shouldSample() -> Bool          // checks `enabled` + 1/30s gate
-    func sample(image:context:colorSpace:) -> Sample
-    func publish(_:)                     // bumps revision; ScopesView observes
+    nonisolated func shouldSample() -> Bool          // checks `enabled` + 1/30s gate
+    nonisolated func sample(image:context:colorSpace:) -> ScopeSample
+    nonisolated func publish(_ sample: ScopeSample)  // drops out-of-order arrivals
+    nonisolated var snapshot: (sample: ScopeSample?, revision: Int)  // pulled by view
 }
 ```
 
-- **Waveform**: 32 column slices. For each, `CIFilter.areaHistogram` over `count: 64` produces a 1-row CIImage; the sampler reads the bins back through the CIContext to a tiny CGImage. The Canvas stacks the columns horizontally.
-- **Vectorscope**: 8×8 grid. For each cell, `CIFilter.areaAverage` produces a 1×1 image; the average RGB is converted to (U, V) chroma offsets. The Canvas plots them on a circular UV plane.
+- **Waveform**: First folds RGB into a luma-only R channel via `CIFilter.colorMatrix` (BT.709 weights). Then 32 column slices, each through `CIFilter.areaHistogram(count: 64)`. The result is read back as `.RGBAf` so per-bin pixel counts aren't clamped. Bins normalise against the global max across all columns so relative brightness across the frame is preserved.
+- **Vectorscope**: 8×8 grid. For each cell, `CIFilter.areaAverage` produces a 1×1 image; the average RGB is read as `.RGBAf` and converted to (U, V) chroma offsets. The Canvas plots them on a circular UV plane.
 
 Per-frame cost is dominated by the 32 small histogram renders plus the 64 averages; on Apple Silicon they fit comfortably in the existing per-frame budget. The 30 Hz cap means a 60 fps preview pays this once per two frames, and never when the panel is hidden (the sampler shortcuts on `enabled == false` before any filter work).
 
 ## UI
 
 - **Inspector → Project → Colour** panel: working-space picker (`Picker` of `WorkingColourSpace.allCases`) + `Toggle("Show scopes")`. Both undoable via `setWorkingColourSpace(_:)` and a coalesced `showScopes` model flag.
-- **Preview overlay**: when `model.showScopes` is on, a `ScopesView` panel sits along the preview's trailing edge. The view reads from `ScopeSampler.shared` (it sets `enabled = true` on appear, `false` on disappear so a hidden panel doesn't pay sample cost).
+- **Preview overlay**: when `model.showScopes` is on, a `ScopesView` panel sits along the preview's trailing edge. The view pulls `ScopeSampler.shared.snapshot` on every `TimelineView(.animation)` tick and sets `enabled = true` on appear / `false` on disappear so a hidden panel doesn't pay sample cost.
 
 ## Persistence
 
-`ProjectDocument` gains `workingColourSpace: String?` (raw value of the enum); legacy documents decode as `nil → .sRGB`. Bump `schemaVersion` to 3 so a v2 build that opens a v3 file is flagged as newer-schema (existing `EditorModel.load(document:from:)` guard).
+`ProjectDocument` gains `workingColourSpace`; the decoder reads it through the raw `String` so an **unknown value** (a future schema's wider-gamut case) decodes as `.sRGB` instead of throwing — the existing `schemaVersion > current` guard in `EditorModel.load(document:from:)` then runs as intended and the open path never fails outright on a wider-gamut document. Legacy documents (no key) also decode as `.sRGB`. `schemaVersion` bumps to 3.
 
 `ProjectState` (undo snapshot) also carries the value so the per-space CIContext / cache purge replays on undo.
+
+`EditorModel.load(document:from:)` unconditionally calls `EffectCompositor.purgeCaptionRasterCache()` before installing the document — `releaseSession()` clears tracks but not the rasterer, and reopening the same project with stable `CaptionLine` UUIDs under a different working space would otherwise reuse stale rasters from the previous session.
 
 ## Trade-offs
 

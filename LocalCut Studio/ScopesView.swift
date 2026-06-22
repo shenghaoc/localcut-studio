@@ -16,9 +16,13 @@ enum ScopeKind: String, CaseIterable, Identifiable {
 }
 
 /// The scopes panel: a `Picker` over scope kinds plus a `Canvas` drawing the
-/// latest sample published by `ScopeSampler.shared`. On appear / disappear the
-/// view flips the sampler's `enabled` flag so a hidden panel pays no per-frame
-/// cost in the compositor's hot path.
+/// latest sample published by `ScopeSampler.shared`.
+///
+/// The sampler is nonisolated (the compositor writes to it from off-main),
+/// so the view pulls a snapshot on a SwiftUI `TimelineView` tick rather than
+/// observing the sampler directly. On appear / disappear we flip the
+/// sampler's `enabled` flag so a hidden panel pays no per-frame cost in the
+/// compositor's hot path.
 struct ScopesView: View {
     let sampler: ScopeSampler
     @State private var kind: ScopeKind = .waveform
@@ -28,11 +32,6 @@ struct ScopesView: View {
     }
 
     var body: some View {
-        // Touch the observed properties here so SwiftUI's @Observable tracking
-        // registers them at body evaluation time (Canvas closures execute later).
-        let sample = sampler.latest
-        let _ = sampler.revision
-
         VStack(spacing: 6) {
             HStack {
                 Picker("", selection: $kind) {
@@ -47,16 +46,19 @@ struct ScopesView: View {
             .padding(.horizontal, 8)
             .padding(.top, 6)
 
-            Canvas { context, size in
-                switch kind {
-                case .waveform:
-                    drawWaveform(into: context, size: size, sample: sample)
-                case .vectorscope:
-                    drawVectorscope(into: context, size: size, sample: sample)
+            TimelineView(.animation(minimumInterval: ScopeSampler.minIntervalSeconds, paused: false)) { _ in
+                let snapshot = sampler.snapshot
+                Canvas { context, size in
+                    switch kind {
+                    case .waveform:
+                        drawWaveform(into: context, size: size, sample: snapshot.sample)
+                    case .vectorscope:
+                        drawVectorscope(into: context, size: size, sample: snapshot.sample)
+                    }
                 }
+                .background(Color.black)
+                .cornerRadius(4)
             }
-            .background(Color.black)
-            .cornerRadius(4)
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
             .accessibilityLabel(kind == .waveform ? "Waveform scope" : "Vectorscope")

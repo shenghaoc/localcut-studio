@@ -2,7 +2,6 @@ import Foundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreGraphics
-import Observation
 import os
 
 /// One frame's worth of scope data, sampled from the compositor's output.
@@ -11,6 +10,9 @@ struct ScopeSample: Sendable, Equatable {
     var waveform: [WaveformColumn]
     /// Per-cell average chroma offsets (U, V) in the [-0.5, 0.5] plane. 8×8 grid.
     var vectorscope: [VectorPoint]
+    /// Monotonic compositor timestamp at sample time. Used by the UI to drop
+    /// out-of-order samples (publish() hops to the main actor via unstructured
+    /// Tasks, which can re-order).
     var generatedAt: Date
 
     static let empty = ScopeSample(waveform: [], vectorscope: [], generatedAt: Date(timeIntervalSince1970: 0))
@@ -35,13 +37,18 @@ struct VectorPoint: Sendable, Equatable {
 }
 
 /// Shared 30 Hz sampler: receives every compositor frame (gated), computes
-/// waveform + vectorscope data, and republishes the latest sample. `ScopesView`
-/// observes the singleton through SwiftUI's `Observable` change-tracking by
-/// reading `revision` inside `body`.
-@Observable
+/// waveform + vectorscope data, and stores the latest sample behind a lock.
+/// `ScopesView` pulls the latest snapshot on a SwiftUI `TimelineView` tick —
+/// the sampler holds no SwiftUI / Observation state because the compositor
+/// reaches it from a nonisolated context, and a `@MainActor`-isolated
+/// singleton would force the entire sampling path through the main actor.
 final class ScopeSampler: @unchecked Sendable {
 
-    static let shared = ScopeSampler()
+    /// `nonisolated(unsafe)` opts the static out of the project's default
+    /// `MainActor` isolation — the type itself is `@unchecked Sendable` and
+    /// all of its accessors are explicitly nonisolated, so a non-isolated
+    /// singleton is safe.
+    nonisolated(unsafe) static let shared = ScopeSampler()
 
     /// 1 / 30 s — the floor between two samples. A 60 fps preview pays the
     /// sampling cost on roughly every other frame and the user can't see the
@@ -56,19 +63,15 @@ final class ScopeSampler: @unchecked Sendable {
     /// Grid resolution for the vectorscope (cells per side). 8×8 = 64 points.
     nonisolated static let vectorscopeGridSize: Int = 8
 
-    /// Whether `body` of `ScopesView` is currently on screen — when off, the
-    /// gate short-circuits before any filter work runs. Read on the
-    /// compositor's nonisolated queue and written from the SwiftUI MainActor.
-    @ObservationIgnored private let state = OSAllocatedUnfairLock(initialState: State())
-
-    /// Bumps on each `publish` so the observing view re-renders only on a new sample.
-    private(set) var revision: Int = 0
-    /// The latest published sample. `nil` until the first frame arrives.
-    private(set) var latest: ScopeSample?
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     private struct State {
         var enabled: Bool = false
         var lastSampleAt: TimeInterval = 0
+        var latest: ScopeSample?
+        /// Bumped on each `publish`; the view reads this so the canvas redraws
+        /// only when a new sample lands, not on every TimelineView tick.
+        var revision: Int = 0
     }
 
     nonisolated init() {}
@@ -76,13 +79,14 @@ final class ScopeSampler: @unchecked Sendable {
     // MARK: - Enable / gate
 
     /// The scope panel sets this when it appears / disappears.
-    @MainActor
-    func setEnabled(_ flag: Bool) {
-        state.withLock { $0.enabled = flag }
-        if !flag {
-            // Clear the last sample so reappearing doesn't show stale pixels
-            // for one frame before the next sample arrives.
-            latest = nil
+    nonisolated func setEnabled(_ flag: Bool) {
+        state.withLock { current in
+            current.enabled = flag
+            if !flag {
+                // Clear the last sample so reappearing doesn't show stale
+                // pixels for one frame before the next sample arrives.
+                current.latest = nil
+            }
         }
     }
 
@@ -102,13 +106,25 @@ final class ScopeSampler: @unchecked Sendable {
         }
     }
 
-    /// Publishes a sample so the UI re-renders. Hops to the main actor because
-    /// the published properties drive SwiftUI observation.
-    func publish(_ sample: ScopeSample) {
-        Task { @MainActor in
-            self.latest = sample
-            self.revision &+= 1
+    /// Stores `sample` as the latest, dropping it on the floor if a newer
+    /// sample (by `generatedAt`) already arrived — `startRequest(_:)` is
+    /// dispatched concurrently for separate frame requests by AVFoundation,
+    /// so two `publish` calls can race and an older frame could otherwise
+    /// overwrite a newer one.
+    nonisolated func publish(_ sample: ScopeSample) {
+        state.withLock { current in
+            if let prior = current.latest, prior.generatedAt > sample.generatedAt {
+                return
+            }
+            current.latest = sample
+            current.revision &+= 1
         }
+    }
+
+    /// The latest published sample plus the publish revision. The UI reads
+    /// this from a `TimelineView` tick at the panel's refresh rate.
+    nonisolated var snapshot: (sample: ScopeSample?, revision: Int) {
+        state.withLock { ($0.latest, $0.revision) }
     }
 
     // MARK: - Sampling
@@ -125,6 +141,11 @@ final class ScopeSampler: @unchecked Sendable {
 
     // MARK: Waveform
 
+    /// Per-column luma histograms. The image is first folded into a single-
+    /// channel luma image (BT.709 weights) so `areaHistogram` returns a
+    /// luma-only distribution; weighting independent R/G/B histograms after
+    /// the fact would not produce a luma histogram for saturated colours
+    /// (a pure red would split across G/B's zero bin and R's high bin).
     private nonisolated func makeWaveform(image: CIImage, context: CIContext,
                                           colorSpace: CGColorSpace) -> [WaveformColumn] {
         let extent = image.extent
@@ -132,6 +153,7 @@ final class ScopeSampler: @unchecked Sendable {
             return []
         }
 
+        let lumaImage = lumaOnly(image)
         let columns = Self.waveformColumnCount
         let bins = Self.waveformBinCount
         let columnWidth = extent.width / CGFloat(columns)
@@ -139,27 +161,55 @@ final class ScopeSampler: @unchecked Sendable {
         var result: [WaveformColumn] = []
         result.reserveCapacity(columns)
 
+        // First pass: collect raw R-channel histograms per column (we just
+        // computed the luma image into R).
+        var rawColumns: [[Float]] = []
+        rawColumns.reserveCapacity(columns)
+        var globalMax: Float = 0
         for i in 0..<columns {
             let columnRect = CGRect(
                 x: extent.origin.x + CGFloat(i) * columnWidth,
                 y: extent.origin.y,
                 width: columnWidth,
                 height: extent.height)
-            let normalisedX = Float((CGFloat(i) + 0.5) / CGFloat(columns))
-            let column = histogramColumn(image: image, rect: columnRect, bins: bins,
-                                         context: context, colorSpace: colorSpace)
-            result.append(WaveformColumn(x: normalisedX, bins: column))
+            let raw = lumaHistogram(image: lumaImage, rect: columnRect, bins: bins,
+                                    context: context, colorSpace: colorSpace)
+            for v in raw where v > globalMax { globalMax = v }
+            rawColumns.append(raw)
+        }
+
+        // Normalise across all columns so the brightest bin sits at 1.0 and
+        // relative magnitudes between columns are preserved (per-column
+        // normalisation would flatten the relationship between columns).
+        let scale: Float = globalMax > 0 ? 1.0 / globalMax : 0
+        for i in 0..<columns {
+            let normalised = scale > 0 ? rawColumns[i].map { $0 * scale } : rawColumns[i]
+            let x = Float((CGFloat(i) + 0.5) / CGFloat(columns))
+            result.append(WaveformColumn(x: x, bins: normalised))
         }
         return result
     }
 
-    /// Runs `CIFilter.areaHistogram` on a column slice and reads the resulting
-    /// 1-pixel-high RGBA image back to a `[Float]` luma histogram. The luma
-    /// channel is computed from R/G/B using BT.709 weights; the alpha channel
-    /// is discarded.
-    private nonisolated func histogramColumn(image: CIImage, rect: CGRect, bins: Int,
-                                             context: CIContext,
-                                             colorSpace: CGColorSpace) -> [Float] {
+    /// Folds RGB into the R channel using BT.709 luma weights. G, B are zeroed
+    /// so `areaHistogram` reports a single-channel luma distribution in R.
+    private nonisolated func lumaOnly(_ image: CIImage) -> CIImage {
+        let filter = CIFilter.colorMatrix()
+        filter.inputImage = image
+        filter.rVector = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+        filter.gVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        filter.bVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        filter.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        return filter.outputImage ?? image
+    }
+
+    /// Runs `CIFilter.areaHistogram` on a luma-only image slice, reading the R
+    /// channel back as float counts. `.RGBAf` is required: `areaHistogram`
+    /// reports raw pixel counts in each channel, which routinely exceed 1.0
+    /// for any slice with more than one pixel per bin — an 8-bit readback
+    /// would clamp every populated bin to 255 and flatten the distribution.
+    private nonisolated func lumaHistogram(image: CIImage, rect: CGRect, bins: Int,
+                                           context: CIContext,
+                                           colorSpace: CGColorSpace) -> [Float] {
         let filter = CIFilter.areaHistogram()
         filter.inputImage = image
         filter.extent = rect
@@ -167,31 +217,21 @@ final class ScopeSampler: @unchecked Sendable {
         filter.scale = 1
         guard let output = filter.outputImage else { return Array(repeating: 0, count: bins) }
 
-        // areaHistogram produces a bins×1 RGBA image with bin values in each channel.
-        let bytesPerRow = bins * 4
-        var pixels = [UInt8](repeating: 0, count: bytesPerRow)
-        let outputRect = CGRect(x: 0, y: 0, width: bins, height: 1)
+        // Each output pixel is bins-wide × 1-tall RGBA float; we read the R
+        // channel as the luma count.
+        let pixelCount = bins
+        var pixels = [Float](repeating: 0, count: pixelCount * 4)
+        let bytesPerRow = pixelCount * 4 * MemoryLayout<Float>.size
+        let outputRect = CGRect(x: 0, y: 0, width: pixelCount, height: 1)
         pixels.withUnsafeMutableBytes { raw in
             guard let base = raw.baseAddress else { return }
             context.render(output, toBitmap: base, rowBytes: bytesPerRow,
-                           bounds: outputRect, format: .RGBA8, colorSpace: colorSpace)
+                           bounds: outputRect, format: .RGBAf, colorSpace: colorSpace)
         }
 
         var out = [Float](repeating: 0, count: bins)
-        var maxValue: Float = 0
         for i in 0..<bins {
-            let r = Float(pixels[i * 4 + 0]) / 255
-            let g = Float(pixels[i * 4 + 1]) / 255
-            let b = Float(pixels[i * 4 + 2]) / 255
-            // BT.709 luma weighting — a reasonable approximation across all
-            // four working spaces for a coarse scope display.
-            let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
-            out[i] = luma
-            if luma > maxValue { maxValue = luma }
-        }
-        // Normalise so the tallest bin sits at 1; an empty column stays all zero.
-        if maxValue > 0 {
-            for i in 0..<bins { out[i] /= maxValue }
+            out[i] = max(0, pixels[i * 4 + 0])
         }
         return out
     }
@@ -227,6 +267,8 @@ final class ScopeSampler: @unchecked Sendable {
     }
 
     /// Reads one cell average via `CIFilter.areaAverage` (1×1 output image).
+    /// `.RGBAf` so cell averages don't get quantised to 8-bit before we
+    /// convert to UV.
     private nonisolated func averageRGB(image: CIImage, rect: CGRect, context: CIContext,
                                         colorSpace: CGColorSpace) -> (r: Float, g: Float, b: Float) {
         let filter = CIFilter.areaAverage()
@@ -234,14 +276,15 @@ final class ScopeSampler: @unchecked Sendable {
         filter.extent = rect
         guard let output = filter.outputImage else { return (0, 0, 0) }
 
-        var pixel: [UInt8] = [0, 0, 0, 0]
+        var pixel: [Float] = [0, 0, 0, 0]
+        let bytesPerRow = 4 * MemoryLayout<Float>.size
         let outRect = CGRect(x: 0, y: 0, width: 1, height: 1)
         pixel.withUnsafeMutableBytes { raw in
             guard let base = raw.baseAddress else { return }
-            context.render(output, toBitmap: base, rowBytes: 4,
-                           bounds: outRect, format: .RGBA8, colorSpace: colorSpace)
+            context.render(output, toBitmap: base, rowBytes: bytesPerRow,
+                           bounds: outRect, format: .RGBAf, colorSpace: colorSpace)
         }
-        return (Float(pixel[0]) / 255, Float(pixel[1]) / 255, Float(pixel[2]) / 255)
+        return (max(0, pixel[0]), max(0, pixel[1]), max(0, pixel[2]))
     }
 
     /// BT.601 RGB → UV chroma. Returns offsets in [-0.5, 0.5]; (0, 0) ≡ neutral

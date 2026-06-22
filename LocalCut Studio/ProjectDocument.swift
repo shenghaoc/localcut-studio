@@ -116,8 +116,15 @@ struct ProjectDocument: Codable, Equatable {
         renderWidth = try c.decodeIfPresent(Double.self, forKey: .renderWidth) ?? 1920
         renderHeight = try c.decodeIfPresent(Double.self, forKey: .renderHeight) ?? 1080
         frameRate = try c.decodeIfPresent(Double.self, forKey: .frameRate) ?? 30
-        workingColourSpace = try c.decodeIfPresent(WorkingColourSpace.self,
-                                                   forKey: .workingColourSpace) ?? .sRGB
+        // Decode through the raw string so an unknown value (a future schema's
+        // additional case) falls back to `.sRGB` instead of throwing — the
+        // `schemaVersion > current` guard in `EditorModel.load(document:from:)`
+        // then runs as intended and the open path doesn't fail outright.
+        if let raw = try c.decodeIfPresent(String.self, forKey: .workingColourSpace) {
+            workingColourSpace = WorkingColourSpace(rawValue: raw) ?? .sRGB
+        } else {
+            workingColourSpace = .sRGB
+        }
         media = try c.decodeIfPresent([MediaRef].self, forKey: .media) ?? []
         videoTracks = try c.decodeIfPresent([TrackDoc].self, forKey: .videoTracks) ?? []
         audioTracks = try c.decodeIfPresent([TrackDoc].self, forKey: .audioTracks) ?? []

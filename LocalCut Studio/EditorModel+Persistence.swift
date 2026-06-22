@@ -380,6 +380,11 @@ extension EditorModel {
         project.name = url?.deletingPathExtension().lastPathComponent ?? document.name
         project.renderSize = CGSize(width: document.renderWidth, height: document.renderHeight)
         project.frameRate = document.frameRate
+        // Always purge the caption-raster cache on load: cached rasters from the
+        // previous session were rendered against the previous working space,
+        // and reopening a project with the same line IDs / text / style /
+        // render size could otherwise reuse them under the new space.
+        EffectCompositor.purgeCaptionRasterCache()
         project.workingColourSpace = document.workingColourSpace
 
         var unresolved: [MediaRef] = []
