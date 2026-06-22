@@ -80,6 +80,10 @@ extension Keyframed {
 
 Effects that support keyframing use `Keyframed<Float>` for their animatable parameters. The compositor evaluates the keyframed value at the current composition time and passes it to the CIFilter.
 
+## Codable representation
+
+`CMTime` is encoded via the existing `CMTimeCode` rational pair (`value`/`timescale`) defined in `ProjectDocument.swift`, so keyframed parameters round-trip losslessly through the project document and stay schema-compatible with clip / transition times.
+
 ## Performance Considerations
 
 - Binary search for O(log n) evaluation

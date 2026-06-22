@@ -18,6 +18,16 @@ struct CompositorLayer {
     let clipStartTime: CMTime
 }
 
+/// One caption line scheduled inside a composition instruction. Carries everything
+/// the compositor needs to draw it on a frame without touching the runtime model.
+struct CaptionRenderItem: Sendable {
+    let lineID: UUID
+    let text: String
+    let words: [WordTiming]?
+    let style: CaptionStyle
+    let range: CMTimeRange
+}
+
 /// One bottom-to-top render step within an instruction interval: either a single
 /// layer, or a transition that blends an outgoing and incoming layer over a
 /// derived progress through the overlap interval.
@@ -44,12 +54,15 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let requiredSourceTrackIDs: [NSValue]?
     let passthroughTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
     let units: [RenderUnit]
+    let captions: [CaptionRenderItem]
 
-    init(timeRange: CMTimeRange, units: [RenderUnit]) {
+    init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = []) {
         self.timeRange = timeRange
         self.units = units
-        // A transition tweens its layers across the interval.
-        containsTweening = units.contains {
+        self.captions = captions
+        // A transition tweens its layers across the interval. Captions also tween
+        // (per-frame animation transform), so any caption forces tweening too.
+        containsTweening = !captions.isEmpty || units.contains {
             if case .transition = $0 { return true }; return false
         }
         let trackIDs = units.flatMap(\.trackIDs)
@@ -71,6 +84,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
         return CIContext(options: [.workingColorSpace: sRGBColorSpace])
     }()
+
+    /// Shared rasteriser so the cache survives across composition rebuilds and
+    /// frame requests. Internally thread-safe (uses `OSAllocatedUnfairLock`).
+    private static let sharedCaptionRasterer = CaptionRasterer()
 
     nonisolated var sourcePixelBufferAttributes: [String: any Sendable]? {
         [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
@@ -98,6 +115,15 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             } else {
                 result = image
             }
+        }
+
+        // Captions sit on top of every clip layer, honouring track / instruction
+        // order: earlier entries draw first, later entries on top.
+        for item in instruction.captions {
+            guard let layer = captionLayer(for: item, time: request.compositionTime,
+                                           renderSize: renderSize) else { continue }
+            result = layer.composited(over: result ?? CIImage(color: .clear)
+                .cropped(to: CGRect(origin: .zero, size: renderSize)))
         }
 
         guard let destination = request.renderContext.newPixelBuffer() else {
@@ -187,6 +213,103 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let renderRect = CGRect(origin: .zero, size: request.renderContext.size)
         let canvas = CIImage(color: .clear).cropped(to: renderRect)
         return image.composited(over: canvas).cropped(to: renderRect)
+    }
+
+    // MARK: - Captions
+
+    /// Renders one caption line for the current frame: looks up (or generates) the
+    /// cached raster, evaluates the animation transforms, masks for typewriter,
+    /// and scales alpha for opacity. Returns nil when the line draws nothing.
+    nonisolated private func captionLayer(for item: CaptionRenderItem,
+                                          time: CMTime,
+                                          renderSize: CGSize) -> CIImage? {
+        let wordIndex = activeWordIndex(for: item, at: time)
+        let raster = wordIndex.map { index in
+            Self.sharedCaptionRasterer.highlightRaster(
+                line: makeLineProxy(item: item),
+                style: item.style,
+                renderSize: renderSize,
+                wordIndex: index)
+        } ?? Self.sharedCaptionRasterer.idleRaster(
+            line: makeLineProxy(item: item),
+            style: item.style,
+            renderSize: renderSize)
+
+        guard let raster, raster.boundingBox != .zero else { return nil }
+
+        let animation = CaptionAnimation.evaluate(
+            currentTime: time,
+            lineStart: item.range.start,
+            lineEnd: item.range.end,
+            style: item.style)
+        var image = raster.image
+
+        if item.style.enterAnimation == .typewriter && animation.typewriterProgress < 1 {
+            image = typewriterMasked(image: image,
+                                     box: raster.boundingBox,
+                                     progress: animation.typewriterProgress)
+        }
+
+        if animation.scale != 1 {
+            let centre = CGPoint(x: raster.boundingBox.midX, y: raster.boundingBox.midY)
+            var transform = CGAffineTransform.identity
+                .translatedBy(x: centre.x, y: centre.y)
+                .scaledBy(x: animation.scale, y: animation.scale)
+                .translatedBy(x: -centre.x, y: -centre.y)
+            transform = transform.translatedBy(x: animation.translation.width,
+                                               y: animation.translation.height)
+            image = image.transformed(by: transform)
+        } else if animation.translation != .zero {
+            image = image.transformed(by: CGAffineTransform(
+                translationX: animation.translation.width,
+                y: animation.translation.height))
+        }
+
+        if animation.opacity < 1 {
+            let filter = CIFilter.colorMatrix()
+            filter.inputImage = image
+            filter.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(animation.opacity))
+            image = filter.outputImage ?? image
+        }
+
+        return image.cropped(to: CGRect(origin: .zero, size: renderSize))
+    }
+
+    /// CIImage gradient mask that reveals progressively from the left edge of the
+    /// text bounding box across to the right, giving the typewriter effect
+    /// without re-rasterising for each visible-length prefix. The mask is WHITE
+    /// (not black) over the reveal area — `CIBlendWithMask` reads the mask as
+    /// grayscale, so white = use input (visible) and clear = use background
+    /// (hidden); an opaque-black mask would leave the caption invisible across
+    /// the entire enter window.
+    nonisolated private func typewriterMasked(image: CIImage, box: CGRect, progress: Float) -> CIImage {
+        let progress = max(0, min(1, CGFloat(progress)))
+        let mask = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
+            .cropped(to: CGRect(x: box.minX,
+                                y: box.minY,
+                                width: box.width * progress,
+                                height: box.height))
+        let filter = CIFilter.blendWithMask()
+        filter.inputImage = image
+        filter.backgroundImage = CIImage(color: .clear).cropped(to: image.extent)
+        filter.maskImage = mask
+        return filter.outputImage ?? image
+    }
+
+    /// Reconstructs a minimal `CaptionLine` proxy for the rasterer cache key. The
+    /// rasterer doesn't read the time range — only id, text, words — so the proxy
+    /// can omit timing.
+    nonisolated private func makeLineProxy(item: CaptionRenderItem) -> CaptionLine {
+        CaptionLine(id: item.lineID, range: item.range, text: item.text,
+                    words: item.words, style: item.style)
+    }
+
+    nonisolated private func activeWordIndex(for item: CaptionRenderItem, at time: CMTime) -> Int? {
+        guard let words = item.words, !words.isEmpty else { return nil }
+        for (i, word) in words.enumerated() where word.range.containsTime(time) {
+            return i
+        }
+        return nil
     }
 
     // MARK: - Transitions

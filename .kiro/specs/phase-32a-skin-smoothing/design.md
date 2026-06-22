@@ -14,12 +14,9 @@ A pure-GPU beauty effect node in the per-clip effect chain: smoothing gated by a
 ## Approach
 
 1. **Mask.** YCbCr skin-tone probability mask in a `CIKernel` (Metal-backed): the YCbCr / HSV ranges Apple's Vision uses for skin segmentation are well-documented; we replicate the chroma-only portion (no spatial prior). Output is a single-channel mask in `[0,1]`. Two tunable parameters (warmth bias, luminance gate) expose the obvious failure modes (very pale / very dark skin) without forcing the user into per-clip tuning.
-2. **Smoothing.** Two implementations to pick from in `design.md` after a prototype shootout:
-   - **Guided filter** (preserves edges via the input image as the guide; smooths only the low-frequency component on the masked region).
-   - **Frequency separation** (low-pass + high-pass split; blend smoothed low-pass back with the original high-pass according to mask and strength).
-   We default to guided filter unless a prototype shows it costs more than 4 ms/frame on M2 at 1080p; frequency separation is the fallback.
+2. **Smoothing.** **Gaussian blur proxy** (not a true guided filter). `CIGaussianBlur` is applied with `clampedToExtent()` to prevent edge bleeding, then blended back using the mask via a `CIColorKernel`. This approximates edge-preserving behavior at low strengths but does not preserve edges at high strengths. A true guided filter (using the image as its own guide) can be implemented later if needed. Both kernels are cached as `static let` to avoid per-frame compilation.
 3. **Effect node.** `SkinSmoothEffect` conforms to the `Effect` protocol from `feature-colour-grading`. It owns one `strength: Keyframed<Float>` (0…1, default 0), one `maskWarmthBias`, one `maskLuminanceGate`, and an `aBBypass: Bool` for the inspector toggle.
-4. **Inspector UI.** A "Beauty" section in the inspector with a strength slider, an A/B bypass toggle, and a "show mask" overlay button that swaps the preview to the mask image so the user can verify it lands on skin.
+4. **Inspector UI.** A "Beauty" section in the inspector with a strength slider, an A/B bypass toggle, a "show mask" overlay button, and accessibility labels on all controls.
 5. **Performance.** Both the mask and smoothing kernels run on the Metal-backed `CIContext` shared with grading. Preview runs at the project render size or the proxy size if `feature-colour-grading` has wired proxy support; export runs full size.
 
 ## Trade-offs

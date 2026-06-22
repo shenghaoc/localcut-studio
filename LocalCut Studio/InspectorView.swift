@@ -36,6 +36,7 @@ struct InspectorView: View {
                     }
                 }
 
+                CaptionsInspectorView(model: model)
                 projectSection
             }
             .formStyle(.grouped)
@@ -206,6 +207,7 @@ struct InspectorView: View {
                             }
                         }),
                     in: 0...1)
+                .accessibilityLabel("Strength")
             }
 
             DisclosureGroup("Advanced") {
@@ -223,6 +225,7 @@ struct InspectorView: View {
                             }),
                         in: -1...1,
                         step: 0.05)
+                    .accessibilityLabel("Mask Warmth")
                 }
 
                 VStack(alignment: .leading) {
@@ -239,6 +242,7 @@ struct InspectorView: View {
                             }),
                         in: 0...1,
                         step: 0.05)
+                    .accessibilityLabel("Luminance Gate")
                 }
             }
 
