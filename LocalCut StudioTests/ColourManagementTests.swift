@@ -87,6 +87,26 @@ func pixelBufferColourAttachmentsDisplayP3() {
     #expect(primaries == kCVImageBufferColorPrimaries_P3_D65 as String)
 }
 
+@Test("applyColourAttachments tags a Rec.709 buffer with the BT.709 transfer (NOT sRGB)")
+func pixelBufferColourAttachmentsRec709() {
+    // Pinned because `rec709` and `sRGB` share primaries + matrix but differ
+    // on transfer (`ITU_R_709_2` vs `sRGB`). A future refactor of
+    // `cvTransferFunction` that conflates the two would silently change the
+    // colour-tagged movie output; this test catches that.
+    guard let buffer = makePixelBuffer(width: 64, height: 36) else {
+        Issue.record("Could not allocate test pixel buffer")
+        return
+    }
+    EffectCompositor.applyColourAttachments(.rec709, to: buffer)
+    let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
+    let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil) as? String
+    let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
+    #expect(primaries == kCVImageBufferColorPrimaries_ITU_R_709_2 as String)
+    #expect(transfer == kCVImageBufferTransferFunction_ITU_R_709_2 as String)
+    #expect(transfer != kCVImageBufferTransferFunction_sRGB as String)
+    #expect(matrix == kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
+}
+
 @Test("applyColourAttachments tags a pixel buffer with Rec.2020 primaries (BT.709 transfer + matrix)")
 func pixelBufferColourAttachmentsRec2020() {
     guard let buffer = makePixelBuffer(width: 64, height: 36) else {

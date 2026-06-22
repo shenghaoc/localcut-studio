@@ -10,9 +10,10 @@ struct ScopeSample: Sendable, Equatable {
     var waveform: [WaveformColumn]
     /// Per-cell average chroma offsets (U, V) in the [-0.5, 0.5] plane. 8×8 grid.
     var vectorscope: [VectorPoint]
-    /// Monotonic compositor timestamp at sample time. Used by the UI to drop
-    /// out-of-order samples (publish() hops to the main actor via unstructured
-    /// Tasks, which can re-order).
+    /// Compositor timestamp at sample time. `publish(_:)` is invoked
+    /// concurrently from AVFoundation's per-frame queues; the lock-protected
+    /// `generatedAt` comparison there ensures an older frame can never
+    /// overwrite a newer one.
     var generatedAt: Date
 
     static let empty = ScopeSample(waveform: [], vectorscope: [], generatedAt: Date(timeIntervalSince1970: 0))
@@ -161,11 +162,12 @@ final class ScopeSampler: @unchecked Sendable {
         var result: [WaveformColumn] = []
         result.reserveCapacity(columns)
 
-        // First pass: collect raw R-channel histograms per column (we just
-        // computed the luma image into R).
-        var rawColumns: [[Float]] = []
-        rawColumns.reserveCapacity(columns)
-        var globalMax: Float = 0
+        // Per-column normalisation: each column's tallest bin sits at 1.0.
+        // A global normaliser would let a single specular highlight in one
+        // column flatten every other column to near-zero, defeating the
+        // panel's purpose for typical footage. Cross-column luma magnitude
+        // is therefore *not* preserved by this scope — a per-row average is
+        // a Phase 38 extension.
         for i in 0..<columns {
             let columnRect = CGRect(
                 x: extent.origin.x + CGFloat(i) * columnWidth,
@@ -174,16 +176,8 @@ final class ScopeSampler: @unchecked Sendable {
                 height: extent.height)
             let raw = lumaHistogram(image: lumaImage, rect: columnRect, bins: bins,
                                     context: context, colorSpace: colorSpace)
-            for v in raw where v > globalMax { globalMax = v }
-            rawColumns.append(raw)
-        }
-
-        // Normalise across all columns so the brightest bin sits at 1.0 and
-        // relative magnitudes between columns are preserved (per-column
-        // normalisation would flatten the relationship between columns).
-        let scale: Float = globalMax > 0 ? 1.0 / globalMax : 0
-        for i in 0..<columns {
-            let normalised = scale > 0 ? rawColumns[i].map { $0 * scale } : rawColumns[i]
+            let columnMax = raw.max() ?? 0
+            let normalised: [Float] = columnMax > 0 ? raw.map { $0 / columnMax } : raw
             let x = Float((CGFloat(i) + 0.5) / CGFloat(columns))
             result.append(WaveformColumn(x: x, bins: normalised))
         }
