@@ -121,7 +121,7 @@ extension Capabilities {
                             osVersion: os)
     }
 
-    nonisolated private static func probeChipFamily() -> ChipFamily {
+    private nonisolated static func probeChipFamily() -> ChipFamily {
         let isAppleSilicon = sysctlInt("hw.optional.arm64") == 1
         guard isAppleSilicon else { return .intel }
         let board = sysctlString("hw.model") ?? ""
@@ -154,7 +154,7 @@ extension Capabilities {
         return 0
     }
 
-    nonisolated private static func probeHardwareEncoderCount() -> Int {
+    private nonisolated static func probeHardwareEncoderCount() -> Int {
         // VTCopyVideoEncoderList doesn't expose a "hardware only" options-key
         // — the hardware flag is a per-entry property
         // (`kVTVideoEncoderList_IsHardwareAccelerated`). Pull the whole list

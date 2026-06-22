@@ -19,10 +19,12 @@
   Intel from Apple Silicon. Apple Silicon generation is derived from a
   board-string read (`hw.model`).
 - **R2.2** Unified-memory size is read from `sysctlbyname("hw.memsize")`.
-- **R2.3** Hardware video encoder count is derived from `VTCopyVideoEncoderList`
-  filtered to hardware-accelerated entries via the documented options key
-  (`kVTVideoEncoderListOptionKey_RequireHardwareAcceleratedVideoEncoder`).
-  A probe failure surfaces zero encoders rather than crashing.
+- **R2.3** Hardware video encoder count is derived from
+  `VTCopyVideoEncoderList` called with a `nil` options dict; entries are
+  counted by checking the per-entry `kVTVideoEncoderList_IsHardwareAccelerated`
+  property (the header exposes no "hardware only" options-dict key —
+  hardware acceleration is a per-encoder attribute). A probe failure
+  surfaces zero encoders rather than crashing.
 - **R2.4** OS version is `ProcessInfo.processInfo.operatingSystemVersion`.
 - **R2.5** The snapshot is captured ONCE at editor launch (a `static let
   current` on `Capabilities`) and never re-probed within a session.

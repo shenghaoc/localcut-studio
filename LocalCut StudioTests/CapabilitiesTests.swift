@@ -205,7 +205,7 @@ func captureStreamsSingle() {
     #expect(verdict.tier == .accelerated)
 }
 
-@Test("Capture streams: 3 streams + 2 encoders, ≥16 GiB → pro")
+@Test("Capture streams: 3 streams + 3 encoders, ≥16 GiB → pro")
 func captureStreamsProMulti() {
     let c = Capabilities(
         chip: .appleSilicon(generation: 3),
@@ -226,6 +226,17 @@ func metalEffectChainIntel() {
         videoEncoderCount: 0,
         osVersion: Capabilities.OSVersion(major: 26, minor: 0))
     let verdict = intel.tier(for: .metalEffectChain)
+    #expect(verdict.tier == .baseline)
+}
+
+@Test("Metal effect chain: unknown AS generation → baseline (errs low)")
+func metalEffectChainUnknownAS() {
+    let unknown = Capabilities(
+        chip: .appleSilicon(generation: 0),
+        unifiedMemoryBytes: 64 * 1024 * 1024 * 1024,
+        videoEncoderCount: 4,
+        osVersion: Capabilities.OSVersion(major: 26, minor: 0))
+    let verdict = unknown.tier(for: .metalEffectChain)
     #expect(verdict.tier == .baseline)
 }
 
