@@ -1,6 +1,6 @@
 # Requirements: Capability Tiers
 
-> Status: **Proposed**.
+> Status: **Implemented**.
 
 ## R1 — Tier model
 
@@ -58,7 +58,8 @@
 ## R5 — Verification
 
 - **R5.1** Unit tests under `LocalCut StudioTests/` cover:
-  - `CapabilityTier` ordering (`.baseline < .accelerated < .pro`).
+  - `CapabilityTier` ordering (`.baseline < .accelerated < .pro`) and `Codable`
+    round-trip.
   - The snapshot is stable across calls (`Capabilities.current === Capabilities.current`
     in value-equality terms).
   - `tier(for:)` returns a sensible, non-empty `reason` for every feature on
@@ -67,8 +68,13 @@
     `.baseline` with a reason naming the chip.
   - `frameInterpolation` on an Apple Silicon-typed value with
     `osVersion.major < 15` returns `.baseline` with a reason naming the OS.
+  - Unknown Apple Silicon generation (`generation: 0`) returns `.baseline` for
+    both `frameInterpolation` and `metalEffectChain`.
   - `simultaneousCaptureStreams(count: N)` for an `N` that exceeds the encoder
     count returns `.baseline`.
+  - Pro-tier gating: M3+ with ≥ 24 GiB → `.pro`; M1/M2 with high memory →
+    `.accelerated`; M3 with < 24 GiB → `.accelerated`.
+  - Board-string → generation table for known `MacNN,X` prefixes.
 - **R5.2** A synthetic `Capabilities` constructor (or builder, in test-only
   scope) lets tests exercise tier transitions without depending on the host.
 - **R5.3** `xcodebuild` (Debug, macOS) green; no test count regression.

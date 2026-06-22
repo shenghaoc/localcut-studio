@@ -1,6 +1,6 @@
 # Design: Capability Tiers (P8 / P26 native equivalent)
 
-> Status: **Proposed**. Infrastructure prerequisite for Phase 37 (frame interpolation),
+> Status: **Implemented**. Infrastructure prerequisite for Phase 37 (frame interpolation),
 > Phase 41 (capture engine), and Phase 45 (program mode).
 
 ## Goal

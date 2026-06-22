@@ -18,8 +18,8 @@
 
 - [x] **T2.1** `sysctlbyname` reads for `hw.optional.arm64`, `hw.memsize`,
       and `hw.model`; chip-generation mapping table.
-- [x] **T2.2** Hardware encoder count via `VTCopyVideoEncoderList` with the
-      hardware-acceleration filter key.
+- [x] **T2.2** Hardware encoder count via `VTCopyVideoEncoderList` with
+      per-entry `kVTVideoEncoderList_IsHardwareAccelerated` filtering.
 - [x] **T2.3** OS version via `ProcessInfo`. Snapshot is `static let current`
       on `Capabilities` — eager, evaluated once at first access.
 
