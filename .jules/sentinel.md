@@ -13,3 +13,9 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Risk:** `AVAssetExportSession` fails if the destination exists, so it's tempting to blindly `removeItem(at:)` first.
 **Learning:** Removing the file is only safe because the user picked that exact path in `NSSavePanel` (which itself confirms overwrite). Doing it for any other reason is data loss.
 **Prevention:** Only delete-then-write at a URL the user just chose via the save panel; never derive an output path and overwrite silently.
+
+## 2026-06-21 - Untrusted Media Metadata Validation
+
+**Vulnerability:** Untrusted external media file metadata like `duration`, `naturalSize`, and `preferredTransform` were being loaded directly into internal properties without sanitization. Maliciously crafted or corrupted video files could inject NaN, infinite, or negative values.
+**Learning:** This could lead to infinite loops, division by zero, layout crashes, or DoS when rendering the UI or calculating timeline mathematics, due to invalid geometric and timing values.
+**Prevention:** All metadata parameters must be validated and clamped before assignment. A set of `.sanitized` computed properties for `CMTime`, `CGSize`, and `CGAffineTransform` ensures values fall back to safe zero or identity states.

@@ -21,6 +21,12 @@ enum CompositionBuilder {
 
     enum BuildError: Error { case noVideoTrackInSource, noAudioTrackInSource }
 
+    /// Upper bound on a single filler-asset encode. Longer caption tails are
+    /// covered by repeatedly inserting this short chunk into the composition
+    /// track via `insertTimeRange`, so the on-disk filler stays small no
+    /// matter how long the tail is.
+    private static let fillerChunkSeconds: Double = 5
+
     /// One placed clip on a composition track, in *effective* (rippled) timeline
     /// coordinates, with the transform/opacity/effects to apply while on screen.
     /// `transitionRange`/`transitionType` are set on the incoming clip of a
@@ -219,13 +225,71 @@ enum CompositionBuilder {
 
         let captionTracks = project.captionTracks.filter { !$0.isMuted }
 
-        // Known limitation: a caption that ends past the last AV clip is
-        // truncated to the AV duration on preview / export. Extending via
-        // `AVMutableComposition.insertEmptyTimeRange` did not reliably update
-        // `composition.duration` on macOS 26; the proper fix is to insert a
-        // placeholder source media (a tiny black/silent .mov) into the
-        // composition for the tail. Tracked as a follow-up; see Phase 30
-        // spec's "Known limitations".
+        // Insert a black-frame filler track wherever the project has caption
+        // activity but no video to render it over. Comparing against the last
+        // VIDEO segment end (not `composition.duration`) matters because an
+        // audio track longer than the final video clip already pushes
+        // `composition.duration` past the last video frame; without this we
+        // would silently miss every caption that sits over the audio-only
+        // gap. Codex P1.
+        //
+        // `insertEmptyTimeRange` does not reliably push `composition.duration`
+        // forward, so we insert real frames. The filler's track doubles as
+        // the *required source* for tail instructions so AVFoundation
+        // schedules the compositor across that interval; without a required
+        // source the export pipeline hangs waiting for a frame.
+        //
+        // For very long tails (multi-minute captions / bad subtitle
+        // timestamps) we encode only a short filler asset and loop-insert it
+        // into the composition track so a 30-minute caption tail does not
+        // make the editor block on writing tens of thousands of frames.
+        // Codex P2 (cap filler generation).
+        let captionEnd = captionTracks.reduce(CMTime.zero) {
+            CMTimeMaximum($0, $1.endTime)
+        }
+        let lastVideoEnd = projectTrackSegments.flatMap { $0 }
+            .reduce(CMTime.zero) { CMTimeMaximum($0, $1.timeRange.end) }
+
+        var fillerTailRange: CMTimeRange?
+        var fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
+        if captionEnd.isNumeric, lastVideoEnd.isNumeric, captionEnd > lastVideoEnd {
+            let tailStart = lastVideoEnd
+            let tailDuration = captionEnd - tailStart
+            // Generate at most `fillerChunkSeconds` of source media; longer
+            // tails reuse the same chunk via repeated `insertTimeRange`s.
+            let chunkSeconds = CMTime(seconds: fillerChunkSeconds,
+                                      preferredTimescale: 600)
+            let filler = try await CaptionTailFiller.asset(
+                renderSize: renderSize,
+                frameRate: project.frameRate,
+                minimumDuration: chunkSeconds)
+            let fillerVideoTracks = try await filler.loadTracks(withMediaType: .video)
+            let fillerAssetDuration = try await filler.load(.duration)
+            if let fillerVideoSource = fillerVideoTracks.first,
+               fillerAssetDuration > .zero,
+               let fillerCompTrack = composition.addMutableTrack(
+                withMediaType: .video,
+                preferredTrackID: kCMPersistentTrackID_Invalid) {
+                // Insert in chunks of at most `fillerAssetDuration` so the
+                // encoded source can be tiny while still covering an
+                // arbitrarily long tail.
+                var insertAt = tailStart
+                var remaining = tailDuration
+                while remaining > .zero {
+                    let chunk = CMTimeMinimum(fillerAssetDuration, remaining)
+                    guard chunk > .zero else { break }
+                    try fillerCompTrack.insertTimeRange(
+                        CMTimeRange(start: .zero, duration: chunk),
+                        of: fillerVideoSource,
+                        at: insertAt)
+                    insertAt = insertAt + chunk
+                    remaining = remaining - chunk
+                }
+                fillerTrackID = fillerCompTrack.trackID
+                fillerTailRange = CMTimeRange(start: tailStart, duration: tailDuration)
+            }
+        }
+
         let totalDuration = composition.duration
         guard totalDuration > .zero else { return nil }
 
@@ -235,7 +299,9 @@ enum CompositionBuilder {
             captionTracks: captionTracks,
             totalDuration: totalDuration,
             renderSize: renderSize,
-            frameRate: project.frameRate)
+            frameRate: project.frameRate,
+            fillerTrackID: fillerTrackID,
+            fillerTailRange: fillerTailRange)
 
         let audioMix: AVAudioMix?
         if hasAudioCrossfade {
@@ -265,9 +331,18 @@ enum CompositionBuilder {
         captionTracks: [CaptionTrack],
         totalDuration: CMTime,
         renderSize: CGSize,
-        frameRate: Double) async throws -> AVVideoComposition? {
+        frameRate: Double,
+        fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid,
+        fillerTailRange: CMTimeRange? = nil) async throws -> AVVideoComposition? {
 
+        // The filler counts as "something to render" for the tail interval, so
+        // a caption-only or audio-only-with-captions project still gets a
+        // video composition (and therefore its caption burn-in). Without this,
+        // a project consisting of just an audio file + an SRT would build to
+        // a silent black tail with no captions on screen. Codex P2 (filler
+        // path).
         let hasAnySegment = projectTrackSegments.contains { !$0.isEmpty }
+            || fillerTrackID != kCMPersistentTrackID_Invalid
         guard hasAnySegment else { return nil }
 
         // Collect and sort every distinct boundary time, including overlap edges
@@ -321,6 +396,24 @@ enum CompositionBuilder {
                                                  type: type, overlap: overlap))
                     }
                 }
+            }
+
+            // Tail intervals (past the last AV clip) have no clip segment, but
+            // the export pipeline still needs a `requiredSourceTrackIDs` entry
+            // to schedule the compositor — surface the filler as a layer so
+            // its track ID flows into the instruction. The layer renders as
+            // black; captions composite on top.
+            if units.isEmpty,
+               let tail = fillerTailRange,
+               fillerTrackID != kCMPersistentTrackID_Invalid,
+               tail.containsTime(CMTime(seconds: midpoint, preferredTimescale: 600)) {
+                units.append(.layer(CompositorLayer(
+                    trackID: fillerTrackID,
+                    transform: .identity,
+                    opacity: 1,
+                    effects: [],
+                    showSkinMask: false,
+                    clipStartTime: tail.start)))
             }
 
             let captionsForInterval = activeCaptionItems(
