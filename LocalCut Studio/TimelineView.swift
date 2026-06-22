@@ -66,10 +66,13 @@ struct TimelineView: View {
                                      onDelete: { deleteSelectedMarkerIfAny() }))
     }
 
-    /// Opens the rename popover for the selected marker; no-op when none is
-    /// selected. Called from the Shift+M key handler.
+    /// Opens the rename popover for the selected marker; reports guidance when
+    /// none is selected. Called from the Shift+M key handler.
     private func beginRenamingSelectedMarker() {
-        guard let marker = model.selectedMarker else { return }
+        guard let marker = model.selectedMarker else {
+            model.statusMessage = "Select a marker on the ruler before pressing Shift+M to rename."
+            return
+        }
         renameDraft = marker.name
         renamingMarkerID = marker.id
     }
