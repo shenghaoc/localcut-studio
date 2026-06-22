@@ -51,9 +51,11 @@ nonisolated enum Fingerprint {
 /// Serialised as a **top-level JSON object** (`{ "assets/<id>.<ext>": "<hex>" }`)
 /// — the documented bundle-format shape — *not* nested under an `entries` field.
 /// The custom Codable below flattens the single stored property and writes the
-/// keys in sorted order itself so a re-save without changes produces
-/// byte-identical JSON, independent of any `JSONEncoder.outputFormatting`
-/// quirks around `singleValueContainer`-encoded dictionaries.
+/// keys in sorted order itself, sidestepping the `singleValueContainer`-encoded
+/// dictionary sorting gap. `encoded()` additionally sets `.sortedKeys` on the
+/// encoder because macOS 26 Foundation's rewritten `JSONEncoder` does not
+/// preserve keyed-container `container.encode(...)` call order without that
+/// flag — see `encoded()` for why both guards are kept (belt and braces).
 nonisolated struct FingerprintIndex: Codable, Equatable, Sendable {
     var entries: [String: String]
 
