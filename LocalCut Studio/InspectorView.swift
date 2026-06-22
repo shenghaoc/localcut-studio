@@ -26,6 +26,8 @@ struct InspectorView: View {
                     if clipIsVideo(clip) {
                         colourSection
                         beautySection
+                    } else {
+                        AudioClipFadesInspectorView(model: model, clip: clip)
                     }
                 } else if let media = model.selectedMedia {
                     mediaSection(media)
@@ -36,6 +38,7 @@ struct InspectorView: View {
                     }
                 }
 
+                AudioInspectorView(model: model)
                 CaptionsInspectorView(model: model)
                 MarkersInspectorView(model: model)
                 projectSection
