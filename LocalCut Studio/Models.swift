@@ -90,7 +90,7 @@ extension CMTime {
     /// Negativity is checked with `self >= .zero` rather than `value >= 0` so a
     /// negative `timescale` (possible in corrupted files) can't slip a negative
     /// time through.
-    var sanitized: CMTime {
+    nonisolated var sanitized: CMTime {
         guard isValid, !isIndefinite, !isPositiveInfinity, !isNegativeInfinity,
               self >= .zero, seconds.isFinite, seconds <= CMTime.maxSaneSeconds else {
             return .zero
@@ -107,7 +107,7 @@ extension CGSize {
 
     /// Returns a validated size, falling back to `.zero` if non-finite, and
     /// clamping each dimension into `0...maxSanePixels`.
-    var sanitized: CGSize {
+    nonisolated var sanitized: CGSize {
         guard width.isFinite, height.isFinite else { return .zero }
         func clamp(_ v: CGFloat) -> CGFloat { min(max(0, v), CGSize.maxSanePixels) }
         return CGSize(width: clamp(width), height: clamp(height))
@@ -122,7 +122,7 @@ extension CGAffineTransform {
 
     /// Returns a validated transform, falling back to `.identity` if any
     /// component is non-finite or implausibly large.
-    var sanitized: CGAffineTransform {
+    nonisolated var sanitized: CGAffineTransform {
         func ok(_ v: CGFloat) -> Bool { v.isFinite && abs(v) <= CGAffineTransform.maxSaneCoefficient }
         guard ok(a), ok(b), ok(c), ok(d), ok(tx), ok(ty) else { return .identity }
         return self
