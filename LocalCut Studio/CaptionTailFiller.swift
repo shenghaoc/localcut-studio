@@ -33,11 +33,13 @@ nonisolated enum CaptionTailFiller {
 
     /// Returns a cached `AVURLAsset` whose duration is at least
     /// `minimumDuration`. Regenerates the file when the cached version is
-    /// missing or too short. No in-process coordination: rebuilds for the
-    /// same (size, fps) very rarely race (the editor cancels in-flight
-    /// rebuilds on a fresh edit), and the test suite that exercises this
-    /// path is `.serialized`. A race on the writer path would surface as a
-    /// thrown `FillerError`, not silent corruption.
+    /// missing or too short.
+    ///
+    /// Concurrent callers requesting the same key are coordinated by writing
+    /// to a unique per-call temp path and then atomically replacing the
+    /// cached file. If two rebuilds race (e.g. an export overlapping a
+    /// preview rebuild), the last-rename-wins; neither caller ever sees a
+    /// half-written file underneath them. Codex P2 (serialise generation).
     static func asset(renderSize: CGSize,
                       frameRate: Double,
                       minimumDuration: CMTime) async throws -> AVURLAsset {
@@ -53,11 +55,56 @@ nonisolated enum CaptionTailFiller {
         }
 
         let generatedSeconds = max(defaultGeneratedSeconds, needed + 1)
-        try await generate(at: url,
-                           renderSize: renderSize,
-                           frameRate: frameRate,
-                           seconds: generatedSeconds)
+        try await generateAtomically(finalURL: url,
+                                     renderSize: renderSize,
+                                     frameRate: frameRate,
+                                     seconds: generatedSeconds)
         return AVURLAsset(url: url)
+    }
+
+    /// Writes to a unique temp file in the same directory, then replaces the
+    /// cached file in one rename. Same-directory write lets `replaceItem` use
+    /// a true rename (no copy across filesystems) and means a concurrent
+    /// reader either sees the old file or the new file — never a partial
+    /// write under a stable name.
+    private static func generateAtomically(finalURL: URL,
+                                            renderSize: CGSize,
+                                            frameRate: Double,
+                                            seconds: Double) async throws {
+        let directory = finalURL.deletingLastPathComponent()
+        let tempURL = directory.appendingPathComponent(
+            ".\(UUID().uuidString).partial.mov")
+
+        do {
+            try await generate(at: tempURL,
+                               renderSize: renderSize,
+                               frameRate: frameRate,
+                               seconds: seconds)
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw error
+        }
+
+        if FileManager.default.fileExists(atPath: finalURL.path) {
+            do {
+                _ = try FileManager.default.replaceItemAt(finalURL, withItemAt: tempURL)
+                return
+            } catch {
+                try? FileManager.default.removeItem(at: tempURL)
+                throw error
+            }
+        }
+        // Destination doesn't exist yet — straight rename.
+        do {
+            try FileManager.default.moveItem(at: tempURL, to: finalURL)
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            // Another writer may have just put a file in place; if it's now
+            // present, fall through with their version rather than fail.
+            if !FileManager.default.fileExists(atPath: finalURL.path) {
+                throw error
+            }
+        }
     }
 
     // MARK: - Internals

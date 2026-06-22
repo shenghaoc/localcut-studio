@@ -21,6 +21,12 @@ enum CompositionBuilder {
 
     enum BuildError: Error { case noVideoTrackInSource, noAudioTrackInSource }
 
+    /// Upper bound on a single filler-asset encode. Longer caption tails are
+    /// covered by repeatedly inserting this short chunk into the composition
+    /// track via `insertTimeRange`, so the on-disk filler stays small no
+    /// matter how long the tail is.
+    private static let fillerChunkSeconds: Double = 5
+
     /// One placed clip on a composition track, in *effective* (rippled) timeline
     /// coordinates, with the transform/opacity/effects to apply while on screen.
     /// `transitionRange`/`transitionType` are set on the incoming clip of a
@@ -215,33 +221,65 @@ enum CompositionBuilder {
 
         let captionTracks = project.captionTracks.filter { !$0.isMuted }
 
-        // Extend the composition to cover any caption tail that runs past the
-        // last AV clip. `insertEmptyTimeRange` does not reliably push
-        // `composition.duration` forward, so we insert a cached black-frame
-        // filler asset instead — see `CaptionTailFiller`. The filler's track
-        // doubles as the *required source* for tail instructions so AVFoundation
-        // actually schedules the compositor across that interval; without a
-        // required source the export pipeline hangs waiting for a frame.
+        // Insert a black-frame filler track wherever the project has caption
+        // activity but no video to render it over. Comparing against the last
+        // VIDEO segment end (not `composition.duration`) matters because an
+        // audio track longer than the final video clip already pushes
+        // `composition.duration` past the last video frame; without this we
+        // would silently miss every caption that sits over the audio-only
+        // gap. Codex P1.
+        //
+        // `insertEmptyTimeRange` does not reliably push `composition.duration`
+        // forward, so we insert real frames. The filler's track doubles as
+        // the *required source* for tail instructions so AVFoundation
+        // schedules the compositor across that interval; without a required
+        // source the export pipeline hangs waiting for a frame.
+        //
+        // For very long tails (multi-minute captions / bad subtitle
+        // timestamps) we encode only a short filler asset and loop-insert it
+        // into the composition track so a 30-minute caption tail does not
+        // make the editor block on writing tens of thousands of frames.
+        // Codex P2 (cap filler generation).
         let captionEnd = captionTracks.reduce(CMTime.zero) {
             CMTimeMaximum($0, $1.endTime)
         }
+        let lastVideoEnd = projectTrackSegments.flatMap { $0 }
+            .reduce(CMTime.zero) { CMTimeMaximum($0, $1.timeRange.end) }
+
         var fillerTailRange: CMTimeRange?
         var fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
-        if captionEnd > composition.duration {
-            let tailStart = composition.duration
+        if captionEnd > lastVideoEnd {
+            let tailStart = lastVideoEnd
             let tailDuration = captionEnd - tailStart
+            // Generate at most `fillerChunkSeconds` of source media; longer
+            // tails reuse the same chunk via repeated `insertTimeRange`s.
+            let chunkSeconds = CMTime(seconds: fillerChunkSeconds,
+                                      preferredTimescale: 600)
             let filler = try await CaptionTailFiller.asset(
                 renderSize: renderSize,
                 frameRate: project.frameRate,
-                minimumDuration: tailDuration)
+                minimumDuration: chunkSeconds)
             let fillerVideoTracks = try await filler.loadTracks(withMediaType: .video)
+            let fillerAssetDuration = try await filler.load(.duration)
             if let fillerVideoSource = fillerVideoTracks.first,
+               fillerAssetDuration > .zero,
                let fillerCompTrack = composition.addMutableTrack(
                 withMediaType: .video,
                 preferredTrackID: kCMPersistentTrackID_Invalid) {
-                let sourceRange = CMTimeRange(start: .zero, duration: tailDuration)
-                try fillerCompTrack.insertTimeRange(
-                    sourceRange, of: fillerVideoSource, at: tailStart)
+                // Insert in chunks of at most `fillerAssetDuration` so the
+                // encoded source can be tiny while still covering an
+                // arbitrarily long tail.
+                var insertAt = tailStart
+                var remaining = tailDuration
+                while remaining > .zero {
+                    let chunk = CMTimeMinimum(fillerAssetDuration, remaining)
+                    try fillerCompTrack.insertTimeRange(
+                        CMTimeRange(start: .zero, duration: chunk),
+                        of: fillerVideoSource,
+                        at: insertAt)
+                    insertAt = insertAt + chunk
+                    remaining = remaining - chunk
+                }
                 fillerTrackID = fillerCompTrack.trackID
                 fillerTailRange = CMTimeRange(start: tailStart, duration: tailDuration)
             }
@@ -292,7 +330,14 @@ enum CompositionBuilder {
         fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid,
         fillerTailRange: CMTimeRange? = nil) async throws -> AVVideoComposition? {
 
+        // The filler counts as "something to render" for the tail interval, so
+        // a caption-only or audio-only-with-captions project still gets a
+        // video composition (and therefore its caption burn-in). Without this,
+        // a project consisting of just an audio file + an SRT would build to
+        // a silent black tail with no captions on screen. Codex P2 (filler
+        // path).
         let hasAnySegment = projectTrackSegments.contains { !$0.isEmpty }
+            || fillerTrackID != kCMPersistentTrackID_Invalid
         guard hasAnySegment else { return nil }
 
         // Collect and sort every distinct boundary time, including overlap edges
