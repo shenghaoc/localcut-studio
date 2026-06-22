@@ -441,13 +441,23 @@ final class EditorModel {
         }
     }
 
-    /// Removes all colour effects from the selected clip.
+    /// Removes only the *colour* effects (`colourGrade` + `lut`) from the
+    /// selected clip. An earlier version called `effects.removeAll()`
+    /// unconditionally, which silently wiped non-colour effects like
+    /// `skinSmooth` when the user clicked Reset on the Colour section —
+    /// surprising data loss. Mirrors the per-effect filter used in
+    /// `resetClipSkinSmooth()`.
     func resetClipColourEffects() {
         guard let id = selectedClipID else { return }
         performUndoable("Reset Colour") {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-                track.clips[index].effects.removeAll()
+                track.clips[index].effects.removeAll { effect in
+                    switch effect {
+                    case .colourGrade, .lut: true
+                    case .skinSmooth: false
+                    }
+                }
                 RenderCache.shared.invalidate(clipID: id)
                 scheduleRebuild()
                 return

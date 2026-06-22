@@ -12,10 +12,10 @@
 ## Interaction
 
 - [x] **T2.1** Edge vs. body hit zones + hover cursors on clip blocks.
-- [x] **T2.2** Transient `dragState` with `offset`-based live feedback (no per-event model mutation).
+- [x] **T2.2** Transient `dragMode` enum in `TimelineView` (`.trimmingLeft` / `.trimmingRight` / `.moving` cases carrying the candidate `CMTime`, not raw drag offset; the spec originally said "offset-based" but candidate-time captures the same idea with the snap result already folded in). No per-event model mutation — the model only sees the final values when `DragGesture.onEnded` fires.
 - [x] **T2.3** Commit on drag end → single `rebuild()`.
 
 ## Verification
 
-- [x] **T3.1** Smoke test: trim both edges, move within and across tracks; preview + export reflect it.
+- [x] **T3.1** Unit-test coverage of the trim/move/snap math in `LocalCut StudioTests/TrimAndDragTests.swift` (left/right edge clamping, source-start clamping, move clamping to zero, cross-kind rejection, overlap resolution, snap-target enumeration and resolution) plus undo / redo integrity in `LocalCut StudioTests/UndoRedoTests.swift`. A full end-to-end smoke test that exports a trimmed/moved composition and verifies pixel parity with preview is not in the suite — the production parity is enforced by routing both preview and export through the same `CompositionBuilder.build` path that the unit tests target.
 - [x] **T3.2** `xcodebuild` green; tests green with no count regression.

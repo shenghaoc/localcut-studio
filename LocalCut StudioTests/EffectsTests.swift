@@ -111,6 +111,34 @@ private func samplePixelEquals(_ a: CIImage, _ b: CIImage, at point: CGPoint,
     return true
 }
 
+@Test("EditorModel.resetClipColourEffects preserves non-colour effects (audit fix)")
+@MainActor
+func resetColourPreservesSkinSmooth() {
+    let model = EditorModel()
+    let mediaID = UUID()
+    let clip = Clip(
+        mediaID: mediaID,
+        sourceStart: .zero,
+        duration: CMTime(seconds: 5, preferredTimescale: 600),
+        timelineStart: .zero)
+    var effected = clip
+    effected.effects = [
+        .colourGrade(ColourGrade()),
+        .skinSmooth(SkinSmoothEffect()),
+        .lut(bookmark: Data([0x1])),
+    ]
+    model.project.videoTracks.first!.clips = [effected]
+    model.selectedClipID = effected.id
+
+    model.resetClipColourEffects()
+
+    let remaining = model.project.videoTracks.first!.clips.first!.effects
+    // SkinSmooth must survive; colour + lut must be gone.
+    #expect(remaining.contains { if case .skinSmooth = $0 { return true }; return false })
+    #expect(!remaining.contains { if case .colourGrade = $0 { return true }; return false })
+    #expect(!remaining.contains { if case .lut = $0 { return true }; return false })
+}
+
 @Test("Effect.lut stores bookmark data")
 func lutEffectStoresData() {
     let data = Data([0x01, 0x02, 0x03])
