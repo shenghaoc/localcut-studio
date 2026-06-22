@@ -34,6 +34,15 @@ final class EditorModel {
     // Skin smoothing debug
     var showSkinMask = false
 
+    // Diagnostics
+    /// Drives whether the diagnostics overlay is on screen and whether the
+    /// `DiagnosticsAgent`'s 1 Hz timer is sampling. Hidden by default so a
+    /// long-running export doesn't pay the probe cost.
+    var isDiagnosticsVisible = false {
+        didSet { syncDiagnosticsLifecycle() }
+    }
+    let diagnostics: DiagnosticsAgent
+
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
     @ObservationIgnored var pendingRebuildTask: Task<Void, Never>?
@@ -80,6 +89,20 @@ final class EditorModel {
         // run-loop-based coalescing (see registerUndo).
         undoManager.groupsByEvent = false
 
+        // The diagnostics agent needs to read the project's frame rate (for the
+        // GPU-utilisation proxy) and the player's dropped-frame counter. We
+        // can't capture `self` strongly here without a retain cycle, but `weak
+        // self` is fine — the agent only outlives the editor briefly during
+        // deinit, and the closures return a sensible default in that window.
+        let project = self.project
+        let player = self.player
+        self.diagnostics = DiagnosticsAgent(
+            frameDuration: { 1.0 / max(1, project.frameRate) },
+            droppedFramesProvider: {
+                let log = player.currentItem?.accessLog()
+                return log?.events.last?.numberOfDroppedVideoFrames ?? 0
+            })
+
         let interval = CMTime(value: 1, timescale: 30)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
@@ -106,6 +129,11 @@ final class EditorModel {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
+    }
+
+    /// Starts or stops the diagnostics agent to match the panel's visibility.
+    private func syncDiagnosticsLifecycle() {
+        if isDiagnosticsVisible { diagnostics.start() } else { diagnostics.stop() }
     }
 
     // MARK: - Import
@@ -874,6 +902,7 @@ final class EditorModel {
                 // No preview left to play; clear the flag so a later rebuild that
                 // re-creates an item (undo, add clip) doesn't silently auto-resume.
                 isPlaying = false
+                DiagnosticsBridge.shared.setDecoderCount(0)
                 return
             }
             let item = AVPlayerItem(asset: built.composition)
@@ -881,6 +910,10 @@ final class EditorModel {
             item.audioMix = built.audioMix
             player.replaceCurrentItem(with: item)
             totalDuration = built.duration
+            // The active VideoToolbox decoder count tracks one-to-one with the
+            // composition's video tracks (each is fed from a distinct source).
+            DiagnosticsBridge.shared.setDecoderCount(
+                built.composition.tracks(withMediaType: .video).count)
             await player.seek(to: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600),
                               toleranceBefore: .zero, toleranceAfter: .zero)
             // Check the live isPlaying rather than a captured flag so a user's

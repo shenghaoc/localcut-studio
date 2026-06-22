@@ -114,6 +114,13 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             return
         }
 
+        // Bracket the body so DiagnosticsAgent can compute a real render time
+        // for every frame the compositor processes.
+        let renderStart = CFAbsoluteTimeGetCurrent()
+        defer {
+            DiagnosticsBridge.shared.recordRenderTime(CFAbsoluteTimeGetCurrent() - renderStart)
+        }
+
         let renderSize = request.renderContext.size
         var result: CIImage?
 
