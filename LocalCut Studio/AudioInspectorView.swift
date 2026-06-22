@@ -184,7 +184,7 @@ struct AudioClipFadesInspectorView: View {
     @ViewBuilder
     private func fadeRow(label: String,
                          seconds: Double,
-                         set: @escaping @Sendable (Double) -> Void) -> some View {
+                         set: @escaping (Double) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label).font(.caption.bold())

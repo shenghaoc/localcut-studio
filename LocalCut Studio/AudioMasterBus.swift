@@ -226,13 +226,12 @@ final class AudioMasterBus {
     /// thread; it writes through the lock and never touches `@Observable`
     /// state directly to avoid SwiftUI re-entrancy on the audio thread.
     ///
-    /// `nonisolated` because the closure inherits the surrounding actor
-    /// isolation by default, and the tap callback is invoked on a non-main
-    /// thread — letting the closure float free of MainActor avoids a Swift 6
-    /// `@Sendable` mismatch.
-    nonisolated private func installMeterTap(on node: AVAudioMixerNode, format: AVAudioFormat) {
+    /// Captures only the `Sendable` lock in the closure's capture list so the
+    /// tap callback is safely `@Sendable` and non-isolated, running on the
+    /// audio thread without any MainActor mismatch.
+    private func installMeterTap(on node: AVAudioMixerNode, format: AVAudioFormat) {
         let lock = meterLock
-        node.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+        node.installTap(onBus: 0, bufferSize: 1024, format: format) { [lock] buffer, _ in
             let snapshot = AudioMasterBus.computeMeter(buffer: buffer)
             lock.withLock { $0 = snapshot }
         }

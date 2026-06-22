@@ -974,9 +974,10 @@ nonisolated struct VolumeEnvelope: Hashable, Codable, Sendable {
             let dv = try c.decode(Int64.self, forKey: .durationValue)
             let ds = try c.decode(Int32.self, forKey: .durationScale)
             // Defensive: a zero/negative timescale is invalid; fall back to 600.
+            // Also ensure duration is non-negative to prevent invalid CMTimeRange.
             range = CMTimeRange(
                 start: CMTime(value: sv, timescale: ss > 0 ? ss : 600),
-                duration: CMTime(value: dv, timescale: ds > 0 ? ds : 600))
+                duration: CMTime(value: max(0, dv), timescale: ds > 0 ? ds : 600))
             fromVolume = try c.decodeIfPresent(Float.self, forKey: .fromVolume) ?? 1
             toVolume = try c.decodeIfPresent(Float.self, forKey: .toVolume) ?? 1
         }
