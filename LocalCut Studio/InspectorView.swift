@@ -63,12 +63,18 @@ struct InspectorView: View {
             LabeledContent("Duration", value: TimeFormatting.timecode(clip.duration.seconds))
 
             VStack(alignment: .leading) {
+                // Visual label only; the slider below carries the same
+                // information for VoiceOver, so hide this to avoid a doubled
+                // announcement.
                 Text("Opacity \(Int(clip.opacity * 100))%")
+                    .accessibilityHidden(true)
                 Slider(
                     value: Binding(
                         get: { Double(clip.opacity) },
                         set: { newValue in model.updateSelectedClipCoalesced("Adjust Opacity") { $0.opacity = Float(newValue) } }),
                     in: 0...1)
+                .accessibilityLabel("Opacity")
+                .accessibilityValue("\(Int(clip.opacity * 100))%")
             }
         }
     }
@@ -90,7 +96,10 @@ struct InspectorView: View {
                 Text("Duration \(String(format: "%.2f s", min(transition.duration.seconds, maxTransitionSeconds)))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Slider(value: transitionDurationBinding, in: minTransitionSeconds...maxTransitionSeconds)
+                    .accessibilityLabel("Transition Duration")
+                    .accessibilityValue(String(format: "%.2f seconds", min(transition.duration.seconds, maxTransitionSeconds)))
             }
 
             Button(role: .destructive) {
@@ -137,9 +146,9 @@ struct InspectorView: View {
                          range: Float(0.5)...Float(1.5), step: Float(0.05), display: String(format: "%.2f", model.selectedClipGrade.contrast))
             colourSlider(label: "Saturation", value: colourGradeBinding(\.saturation),
                          range: Float(0)...Float(2), step: Float(0.05), display: String(format: "%.2f", model.selectedClipGrade.saturation))
-            colourSlider(label: "Temp offset", value: colourGradeBinding(\.temperatureOffset),
+            colourSlider(label: "Temp offset", accessibilityLabel: "Temperature Offset", value: colourGradeBinding(\.temperatureOffset),
                          range: Float(-4000)...Float(4000), step: Float(100), display: "\(String(format: "%+.0f", model.selectedClipGrade.temperatureOffset))K")
-            colourSlider(label: "Tint offset", value: colourGradeBinding(\.tintOffset),
+            colourSlider(label: "Tint offset", accessibilityLabel: "Tint Offset", value: colourGradeBinding(\.tintOffset),
                          range: Float(-150)...Float(150), step: Float(10), display: String(format: "%+.0f", model.selectedClipGrade.tintOffset))
 
             HStack {
@@ -154,12 +163,19 @@ struct InspectorView: View {
     }
 
     @ViewBuilder
-    private func colourSlider(label: String, value: Binding<Float>, range: ClosedRange<Float>, step: Float, display: String) -> some View {
+    /// - Parameter accessibilityLabel: Spoken label for VoiceOver; defaults to
+    ///   the visible `label` but lets callers spell out abbreviations (e.g.
+    ///   "Temp offset" → "Temperature Offset").
+    private func colourSlider(label: String, accessibilityLabel: String? = nil, value: Binding<Float>, range: ClosedRange<Float>, step: Float, display: String) -> some View {
         VStack(alignment: .leading) {
+            // Visual label only; hidden so VoiceOver reads just the slider.
             Text("\(label)  \(display)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Slider(value: value, in: range, step: step)
+                .accessibilityLabel(accessibilityLabel ?? label)
+                .accessibilityValue(display)
         }
     }
 
