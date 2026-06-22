@@ -244,6 +244,21 @@ struct DiagnosticsTests {
         #expect(!DiagnosticsBridge.shared.isEnabled)
     }
 
+    @Test("Agent's deinit closes the bridge gate even when stop() wasn't called (R2.4)")
+    func deinitClosesGate() {
+        DiagnosticsBridge.shared.reset()
+        do {
+            let agent = DiagnosticsAgent()
+            agent.start()
+            #expect(DiagnosticsBridge.shared.isEnabled)
+            // No explicit stop() — the editor's teardown path relies on the
+            // agent's deinit invalidating the timer and closing the gate when
+            // the last strong reference drops.
+        }
+        // The agent has been released; the bridge gate must have been closed.
+        #expect(!DiagnosticsBridge.shared.isEnabled)
+    }
+
     // MARK: - clearRenderSamples preserves decoder / drops
 
     @Test("clearRenderSamples() wipes the ring but preserves decoder count and drops")

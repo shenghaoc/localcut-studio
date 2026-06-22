@@ -4,7 +4,11 @@ import AppKit
 /// A translucent overlay that surfaces the `DiagnosticsAgent`'s probes. Anchored
 /// top-trailing on the editor view; togglable from View ▸ Show Diagnostics.
 struct DiagnosticsView: View {
-    @Bindable var agent: DiagnosticsAgent
+    // Read-only — the view never creates `$agent.foo` bindings, so `let` is
+    // enough. `@Observable` tracking happens on plain property reads inside
+    // `body`; `@Bindable` would expose write access to every property of the
+    // agent, which would be semantic overreach here.
+    let agent: DiagnosticsAgent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -65,7 +69,11 @@ struct DiagnosticsView: View {
 
     @ViewBuilder
     private var sparkline: some View {
-        if agent.sparkline.isEmpty {
+        // A single sample renders as nothing through `Path.addLine` (only
+        // `move(to:)` runs, then `stroke` draws nothing), which would look
+        // identical to a stuck blank area instead of the em-dash empty state.
+        // Treat <2 samples the same as zero samples.
+        if agent.sparkline.count < 2 {
             // Empty state shouldn't read as a stuck zero — an em dash is clearer.
             HStack {
                 Spacer()
@@ -83,7 +91,7 @@ struct DiagnosticsView: View {
                     // wildly misleading peak. A real spike past the budget
                     // pushes the scale up as before.
                     let maxValue = max(16.6, maxSample)
-                    let stepX = samples.count > 1 ? proxy.size.width / CGFloat(samples.count - 1) : 0
+                    let stepX = proxy.size.width / CGFloat(samples.count - 1)
                     let scaleY = proxy.size.height / CGFloat(maxValue)
                     for (i, value) in samples.enumerated() {
                         let point = CGPoint(

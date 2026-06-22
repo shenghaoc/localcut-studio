@@ -97,6 +97,9 @@ struct EditorView: View {
         .overlay(alignment: .topTrailing) {
             if model.isDiagnosticsVisible {
                 DiagnosticsView(agent: model.diagnostics)
+                    // Clear the unified toolbar (~52 pt on the .unified style)
+                    // plus a few points of breathing room so the panel doesn't
+                    // butt against the window chrome.
                     .padding(.top, 60)
                     .padding(.trailing, 16)
                     .transition(.opacity)

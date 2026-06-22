@@ -17,7 +17,7 @@
 - **R2.1** The agent is owned by `EditorModel` and lives as long as the editor session.
 - **R2.2** The 1 Hz timer is not scheduled until `start()` runs; `stop()` invalidates it so probes don't sample when the panel is hidden.
 - **R2.3** Toggling `View ▸ Show Diagnostics` calls `start()` / `stop()` through `EditorModel.isDiagnosticsVisible`.
-- **R2.4** Closing the editor (`EditorModel.deinit`) stops the agent.
+- **R2.4** Closing the editor stops the agent: the agent's `deinit` invalidates the timer and closes the bridge gate, so a torn-down editor session doesn't leave the compositor recording into the bridge or the timer wakeup scheduled.
 - **R2.5** `start()` resets CPU calibration so the second tick after a fresh start reports a real delta, not a since-process-launch one.
 - **R2.6** `start()` preserves the bridge's decoder count (populated by the editor's most recent rebuild, independent of the panel's lifecycle) and seeds the drop baseline from the live counter; only render-related transient state is wiped.
 - **R2.7** When `EditorModel.rebuild()` produces no composition, the bridge's render samples are cleared in addition to setting decoder count to 0 — otherwise GPU / last / p95 would report stale numbers indefinitely.

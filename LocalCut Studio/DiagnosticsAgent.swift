@@ -67,7 +67,7 @@ final class DiagnosticsAgent {
 
     /// Visible window into the sparkline — sized so a 1080p panel can plot it
     /// readably without overrun.
-    nonisolated private static let sparklineCapacity = 60
+    private static let sparklineCapacity = 60
 
     init(
         now: @escaping @Sendable () -> CFAbsoluteTime = { CFAbsoluteTimeGetCurrent() },
@@ -81,6 +81,15 @@ final class DiagnosticsAgent {
 
     deinit {
         timer?.invalidate()
+        // Close the bridge's hot-path gate when the editor session tears down.
+        // `EditorModel.deinit` would normally call `stop()`, but `stop()` is
+        // MainActor-isolated (it writes `isRunning`), and Swift 6's deinit on a
+        // `@MainActor` class is nonisolated by default. The agent owning its
+        // own gate-close means EditorModel doesn't need to fight isolation just
+        // to satisfy the spec's "deinit stops the agent" intent — closing the
+        // gate here keeps the next session from inheriting an open gate from a
+        // torn-down one.
+        DiagnosticsBridge.shared.setEnabled(false)
     }
 
     // MARK: - Lifecycle
