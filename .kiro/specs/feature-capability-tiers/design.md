@@ -68,20 +68,21 @@ struct Capabilities: Sendable, Hashable {
   it as baseline rather than guessing high.
 - **Unified memory.** `sysctlbyname("hw.memsize")` returns the byte count;
   on Apple Silicon all of it is unified GPU-addressable.
-- **Encoder count.** `VTCopyVideoEncoderList` filtered by
-  `kVTVideoEncoderListOption_MustBeHardwareAccelerated`, counted by
-  `CFArrayGetCount`. This is a **rough proxy** for concurrent hardware
-  capacity — the list returns one row per (codec, encoder) implementation,
-  not per concurrent encoder instance. A Mac with one H.264 + HEVC engine
-  reports two rows even though the silicon is one block. For the v1
-  multi-stream gate (Phase 41 / 45) this proxy is acceptable: Intel Macs
-  return 0, baseline Apple Silicon returns 2–3, and Pro/Max/Ultra return
-  more — enough signal to distinguish a single-stream host from a
-  multi-stream one. A future revision can read
-  `kVTVideoEncoderList_InstanceLimit` per encoder for finer-grained
-  capacity gating; the API stays unchanged because the gate consumers
-  (`.simultaneousCaptureStreams(count:)`) speak in stream count, not
-  encoder rows.
+- **Encoder count.** `VTCopyVideoEncoderList(nil, ...)` followed by a
+  per-entry check of `kVTVideoEncoderList_IsHardwareAccelerated`
+  (`VTVideoEncoderList.h` doesn't expose a "hardware only" options-dict
+  key — the hardware flag is a per-encoder property). This is a **rough
+  proxy** for concurrent hardware capacity: the list returns one row per
+  (codec, encoder) implementation, not per concurrent encoder instance.
+  A Mac with one H.264 + HEVC engine reports two hardware rows even
+  though the silicon is one block. For the v1 multi-stream gate
+  (Phase 41 / 45) this proxy is acceptable: Intel Macs return 0,
+  baseline Apple Silicon returns 2–3, and Pro/Max/Ultra return more —
+  enough signal to distinguish a single-stream host from a multi-stream
+  one. A future revision can read `kVTVideoEncoderList_InstanceLimit`
+  per encoder for finer-grained capacity gating; the API stays unchanged
+  because the gate consumers (`.simultaneousCaptureStreams(count:)`)
+  speak in stream count, not encoder rows.
 - **OS version.** `ProcessInfo.processInfo.operatingSystemVersion` — needed by
   `Capabilities.tier(for:)` so APIs that ship in a specific macOS revision
   (`VTFrameProcessor` on macOS 15.4+, etc.) cannot be reached by a higher chip

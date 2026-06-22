@@ -155,17 +155,21 @@ extension Capabilities {
     }
 
     nonisolated private static func probeHardwareEncoderCount() -> Int {
-        // `kVTVideoEncoderListOption_MustBeHardwareAccelerated` filters the
-        // list to entries the OS will run on the hardware encoder block. On
-        // Intel Macs without a hardware H.264/HEVC path the list comes back
-        // empty.
-        let options: CFDictionary = [
-            kVTVideoEncoderListOption_MustBeHardwareAccelerated: kCFBooleanTrue!
-        ] as CFDictionary
+        // VTCopyVideoEncoderList doesn't expose a "hardware only" options-key
+        // — the hardware flag is a per-entry property
+        // (`kVTVideoEncoderList_IsHardwareAccelerated`). Pull the whole list
+        // and count entries where the flag is set. On Intel Macs without a
+        // hardware H.264/HEVC path none of the rows are hw-accelerated.
         var listRef: CFArray?
-        let status = VTCopyVideoEncoderList(options, &listRef)
+        let status = VTCopyVideoEncoderList(nil, &listRef)
         guard status == noErr, let list = listRef else { return 0 }
-        return CFArrayGetCount(list)
+        let hwKey = kVTVideoEncoderList_IsHardwareAccelerated as String
+        var hwCount = 0
+        for entry in (list as NSArray) {
+            guard let dict = entry as? [String: Any] else { continue }
+            if (dict[hwKey] as? Bool) == true { hwCount += 1 }
+        }
+        return hwCount
     }
 }
 
@@ -298,9 +302,13 @@ private nonisolated func sysctlString(_ name: String) -> String? {
     var size: Int = 0
     if sysctlbyname(name, nil, &size, nil, 0) != 0 { return nil }
     guard size > 0 else { return nil }
-    var buffer = [CChar](repeating: 0, count: size)
+    var buffer = [UInt8](repeating: 0, count: size)
     if sysctlbyname(name, &buffer, &size, nil, 0) != 0 { return nil }
-    return String(cString: buffer)
+    // `sysctlbyname` populates a NUL-terminated C string; drop the trailing
+    // NUL bytes before decoding so the resulting Swift string doesn't carry
+    // them either.
+    while buffer.last == 0 { buffer.removeLast() }
+    return String(decoding: buffer, as: UTF8.self)
 }
 
 private nonisolated func sysctlInt(_ name: String) -> Int? {
