@@ -104,18 +104,12 @@ nonisolated struct SkinSmoothEffect: Hashable, Codable, Sendable {
         // Clamp static parameters
         maskWarmthBias = max(-1, min(1, maskWarmthBias))
         maskLuminanceGate = max(0, min(1, maskLuminanceGate))
-        // Clamp keyframe values
-        for kf in strength.keyframes {
-            let clamped = max(0, min(1, kf.value))
-            if clamped != kf.value {
-                strength.updateKeyframe(id: kf.id, value: clamped)
-            }
+        // Clamp keyframe values and default value efficiently
+        let clampedKeyframes = strength.keyframes.map { kf in
+            Keyframe(id: kf.id, time: kf.time, value: max(0, min(1, kf.value)))
         }
-        // Clamp default value by creating a new Keyframed
         let clampedDefault = max(0, min(1, strength.defaultValue))
-        if clampedDefault != strength.defaultValue {
-            strength = Keyframed<Float>(keyframes: Array(strength.keyframes), defaultValue: clampedDefault)
-        }
+        strength = Keyframed<Float>(keyframes: clampedKeyframes, defaultValue: clampedDefault)
     }
 }
 

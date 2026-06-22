@@ -409,10 +409,14 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     private static let skinMaskKernel: CIColorKernel? = {
         CIColorKernel(source: """
             kernel vec4 skinMask(__sample image, float warmthBias, float luminanceGate) {
+                // Unpremultiply to get true colors for YCbCr conversion
+                float alpha = image.a;
+                vec3 rgb = alpha > 0.0 ? image.rgb / alpha : vec3(0.0);
+
                 // YCbCr conversion (normalized 0-1 inputs, 0-1 outputs)
-                float y = 0.299 * image.r + 0.587 * image.g + 0.114 * image.b;
-                float cb = 0.5 - 0.168736 * image.r - 0.331264 * image.g + 0.5 * image.b;
-                float cr = 0.5 + 0.5 * image.r - 0.418688 * image.g - 0.081312 * image.b;
+                float y = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
+                float cb = 0.5 - 0.168736 * rgb.r - 0.331264 * rgb.g + 0.5 * rgb.b;
+                float cr = 0.5 + 0.5 * rgb.r - 0.418688 * rgb.g - 0.081312 * rgb.b;
 
                 // Skin tone detection in Cb-Cr space
                 // Typical skin: Cb in [0.3, 0.5], Cr in [0.5, 0.7]
@@ -431,7 +435,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 float lumGate = smoothstep(0.0, luminanceGate * 0.5, y) * (1.0 - smoothstep(1.0 - luminanceGate * 0.5, 1.0, y));
                 skinProb *= lumGate;
 
-                return vec4(skinProb, skinProb, skinProb, 1.0);
+                // Scale by alpha to prevent transparent regions from accumulating skin probability
+                skinProb *= alpha;
+
+                return vec4(skinProb, skinProb, skinProb, alpha);
             }
             """)
     }()
@@ -486,9 +493,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let clamped = image.clampedToExtent()
 
         // Apply a moderate blur — radius scales with strength
-        guard let blurFilter = CIFilter(name: "CIGaussianBlur") else { return nil }
-        blurFilter.setValue(clamped, forKey: kCIInputImageKey)
-        blurFilter.setValue(strength * 10.0, forKey: kCIInputRadiusKey)
+        let blurFilter = CIFilter.gaussianBlur()
+        blurFilter.inputImage = clamped
+        blurFilter.radius = strength * 10.0
         guard let blurred = blurFilter.outputImage else { return nil }
 
         // Clip blurred image back to original extent

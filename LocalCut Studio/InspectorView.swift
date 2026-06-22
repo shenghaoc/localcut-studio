@@ -21,7 +21,7 @@ struct InspectorView: View {
             Form {
                 if let transition = model.selectedTransition {
                     transitionSection(transition)
-                } else                 if let clip = model.selectedClip {
+                } else if let clip = model.selectedClip {
                     clipSection(clip)
                     if clipIsVideo(clip) {
                         colourSection
