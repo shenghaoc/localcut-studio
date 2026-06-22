@@ -7,12 +7,6 @@ on:
       - "docs/**"
       - ".kiro/**"
       - ".jules/**"
-      - "A11Y-CHECKLIST.md"
-      - "BLOCKER-CLASSIFICATION.md"
-      - "RELEASE-READINESS.md"
-      - "CLAUDE.md"
-      - "GEMINI.md"
-      - "AGENTS.md"
   push:
     branches:
       - main
