@@ -93,7 +93,14 @@ nonisolated struct FingerprintIndex: Codable, Equatable, Sendable {
 
     func encoded() throws -> Data {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = .prettyPrinted
+        // `.sortedKeys` AS WELL AS the manual sort in `encode(to:)` — Swift
+        // Foundation's JSONEncoder on macOS 26 does not preserve the order
+        // of `container.encode(...)` calls for keyed containers without this
+        // formatting flag, so two consecutive `encoded()` calls on the same
+        // value could otherwise produce different byte sequences (same length,
+        // permuted keys). Belt-and-braces ensures byte-identical output for
+        // the fingerprint-comparison fast path in `ProjectBundle.write`.
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(self)
     }
 
