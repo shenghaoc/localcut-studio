@@ -58,9 +58,11 @@ nonisolated enum ExportBitrateBracket: String, Codable, Hashable, Sendable, Case
     }
 
     /// Rough per-pixel rate used by the writer fallback. The bracket multiplies
-    /// a baseline of 0.1 bits per pixel per second.
+    /// a baseline of 0.1 bits per pixel per second. Uses `Swift.max` to
+    /// disambiguate against the `.max` enum case while inside this enum's
+    /// scope.
     func bitsPerSecond(for renderSize: CGSize) -> Int {
-        let area = max(1.0, Double(renderSize.width) * Double(renderSize.height))
+        let area = Swift.max(1.0, Double(renderSize.width) * Double(renderSize.height))
         let pixelsPerSecond = area * 30
         let perPixel: Double
         switch self {
@@ -345,7 +347,6 @@ extension ExportPreset {
     var assetExportSessionPresetName: String? {
         let h264 = AVVideoCodecType.h264.rawValue
         let hevc = AVVideoCodecType.hevc.rawValue
-        let proRes422HQ = AVVideoCodecType.proRes422HQ.rawValue
         let proRes422 = AVVideoCodecType.proRes422.rawValue
         let proRes4444 = AVVideoCodecType.proRes4444.rawValue
 
@@ -360,10 +361,15 @@ extension ExportPreset {
         case hevc:
             if matches(width, height, 1920, 1080) { return AVAssetExportPresetHEVC1920x1080 }
             if matches(width, height, 3840, 2160) { return AVAssetExportPresetHEVC3840x2160 }
-        case proRes422HQ, proRes422:
+        case proRes422:
             return AVAssetExportPresetAppleProRes422LPCM
         case proRes4444:
             return AVAssetExportPresetAppleProRes4444LPCM
+        // Other ProRes flavours (HQ, LT, Proxy) intentionally fall through to
+        // the AVAssetWriter path: AVFoundation's session presets don't expose
+        // a HQ/LT/Proxy variant, and mapping them to the plain 422 preset
+        // would silently downgrade the encoded file while the inspector still
+        // advertises the higher-quality codec.
         default:
             return nil
         }

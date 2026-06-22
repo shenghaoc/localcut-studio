@@ -219,6 +219,12 @@ final class RenderQueue {
     /// `queue.json`.
     @ObservationIgnored private let persistsToDisk: Bool
 
+    /// Set when `load()` reads a queue file written by a newer build than
+    /// this one understands. While true, `persist()` is a no-op so the
+    /// newer-version file isn't downconverted by a later enqueue / cancel
+    /// (R3.6, codex P1).
+    @ObservationIgnored private var refusingPersist: Bool = false
+
     init(jobs: [QueueJob] = [], persistsToDisk: Bool = true) {
         self.jobs = jobs
         self.currentJobID = nil
@@ -309,9 +315,12 @@ final class RenderQueue {
         runnerTask?.cancel()
     }
 
-    /// The pull-the-next-job loop. Exits when no `.queued` job remains.
+    /// The pull-the-next-job loop. Exits when no `.queued` job remains or
+    /// the runner task is cancelled — without the cancel check, `stop()`
+    /// could cancel the in-flight job and then watch the loop immediately
+    /// pull the next queued one (codex P2).
     private func runLoop() async {
-        while let next = nextQueuedJobID() {
+        while !Task.isCancelled, let next = nextQueuedJobID() {
             await runJob(id: next)
             await Task.yield()
         }
@@ -324,14 +333,22 @@ final class RenderQueue {
     /// Single job's lifecycle: pre-flight checks, build composition, run the
     /// chosen path, update status, persist. Each await suspension is a
     /// cancellation point.
+    ///
+    /// Re-resolves the job by id after every suspension instead of caching
+    /// `firstIndex` — `clearCompleted()` (or any other mutator) can drop
+    /// earlier rows during an await and shift indices under us (codex P1).
     private func runJob(id: UUID) async {
-        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+        guard let initialIndex = jobs.firstIndex(where: { $0.id == id }) else { return }
         currentJobID = id
-        jobs[index].status = .running
-        jobs[index].progress = 0
-        jobs[index].errorMessage = nil
+        let preset = jobs[initialIndex].preset
+        let outputBookmark = jobs[initialIndex].outputBookmark
+        let outputDisplayName = jobs[initialIndex].outputDisplayName
+        let snapshot = jobs[initialIndex].projectSnapshot
+        jobs[initialIndex].status = .running
+        jobs[initialIndex].progress = 0
+        jobs[initialIndex].errorMessage = nil
         let startWall = Date()
-        log("job \(id.uuidString.prefix(8)) running — output: \(jobs[index].outputDisplayName)")
+        log("job \(id.uuidString.prefix(8)) running — output: \(outputDisplayName)")
         persist()
         recomputeTotalProgress()
 
@@ -345,7 +362,7 @@ final class RenderQueue {
         // Resolve the output bookmark. A stale / missing target is a clean
         // `.failed` rather than a crash — the user can retry by adding a fresh
         // destination.
-        guard let outputURL = resolveBookmark(jobs[index].outputBookmark) else {
+        guard let outputURL = resolveBookmark(outputBookmark) else {
             finish(jobID: id, status: .failed,
                    message: RenderQueueError.outputDestinationUnavailable.localizedDescription,
                    startWall: startWall)
@@ -360,11 +377,27 @@ final class RenderQueue {
         // live project. Any per-clip security-scoped access taken during
         // reconstruction is released via the `accessedSources` defer below;
         // the queue must not leak access tokens across jobs (R3.4).
-        let snapshot = jobs[index].projectSnapshot
-        let reconstructed = reconstructProject(from: snapshot)
+        //
+        // The preset's target dimensions / aspect / frame rate override the
+        // snapshot's render settings, so queuing the Instagram 9:16 preset
+        // against a 1920×1080 project actually renders 1080×1920 — without
+        // this step the UI advertises an aspect that the encode wouldn't
+        // produce (codex P1).
+        let reconstructed = reconstructProject(from: snapshot, applying: preset)
         let project = reconstructed.project
         let heldSources = reconstructed.accessedSources
+        let missingSources = reconstructed.missingBookmarks
         defer { for url in heldSources { url.stopAccessingSecurityScopedResource() } }
+
+        // If any referenced source bookmark didn't resolve, the export would
+        // silently render with clips missing. Better to fail the row so the
+        // user knows what to retry (codex P1).
+        if missingSources > 0 {
+            finish(jobID: id, status: .failed,
+                   message: "Could not resolve \(missingSources) source media file(s) — relink and re-queue.",
+                   startWall: startWall)
+            return
+        }
 
         do {
             guard let built = try await CompositionBuilder.build(project: project) else {
@@ -384,7 +417,6 @@ final class RenderQueue {
             // over a stale artefact from a previous run.
             try? FileManager.default.removeItem(at: outputURL)
 
-            let preset = jobs[index].preset
             if let presetName = preset.assetExportSessionPresetName {
                 try await exportWithSession(
                     presetName: presetName, preset: preset,
@@ -405,8 +437,17 @@ final class RenderQueue {
             cancelInFlightID = nil
             finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
         } catch {
-            finish(jobID: id, status: .failed,
-                   message: error.localizedDescription, startWall: startWall)
+            // `AVAssetExportSession.cancelExport()` makes the awaited export
+            // throw a generic error, not `CancellationError`. If a cancel is
+            // in flight for this job, treat any failure as the cancellation
+            // it actually is so the row doesn't persist as `.failed` (codex P2).
+            if cancelInFlightID == id {
+                cancelInFlightID = nil
+                finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
+            } else {
+                finish(jobID: id, status: .failed,
+                       message: error.localizedDescription, startWall: startWall)
+            }
         }
     }
 
@@ -493,27 +534,47 @@ final class RenderQueue {
         }
         writer.add(videoInput)
 
-        let audioSettings: [String: Any] = [
-            AVFormatIDKey: preset.audioConfig.codec,
+        // Compressed audio needs `AVEncoderBitRateKey`; passing it for LPCM
+        // makes `AVAssetWriterInput` refuse to initialise. Cast the format ID
+        // explicitly to `Int` so the NSNumber bridge inside the settings
+        // dictionary doesn't fall over (Gemini review).
+        var audioSettings: [String: Any] = [
+            AVFormatIDKey: Int(preset.audioConfig.codec),
             AVSampleRateKey: preset.audioConfig.sampleRate,
             AVNumberOfChannelsKey: preset.audioConfig.channels,
-            AVEncoderBitRateKey: preset.audioConfig.bitrate,
         ]
+        if preset.audioConfig.codec != kAudioFormatLinearPCM {
+            audioSettings[AVEncoderBitRateKey] = preset.audioConfig.bitrate
+        }
         let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
         audioInput.expectsMediaDataInRealTime = false
         let canAddAudio = writer.canAdd(audioInput)
         if canAddAudio { writer.add(audioInput) }
 
         let reader = try AVAssetReader(asset: built.composition)
-        let videoTracks = try await built.composition.loadTracks(withMediaType: .video)
-        let audioTracks = try await built.composition.loadTracks(withMediaType: .audio)
+        // The async `loadTracks(withMediaType:)` requires `AVComposition` to be
+        // `sending`, which Swift 6's strict-concurrency check refuses because
+        // the composition is reached through a `BuiltComposition` struct and
+        // so isn't a uniquely-owned local. The synchronous accessors are
+        // soft-deprecated on AVAsset but remain functional and avoid the
+        // cross-actor send; for a freshly-built local composition they
+        // produce the same tracks.
+        //
+        // `AVComposition.tracks(withMediaType:)` returns `[AVCompositionTrack]`;
+        // the NSArray bridge handles the upcast to `[AVAssetTrack]` that the
+        // reader-output initialisers want.
+        let videoTracks = built.composition.tracks(withMediaType: .video) as [AVAssetTrack]
+        let audioTracks = built.composition.tracks(withMediaType: .audio) as [AVAssetTrack]
 
         var readerVideoOutput: AVAssetReaderVideoCompositionOutput?
         if !videoTracks.isEmpty {
+            // Cast `kCVPixelFormatType_32BGRA` (a `UInt32` / `OSType`) to `Int`
+            // so it bridges correctly to `NSNumber` inside the settings
+            // dictionary (Gemini review).
             let output = AVAssetReaderVideoCompositionOutput(
                 videoTracks: videoTracks,
                 videoSettings: [
-                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                    kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
                 ])
             output.videoComposition = built.videoComposition
             output.alwaysCopiesSampleData = false
@@ -525,9 +586,21 @@ final class RenderQueue {
 
         var readerAudioOutput: AVAssetReaderAudioMixOutput?
         if canAddAudio, !audioTracks.isEmpty {
+            // Decode the source audio to linear PCM so the writer's
+            // (potentially compressed) input gets samples it can re-encode.
+            // Passing `audioSettings: nil` would hand the writer the source's
+            // native compressed samples and the append would fail (codex review).
             let output = AVAssetReaderAudioMixOutput(
                 audioTracks: audioTracks,
-                audioSettings: nil)
+                audioSettings: [
+                    AVFormatIDKey: Int(kAudioFormatLinearPCM),
+                    AVSampleRateKey: preset.audioConfig.sampleRate,
+                    AVNumberOfChannelsKey: preset.audioConfig.channels,
+                    AVLinearPCMBitDepthKey: 16,
+                    AVLinearPCMIsFloatKey: false,
+                    AVLinearPCMIsBigEndianKey: false,
+                    AVLinearPCMIsNonInterleaved: false,
+                ])
             output.audioMix = built.audioMix
             output.alwaysCopiesSampleData = false
             if reader.canAdd(output) {
@@ -570,6 +643,14 @@ final class RenderQueue {
             audioInput.markAsFinished()
         }
 
+        // A reader that failed mid-pump leaves the writer with a truncated
+        // stream. Surface the read error instead of letting `finishWriting`
+        // complete a silently-broken file (Gemini review).
+        if reader.status == .failed, let error = reader.error {
+            writer.cancelWriting()
+            throw error
+        }
+
         if cancelInFlightID == jobID {
             writer.cancelWriting()
             return
@@ -597,11 +678,21 @@ final class RenderQueue {
                     if let sample = output.copyNextSampleBuffer() {
                         input.append(sample)
                         if let progress, totalDuration > 0 {
-                            let pts = CMSampleBufferGetPresentationTimeStamp(sample).seconds
-                            let fraction = max(0, min(1, pts / totalDuration))
-                            progress(fraction)
+                            // Guard against non-numeric / invalid PTS so a bad
+                            // sample doesn't propagate NaN into the UI
+                            // (Gemini review).
+                            let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+                            if pts.isValid && pts.isNumeric {
+                                let fraction = Swift.max(0, Swift.min(1, pts.seconds / totalDuration))
+                                if fraction.isFinite {
+                                    progress(fraction)
+                                }
+                            }
                         }
                     } else {
+                        // Once the reader output is exhausted, tell AVFoundation
+                        // to stop invoking this callback so a late post-finish
+                        // call can't append to a finished input (Gemini review).
                         input.markAsFinished()
                         if resume.tryConsume() {
                             continuation.resume()
@@ -661,17 +752,28 @@ final class RenderQueue {
     }
 
     /// Writes the current queue to disk atomically. Called on every state
-    /// transition; the doc is small enough that this is cheap.
+    /// transition; the encode happens on the MainActor (where `jobs` lives)
+    /// but the actual file write is hopped to a background queue so a slow
+    /// disk can't stall the UI (Gemini review).
     private func persist() {
-        guard persistsToDisk, let url = Self.queueFileURL() else { return }
+        guard persistsToDisk, !refusingPersist, let url = Self.queueFileURL() else { return }
         let doc = RenderQueueDoc(jobs: jobs)
+        let encoded: Data
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(doc)
-            try data.write(to: url, options: .atomic)
+            encoded = try encoder.encode(doc)
         } catch {
             logger.error("queue persist failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        let log = logger
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try encoded.write(to: url, options: .atomic)
+            } catch {
+                log.error("queue persist failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
@@ -683,17 +785,25 @@ final class RenderQueue {
         do {
             let data = try Data(contentsOf: url)
             let doc = try JSONDecoder().decode(RenderQueueDoc.self, from: data)
-            // Refuse to overwrite a newer-version file on save (R3.6); the
-            // simplest enforcement is to skip loading entirely so the queue
-            // stays empty and the file remains untouched until the build
-            // catches up.
+            // A queue file written by a newer build carries fields we don't
+            // understand. Latch `refusingPersist` so subsequent enqueue /
+            // cancel calls don't overwrite the future-version file with the
+            // current schema and drop the unknown payload (R3.6, codex P1).
             guard doc.version <= RenderQueueDoc.currentVersion else {
-                statusMessage = "Render queue saved by a newer version — skipping."
+                refusingPersist = true
+                statusMessage = "Render queue saved by a newer version — pausing persistence until update."
                 return
             }
-            jobs = Self.reconcile(loaded: doc.jobs)
+            let reconciled = Self.reconcile(loaded: doc.jobs)
+            let didMutate = reconciled != doc.jobs
+            jobs = reconciled
             recomputeTotalProgress()
             log("queue loaded — \(jobs.count) job(s)")
+            // If reconciliation actually changed anything (a running → queued
+            // rewind or a stale-bookmark → failed flip), persist so the
+            // change survives a relaunch — otherwise the same stale state
+            // would be re-resurrected on every launch (codex P2).
+            if didMutate { persist() }
             // Resume the runner if any survived as queued.
             start()
         } catch {
@@ -744,31 +854,37 @@ final class RenderQueue {
 
     /// Builds a throwaway `Project` from a Codable snapshot so the queue can
     /// reuse `CompositionBuilder.build(project:)` without touching the
-    /// editor's live project. Returns both the project and the set of URLs
-    /// for which the runner now holds security-scoped access — the caller
-    /// must `stopAccessingSecurityScopedResource()` on each when the job
-    /// finishes (R3.4).
-    private func reconstructProject(from doc: ProjectDocument)
-        -> (project: Project, accessedSources: [URL]) {
+    /// editor's live project.
+    ///
+    /// Returns the project, the URLs for which the runner now holds
+    /// security-scoped access (must be stopped at job end — R3.4), and the
+    /// count of source bookmarks that didn't resolve (the caller fails the
+    /// job so missing media is surfaced instead of silently dropped).
+    ///
+    /// `preset.targetSize`, `aspect`, and `frameRate` override the snapshot's
+    /// render settings so a preset-driven render actually produces the
+    /// advertised dimensions even if the project was authored at a different
+    /// canvas size.
+    private func reconstructProject(from doc: ProjectDocument, applying preset: ExportPreset)
+        -> (project: Project, accessedSources: [URL], missingBookmarks: Int) {
         let project = Project()
         project.name = doc.name
-        project.renderSize = CGSize(width: doc.renderWidth, height: doc.renderHeight)
-        project.frameRate = doc.frameRate
+        project.renderSize = preset.targetSize.cgSize
+        project.frameRate = preset.frameRate ?? doc.frameRate
 
-        // Rebuild media items from refs; failures mean the source file isn't
-        // reachable any more and the export's reader will skip those tracks.
-        // We intentionally don't surface this through the queue's error path
-        // because the user wrote this snapshot in good faith — the composition
-        // builder reports the empty composition instead.
         var rebuilt: [MediaItem] = []
         var accessed: [URL] = []
+        var missing = 0
         for ref in doc.media {
-            guard !ref.bookmark.isEmpty else { continue }
+            guard !ref.bookmark.isEmpty else { missing += 1; continue }
             var stale = false
             guard let url = try? URL(resolvingBookmarkData: ref.bookmark,
                                      options: [.withSecurityScope],
                                      relativeTo: nil,
-                                     bookmarkDataIsStale: &stale) else { continue }
+                                     bookmarkDataIsStale: &stale) else {
+                missing += 1
+                continue
+            }
             if url.startAccessingSecurityScopedResource() {
                 accessed.append(url)
             }
@@ -800,7 +916,7 @@ final class RenderQueue {
         if project.audioTracks.isEmpty { project.audioTracks = [Track(name: "A1", kind: .audio)] }
 
         project.captionTracks = doc.captionTracks.map { $0.makeTrack() }
-        return (project, accessed)
+        return (project, accessed, missing)
     }
 
     private func log(_ message: String) {

@@ -88,24 +88,35 @@ struct RenderQueueInspectorView: View {
     }
 
     private func queueRow(_ job: QueueJob) -> some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(job.outputDisplayName)
-                Text(job.preset.name)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            statusPill(job)
-            if job.status == .queued || job.status == .running {
-                Button {
-                    model.renderQueue.cancel(jobID: job.id)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(job.outputDisplayName)
+                    Text(job.preset.name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderless)
-                .help("Cancel render")
-                .accessibilityLabel("Cancel \(job.outputDisplayName)")
+                Spacer()
+                statusPill(job)
+                if job.status == .queued || job.status == .running {
+                    Button {
+                        model.renderQueue.cancel(jobID: job.id)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Cancel render")
+                    .accessibilityLabel("Cancel \(job.outputDisplayName)")
+                }
+            }
+            // Surface the underlying failure so the user can act on it
+            // rather than guessing why the pill went red (codex P2).
+            if job.status == .failed, let message = job.errorMessage {
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+                    .accessibilityLabel("Failure reason: \(message)")
             }
         }
         .padding(.vertical, 2)
