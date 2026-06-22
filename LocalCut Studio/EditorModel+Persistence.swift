@@ -32,8 +32,10 @@ struct ProjectState: Equatable {
     var videoTracks: [TrackClips]
     var audioTracks: [TrackClips]
     var captionTracks: [CaptionTrackSnapshot]
+    var markers: [TimelineMarker]
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
+    var selectedMarkerID: TimelineMarker.ID?
 
     static func == (lhs: ProjectState, rhs: ProjectState) -> Bool {
         lhs.name == rhs.name
@@ -44,8 +46,10 @@ struct ProjectState: Equatable {
             && lhs.videoTracks == rhs.videoTracks
             && lhs.audioTracks == rhs.audioTracks
             && lhs.captionTracks == rhs.captionTracks
+            && lhs.markers == rhs.markers
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
+            && lhs.selectedMarkerID == rhs.selectedMarkerID
     }
 }
 
@@ -53,8 +57,10 @@ struct ProjectState: Equatable {
 
 extension EditorModel {
 
-    /// How the preview should refresh after an undoable mutation.
-    enum RebuildMode { case immediate, debounced }
+    /// How the preview should refresh after an undoable mutation. `.skip` is
+    /// for edits that don't touch the composition (e.g. marker rename) so a
+    /// burst of keystrokes doesn't churn `AVMutableComposition` for no reason.
+    enum RebuildMode { case immediate, debounced, skip }
 
     /// Captures the current arrangement for undo.
     func captureState() -> ProjectState {
@@ -75,8 +81,10 @@ extension EditorModel {
                     trackID: $0.id, name: $0.name, isMuted: $0.isMuted,
                     defaultStyle: $0.defaultStyle, lines: $0.lines)
             },
+            markers: project.markers,
             selectedClipID: selectedClipID,
-            selectedTransitionClipID: selectedTransitionClipID)
+            selectedTransitionClipID: selectedTransitionClipID,
+            selectedMarkerID: selectedMarkerID)
     }
 
     /// Restores a previously captured arrangement. Track identities are stable
@@ -130,8 +138,13 @@ extension EditorModel {
             }
         }
         project.captionTracks = restored
+        // Markers are value types and the entire list is small; restore by
+        // assignment. The sort invariant is preserved because every mutation
+        // path on `EditorModel` writes a sorted list into the snapshot.
+        project.markers = state.markers
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
+        selectedMarkerID = state.selectedMarkerID
         reconcileAccessedURLs()
     }
 
@@ -191,6 +204,7 @@ extension EditorModel {
         switch mode {
         case .immediate: scheduleRebuild()
         case .debounced: rebuildDebounced()
+        case .skip: break
         }
         scheduleCoalescedCommit()
     }
@@ -289,6 +303,7 @@ extension EditorModel {
         project.videoTracks = [Track(name: "V1", kind: .video)]
         project.audioTracks = [Track(name: "A1", kind: .audio)]
         project.captionTracks = []
+        project.markers = []
         documentURL = nil
         isDirty = false
         unresolvedMedia = []
@@ -317,9 +332,11 @@ extension EditorModel {
         RenderCache.shared.purge()
         project.mediaItems.removeAll()
         project.captionTracks.removeAll()
+        project.markers.removeAll()
         selectedClipID = nil
         selectedMediaID = nil
         selectedTransitionClipID = nil
+        selectedMarkerID = nil
         unresolvedMedia = []
         undoManager.removeAllActions()
         coalescedCommitTask?.cancel()
@@ -371,6 +388,10 @@ extension EditorModel {
         project.videoTracks = makeTracks(from: document.videoTracks, kind: .video, fallbackName: "V1")
         project.audioTracks = makeTracks(from: document.audioTracks, kind: .audio, fallbackName: "A1")
         project.captionTracks = document.captionTracks.map { $0.makeTrack() }
+        // Markers serialise as a flat sorted array; re-sort on the way in so a
+        // hand-edited or migrated document with unsorted entries can't break
+        // ordered draw / lookup code.
+        project.markers = document.markers.sorted { $0.time < $1.time }
 
         // A document from a newer schema would lose its future-only fields if we
         // re-saved it as the current version, so don't adopt its URL — Save then

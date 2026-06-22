@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import AVFoundation
 
 /// The multi-track timeline: a time ruler, one lane per track, clip blocks, and a
@@ -6,16 +7,22 @@ import AVFoundation
 struct TimelineView: View {
     @Bindable var model: EditorModel
 
-    private let rulerHeight: CGFloat = 24
+    private let rulerHeight: CGFloat = 36
     private let laneHeight: CGFloat = 56
     private let gutterWidth: CGFloat = 56
     private let edgeZoneWidth: CGFloat = 8
+    private let markerGlyphSize: CGFloat = 12
+    @State private var renamingMarkerID: TimelineMarker.ID?
+    @State private var renameDraft: String = ""
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
 
-    /// Content width in points, with headroom past the last clip.
+    /// Content width in points, with headroom past the last clip *or* the
+    /// last marker — markers don't extend `Project.duration`, but they still
+    /// have to be visible on the scrollable ruler (Codex review #3).
     private var contentWidth: CGFloat {
-        max(CGFloat(model.totalDuration) + 4, 10) * pps
+        let tail = max(model.totalDuration, model.project.markers.last?.time.seconds ?? 0)
+        return max(CGFloat(tail) + 4, 10) * pps
     }
 
     private var tracks: [Track] {
@@ -54,6 +61,27 @@ struct TimelineView: View {
                 timelineScroller
             }
         }
+        .background(MarkerKeyHandler(onAdd: { model.addMarkerAtPlayhead() },
+                                     onRename: { beginRenamingSelectedMarker() },
+                                     onDelete: { deleteSelectedMarkerIfAny() }))
+    }
+
+    /// Opens the rename popover for the selected marker; no-op when none is
+    /// selected. Called from the Shift+M key handler.
+    private func beginRenamingSelectedMarker() {
+        guard let marker = model.selectedMarker else { return }
+        renameDraft = marker.name
+        renamingMarkerID = marker.id
+    }
+
+    /// Deletes the selected marker; returns whether anything was deleted so the
+    /// Delete handler can decide whether to consume the key. When no marker is
+    /// selected the existing clip / transition delete shortcut keeps firing.
+    @discardableResult
+    private func deleteSelectedMarkerIfAny() -> Bool {
+        guard let id = model.selectedMarkerID else { return false }
+        model.removeMarker(id: id)
+        return true
     }
 
     // MARK: Header
@@ -117,31 +145,121 @@ struct TimelineView: View {
     }
 
     private var ruler: some View {
-        Canvas { context, size in
-            let step = tickStep()
-            var t = 0.0
-            while CGFloat(t) * pps <= size.width {
-                let x = CGFloat(t) * pps
-                let isMajor = (t.truncatingRemainder(dividingBy: step * 5) < 0.0001)
-                var line = Path()
-                line.move(to: CGPoint(x: x, y: isMajor ? 6 : 12))
-                line.addLine(to: CGPoint(x: x, y: rulerHeight))
-                context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
-                if isMajor {
-                    let text = Text(TimeFormatting.timecode(t)).font(.system(size: 9)).foregroundStyle(.secondary)
-                    context.draw(text, at: CGPoint(x: x + 2, y: 6), anchor: .topLeading)
+        let markers = model.project.markers
+        let selectedMarkerID = model.selectedMarkerID
+        return ZStack(alignment: .topLeading) {
+            // Scrub gesture lives on the Canvas — *not* the ZStack — so the
+            // marker glyph's `onTapGesture` actually wins on a press that lands
+            // on a glyph. `DragGesture(minimumDistance: 0)` on the outer ZStack
+            // would otherwise intercept every touch (Gemini review #3).
+            Canvas { context, size in
+                let step = tickStep()
+                // Ticks sit in the lower half of the ruler so the marker band
+                // above them stays visually distinct.
+                let tickTop = rulerHeight - 12
+                var t = 0.0
+                while CGFloat(t) * pps <= size.width {
+                    let x = CGFloat(t) * pps
+                    let isMajor = (t.truncatingRemainder(dividingBy: step * 5) < 0.0001)
+                    var line = Path()
+                    line.move(to: CGPoint(x: x, y: isMajor ? tickTop : tickTop + 6))
+                    line.addLine(to: CGPoint(x: x, y: rulerHeight))
+                    context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
+                    if isMajor {
+                        let text = Text(TimeFormatting.timecode(t)).font(.system(size: 9)).foregroundStyle(.secondary)
+                        context.draw(text, at: CGPoint(x: x + 2, y: tickTop), anchor: .topLeading)
+                    }
+                    t += step
                 }
-                t += step
+            }
+            .contentShape(Rectangle())
+            .gesture(rulerScrubGesture)
+
+            ForEach(markers) { marker in
+                markerGlyph(marker, isSelected: marker.id == selectedMarkerID)
             }
         }
         .frame(height: rulerHeight)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    model.seek(toSeconds: Double(value.location.x / pps))
+    }
+
+    /// Scrub gesture that also clears any marker selection on a fresh press,
+    /// so dragging the playhead off the marker band releases focus from a
+    /// previously-selected marker. Lives on the Canvas — *not* the parent
+    /// ZStack — so marker glyph taps still win when the press lands on a glyph.
+    private var rulerScrubGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if model.selectedMarkerID != nil { model.selectedMarkerID = nil }
+                model.seek(toSeconds: Double(value.location.x / pps))
+            }
+    }
+
+    /// One marker glyph + label drawn at the marker's `time`. The popover
+    /// reopens whenever `renamingMarkerID` matches this marker's id.
+    ///
+    /// Only the diamond glyph is hit-tested (Codex review #4); the floating
+    /// label above sits inside a 60pt-wide layout box so it can centre and
+    /// overflow neighbouring glyphs visually, but with `allowsHitTesting(false)`
+    /// so clicks past the diamond fall through to the ruler scrub gesture
+    /// instead of selecting the marker.
+    @ViewBuilder
+    private func markerGlyph(_ marker: TimelineMarker, isSelected: Bool) -> some View {
+        let x = CGFloat(marker.time.seconds) * pps
+        let fill: Color = marker.colour.map { Color(cgColor: $0.cgColor) } ?? Color.accentColor
+        let strokeColor: Color = isSelected ? .accentColor : .black.opacity(0.4)
+        let strokeWidth: CGFloat = isSelected ? 2 : 1
+        let labelWidth: CGFloat = 60
+        VStack(spacing: 1) {
+            Text(marker.name)
+                .font(.system(size: 9))
+                .lineLimit(1)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(.regularMaterial.opacity(0.8)))
+                .frame(width: labelWidth)
+                .allowsHitTesting(false)
+            MarkerDiamond()
+                .fill(fill)
+                .overlay(MarkerDiamond().stroke(strokeColor, lineWidth: strokeWidth))
+                .frame(width: markerGlyphSize, height: markerGlyphSize)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+                .onTapGesture { model.selectMarker(id: marker.id) }
+                .popover(isPresented: Binding(
+                    get: { renamingMarkerID == marker.id },
+                    set: { newValue in if !newValue { commitRenameIfActive(); renamingMarkerID = nil } }
+                )) {
+                    markerRenamePopover(marker)
                 }
-        )
+                .accessibilityLabel("Marker \(marker.name) at \(TimeFormatting.timecode(marker.time.seconds))")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+        }
+        .frame(width: labelWidth, alignment: .center)
+        .offset(x: x - labelWidth / 2, y: 0)
+    }
+
+    @ViewBuilder
+    private func markerRenamePopover(_ marker: TimelineMarker) -> some View {
+        HStack(spacing: 8) {
+            TextField("Name", text: $renameDraft)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 160)
+                .onSubmit { commitRenameIfActive(); renamingMarkerID = nil }
+            Button("Done") {
+                commitRenameIfActive()
+                renamingMarkerID = nil
+            }
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(10)
+    }
+
+    private func commitRenameIfActive() {
+        guard let id = renamingMarkerID else { return }
+        model.renameMarker(id: id, to: renameDraft)
     }
 
     private func lane(for track: Track, trackIndex: Int) -> some View {
@@ -153,6 +271,7 @@ struct TimelineView: View {
                 .onTapGesture {
                     model.selectedClipID = nil
                     model.selectedTransitionClipID = nil
+                    model.selectedMarkerID = nil
                 }
             ForEach(track.clips) { clip in
                 clipBlock(clip, kind: track.kind, trackID: track.id, trackIndex: trackIndex,
@@ -192,6 +311,7 @@ struct TimelineView: View {
                 .onTapGesture {
                     model.selectedClipID = nil
                     model.selectedMediaID = nil
+                    model.selectedMarkerID = nil
                     model.selectedTransitionClipID = placement.clip.id
                 }
                 .accessibilityLabel("\(type.displayName) transition")
@@ -246,6 +366,7 @@ struct TimelineView: View {
         .onTapGesture {
             model.selectedClipID = clip.id
             model.selectedTransitionClipID = nil
+            model.selectedMarkerID = nil
         }
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
         .accessibilityLabel(nameLabel)
@@ -442,5 +563,145 @@ struct TimelineView: View {
         let raw = Double(targetPixels / pps)
         let candidates: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300]
         return candidates.first { $0 >= raw } ?? 600
+    }
+}
+
+// MARK: - Marker glyph + keyboard
+
+/// A four-pointed diamond drawn for each marker glyph.
+private struct MarkerDiamond: Shape {
+    nonisolated func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let midX = rect.midX
+        let midY = rect.midY
+        p.move(to: CGPoint(x: midX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: midY))
+        p.addLine(to: CGPoint(x: midX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: midY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// AppKit local-event monitor that adds / renames / deletes markers from the
+/// timeline keyboard shortcuts. The monitor lives for the lifetime of the
+/// timeline view but is scoped two ways: it only fires for events targeted at
+/// the *hosting* window (Gemini review #1 — multi-project windows each install
+/// their own monitor and must not fight over each other's keys), and it
+/// defers to any text-input first responder so typing into caption / inspector
+/// fields isn't stolen.
+///
+/// `Delete` only consumes the event when there is a selected marker — when
+/// none is selected, the event falls through to the existing toolbar
+/// `.keyboardShortcut(.delete, modifiers: [])` that drives clip / transition
+/// deletion. That's the contract the spec calls out (R4.5).
+private struct MarkerKeyHandler: NSViewRepresentable {
+    let onAdd: () -> Void
+    let onRename: () -> Void
+    let onDelete: () -> Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.view = view
+        context.coordinator.onAdd = onAdd
+        context.coordinator.onRename = onRename
+        context.coordinator.onDelete = onDelete
+        context.coordinator.install()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.view = nsView
+        context.coordinator.onAdd = onAdd
+        context.coordinator.onRename = onRename
+        context.coordinator.onDelete = onDelete
+    }
+
+    @MainActor
+    final class Coordinator {
+        var onAdd: (() -> Void)?
+        var onRename: (() -> Void)?
+        var onDelete: (() -> Bool)?
+        weak var view: NSView?
+        // `nonisolated(unsafe)` so `deinit` can clear it without hopping actors;
+        // mutation only happens via `install`, called on the main actor, so the
+        // unsafety here is a compiler-visible footnote rather than a real race.
+        nonisolated(unsafe) private var monitor: Any?
+
+        func install() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                // Read every NSEvent / NSWindow field we need on the delivery
+                // queue (.main) *before* entering assumeIsolated. Capturing the
+                // non-Sendable NSEvent (or NSWindow) inside the isolated
+                // closure would be a Swift 6 "sending risks data races" error,
+                // and the return type of `assumeIsolated` must itself be
+                // Sendable — so we funnel a `Bool` verdict out and materialise
+                // the `NSEvent?` on the way back. (See the matching pattern on
+                // the player's endObserver in `EditorModel.init`.)
+                let chars = event.charactersIgnoringModifiers ?? ""
+                let modifiers = event.modifierFlags
+                let keyCode = event.keyCode
+                let eventWindowID = event.window.map(ObjectIdentifier.init)
+                let consume: Bool = MainActor.assumeIsolated {
+                    self?.handle(chars: chars,
+                                 modifiers: modifiers,
+                                 keyCode: keyCode,
+                                 eventWindowID: eventWindowID) ?? false
+                }
+                return consume ? nil : event
+            }
+        }
+
+        deinit {
+            if let m = monitor {
+                DispatchQueue.main.async { NSEvent.removeMonitor(m) }
+            }
+        }
+
+        /// Returns whether the event should be consumed (true) or passed
+        /// through (false). Doing the consume/pass decision as a `Bool` keeps
+        /// `NSEvent` out of `MainActor.assumeIsolated`'s Sendable return type;
+        /// the inputs are all Sendable primitives extracted at the call site.
+        private func handle(chars: String,
+                            modifiers: NSEvent.ModifierFlags,
+                            keyCode: UInt16,
+                            eventWindowID: ObjectIdentifier?) -> Bool {
+            // Only fire for events targeted at the timeline's own window.
+            // Without this guard, every open project window installs a monitor
+            // and the most-recently-active one steals M / Delete keys from
+            // whichever window the user is actually typing into (Gemini #1-2).
+            guard let hostWindow = view?.window,
+                  let eventWindowID,
+                  ObjectIdentifier(hostWindow) == eventWindowID else {
+                return false
+            }
+            // Anything other than plain or Shift modifiers (Command/Option/etc.)
+            // belongs to a different command; never swallow those.
+            let stripped = modifiers
+                .intersection(.deviceIndependentFlagsMask)
+                .subtracting([.shift, .capsLock, .numericPad, .function])
+            guard stripped.isEmpty else { return false }
+            // Don't steal keys from any first responder that owns a text input
+            // (rename popovers, inspector fields, the caption editor).
+            if let responder = hostWindow.firstResponder,
+               responder is NSText || responder is NSTextField || responder is NSTextView {
+                return false
+            }
+
+            let shift = modifiers.contains(.shift)
+            // Delete / Backspace: only consume when a marker is selected so
+            // the existing clip / transition delete shortcut keeps firing.
+            let isDelete = (keyCode == 0x33 || keyCode == 0x75)
+
+            if chars == "m" || chars == "M" {
+                if shift { onRename?() } else { onAdd?() }
+                return true
+            }
+            if isDelete, onDelete?() == true { return true }
+            return false
+        }
     }
 }

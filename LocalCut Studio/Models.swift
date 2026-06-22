@@ -793,6 +793,48 @@ final class CaptionTrack: Identifiable {
     }
 }
 
+// MARK: - Timeline Markers
+
+/// A named point in time on the project timeline. Hand-placed by the user, or
+/// emitted in bulk by future phases (Phase 34 beat detection, Phase 44 chapter
+/// finishing). Markers are annotations, not content: they do not extend
+/// `Project.duration`.
+nonisolated struct TimelineMarker: Identifiable, Hashable, Codable, Sendable {
+    let id: UUID
+    var time: CMTime
+    var name: String
+    /// Optional accent for the marker glyph; `nil` ⇒ default ruler accent.
+    var colour: RGBAColour?
+
+    init(id: UUID = UUID(), time: CMTime, name: String = "Marker", colour: RGBAColour? = nil) {
+        self.id = id
+        self.time = time
+        self.name = name
+        self.colour = colour
+    }
+
+    /// `time` is nested as a `CMTimeCode`-shaped object (`{value, timescale}`)
+    /// so the document representation matches caption lines / keyframes.
+    private enum CodingKeys: String, CodingKey { case id, time, name, colour }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        let timeCode = try c.decode(CMTimeCode.self, forKey: .time)
+        time = timeCode.cmTime
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Marker"
+        colour = try c.decodeIfPresent(RGBAColour.self, forKey: .colour)
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(CMTimeCode(time), forKey: .time)
+        try c.encode(name, forKey: .name)
+        try c.encodeIfPresent(colour, forKey: .colour)
+    }
+}
+
 // MARK: - Project
 
 /// The editable document: imported media plus the multi-track arrangement and
@@ -804,6 +846,10 @@ final class Project {
     var videoTracks: [Track]
     var audioTracks: [Track]
     var captionTracks: [CaptionTrack] = []
+    /// Timeline markers sorted by `time`. Mutation paths on `EditorModel`
+    /// preserve the invariant so draw / lookup code can treat the list as
+    /// ordered without re-sorting per frame.
+    var markers: [TimelineMarker] = []
 
     /// Output canvas size for preview and export.
     var renderSize = CGSize(width: 1920, height: 1080)
@@ -821,7 +867,8 @@ final class Project {
 
     /// Longest end time across every track — the project's total duration.
     /// Caption tracks count too, so a final caption past the last clip extends
-    /// the timeline rather than being clipped off the end.
+    /// the timeline rather than being clipped off the end. Markers are
+    /// annotations, not content, so they do not contribute here.
     var duration: CMTime {
         let av = (videoTracks + audioTracks).reduce(CMTime.zero) { CMTimeMaximum($0, $1.endTime) }
         let captions = captionTracks.reduce(CMTime.zero) { CMTimeMaximum($0, $1.endTime) }

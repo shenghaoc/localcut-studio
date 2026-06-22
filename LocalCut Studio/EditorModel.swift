@@ -15,6 +15,10 @@ final class EditorModel {
     // Selection
     var selectedClipID: Clip.ID?
     var selectedMediaID: MediaItem.ID?
+    /// The marker currently highlighted on the timeline ruler / inspector.
+    /// `Delete` only removes a marker when this is set, so the existing
+    /// clip / transition delete shortcut keeps working unchanged.
+    var selectedMarkerID: TimelineMarker.ID?
 
     // Playback
     let player = AVPlayer()
@@ -620,6 +624,7 @@ final class EditorModel {
             setTransition(Transition(duration: duration), onClip: id)
             selectedClipID = nil
             selectedMediaID = nil
+            selectedMarkerID = nil
             selectedTransitionClipID = id
             statusMessage = "Added transition."
         }
