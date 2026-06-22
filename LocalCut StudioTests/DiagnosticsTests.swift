@@ -8,13 +8,16 @@ import AVFoundation
 struct DiagnosticsTests {
 
     /// A control over the agent's wall-clock source so a single test can drive
-    /// CPU calibration deterministically.
+    /// CPU calibration deterministically. The methods are `nonisolated` so the
+    /// agent's `@Sendable` `now` closure can read it without crossing the main
+    /// actor (the build setting `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`
+    /// would otherwise pin them to the main actor).
     private final class Clock: @unchecked Sendable {
         private let lock = NSLock()
-        private var value: CFAbsoluteTime
+        nonisolated(unsafe) private var value: CFAbsoluteTime
         init(start: CFAbsoluteTime = 1_000) { self.value = start }
-        func read() -> CFAbsoluteTime { lock.withLock { value } }
-        func advance(by seconds: CFAbsoluteTime) { lock.withLock { value += seconds } }
+        nonisolated func read() -> CFAbsoluteTime { lock.withLock { value } }
+        nonisolated func advance(by seconds: CFAbsoluteTime) { lock.withLock { value += seconds } }
     }
 
     // MARK: - V1 — probes resolve to non-NaN within 2 s
