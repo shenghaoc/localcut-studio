@@ -12,7 +12,7 @@
 
 ## Compositor
 
-- [x] **T2.1** Add `clipID: UUID` to `CompositorLayer`; thread `clip.id` through `CompositionBuilder.VideoSegment` so the layer carries it.
+- [x] **T2.1** Add `clipID: UUID`, `sourceRange: CMTimeRange`, and `timeRange: CMTimeRange` to `CompositorLayer`; thread `clip.id` and piece ranges through `CompositionBuilder.VideoSegment` so the layer carries them. The compositor computes source-frame time from `sourceRange` / `timeRange` for the cache key (Gemini review — key by source time, not composition time, so speed ramps and frame interpolation hit the same entry for repeated source frames).
 - [x] **T2.2** `EffectCompositor.applyEffectChain` consults `RenderCache.shared` before running the chain; on miss runs the chain, **materialises the result into a CGImage-backed `CIImage`** (so cache hits skip kernel evaluation, not just Swift filter-chain construction — codex review P1), and writes it back. No-op when `effects.isEmpty`. Skips the write when any effect failed to apply, so a transient LUT-load failure does not freeze the un-LUT'ed image (codex review P2).
 - [x] **T2.3** Effect-chain edits in `EditorModel` invalidate the cache:
   - `selectedClipGrade` / `selectedClipSkinSmooth` setters

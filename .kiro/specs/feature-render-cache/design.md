@@ -1,6 +1,6 @@
 # Design: Render Cache (P19 native equivalent)
 
-> Status: **Proposed**. Infrastructure prerequisite for Phase 35 (speed ramps) and Phase 37 (frame interpolation via `VTFrameProcessor`).
+> Status: **Implemented**. Infrastructure prerequisite for Phase 35 (speed ramps) and Phase 37 (frame interpolation via `VTFrameProcessor`).
 
 ## Goal
 
@@ -10,7 +10,7 @@ The cache sits **inside `EffectCompositor`**, replacing the per-frame `applyEffe
 
 ## Approach
 
-1. **Composite key.** A frame is uniquely identified by *which clip* produced it, *what effects* the chain applied, *when* in the source we were, and *what canvas* we were rendering into. Each axis maps to one field of `RenderCacheKey`.
+1. **Composite key.** A frame is uniquely identified by *which clip* produced it, *what effects* the chain applied, *when in the source media* we were, and *what canvas* we were rendering into. Each axis maps to one field of `RenderCacheKey`. The time field is the **source-frame time** (computed from `sourceRange` / `timeRange`), not `compositionTime` — this makes the key stable across repeated source-frame requests (speed ramps, frame interpolation) and unique per source frame (no collisions across pieces of the same clip split by transition cuts).
 2. **In-memory LRU.** An `OSAllocatedUnfairLock`-guarded ordered dictionary, same shape as `TitleRasterer` in `LocalCut Studio/TitleRaster.swift`. Most-recently-used entries live at the back of the order array; the front is dropped first.
 3. **Byte-budget eviction.** Frames are large (8 MiB at 1080p, 33 MiB at 4K) and *variable* (project resize jumps an entry's footprint by 4×), so the cap is total estimated bytes, not entry count.
 4. **Cache-key invalidation.** Effect-chain edits change `effectChainHash`, so a new request never collides with a stale entry — correctness is automatic. Explicit `invalidate(clipID:)` and `invalidate(notMatchingRenderSize:)` exist only to release dead bytes promptly when the editor knows a clip's effects mutated or the canvas resized.
@@ -48,7 +48,7 @@ extension Array where Element == Effect {
 }
 ```
 
-`CompositorLayer` gains a `clipID: UUID` so the compositor can build the key from data it already has. `CompositionBuilder.VideoSegment` already knows the originating clip; the id propagates one extra hop into `CompositorLayer.init(clipID:trackID:transform:opacity:effects:)`.
+`CompositorLayer` gains `clipID: UUID`, `sourceRange: CMTimeRange`, and `timeRange: CMTimeRange` so the compositor can compute the source-frame time for the key without reaching back into the composition. `CompositionBuilder.VideoSegment` already knows the originating clip and piece ranges; they propagate one extra hop into `CompositorLayer.init(clipID:trackID:transform:opacity:effects:showSkinMask:clipStartTime:sourceRange:timeRange:)`.
 
 ## Cache
 
@@ -121,7 +121,7 @@ nonisolated private func applyEffectChain(_ image: CIImage,
 }
 ```
 
-`renderedImage(for layer:, request:)` builds the key from the layer's `clipID`, the chain's `renderCacheHash`, `request.compositionTime`, and `request.renderContext.size`. When `effects.isEmpty` the key is `nil` — there is nothing to cache. The skin-mask debug visualisation (`layer.showSkinMask`) bypasses the cache entirely: it produces a one-off debug image that must not be served back on a normal preview after the toggle.
+`renderedImage(for layer:, request:)` builds the key from the layer's `clipID`, the chain's `renderCacheHash`, a **source-frame time** computed from `layer.sourceRange` and `layer.timeRange` (not `request.compositionTime`), and `request.renderContext.size`. When `effects.isEmpty` the key is `nil` — there is nothing to cache. The skin-mask debug visualisation (`layer.showSkinMask`) bypasses the cache entirely: it produces a one-off debug image that must not be served back on a normal preview after the toggle.
 
 ## Invalidation
 
