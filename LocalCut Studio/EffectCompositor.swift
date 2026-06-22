@@ -517,7 +517,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// so a later `CIContext.render` only reuploads the texture instead of
     /// re-running the per-clip kernel chain.
     nonisolated private func materialise(_ image: CIImage, extent: CGRect) -> CIImage? {
-        guard let cg = Self.sharedCIContext.createCGImage(image, from: extent) else {
+        guard let cg = Self.context(for: .sRGB).createCGImage(image, from: extent) else {
             return nil
         }
         return CIImage(cgImage: cg)
