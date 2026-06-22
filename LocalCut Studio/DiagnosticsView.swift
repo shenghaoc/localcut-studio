@@ -82,9 +82,9 @@ struct DiagnosticsView: View {
                 Spacer()
             }
         } else {
+            let samples = agent.sparkline
             GeometryReader { proxy in
                 Path { path in
-                    let samples = agent.sparkline
                     guard let maxSample = samples.max(), maxSample > 0 else { return }
                     // Floor the y-axis at the 60 fps budget (~16.6 ms) so a
                     // sub-millisecond render fluctuation doesn't stretch into a
