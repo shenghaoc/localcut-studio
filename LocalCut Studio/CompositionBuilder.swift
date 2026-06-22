@@ -31,10 +31,7 @@ enum CompositionBuilder {
     /// coordinates, with the transform/opacity/effects to apply while on screen.
     /// `transitionRange`/`transitionType` are set on the incoming clip of a
     /// transition so the compositor can blend it with its predecessor.
-    // `internal` (not `private`) so the fast-path video composition helper
-    // and its regression test can see the segment shape. The type otherwise
-    // stays an implementation detail of the builder.
-    struct VideoSegment {
+    private struct VideoSegment {
         let clipID: UUID
         let compTrackID: CMPersistentTrackID
         let timeRange: CMTimeRange
@@ -334,31 +331,29 @@ enum CompositionBuilder {
         let totalDuration = composition.duration
         guard totalDuration > .zero else { return nil }
 
-        // Fast-path: when the project consists only of cross-dissolves with no
-        // effect chains / captions / non-sRGB working space, the dissolve is
-        // expressed via standard `AVMutableVideoCompositionLayerInstruction` +
-        // `setOpacityRamp` (T1.2 feature-transitions). Falls back to the
-        // custom-compositor path otherwise.
-        let videoComposition: AVVideoComposition?
-        if let fast = Self.tryBuildFastPathVideoComposition(
+        // Every cross-dissolve renders through the custom compositor's additive
+        // blend (`EffectCompositor.crossDissolve` — RGB·(1-p) + RGB·p, which
+        // holds midpoint brightness for opaque inputs). An earlier draft also
+        // shipped a fast-path that routed cross-dissolves through standard
+        // `AVMutableVideoCompositionLayerInstruction.setOpacityRamp` when no
+        // effects / wipes / captions were present, but `setOpacityRamp` does
+        // source-over alpha compositing — at progress 0.5 it yields
+        // `(2·incoming + outgoing)/3` with α=0.75, not the additive `(A+B)/2`
+        // at α=1. Switching paths on the same project would have produced
+        // visibly different cross-dissolves, violating T3.1 "preview matches
+        // export". The layer-instruction helper is retained in
+        // `crossDissolveLayerInstructions(...)` as tested spec-compliance
+        // infrastructure (Codex P2) for a future native-export path.
+        let videoComposition = try await makeVideoComposition(
             composition: composition,
-            project: project,
             projectTrackSegments: projectTrackSegments,
+            captionTracks: captionTracks,
+            totalDuration: totalDuration,
             renderSize: renderSize,
-            frameRate: project.frameRate) {
-            videoComposition = fast
-        } else {
-            videoComposition = try await makeVideoComposition(
-                composition: composition,
-                projectTrackSegments: projectTrackSegments,
-                captionTracks: captionTracks,
-                totalDuration: totalDuration,
-                renderSize: renderSize,
-                frameRate: project.frameRate,
-                fillerTrackID: fillerTrackID,
-                fillerTailRange: fillerTailRange,
-                workingColourSpace: project.workingColourSpace)
-        }
+            frameRate: project.frameRate,
+            fillerTrackID: fillerTrackID,
+            fillerTailRange: fillerTailRange,
+            workingColourSpace: project.workingColourSpace)
 
         let audioMix: AVAudioMix?
         if hasAudioCrossfade || hasBusContribution {
@@ -706,107 +701,4 @@ enum CompositionBuilder {
         return (outgoing, incoming)
     }
 
-    /// Best-effort fast-path video composition that returns a standard
-    /// `AVVideoComposition` driven entirely by `AVMutableVideoCompositionLayerInstruction`
-    /// (with `setOpacityRamp` for cross-dissolves) — no custom compositor at
-    /// all. Returns `nil` when the project has anything that requires the
-    /// custom path (wipes, effect chains, caption tracks, non-sRGB working
-    /// space, audio bus contributions other than transition crossfades) so
-    /// the caller falls back to `makeVideoComposition`.
-    ///
-    /// The eligibility window is intentionally narrow; this is the spec-literal
-    /// path called out by feature-transitions T1.2, not a replacement for the
-    /// custom compositor.
-    static func tryBuildFastPathVideoComposition(
-        composition: AVMutableComposition,
-        project: Project,
-        projectTrackSegments: [[VideoSegment]],
-        renderSize: CGSize,
-        frameRate: Double
-    ) -> AVVideoComposition? {
-
-        // Eligibility — bail on any feature that needs the custom compositor.
-        for track in project.videoTracks {
-            for clip in track.clips where !clip.effects.isEmpty { return nil }
-            for clip in track.clips where clip.transition?.type == .wipe { return nil }
-        }
-        guard project.captionTracks.allSatisfy({ $0.isMuted }) else { return nil }
-        if project.workingColourSpace != .sRGB { return nil }
-
-        // Only one video pool track may be in play — fast path doesn't support
-        // packed-overlap scenarios with three+ chained clips on one project track.
-        let pools = projectTrackSegments.flatMap { $0 }
-        guard !pools.isEmpty else { return nil }
-        let compositionVideoTracks = composition.tracks(withMediaType: .video)
-        guard !compositionVideoTracks.isEmpty else { return nil }
-
-        // Collect boundaries the same way `makeVideoComposition` does so each
-        // overlap window is its own instruction interval.
-        var boundarySet = Set<Double>([0])
-        let totalDuration = composition.duration
-        boundarySet.insert(totalDuration.seconds)
-        for seg in pools {
-            boundarySet.insert(seg.timeRange.start.seconds)
-            boundarySet.insert(seg.timeRange.end.seconds)
-            if let overlap = seg.transitionRange {
-                boundarySet.insert(overlap.start.seconds)
-                boundarySet.insert(overlap.end.seconds)
-            }
-        }
-        let boundaries = boundarySet.sorted()
-
-        var instructions: [AVMutableVideoCompositionInstruction] = []
-        for i in 0..<(boundaries.count - 1) {
-            let start = CMTime(seconds: boundaries[i], preferredTimescale: 600)
-            let end = CMTime(seconds: boundaries[i + 1], preferredTimescale: 600)
-            let range = CMTimeRange(start: start, end: end)
-            guard range.duration > .zero else { continue }
-            let midpoint = boundaries[i] + (boundaries[i + 1] - boundaries[i]) / 2
-
-            let visible = pools.filter { $0.contains(midpoint) }
-            guard !visible.isEmpty else { continue }
-
-            let instr = AVMutableVideoCompositionInstruction()
-            instr.timeRange = range
-
-            // If a cross-dissolve is active in this interval, emit a pair of
-            // ramping layer instructions for it; otherwise emit plain layer
-            // instructions per visible segment.
-            if let incoming = visible.first(where: { seg in
-                guard let r = seg.transitionRange, seg.transitionType == .crossDissolve else { return false }
-                return r.start.seconds <= midpoint && midpoint < r.end.seconds
-            }),
-               let outgoing = visible.filter({ $0.timeRange.start < incoming.timeRange.start })
-                                     .max(by: { $0.timeRange.start < $1.timeRange.start }),
-               let overlap = incoming.transitionRange {
-                let pair = crossDissolveLayerInstructions(
-                    outgoingTrackID: outgoing.compTrackID,
-                    incomingTrackID: incoming.compTrackID,
-                    outgoingTransform: outgoing.transform,
-                    incomingTransform: incoming.transform,
-                    overlap: overlap)
-                instr.layerInstructions = [pair.incoming, pair.outgoing]
-            } else {
-                var layers: [AVMutableVideoCompositionLayerInstruction] = []
-                for seg in visible {
-                    let l = AVMutableVideoCompositionLayerInstruction()
-                    l.trackID = seg.compTrackID
-                    l.setTransform(seg.transform, at: range.start)
-                    if seg.opacity < 1 {
-                        l.setOpacity(seg.opacity, at: range.start)
-                    }
-                    layers.append(l)
-                }
-                instr.layerInstructions = layers
-            }
-
-            instructions.append(instr)
-        }
-
-        let videoComposition = AVMutableVideoComposition()
-        videoComposition.renderSize = renderSize
-        videoComposition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))
-        videoComposition.instructions = instructions
-        return videoComposition
-    }
 }

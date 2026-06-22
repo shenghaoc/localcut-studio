@@ -430,25 +430,4 @@ struct TransitionsTests {
         #expect(inRange == overlap)
     }
 
-    @Test("tryBuildFastPathVideoComposition: returns nil when wipes are present")
-    func fastPathRejectsWipe() async throws {
-        let project = Project()
-        let videoTrack = project.videoTracks.first!
-        let pair = makeAdjacentPair(transition: 1)
-        var b = pair.b
-        b.transition = Transition(type: .wipe, duration: time(1))
-        videoTrack.clips = [pair.a, b]
-
-        let composition = AVMutableComposition()
-        let fast = CompositionBuilder.tryBuildFastPathVideoComposition(
-            composition: composition,
-            project: project,
-            projectTrackSegments: [],  // empty pool — eligibility short-circuits
-            renderSize: CGSize(width: 1920, height: 1080),
-            frameRate: 30)
-        // No pool entries means the fast-path returns nil; wipe presence also
-        // ensures it returns nil regardless. Either way the custom-compositor
-        // path is the one that runs in production.
-        #expect(fast == nil)
-    }
 }

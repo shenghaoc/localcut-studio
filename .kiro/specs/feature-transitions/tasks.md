@@ -5,7 +5,7 @@
 ## Model & engine
 
 - [x] **T1.1** `Transition` type (type + duration) attached at a cut; derived overlap from neighbours.
-- [x] **T1.2** Builder: overlap placement + opacity-ramp instruction for cross-dissolve.
+- [x] **T1.2** Builder: overlap placement is done in `TransitionLayout.pieces` / `CompositionBuilder.makeVideoComposition`. The opacity-ramp form is exposed by `CompositionBuilder.crossDissolveLayerInstructions(...)` (`setOpacityRamp` on two `AVMutableVideoCompositionLayerInstruction`s) with a regression test (`crossDissolveLayerRamps`) and is reserved for a future native-export fast-path. Production cross-dissolves still run through `EffectCompositor.crossDissolve` (additive `RGB·(1-p) + RGB·p` for opaque inputs); the two forms produce mathematically different pixels (`setOpacityRamp` is source-over, midpoint = `(2B + A)/3` with `α=0.75`; additive midpoint = `(A + B)/2` with `α=1`) so we ship only one to keep preview and export pixel-identical (R5.1 / T3.1).
 - [x] **T1.3** Wipe via `EffectCompositor` transition blend over the overlap interval.
 - [x] **T1.4** Duration clamping to available overlap; unit tests for time ranges.
 

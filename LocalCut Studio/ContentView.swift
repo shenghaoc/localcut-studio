@@ -66,9 +66,12 @@ struct DocumentCommands: Commands {
                 .keyboardShortcut("z", modifiers: [.command, .shift])
                 .disabled(!model.canRedo)
         }
-        // Edit-menu entry for Add Transition mirrors the toolbar button so
-        // keyboard-driven workflows + the menu bar both reach the same action.
-        CommandMenu("Timeline") {
+        // Edit-menu entries mirror the toolbar buttons so keyboard-driven
+        // workflows + the menu bar both reach the same actions. A top-level
+        // "Timeline" menu would be non-standard for a macOS app — grouping
+        // inside Edit (after pasteboard) keeps the menu bar conventional.
+        CommandGroup(after: .pasteboard) {
+            Divider()
             Button("Split Clip at Playhead") { model.splitSelectedClipAtPlayhead() }
                 .keyboardShortcut("k", modifiers: .command)
                 .disabled(model.selectedClipID == nil)
