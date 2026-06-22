@@ -180,45 +180,70 @@ enum CompositionBuilder {
         // Audio: split clips at cuts and place each piece on its own composition
         // track so rippled overlaps mix instead of corrupting one track, then
         // crossfade the overlaps so transitions stay smooth and in sync.
+        //
+        // P16 master-bus extension: when the bus or per-clip envelopes contribute
+        // anything beyond defaults, ramps and baselines are multiplied through
+        // the master/track gain and per-clip envelope. A default project (master
+        // gain 1, empty track inputs, empty envelopes) produces the identical
+        // ramp set as before the bus existed — the audio mix is still nil unless
+        // a crossfade is actually present.
         var audioMixParameters: [AVMutableAudioMixInputParameters] = []
         var hasAudioCrossfade = false
+        var hasBusContribution = false
         for projectTrack in project.audioTracks where !projectTrack.isMuted {
-            var placed: [(track: AVMutableCompositionTrack, piece: TransitionLayout.Piece)] = []
+            let trackInput = project.trackInputs.first(where: { $0.id == projectTrack.id })
+            let baseline = AudioBusMixing.baselineVolume(masterGain: project.masterGain,
+                                                         trackInput: trackInput)
+            if baseline != 1 { hasBusContribution = true }
+
+            var placed: [(track: AVMutableCompositionTrack, clip: Clip,
+                          piece: TransitionLayout.Piece)] = []
             let ordered = projectTrack.clips.sorted { $0.timelineStart < $1.timelineStart }
             for clip in ordered {
                 guard let media = project.media(for: clip.mediaID), media.hasAudio else { continue }
                 let sourceTracks = try await media.asset.loadTracks(withMediaType: .audio)
                 guard let sourceTrack = sourceTracks.first else { continue }
+                if !clip.volumeEnvelope.isEmpty { hasBusContribution = true }
                 for piece in TransitionLayout.pieces(for: clip, overlap: .zero, cuts: cuts) {
                     guard let compTrack = composition.addMutableTrack(
                         withMediaType: .audio,
                         preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
                     try compTrack.insertTimeRange(piece.sourceRange, of: sourceTrack, at: piece.effectiveStart)
-                    placed.append((compTrack, piece))
+                    placed.append((compTrack, clip, piece))
                 }
             }
 
             placed.sort { $0.piece.effectiveStart < $1.piece.effectiveStart }
             for index in placed.indices {
                 let piece = placed[index].piece
+                let clip = placed[index].clip
                 let params = AVMutableAudioMixInputParameters(track: placed[index].track)
                 let leadOverlap = index > 0
                     ? CMTimeMaximum(.zero, placed[index - 1].piece.effectiveEnd - piece.effectiveStart) : .zero
                 let trailOverlap = index < placed.count - 1
                     ? CMTimeMaximum(.zero, piece.effectiveEnd - placed[index + 1].piece.effectiveStart) : .zero
 
+                // Transition crossfades are written first, baseline-multiplied,
+                // so a default project (baseline = 1) produces the exact same
+                // ramp values as before. The R6.5 regression test guards this.
                 if leadOverlap > .zero {
-                    params.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1,
+                    params.setVolumeRamp(fromStartVolume: 0, toEndVolume: baseline,
                                          timeRange: CMTimeRange(start: piece.effectiveStart, duration: leadOverlap))
                     hasAudioCrossfade = true
                 } else {
-                    params.setVolume(1, at: piece.effectiveStart)
+                    params.setVolume(baseline, at: piece.effectiveStart)
                 }
                 if trailOverlap > .zero {
-                    params.setVolumeRamp(fromStartVolume: 1, toEndVolume: 0,
+                    params.setVolumeRamp(fromStartVolume: baseline, toEndVolume: 0,
                                          timeRange: CMTimeRange(start: piece.effectiveEnd - trailOverlap, duration: trailOverlap))
                     hasAudioCrossfade = true
                 }
+
+                applyVolumeEnvelope(clip.volumeEnvelope,
+                                    on: params,
+                                    pieceRange: CMTimeRange(start: piece.effectiveStart, duration: piece.duration),
+                                    baseline: baseline)
+
                 audioMixParameters.append(params)
             }
         }
@@ -305,7 +330,7 @@ enum CompositionBuilder {
             workingColourSpace: project.workingColourSpace)
 
         let audioMix: AVAudioMix?
-        if hasAudioCrossfade {
+        if hasAudioCrossfade || hasBusContribution {
             let mix = AVMutableAudioMix()
             mix.inputParameters = audioMixParameters
             audioMix = mix
@@ -318,6 +343,37 @@ enum CompositionBuilder {
             videoComposition: videoComposition,
             audioMix: audioMix,
             duration: totalDuration.seconds)
+    }
+
+    // MARK: - Volume envelope application (P16)
+
+    /// Writes the clip's `VolumeEnvelope` ramps into `params`, baseline-multiplied
+    /// so master/track gain still apply. `fadeIn` + `fadeOut` are clamped at
+    /// *render* time (see `VolumeEnvelope.clampedFades`) so a temporary
+    /// shortening of the clip doesn't lose the user's authored intent.
+    private static func applyVolumeEnvelope(_ envelope: VolumeEnvelope,
+                                            on params: AVMutableAudioMixInputParameters,
+                                            pieceRange: CMTimeRange,
+                                            baseline: Float) {
+        guard !envelope.isEmpty else { return }
+
+        let (fadeIn, fadeOut) = envelope.clampedFades(clipDuration: pieceRange.duration)
+        if fadeIn > .zero {
+            params.setVolumeRamp(fromStartVolume: 0,
+                                 toEndVolume: baseline,
+                                 timeRange: CMTimeRange(start: pieceRange.start, duration: fadeIn))
+        }
+        if fadeOut > .zero {
+            params.setVolumeRamp(fromStartVolume: baseline,
+                                 toEndVolume: 0,
+                                 timeRange: CMTimeRange(start: pieceRange.end - fadeOut, duration: fadeOut))
+        }
+        for ramp in envelope.ramps {
+            guard let clamped = VolumeEnvelope.clampedRange(ramp.range, to: pieceRange) else { continue }
+            params.setVolumeRamp(fromStartVolume: ramp.fromVolume * baseline,
+                                 toEndVolume: ramp.toVolume * baseline,
+                                 timeRange: clamped)
+        }
     }
 
     // MARK: - Video composition

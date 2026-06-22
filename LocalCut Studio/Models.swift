@@ -335,6 +335,13 @@ struct Clip: Identifiable, Hashable {
     /// The trailing clip owns the transition; the overlap is derived, not stored.
     var transition: Transition?
 
+    /// Per-clip audio volume envelope (P16). Extends — does not replace — the
+    /// transition crossfade ramps written by `CompositionBuilder`; an empty
+    /// envelope is bit-identical to the pre-bus behaviour. Audio-only data;
+    /// stored on video clips too so the model stays kind-agnostic, but unused
+    /// for video pieces (audio mix params are only built for audio tracks).
+    var volumeEnvelope: VolumeEnvelope = VolumeEnvelope()
+
     var timelineEnd: CMTime { timelineStart + duration }
 
     var timeRangeInSource: CMTimeRange { CMTimeRange(start: sourceStart, duration: duration) }
@@ -908,6 +915,160 @@ nonisolated struct TimelineMarker: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+// MARK: - Audio master bus (P16 infrastructure)
+
+/// Per-audio-track input on the master bus: independent pan and linear gain.
+/// `id == Track.id` so the input is keyed against the project's audio tracks.
+nonisolated struct TrackInput: Identifiable, Hashable, Codable, Sendable {
+    var id: UUID
+    /// Stereo balance, −1 (full L) … +1 (full R). Defaults to centre.
+    var pan: Float
+    /// Linear gain, 0…2 (≈ −∞…+6 dB). Defaults to unity.
+    var gain: Float
+
+    init(id: UUID, pan: Float = 0, gain: Float = 1) {
+        self.id = id
+        self.pan = pan
+        self.gain = gain
+    }
+
+    mutating func clamp() {
+        pan = max(-1, min(1, pan))
+        gain = max(0, min(2, gain))
+    }
+}
+
+/// A per-clip envelope of linear-gain ramps applied **in addition to** the
+/// transition crossfade ramps already written by `CompositionBuilder`. An empty
+/// envelope leaves the existing audio mix bit-identical to the pre-bus path.
+nonisolated struct VolumeEnvelope: Hashable, Codable, Sendable {
+    /// A linear ramp between two volumes over a clip-relative time range.
+    /// `range` is in the clip's effective (rippled) timeline coordinates and
+    /// is clamped to the clip's range at render time.
+    nonisolated struct Ramp: Hashable, Codable, Sendable {
+        var range: CMTimeRange
+        var fromVolume: Float
+        var toVolume: Float
+
+        init(range: CMTimeRange, fromVolume: Float, toVolume: Float) {
+            self.range = range
+            self.fromVolume = fromVolume
+            self.toVolume = toVolume
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case startValue, startScale, durationValue, durationScale, fromVolume, toVolume
+        }
+
+        init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let sv = try c.decode(Int64.self, forKey: .startValue)
+            let ss = try c.decode(Int32.self, forKey: .startScale)
+            let dv = try c.decode(Int64.self, forKey: .durationValue)
+            let ds = try c.decode(Int32.self, forKey: .durationScale)
+            // Defensive: a zero/negative timescale is invalid; fall back to 600.
+            range = CMTimeRange(
+                start: CMTime(value: sv, timescale: ss > 0 ? ss : 600),
+                duration: CMTime(value: dv, timescale: ds > 0 ? ds : 600))
+            fromVolume = try c.decodeIfPresent(Float.self, forKey: .fromVolume) ?? 1
+            toVolume = try c.decodeIfPresent(Float.self, forKey: .toVolume) ?? 1
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            let s = range.start.isNumeric ? range.start : .zero
+            let d = range.duration.isNumeric ? range.duration : .zero
+            try c.encode(s.value, forKey: .startValue)
+            try c.encode(s.timescale == 0 ? 600 : s.timescale, forKey: .startScale)
+            try c.encode(d.value, forKey: .durationValue)
+            try c.encode(d.timescale == 0 ? 600 : d.timescale, forKey: .durationScale)
+            try c.encode(fromVolume, forKey: .fromVolume)
+            try c.encode(toVolume, forKey: .toVolume)
+        }
+    }
+
+    /// Linear fade from 0→1 at the clip's head; `.zero` ⇒ no fade-in.
+    var fadeIn: CMTime
+    /// Linear fade from 1→0 at the clip's tail; `.zero` ⇒ no fade-out.
+    var fadeOut: CMTime
+    /// Free-form ramps applied on top of `fadeIn` / `fadeOut`.
+    var ramps: [Ramp]
+
+    init(fadeIn: CMTime = .zero, fadeOut: CMTime = .zero, ramps: [Ramp] = []) {
+        self.fadeIn = fadeIn
+        self.fadeOut = fadeOut
+        self.ramps = ramps
+    }
+
+    var isEmpty: Bool {
+        fadeIn == .zero && fadeOut == .zero && ramps.isEmpty
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fadeInValue, fadeInScale, fadeOutValue, fadeOutScale, ramps
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let fiv = try c.decodeIfPresent(Int64.self, forKey: .fadeInValue) ?? 0
+        let fis = try c.decodeIfPresent(Int32.self, forKey: .fadeInScale) ?? 600
+        let fov = try c.decodeIfPresent(Int64.self, forKey: .fadeOutValue) ?? 0
+        let fos = try c.decodeIfPresent(Int32.self, forKey: .fadeOutScale) ?? 600
+        fadeIn = CMTime(value: fiv, timescale: fis > 0 ? fis : 600)
+        fadeOut = CMTime(value: fov, timescale: fos > 0 ? fos : 600)
+        ramps = try c.decodeIfPresent([Ramp].self, forKey: .ramps) ?? []
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        let fi = fadeIn.isNumeric ? fadeIn : .zero
+        let fo = fadeOut.isNumeric ? fadeOut : .zero
+        try c.encode(fi.value, forKey: .fadeInValue)
+        try c.encode(fi.timescale == 0 ? 600 : fi.timescale, forKey: .fadeInScale)
+        try c.encode(fo.value, forKey: .fadeOutValue)
+        try c.encode(fo.timescale == 0 ? 600 : fo.timescale, forKey: .fadeOutScale)
+        if !ramps.isEmpty { try c.encode(ramps, forKey: .ramps) }
+    }
+
+    /// Returns the effective fade-in / fade-out clamped to `clipDuration`. When
+    /// `fadeIn + fadeOut > clipDuration`, each fade is reduced to
+    /// `clipDuration / 2`. Clamping happens at *render* time so a temporary
+    /// shortening doesn't lose the user's authored fades.
+    func clampedFades(clipDuration: CMTime) -> (fadeIn: CMTime, fadeOut: CMTime) {
+        guard clipDuration > .zero else { return (.zero, .zero) }
+        let fi = CMTimeMaximum(.zero, CMTimeMinimum(fadeIn, clipDuration))
+        let fo = CMTimeMaximum(.zero, CMTimeMinimum(fadeOut, clipDuration))
+        let sum = fi + fo
+        if sum <= clipDuration { return (fi, fo) }
+        let half = CMTimeMultiplyByRatio(clipDuration, multiplier: 1, divisor: 2)
+        return (half, half)
+    }
+
+    /// Intersects `range` with the clip's effective range so a ramp that
+    /// extends past the clip end clamps to the clip end (R6.4).
+    static func clampedRange(_ range: CMTimeRange, to clipRange: CMTimeRange) -> CMTimeRange? {
+        let intersection = range.intersection(clipRange)
+        return intersection.duration > .zero ? intersection : nil
+    }
+}
+
+/// A peak + RMS amplitude snapshot from the master bus's mixer tap. Updated on
+/// the audio thread and surfaced through the bus's `@Observable` accessor.
+nonisolated struct AudioMeterSnapshot: Hashable, Sendable {
+    var peakLeft: Float
+    var peakRight: Float
+    var rmsLeft: Float
+    var rmsRight: Float
+    /// Monotonic wall-clock at sample time; the inspector's hold/decay uses it
+    /// to debounce between rapid updates.
+    var sampledAt: ContinuousClock.Instant
+
+    static let silent = AudioMeterSnapshot(
+        peakLeft: 0, peakRight: 0, rmsLeft: 0, rmsRight: 0,
+        sampledAt: ContinuousClock.now)
+}
+
+
 // MARK: - Project
 
 /// The editable document: imported media plus the multi-track arrangement and
@@ -932,9 +1093,25 @@ final class Project {
     /// onto every output `CVPixelBuffer` attachment.
     var workingColourSpace: WorkingColourSpace = .sRGB
 
+    // MARK: - Audio master bus (P16) parameters
+
+    /// Master-bus output gain (linear, 0…2 ≈ −∞…+6 dB). Defaults to unity so
+    /// a project with no audio-bus edits renders bit-identically to today's
+    /// behaviour.
+    var masterGain: Float = 1
+    /// Per-audio-track inputs on the bus. Tracks are matched by `id` lazily;
+    /// a missing entry implies defaults (pan 0, gain 1).
+    var trackInputs: [TrackInput] = []
+
     init() {
         videoTracks = [Track(name: "V1", kind: .video)]
         audioTracks = [Track(name: "A1", kind: .audio)]
+    }
+
+    /// Looks up the bus input for a track, returning defaults when not yet
+    /// authored. Callers that mutate read-then-write via `setTrackInput`.
+    func trackInput(for trackID: Track.ID) -> TrackInput {
+        trackInputs.first(where: { $0.id == trackID }) ?? TrackInput(id: trackID)
     }
 
     func media(for id: MediaItem.ID) -> MediaItem? {

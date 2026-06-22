@@ -12,6 +12,13 @@ final class EditorModel {
 
     let project = Project()
 
+    /// Runtime audio master bus (P16). Owns the live + offline `AVAudioEngine`
+    /// graphs and the peak/RMS meter snapshot; persistent parameters live on
+    /// `project`. Created here so the inspector can bind to a stable instance
+    /// for the editor's lifetime; engine startup is deferred to Phase 36 so
+    /// landing the bus does not regress the current `AVPlayer` preview path.
+    let audioBus = AudioMasterBus()
+
     // Selection
     var selectedClipID: Clip.ID?
     var selectedMediaID: MediaItem.ID?

@@ -58,8 +58,9 @@ struct TransformCode: Codable, Equatable {
 /// `schemaVersion` for forward-compatible decoding (R4.2).
 struct ProjectDocument: Codable, Equatable {
     /// Bumped when the on-disk schema changes incompatibly. v3 adds
-    /// `workingColourSpace` and `markers`; v2 added `captionTracks`. A v2 build
-    /// that opens a v3 file would silently strip those fields on the next save,
+    /// `workingColourSpace`, `markers`, and the audio master bus (`audioBus` +
+    /// per-clip `volumeEnvelope`). v2 added `captionTracks`. A v2 build that
+    /// opens a v3 file would silently strip those fields on the next save,
     /// so the version guard in `EditorModel.load(document:from:)` keeps older
     /// builds from overwriting.
     static let currentSchemaVersion = 3
@@ -77,6 +78,8 @@ struct ProjectDocument: Codable, Equatable {
     var audioTracks: [TrackDoc]
     var captionTracks: [CaptionTrackDoc]
     var markers: [TimelineMarker]
+    /// Audio master bus parameters (P16, schema v3+).
+    var audioBus: AudioBusDoc
 
     init(schemaVersion: Int = ProjectDocument.currentSchemaVersion,
          name: String,
@@ -88,7 +91,8 @@ struct ProjectDocument: Codable, Equatable {
          videoTracks: [TrackDoc],
          audioTracks: [TrackDoc],
          captionTracks: [CaptionTrackDoc] = [],
-         markers: [TimelineMarker] = []) {
+         markers: [TimelineMarker] = [],
+         audioBus: AudioBusDoc = AudioBusDoc()) {
         self.schemaVersion = schemaVersion
         self.name = name
         self.renderWidth = renderWidth
@@ -100,11 +104,12 @@ struct ProjectDocument: Codable, Equatable {
         self.audioTracks = audioTracks
         self.captionTracks = captionTracks
         self.markers = markers
+        self.audioBus = audioBus
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, name, renderWidth, renderHeight, frameRate, workingColourSpace,
-             media, videoTracks, audioTracks, captionTracks, markers
+             media, videoTracks, audioTracks, captionTracks, markers, audioBus
     }
 
     // Lenient decoding: missing fields fall back to defaults and unknown keys are
@@ -130,6 +135,67 @@ struct ProjectDocument: Codable, Equatable {
         audioTracks = try c.decodeIfPresent([TrackDoc].self, forKey: .audioTracks) ?? []
         captionTracks = try c.decodeIfPresent([CaptionTrackDoc].self, forKey: .captionTracks) ?? []
         markers = try c.decodeIfPresent([TimelineMarker].self, forKey: .markers) ?? []
+        audioBus = try c.decodeIfPresent(AudioBusDoc.self, forKey: .audioBus) ?? AudioBusDoc()
+    }
+}
+
+// MARK: - Audio master bus persistence (P16, schema v3+)
+
+/// Codable snapshot of the project's master-bus parameters. Schema-version is
+/// embedded so future field additions stay forward-compatible.
+struct AudioBusDoc: Codable, Equatable {
+    var schemaVersion: Int
+    var masterGain: Float
+    var trackInputs: [TrackInputDoc]
+
+    init(schemaVersion: Int = 1, masterGain: Float = 1, trackInputs: [TrackInputDoc] = []) {
+        self.schemaVersion = schemaVersion
+        self.masterGain = masterGain
+        self.trackInputs = trackInputs
+    }
+
+    private enum CodingKeys: String, CodingKey { case schemaVersion, masterGain, trackInputs }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        masterGain = try c.decodeIfPresent(Float.self, forKey: .masterGain) ?? 1
+        trackInputs = try c.decodeIfPresent([TrackInputDoc].self, forKey: .trackInputs) ?? []
+    }
+}
+
+struct TrackInputDoc: Codable, Equatable {
+    var trackID: UUID
+    var pan: Float
+    var gain: Float
+
+    init(trackID: UUID, pan: Float = 0, gain: Float = 1) {
+        self.trackID = trackID
+        self.pan = pan
+        self.gain = gain
+    }
+
+    private enum CodingKeys: String, CodingKey { case trackID, pan, gain }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        trackID = try c.decode(UUID.self, forKey: .trackID)
+        pan = try c.decodeIfPresent(Float.self, forKey: .pan) ?? 0
+        gain = try c.decodeIfPresent(Float.self, forKey: .gain) ?? 1
+    }
+}
+
+extension AudioBusDoc {
+    init(project: Project) {
+        self.init(
+            masterGain: project.masterGain,
+            trackInputs: project.trackInputs.map { TrackInputDoc(trackID: $0.id, pan: $0.pan, gain: $0.gain) })
+    }
+}
+
+extension TrackInputDoc {
+    var trackInput: TrackInput {
+        TrackInput(id: trackID, pan: pan, gain: gain)
     }
 }
 
@@ -214,6 +280,9 @@ struct ClipDoc: Codable, Equatable {
     var opacity: Float
     var effects: [Effect]
     var transition: TransitionDoc?
+    /// Per-clip volume envelope (P16, schema v3+). Empty envelope on legacy
+    /// documents leaves audio mixing bit-identical to the pre-bus path.
+    var volumeEnvelope: VolumeEnvelope
 
     init(mediaID: UUID,
          sourceStart: CMTimeCode,
@@ -221,7 +290,8 @@ struct ClipDoc: Codable, Equatable {
          timelineStart: CMTimeCode,
          opacity: Float,
          effects: [Effect],
-         transition: TransitionDoc?) {
+         transition: TransitionDoc?,
+         volumeEnvelope: VolumeEnvelope = VolumeEnvelope()) {
         self.mediaID = mediaID
         self.sourceStart = sourceStart
         self.duration = duration
@@ -229,10 +299,11 @@ struct ClipDoc: Codable, Equatable {
         self.opacity = opacity
         self.effects = effects
         self.transition = transition
+        self.volumeEnvelope = volumeEnvelope
     }
 
     private enum CodingKeys: String, CodingKey {
-        case mediaID, sourceStart, duration, timelineStart, opacity, effects, transition
+        case mediaID, sourceStart, duration, timelineStart, opacity, effects, transition, volumeEnvelope
     }
 
     init(from decoder: any Decoder) throws {
@@ -244,6 +315,7 @@ struct ClipDoc: Codable, Equatable {
         opacity = try c.decodeIfPresent(Float.self, forKey: .opacity) ?? 1
         effects = try c.decodeIfPresent([Effect].self, forKey: .effects) ?? []
         transition = try c.decodeIfPresent(TransitionDoc.self, forKey: .transition)
+        volumeEnvelope = try c.decodeIfPresent(VolumeEnvelope.self, forKey: .volumeEnvelope) ?? VolumeEnvelope()
     }
 }
 
@@ -271,7 +343,8 @@ extension ProjectDocument {
             videoTracks: project.videoTracks.map(TrackDoc.init(track:)),
             audioTracks: project.audioTracks.map(TrackDoc.init(track:)),
             captionTracks: project.captionTracks.map(CaptionTrackDoc.init(track:)),
-            markers: project.markers)
+            markers: project.markers,
+            audioBus: AudioBusDoc(project: project))
     }
 }
 
@@ -329,7 +402,8 @@ extension ClipDoc {
             timelineStart: CMTimeCode(clip.timelineStart),
             opacity: clip.opacity,
             effects: clip.effects,
-            transition: clip.transition.map(TransitionDoc.init(transition:)))
+            transition: clip.transition.map(TransitionDoc.init(transition:)),
+            volumeEnvelope: clip.volumeEnvelope)
     }
 }
 
@@ -350,7 +424,8 @@ extension ClipDoc {
              timelineStart: timelineStart.cmTime,
              opacity: opacity,
              effects: effects,
-             transition: transition?.makeTransition())
+             transition: transition?.makeTransition(),
+             volumeEnvelope: volumeEnvelope)
     }
 }
 

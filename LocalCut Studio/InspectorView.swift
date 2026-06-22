@@ -36,6 +36,7 @@ struct InspectorView: View {
                     }
                 }
 
+                AudioInspectorView(model: model)
                 CaptionsInspectorView(model: model)
                 MarkersInspectorView(model: model)
                 projectSection

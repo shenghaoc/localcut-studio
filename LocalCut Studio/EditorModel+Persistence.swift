@@ -34,6 +34,11 @@ struct ProjectState: Equatable {
     var audioTracks: [TrackClips]
     var captionTracks: [CaptionTrackSnapshot]
     var markers: [TimelineMarker]
+    /// Master-bus gain (linear, 0…2). Per-clip volume envelopes ride along
+    /// inside `clips`; only bus-level parameters live here directly.
+    var masterGain: Float
+    /// Per-audio-track pan + gain on the bus.
+    var trackInputs: [TrackInput]
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
@@ -49,6 +54,8 @@ struct ProjectState: Equatable {
             && lhs.audioTracks == rhs.audioTracks
             && lhs.captionTracks == rhs.captionTracks
             && lhs.markers == rhs.markers
+            && lhs.masterGain == rhs.masterGain
+            && lhs.trackInputs == rhs.trackInputs
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
@@ -85,6 +92,8 @@ extension EditorModel {
                     defaultStyle: $0.defaultStyle, lines: $0.lines)
             },
             markers: project.markers,
+            masterGain: project.masterGain,
+            trackInputs: project.trackInputs,
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID,
             selectedMarkerID: selectedMarkerID)
@@ -151,6 +160,8 @@ extension EditorModel {
         // assignment. The sort invariant is preserved because every mutation
         // path on `EditorModel` writes a sorted list into the snapshot.
         project.markers = state.markers
+        project.masterGain = state.masterGain
+        project.trackInputs = state.trackInputs
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID
@@ -314,6 +325,8 @@ extension EditorModel {
         project.audioTracks = [Track(name: "A1", kind: .audio)]
         project.captionTracks = []
         project.markers = []
+        project.masterGain = 1
+        project.trackInputs = []
         documentURL = nil
         isDirty = false
         unresolvedMedia = []
@@ -343,6 +356,8 @@ extension EditorModel {
         project.mediaItems.removeAll()
         project.captionTracks.removeAll()
         project.markers.removeAll()
+        project.masterGain = 1
+        project.trackInputs = []
         selectedClipID = nil
         selectedMediaID = nil
         selectedTransitionClipID = nil
@@ -355,6 +370,8 @@ extension EditorModel {
         coalescedUndoBefore = nil
         coalescedUndoName = nil
         coalescedUndoTarget = nil
+        audioBus.teardownLive()
+        audioBus.teardownOffline()
     }
 
     /// Reads and opens a `.lcstudio` document. The file read happens off the main
@@ -408,6 +425,8 @@ extension EditorModel {
         // hand-edited or migrated document with unsorted entries can't break
         // ordered draw / lookup code.
         project.markers = document.markers.sorted { $0.time < $1.time }
+        project.masterGain = document.audioBus.masterGain
+        project.trackInputs = document.audioBus.trackInputs.map(\.trackInput)
 
         // A document from a newer schema would lose its future-only fields if we
         // re-saved it as the current version, so don't adopt its URL — Save then
