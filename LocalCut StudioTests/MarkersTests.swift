@@ -204,14 +204,48 @@ struct MarkersEditorTests {
         model.addMarkerAtPlayhead()
         let id = model.project.markers[0].id
         model.selectedMarkerID = nil
-        // `seek(toSeconds:)` clamps to `totalDuration`; the unit test has no
-        // composition, so widen the cap to a generous value first so the seek
-        // actually lands at the marker time.
-        model.totalDuration = 10
         model.currentTime = 0
         model.seekToMarker(id: id)
         #expect(model.selectedMarkerID == id)
         #expect(abs(model.currentTime - 1.0) < 1e-6)
+    }
+
+    @Test("seekToMarker bypasses the totalDuration clamp for markers past project end (Codex review #5)")
+    func seekPastProjectEnd() {
+        let model = EditorModel()
+        // No clips → `totalDuration` stays 0. A marker at 12 s is allowed
+        // (markers don't extend `Project.duration`) and clicking its row in
+        // the inspector must still park the playhead at 12 s, not at 0.
+        model.project.markers = [TimelineMarker(
+            time: CMTime(seconds: 12, preferredTimescale: 600),
+            name: "Tail")]
+        let id = model.project.markers[0].id
+        model.seekToMarker(id: id)
+        #expect(abs(model.currentTime - 12) < 1e-6)
+        #expect(model.selectedMarkerID == id)
+    }
+
+    @Test("Adding a marker clears clip / transition / media focus (Gemini review #4, Codex review #2)")
+    func markerSelectionIsMutuallyExclusive() {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        media.duration = CMTime(seconds: 5, preferredTimescale: 600)
+        model.project.mediaItems.append(media)
+        let clip = Clip(mediaID: media.id, sourceStart: .zero,
+                        duration: CMTime(seconds: 5, preferredTimescale: 600),
+                        timelineStart: .zero)
+        model.project.videoTracks.first!.clips.append(clip)
+        model.selectedClipID = clip.id
+        model.selectedMediaID = media.id
+
+        model.currentTime = 1
+        model.addMarkerAtPlayhead()
+
+        // After the add, only the marker should be selected.
+        #expect(model.selectedMarkerID != nil)
+        #expect(model.selectedClipID == nil)
+        #expect(model.selectedMediaID == nil)
+        #expect(model.selectedTransitionClipID == nil)
     }
 
     @Test("ProjectState snapshot survives applyState restore with identity intact")

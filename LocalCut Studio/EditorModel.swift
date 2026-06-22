@@ -624,6 +624,7 @@ final class EditorModel {
             setTransition(Transition(duration: duration), onClip: id)
             selectedClipID = nil
             selectedMediaID = nil
+            selectedMarkerID = nil
             selectedTransitionClipID = id
             statusMessage = "Added transition."
         }

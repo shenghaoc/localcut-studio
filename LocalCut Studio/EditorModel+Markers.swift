@@ -13,12 +13,14 @@ extension EditorModel {
 
     /// Adds a marker at the playhead and selects it. The list stays sorted by
     /// `time` so the timeline ruler and inspector can iterate it in order.
+    /// Selecting the new marker clears clip / transition selection so Delete
+    /// and the inspector act on the marker that just got focus.
     func addMarkerAtPlayhead() {
         performUndoable("Add Marker") {
             let time = CMTime(seconds: currentTime, preferredTimescale: 600)
             let marker = TimelineMarker(time: time, name: defaultMarkerName())
             insertMarkerSorted(marker)
-            selectedMarkerID = marker.id
+            focusMarker(marker.id)
             statusMessage = "Added marker at \(TimeFormatting.timecode(time.seconds))."
         }
     }
@@ -57,11 +59,19 @@ extension EditorModel {
     }
 
     /// Seeks the playhead to a marker's time. Cheap helper for click-to-seek
-    /// in the inspector list.
+    /// in the inspector list. Markers are allowed past `Project.duration`
+    /// (they're annotations, not content), so this path bypasses the playback
+    /// clamp in `seek(toSeconds:)` and parks the playhead at the marker time
+    /// itself — otherwise selecting a marker at 12s in a 10s project would
+    /// silently leave the playhead at 10s while highlighting the 12s glyph
+    /// (Codex review #5).
     func seekToMarker(id: TimelineMarker.ID) {
         guard let marker = project.markers.first(where: { $0.id == id }) else { return }
-        seek(toSeconds: marker.time.seconds)
-        selectedMarkerID = id
+        let seconds = max(0, marker.time.seconds)
+        currentTime = seconds
+        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
+                    toleranceBefore: .zero, toleranceAfter: .zero)
+        focusMarker(id)
     }
 
     // MARK: - Helpers
@@ -74,6 +84,16 @@ extension EditorModel {
         } else {
             project.markers.append(marker)
         }
+    }
+
+    /// Mutually-exclusive marker selection: clears the clip / transition /
+    /// media focus so Delete and the inspector always act on one thing
+    /// (Gemini review #4-#6, Codex review #2).
+    private func focusMarker(_ id: TimelineMarker.ID) {
+        selectedMarkerID = id
+        selectedClipID = nil
+        selectedTransitionClipID = nil
+        selectedMediaID = nil
     }
 
     /// "Marker", "Marker 2", "Marker 3", … so two consecutive M presses don't
