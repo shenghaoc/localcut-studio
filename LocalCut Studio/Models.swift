@@ -50,10 +50,8 @@ extension CGAffineTransform {
     /// Returns a validated transform, falling back to `.identity` if any
     /// component is non-finite or implausibly large.
     var sanitized: CGAffineTransform {
-        let components = [a, b, c, d, tx, ty]
-        guard components.allSatisfy({ $0.isFinite && abs($0) <= CGAffineTransform.maxSaneCoefficient }) else {
-            return .identity
-        }
+        func ok(_ v: CGFloat) -> Bool { v.isFinite && abs(v) <= CGAffineTransform.maxSaneCoefficient }
+        guard ok(a), ok(b), ok(c), ok(d), ok(tx), ok(ty) else { return .identity }
         return self
     }
 }

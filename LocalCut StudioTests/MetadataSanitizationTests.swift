@@ -58,6 +58,11 @@ struct MetadataSanitizationTests {
         #expect(CGSize(width: -1920, height: -1080).sanitized == .zero)
     }
 
+    @Test("Mixed-sign dimensions clamp only the negative axis to zero")
+    func sizeClampsMixedSign() {
+        #expect(CGSize(width: 1920, height: -1080).sanitized == CGSize(width: 1920, height: 0))
+    }
+
     @Test("Implausibly large finite dimensions clamp to the sane maximum")
     func sizeClampsEnormous() {
         // Would otherwise trap `Int(width)` in the inspector.
