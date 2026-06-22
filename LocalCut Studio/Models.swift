@@ -152,8 +152,22 @@ final class MediaItem: Identifiable {
 
     /// Security-scoped bookmark to `url`, created at import. Persisted in the
     /// project document so the file can be re-resolved across launches under the
-    /// sandbox (R1.2). `nil` until a bookmark could be created.
+    /// sandbox (R1.2). `nil` until a bookmark could be created, or for media that
+    /// lives inside the project bundle (the bundle's outer URL is the grant).
     var bookmark: Data?
+
+    /// Bundle-relative path (`assets/<id>.<ext>`) when this media has been
+    /// copied into the current `.lcbundle` project. `nil` for media that has
+    /// not been placed in a bundle yet (legacy `.lcstudio` documents) or that
+    /// the user has explicitly opted out of bundling (see `wantsBundling`).
+    var bundleRelativePath: String?
+
+    /// Whether this media should be **copied into** the bundle on the next
+    /// bundle save. Defaults to `true` — the standard "include media in the
+    /// project" expectation. A future "Don't copy" import option flips this
+    /// to `false`, which the bundle save path then honours by leaving the
+    /// ref external (bookmark-resolved) instead of stamping a bundled path.
+    var wantsBundling: Bool = true
 
     /// Poster frame shown in the media bin. Generated lazily after import.
     var thumbnail: CGImage?
