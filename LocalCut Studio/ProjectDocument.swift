@@ -33,7 +33,9 @@ nonisolated struct CMTimeCode: Codable, Equatable, Sendable {
         }
     }
 
-    var cmTime: CMTime { CMTime(value: value, timescale: timescale) }
+    var cmTime: CMTime {
+        CMTime(value: value, timescale: timescale > 0 ? timescale : 600)
+    }
 }
 
 /// Codable form of an affine transform (the media's preferred orientation).

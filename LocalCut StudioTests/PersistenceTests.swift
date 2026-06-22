@@ -33,6 +33,20 @@ struct PersistenceTests {
         #expect(CMTimeCode(.invalid).cmTime == .zero)
     }
 
+    @Test("Decoded CMTimeCode uses a safe timescale for corrupt documents")
+    func decodedCMTimeCodeUsesSafeTimescale() throws {
+        for rawTimescale in [0, -600] {
+            let data = Data(#"{"value":1000,"timescale":\#(rawTimescale)}"#.utf8)
+            let decoded = try JSONDecoder().decode(CMTimeCode.self, from: data)
+            let time = decoded.cmTime
+
+            #expect(time.value == 1000)
+            #expect(time.timescale == 600)
+            #expect(time.isNumeric)
+            #expect(time.seconds.isFinite)
+        }
+    }
+
     // MARK: - Document round-trip equality (T1.4, R1.1)
 
     private func sampleDocument() -> ProjectDocument {
