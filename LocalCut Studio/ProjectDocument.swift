@@ -248,22 +248,30 @@ struct MediaRef: Codable, Equatable {
 
 /// Codable lane of clips.
 struct TrackDoc: Codable, Equatable {
+    /// Stable identity (schema v3+). Persisted so the audio master bus's
+    /// `TrackInput` entries — which key off `Track.id` — still match the
+    /// runtime tracks after a save/load round trip. Legacy documents without
+    /// an `id` decode to a fresh UUID; bus inputs from those older saves
+    /// won't match by id and are silently ignored (the inspector can re-author).
+    var id: UUID
     var name: String
     var kind: String          // TrackKind raw ("video" / "audio")
     var isMuted: Bool
     var clips: [ClipDoc]
 
-    init(name: String, kind: String, isMuted: Bool, clips: [ClipDoc]) {
+    init(id: UUID = UUID(), name: String, kind: String, isMuted: Bool, clips: [ClipDoc]) {
+        self.id = id
         self.name = name
         self.kind = kind
         self.isMuted = isMuted
         self.clips = clips
     }
 
-    private enum CodingKeys: String, CodingKey { case name, kind, isMuted, clips }
+    private enum CodingKeys: String, CodingKey { case id, name, kind, isMuted, clips }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "video"
         isMuted = try c.decodeIfPresent(Bool.self, forKey: .isMuted) ?? false
@@ -386,6 +394,7 @@ extension MediaRef {
 extension TrackDoc {
     init(track: Track) {
         self.init(
+            id: track.id,
             name: track.name,
             kind: track.kind == .video ? "video" : "audio",
             isMuted: track.isMuted,

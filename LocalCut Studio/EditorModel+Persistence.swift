@@ -454,7 +454,9 @@ extension EditorModel {
     private func makeTracks(from docs: [TrackDoc], kind: TrackKind, fallbackName: String) -> [Track] {
         guard !docs.isEmpty else { return [Track(name: fallbackName, kind: kind)] }
         return docs.map { doc in
-            let track = Track(name: doc.name.isEmpty ? fallbackName : doc.name, kind: kind)
+            // Carry the persisted UUID across the restore so audio-bus
+            // `TrackInput` rows keyed by `Track.id` keep matching after open.
+            let track = Track(id: doc.id, name: doc.name.isEmpty ? fallbackName : doc.name, kind: kind)
             track.isMuted = doc.isMuted
             track.clips = doc.clips.map { $0.makeClip() }
             return track

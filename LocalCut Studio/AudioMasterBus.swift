@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Accelerate
 import os
 
 /// The native macOS port's audio master bus (P16). Owns two parallel
@@ -22,6 +23,14 @@ import os
 /// lives inside the audio nodes themselves. The peak/RMS meter snapshot is
 /// updated on the audio thread under an `OSAllocatedUnfairLock` and read on
 /// the main actor through the `@Observable` accessor.
+///
+/// **Preview wiring status.** The live engine is *not* yet wired into the
+/// `AVPlayer` preview path — that's Phase 36's job, where the bus replaces
+/// `AVPlayer`'s internal AU graph with an `AVAudioPlayerNode` chain. Until
+/// then, `prepareLive()` exists for opt-in monitoring (e.g. mic capture in
+/// Phase 41) and the inspector meter reflects whatever the live graph happens
+/// to be rendering — `silent` for an unwired bus. The offline engine **is**
+/// fully wired for tests and is the path Phase 36's export pipeline will use.
 @MainActor
 @Observable
 final class AudioMasterBus {
@@ -29,6 +38,12 @@ final class AudioMasterBus {
     /// The latest peak + RMS sample from whichever graph is rendering. Reads
     /// land on the main actor; writes happen on the audio thread, guarded by
     /// `meterLock` so the read/write race is correctly serialised.
+    ///
+    /// SwiftUI does not auto-track audio-thread writes through this accessor
+    /// because it doesn't read observable storage; the inspector drives
+    /// periodic re-reads with `TimelineView(.animation(...))` so the meter
+    /// animates in lockstep with rendering instead of waiting on unrelated
+    /// model state to change.
     var meterSnapshot: AudioMeterSnapshot {
         meterLock.withLock { $0 }
     }
@@ -72,17 +87,20 @@ final class AudioMasterBus {
 
     // MARK: - Live engine lifecycle
 
-    /// Starts the live engine, installs the master mixer tap if needed.
-    /// Idempotent: a successful re-call is a no-op; a failure tears the engine
-    /// down so a later retry starts from a clean state.
+    /// Starts the live engine, installs the master mixer tap **after** the
+    /// engine is running so the tap reads the actual hardware-matched output
+    /// format (installing before `start()` can crash on a format mismatch when
+    /// the device negotiates a different layout). Idempotent: a successful
+    /// re-call is a no-op; a failure tears the engine down so a later retry
+    /// starts from a clean state.
     func prepareLive() {
         guard !isLiveRunning else { return }
-        installLiveTapIfNeeded()
         do {
             // `prepare()` allocates render resources without starting; needed
             // for some node types before `start()`.
             liveEngine.prepare()
             try liveEngine.start()
+            installLiveTapIfNeeded()
             isLiveRunning = true
             lastStartError = nil
         } catch {
@@ -127,32 +145,43 @@ final class AudioMasterBus {
     /// `setVoiceProcessingEnabled(_:)` is **never** called on this engine —
     /// the API refuses `.offline`. Phase 36's denoiser will attach a vDSP
     /// `AVAudioUnit` here instead.
+    ///
+    /// Setup is wrapped so a failure (manual-rendering enable, start) tears
+    /// down the partially-attached graph before rethrowing — a later retry
+    /// then starts from a clean state instead of stacking another player /
+    /// tap onto the dirty engine.
     func prepareOffline(format: AVAudioFormat = AudioMasterBus.canonicalFormat,
                         maximumFrameCount: AVAudioFrameCount = 4096) throws {
         guard !isOfflineRunning else { return }
 
-        // Attach a player node lazily so tests can write samples into the
-        // offline graph without a source file.
-        let playerID = UUID()
-        let player = AVAudioPlayerNode()
-        offlineEngine.attach(player)
-        offlineEngine.connect(player, to: offlineEngine.mainMixerNode, format: format)
-        offlinePlayers[playerID] = player
+        do {
+            // Attach a player node lazily so tests can write samples into the
+            // offline graph without a source file.
+            let playerID = UUID()
+            let player = AVAudioPlayerNode()
+            offlineEngine.attach(player)
+            offlineEngine.connect(player, to: offlineEngine.mainMixerNode, format: format)
+            offlinePlayers[playerID] = player
 
-        try offlineEngine.enableManualRenderingMode(.offline,
-                                                    format: format,
-                                                    maximumFrameCount: maximumFrameCount)
-        installOfflineTapIfNeeded(format: format)
-        offlineEngine.prepare()
-        try offlineEngine.start()
-        // Start every attached player so scheduled buffers actually play out.
-        for player in offlinePlayers.values { player.play() }
-        isOfflineRunning = true
+            try offlineEngine.enableManualRenderingMode(.offline,
+                                                        format: format,
+                                                        maximumFrameCount: maximumFrameCount)
+            installOfflineTapIfNeeded(format: format)
+            offlineEngine.prepare()
+            try offlineEngine.start()
+            // Start every attached player so scheduled buffers actually play out.
+            for player in offlinePlayers.values { player.play() }
+            isOfflineRunning = true
+        } catch {
+            // Partial-setup teardown leaves the engine ready for a retry.
+            teardownOffline()
+            throw error
+        }
     }
 
     /// Pulls one block of audio through the offline graph into `buffer`. Meter
     /// tap fires during the pull and updates `meterSnapshot`.
-    func renderOfflineBlock(into buffer: AVAudioPCMBuffer) throws -> AVAudioEngine.ManualRenderingStatus {
+    func renderOfflineBlock(into buffer: AVAudioPCMBuffer) throws -> AVAudioEngineManualRenderingStatus {
         try offlineEngine.renderOffline(buffer.frameCapacity, to: buffer)
     }
 
@@ -210,6 +239,10 @@ final class AudioMasterBus {
     }
 
     /// Pure-function meter compute, exposed for direct unit testing.
+    /// Uses Accelerate's `vDSP_maxmgv` + `vDSP_measqv` for the per-channel
+    /// reduction so the tap fits inside the audio thread's budget at 48 kHz
+    /// stereo (manual scalar loops at 1024-frame blocks would burn an order
+    /// of magnitude more cycles).
     nonisolated static func computeMeter(buffer: AVAudioPCMBuffer) -> AudioMeterSnapshot {
         let frameCount = Int(buffer.frameLength)
         guard frameCount > 0,
@@ -219,18 +252,14 @@ final class AudioMasterBus {
                                       sampledAt: ContinuousClock.now)
         }
         let channelCount = Int(buffer.format.channelCount)
+        let length = vDSP_Length(frameCount)
 
         func reduce(_ ptr: UnsafePointer<Float>) -> (peak: Float, rms: Float) {
             var peak: Float = 0
-            var sumSquares: Float = 0
-            for i in 0..<frameCount {
-                let s = ptr[i]
-                let mag = abs(s)
-                if mag > peak { peak = mag }
-                sumSquares += s * s
-            }
-            let rms = (sumSquares / Float(frameCount)).squareRoot()
-            return (peak, rms)
+            var meanSquare: Float = 0
+            vDSP_maxmgv(ptr, 1, &peak, length)
+            vDSP_measqv(ptr, 1, &meanSquare, length)
+            return (peak, meanSquare.squareRoot())
         }
 
         let l = reduce(channelData[0])
@@ -247,6 +276,12 @@ final class AudioMasterBus {
 /// baselines and envelope ramps that `CompositionBuilder` writes into
 /// `AVMutableAudioMixInputParameters`. Kept here, not on `Project`, so the
 /// bus owns every audio-mix-shaping concern.
+///
+/// **Pan is not applied here.** `TrackInput.pan` is stored and persisted, but
+/// applying it requires an `AVAudioMixerNode.pan` write on the live graph and
+/// a panner node on the offline graph — both deferred to Phase 36 where the
+/// bus actually owns the audio rendering path. Until then, the UI does not
+/// expose a pan control, so a project's pan field stays at its default.
 enum AudioBusMixing {
 
     /// Effective baseline volume (master × per-track gain). `1.0` for the

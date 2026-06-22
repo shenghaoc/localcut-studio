@@ -222,6 +222,14 @@ enum CompositionBuilder {
                     ? CMTimeMaximum(.zero, placed[index - 1].piece.effectiveEnd - piece.effectiveStart) : .zero
                 let trailOverlap = index < placed.count - 1
                     ? CMTimeMaximum(.zero, piece.effectiveEnd - placed[index + 1].piece.effectiveStart) : .zero
+                // A clip can be split into multiple pieces by another track's
+                // transition cut. Fades only apply at the clip's actual head /
+                // tail (not at every internal split), so flag the first / last
+                // piece of each clip.
+                let isFirstPieceOfClip = index == 0
+                    || placed[index - 1].clip.id != clip.id
+                let isLastPieceOfClip = index == placed.count - 1
+                    || placed[index + 1].clip.id != clip.id
 
                 // Transition crossfades are written first, baseline-multiplied,
                 // so a default project (baseline = 1) produces the exact same
@@ -241,7 +249,12 @@ enum CompositionBuilder {
 
                 applyVolumeEnvelope(clip.volumeEnvelope,
                                     on: params,
-                                    pieceRange: CMTimeRange(start: piece.effectiveStart, duration: piece.duration),
+                                    clip: clip,
+                                    piece: piece,
+                                    isFirstPieceOfClip: isFirstPieceOfClip,
+                                    isLastPieceOfClip: isLastPieceOfClip,
+                                    leadOverlap: leadOverlap,
+                                    trailOverlap: trailOverlap,
                                     baseline: baseline)
 
                 audioMixParameters.append(params)
@@ -348,32 +361,122 @@ enum CompositionBuilder {
     // MARK: - Volume envelope application (P16)
 
     /// Writes the clip's `VolumeEnvelope` ramps into `params`, baseline-multiplied
-    /// so master/track gain still apply. `fadeIn` + `fadeOut` are clamped at
-    /// *render* time (see `VolumeEnvelope.clampedFades`) so a temporary
-    /// shortening of the clip doesn't lose the user's authored intent.
+    /// so master/track gain still apply. Handles four awkward shapes:
+    ///
+    /// - **Clip-relative ramps.** `VolumeEnvelope.Ramp.range` is in clip-relative
+    ///   time (so the automation moves with the clip on drag/trim); we project it
+    ///   to effective time via each piece's clip-relative offset.
+    /// - **Multi-piece clips.** A clip spanning another track's transition cut is
+    ///   split into multiple pieces by `TransitionLayout.pieces`. Each piece only
+    ///   covers a sub-range of clip-relative time, so we intersect ramps with that
+    ///   sub-range and emit partial ramps. Fades go on the first / last piece only.
+    /// - **Render-time fade clamp.** `fadeIn + fadeOut > clipDuration` ⇒ each fade
+    ///   reduces to `clipDuration / 2` (see `VolumeEnvelope.clampedFades`).
+    /// - **Transition crossfade conflicts.** Where a transition ramp already
+    ///   occupies the head / tail of a piece, envelope writes inside that window
+    ///   would overwrite the crossfade (last write wins in
+    ///   `AVMutableAudioMixInputParameters`). We restrict envelope writes to the
+    ///   non-transition portion of each piece so transitions remain authoritative
+    ///   at the cut.
     private static func applyVolumeEnvelope(_ envelope: VolumeEnvelope,
                                             on params: AVMutableAudioMixInputParameters,
-                                            pieceRange: CMTimeRange,
+                                            clip: Clip,
+                                            piece: TransitionLayout.Piece,
+                                            isFirstPieceOfClip: Bool,
+                                            isLastPieceOfClip: Bool,
+                                            leadOverlap: CMTime,
+                                            trailOverlap: CMTime,
                                             baseline: Float) {
         guard !envelope.isEmpty else { return }
 
-        let (fadeIn, fadeOut) = envelope.clampedFades(clipDuration: pieceRange.duration)
-        if fadeIn > .zero {
-            params.setVolumeRamp(fromStartVolume: 0,
-                                 toEndVolume: baseline,
-                                 timeRange: CMTimeRange(start: pieceRange.start, duration: fadeIn))
+        let clipDuration = clip.duration
+        let (fadeIn, fadeOut) = envelope.clampedFades(clipDuration: clipDuration)
+        // Clip-relative offset of this piece: how far into the clip's source it
+        // starts. For a single-piece clip this is .zero.
+        let pieceClipRelOffset = piece.sourceRange.start - clip.sourceStart
+        let pieceClipRelRange = CMTimeRange(start: pieceClipRelOffset, duration: piece.duration)
+
+        // Envelope ramps to write, in clip-relative coordinates with their final
+        // (baseline-multiplied) endpoint volumes. Fades degrade to no-op when a
+        // transition crossfade already covers the same boundary.
+        var envelopeRamps: [(range: CMTimeRange, fromVolume: Float, toVolume: Float)] = []
+        if fadeIn > .zero, isFirstPieceOfClip, leadOverlap == .zero {
+            envelopeRamps.append((
+                range: CMTimeRange(start: .zero, duration: fadeIn),
+                fromVolume: 0,
+                toVolume: baseline))
         }
-        if fadeOut > .zero {
-            params.setVolumeRamp(fromStartVolume: baseline,
-                                 toEndVolume: 0,
-                                 timeRange: CMTimeRange(start: pieceRange.end - fadeOut, duration: fadeOut))
+        if fadeOut > .zero, isLastPieceOfClip, trailOverlap == .zero {
+            envelopeRamps.append((
+                range: CMTimeRange(start: clipDuration - fadeOut, duration: fadeOut),
+                fromVolume: baseline,
+                toVolume: 0))
         }
         for ramp in envelope.ramps {
-            guard let clamped = VolumeEnvelope.clampedRange(ramp.range, to: pieceRange) else { continue }
-            params.setVolumeRamp(fromStartVolume: ramp.fromVolume * baseline,
-                                 toEndVolume: ramp.toVolume * baseline,
-                                 timeRange: clamped)
+            let clipFullRange = CMTimeRange(start: .zero, duration: clipDuration)
+            guard let clamped = VolumeEnvelope.clampedRange(ramp.range, to: clipFullRange) else { continue }
+            let (from, to) = subRampVolumes(
+                fullRange: ramp.range,
+                fullFrom: ramp.fromVolume * baseline,
+                fullTo: ramp.toVolume * baseline,
+                subRange: clamped)
+            envelopeRamps.append((range: clamped, fromVolume: from, toVolume: to))
         }
+
+        for er in envelopeRamps {
+            // Intersect with this piece's clip-relative range so we only emit
+            // the portion that actually plays out of this piece.
+            let inPiece = er.range.intersection(pieceClipRelRange)
+            guard inPiece.duration > .zero else { continue }
+
+            // Avoid overwriting the transition crossfade ramps written above.
+            // Trim envelope writes that fall inside [pieceStart, pieceStart+leadOverlap]
+            // or [pieceEnd-trailOverlap, pieceEnd] (in clip-relative coordinates).
+            var trimmed = inPiece
+            if leadOverlap > .zero {
+                let leadEndCR = pieceClipRelRange.start + leadOverlap
+                if trimmed.start < leadEndCR {
+                    let cut = CMTimeMinimum(leadEndCR - trimmed.start, trimmed.duration)
+                    trimmed = CMTimeRange(start: trimmed.start + cut,
+                                          duration: trimmed.duration - cut)
+                }
+            }
+            if trailOverlap > .zero {
+                let trailStartCR = pieceClipRelRange.end - trailOverlap
+                if trimmed.end > trailStartCR {
+                    let cut = CMTimeMinimum(trimmed.end - trailStartCR, trimmed.duration)
+                    trimmed = CMTimeRange(start: trimmed.start,
+                                          duration: trimmed.duration - cut)
+                }
+            }
+            guard trimmed.duration > .zero else { continue }
+
+            // Project clip-relative time back to this piece's effective time.
+            let effStart = piece.effectiveStart + (trimmed.start - pieceClipRelOffset)
+            let effRange = CMTimeRange(start: effStart, duration: trimmed.duration)
+            let (from, to) = subRampVolumes(
+                fullRange: er.range,
+                fullFrom: er.fromVolume,
+                fullTo: er.toVolume,
+                subRange: trimmed)
+            params.setVolumeRamp(fromStartVolume: from, toEndVolume: to, timeRange: effRange)
+        }
+    }
+
+    /// Linearly interpolates `fullFrom` / `fullTo` over `fullRange` and returns
+    /// the endpoint volumes that correspond to `subRange`. Used to emit partial
+    /// ramps when an envelope ramp only intersects part of a piece.
+    private static func subRampVolumes(fullRange: CMTimeRange,
+                                       fullFrom: Float,
+                                       fullTo: Float,
+                                       subRange: CMTimeRange) -> (Float, Float) {
+        let fullDur = fullRange.duration.seconds
+        guard fullDur > 0 else { return (fullFrom, fullTo) }
+        let t0 = (subRange.start - fullRange.start).seconds / fullDur
+        let t1 = (subRange.end - fullRange.start).seconds / fullDur
+        let from = fullFrom + (fullTo - fullFrom) * Float(t0)
+        let to = fullFrom + (fullTo - fullFrom) * Float(t1)
+        return (from, to)
     }
 
     // MARK: - Video composition

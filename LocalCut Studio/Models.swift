@@ -350,13 +350,18 @@ struct Clip: Identifiable, Hashable {
 /// An ordered lane of clips of a single kind.
 @Observable
 final class Track: Identifiable {
-    let id = UUID()
+    /// `let` so identity stays stable for the runtime lifetime of the track.
+    /// Document load passes the persisted UUID so audio-bus inputs keyed by
+    /// `Track.id` keep matching after open (otherwise gain/pan saved against
+    /// the old runtime UUID would be silently ignored).
+    let id: UUID
     var name: String
     let kind: TrackKind
     var clips: [Clip] = []
     var isMuted = false
 
-    init(name: String, kind: TrackKind) {
+    init(id: UUID = UUID(), name: String, kind: TrackKind) {
+        self.id = id
         self.name = name
         self.kind = kind
     }

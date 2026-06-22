@@ -293,6 +293,94 @@ struct AudioBusRegressionTests {
         #expect(abs(restoredClip.volumeEnvelope.ramps[0].fromVolume - 0.2) < 1e-6)
         #expect(abs(restoredClip.volumeEnvelope.ramps[0].toVolume - 0.9) < 1e-6)
     }
+
+    @Test("TrackDoc: track id round-trips so audio bus inputs match restored tracks (codex P1)")
+    func trackIDsSurviveSaveLoadSoBusInputsMatch() throws {
+        // Set up a project with a per-track gain on the first audio track.
+        let project = Project()
+        let originalTrackID = project.audioTracks[0].id
+        project.trackInputs = [TrackInput(id: originalTrackID, pan: 0, gain: 0.4)]
+        project.masterGain = 1
+
+        // Save and reload through ProjectDocument.
+        let data = try ProjectDocument(project: project).encoded()
+        let back = try ProjectDocument(data: data)
+        // The TrackDoc must carry the original UUID so the runtime makeTracks()
+        // can rebuild a Track whose id matches the persisted trackInput.
+        #expect(back.audioTracks.count == 1)
+        #expect(back.audioTracks[0].id == originalTrackID)
+        // The trackInput's trackID still points at that same UUID.
+        #expect(back.audioBus.trackInputs[0].trackID == originalTrackID)
+    }
+
+    @Test("CompositionBuilder: envelope ramps are clip-relative (gemini #3 fix)")
+    func envelopeRampShiftedByClipTimelinePosition() async throws {
+        // A clip placed at timeline t=5s carries a 0.3 s clip-relative ramp at
+        // [0, 0.3]. Without the clip-relative→absolute shift this ramp would
+        // be skipped (intersection with the piece starting at t=5 is empty);
+        // with the fix the ramp lands at effective time [5, 5.3].
+        let project = Project()
+        let url = try makeAudioFixture(seconds: 10)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let media = try await loadAudioMedia(from: url)
+        project.mediaItems.append(media)
+        var clip = Clip(mediaID: media.id,
+                        sourceStart: .zero,
+                        duration: cm(3),
+                        timelineStart: cm(5))
+        clip.volumeEnvelope = VolumeEnvelope(
+            ramps: [VolumeEnvelope.Ramp(range: CMTimeRange(start: .zero, duration: cm(0.3)),
+                                        fromVolume: 0.2, toVolume: 0.8)])
+        project.audioTracks[0].clips = [clip]
+        project.masterGain = 1
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+        let mix = try #require(built.audioMix)
+        let params = try #require(mix.inputParameters.first)
+
+        // Probe just past the ramp's effective start; getVolumeRamp returns
+        // true only when an active ramp covers the probe time, and reports the
+        // ramp's range. With the shift fix this lands at [5, 5.3]; without it
+        // there's no ramp at this time at all.
+        var startVol: Float = 0
+        var endVol: Float = 0
+        var rampRange = CMTimeRange()
+        let probe = CMTime(seconds: 5.1, preferredTimescale: 600)
+        let hit = params.getVolumeRamp(for: probe,
+                                       startVolume: &startVol,
+                                       endVolume: &endVol,
+                                       timeRange: &rampRange)
+        #expect(hit == true)
+        #expect(abs(rampRange.start.seconds - 5) < 1e-3)
+        #expect(abs(rampRange.duration.seconds - 0.3) < 1e-3)
+    }
+
+    @Test("EditorModel: splitting a clip preserves the right-half volume envelope (codex P2)")
+    func splitClipPreservesVolumeEnvelope() {
+        let model = EditorModel()
+        // Place a 4s clip on the audio track with a non-empty envelope.
+        var clip = Clip(mediaID: UUID(), sourceStart: .zero,
+                        duration: cm(4), timelineStart: .zero)
+        clip.volumeEnvelope = VolumeEnvelope(
+            fadeIn: cm(0.2), fadeOut: cm(0.5),
+            ramps: [VolumeEnvelope.Ramp(
+                range: CMTimeRange(start: cm(1), duration: cm(1)),
+                fromVolume: 0.3, toVolume: 0.7)])
+        model.project.audioTracks[0].clips = [clip]
+        model.selectedClipID = clip.id
+
+        // Park the playhead at 2 s and split.
+        model.currentTime = 2.0
+        model.splitSelectedClipAtPlayhead()
+
+        let clips = model.project.audioTracks[0].clips
+        #expect(clips.count == 2)
+        // Both halves must keep the envelope; the render-time clamp handles the
+        // shorter duration. The previous bug dropped the right half's envelope.
+        #expect(clips[0].volumeEnvelope.fadeIn == cm(0.2))
+        #expect(clips[1].volumeEnvelope.fadeIn == cm(0.2))
+        #expect(clips[1].volumeEnvelope.ramps.count == 1)
+    }
 }
 
 // MARK: - Audio fixture helpers (used by the regression tests)

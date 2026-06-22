@@ -340,7 +340,12 @@ final class EditorModel {
                              duration: clip.duration - offset,
                              timelineStart: playhead,
                              opacity: clip.opacity,
-                             effects: clip.effects)
+                             effects: clip.effects,
+                             // Carry the authored envelope to the right half so a
+                             // split doesn't silently drop volume automation. The
+                             // render-time fade clamp already trims fades that no
+                             // longer fit either side's duration.
+                             volumeEnvelope: clip.volumeEnvelope)
 
                 track.clips.replaceSubrange(index...index, with: [left, right])
                 selectedClipID = left.id

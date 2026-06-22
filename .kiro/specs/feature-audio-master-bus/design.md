@@ -130,7 +130,11 @@ struct AudioMeterSnapshot: Hashable, Sendable {
 /// transition-derived ramps only" (today's behaviour, untouched).
 struct VolumeEnvelope: Hashable, Codable {
     struct Ramp: Hashable, Codable {
-        var range: CMTimeRange        // clamped to the clip's timelineRange
+        /// **Clip-relative** time range — `start = 0` is the clip's head.
+        /// The build pipeline shifts this onto the clip's effective timeline
+        /// position per piece, so the automation moves with the clip on
+        /// drag / trim / split.
+        var range: CMTimeRange
         var fromVolume: Float
         var toVolume: Float
     }
@@ -140,10 +144,24 @@ struct VolumeEnvelope: Hashable, Codable {
 }
 ```
 
-`fadeIn` / `fadeOut` are convenience knobs that lower into two `Ramp`
-entries clamped to the clip's effective timeline range; longer values
-than the clip duration clamp to that duration (split evenly when both
-fade-in and fade-out exceed half-length).
+`fadeIn` / `fadeOut` are convenience knobs that lower into two implicit
+`Ramp` entries (clip-relative `[0, fadeIn]` and `[clipDur − fadeOut, clipDur]`)
+clamped to the clip's duration at render time; longer values than the clip
+duration clamp to that duration (split evenly when both fade-in and fade-out
+exceed half-length).
+
+**Multi-piece clips.** A clip spanning another track's transition cut gets
+split into multiple `TransitionLayout.Piece`s. Fades emit on the **first**
+piece (fadeIn) and the **last** piece (fadeOut) only; envelope ramps emit on
+each piece their clip-relative range intersects, with endpoints linearly
+interpolated for the sub-range.
+
+**Transition precedence at the cut.** Where a transition crossfade ramp
+already occupies the head / tail of a piece, envelope writes inside that
+window would overwrite the crossfade (last write wins in
+`AVMutableAudioMixInputParameters`). Envelope writes are restricted to the
+non-transition portion of each piece so transitions remain authoritative at
+the cut.
 
 ## Integration with `CompositionBuilder`
 
@@ -167,11 +185,13 @@ right after the existing transition ramp loop, before the
    - For every `Ramp` in the clip's `VolumeEnvelope` whose `range`
      intersects the piece, emit a `setVolumeRamp(...)` over the intersected
      interval, baseline-multiplied.
-3. Pan is applied through `AVMutableAudioMixInputParameters.audioTapProcessor`
-   on the live preview only; offline export reads pan from the bus and writes
-   it into the engine's mixer node, so preview and export are sample-identical
-   for centred / symmetric pans. (Per-clip pan automation is not in scope here
-   — Phase 35 keyframes it via the keyframe infra.)
+3. Pan is **data-model-only** in this spec — `TrackInput.pan` is persisted
+   and undoable, but the audio rendering path stays a per-input volume
+   scalar. Applying pan requires a per-track `AVAudioMixerNode.pan` write on
+   the live graph plus a panner node on the offline graph, both of which sit
+   inside Phase 36's owned audio rendering pipeline. The inspector therefore
+   does not surface a pan control until Phase 36; existing pan field values
+   round-trip but do not affect audio.
 
 This keeps the **existing transition ramp behaviour bit-identical** when the
 envelope and bus gains are at defaults (`fadeIn = fadeOut = 0`, no ramps,
