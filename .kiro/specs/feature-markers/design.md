@@ -78,8 +78,16 @@ marker selects it; tapping the ruler away from any glyph clears the selection.
 
 ### Keyboard
 
-A new `MarkerKeyHandler` view modifier (NSEvent-monitor) on `TimelineView`
-listens while the timeline lane has focus:
+A new `MarkerKeyHandler` view modifier installs an `NSEvent`
+`addLocalMonitorForEvents(matching: .keyDown)` on `TimelineView`. The monitor
+is scoped two ways to avoid hijacking unrelated keys:
+
+1. **Window identity** — only events whose `event.window` is the same window
+   the timeline view is hosted in are considered, so multi-project windows
+   don't fight over each other's shortcuts.
+2. **Text-input first responder defer** — if the window's first responder is
+   an `NSText` / `NSTextField` / `NSTextView`, the event passes through
+   unchanged so caption / inspector typing isn't stolen.
 
 | Key             | Action                                                       |
 |-----------------|--------------------------------------------------------------|
