@@ -36,9 +36,10 @@ enum CompositionBuilder {
         let transitionType: TransitionType?
         let showSkinMask: Bool
         let clipStartTime: CMTime
+        let sourceRange: CMTimeRange
 
         var layer: CompositorLayer {
-            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipStartTime: clipStartTime)
+            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipStartTime: clipStartTime, sourceRange: sourceRange, timeRange: timeRange)
         }
 
         func contains(_ seconds: Double) -> Bool {
@@ -163,7 +164,8 @@ enum CompositionBuilder {
                         transitionRange: piece.transitionRange,
                         transitionType: piece.overlap > .zero ? clip.transition?.type : nil,
                         showSkinMask: showSkinMask,
-                        clipStartTime: clip.timelineStart))
+                        clipStartTime: clip.timelineStart,
+                        sourceRange: piece.sourceRange))
                 }
             }
             projectTrackSegments.append(segments)

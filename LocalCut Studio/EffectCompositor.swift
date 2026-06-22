@@ -19,6 +19,12 @@ struct CompositorLayer {
     let showSkinMask: Bool
     /// The clip's start time on the timeline, used to compute clip-local time for keyframe evaluation.
     let clipStartTime: CMTime
+    /// The piece's range within the source media, used to compute source time
+    /// for the render cache key so repeated source frames hit the same entry.
+    let sourceRange: CMTimeRange
+    /// The piece's range on the composition timeline, paired with `sourceRange`
+    /// to map composition time → source time.
+    let timeRange: CMTimeRange
 }
 
 /// One caption line scheduled inside a composition instruction. Carries everything
@@ -197,11 +203,22 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 image = mask
             }
         } else {
-            let cacheKey: RenderCacheKey? = layer.effects.isEmpty ? nil : RenderCacheKey(
-                clipID: layer.clipID,
-                effectChainHash: layer.effects.renderCacheHash,
-                time: request.compositionTime,
-                renderSize: request.renderContext.size)
+            // Map composition time → source time so the cache key is stable
+            // across repeated source-frame requests (speed ramps, frame
+            // interpolation) and unique per source frame (no collisions
+            // across pieces of the same clip).
+            let cacheKey: RenderCacheKey? = layer.effects.isEmpty ? nil : {
+                let rel = (request.compositionTime - layer.timeRange.start).seconds
+                let tDur = layer.timeRange.duration.seconds
+                let sDur = layer.sourceRange.duration.seconds
+                let srcSec = layer.sourceRange.start.seconds + (tDur > 0 ? rel * sDur / tDur : 0)
+                let sourceTime = CMTime(seconds: srcSec, preferredTimescale: RenderCacheKey.normalisedTimescale)
+                return RenderCacheKey(
+                    clipID: layer.clipID,
+                    effectChainHash: layer.effects.renderCacheHash,
+                    time: sourceTime,
+                    renderSize: request.renderContext.size)
+            }()
             image = applyEffectChain(image, effects: layer.effects,
                                      cacheKey: cacheKey, at: clipLocalTime)
         }
