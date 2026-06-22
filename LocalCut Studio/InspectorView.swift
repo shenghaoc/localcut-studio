@@ -92,6 +92,7 @@ struct InspectorView: View {
                     .foregroundStyle(.secondary)
                 Slider(value: transitionDurationBinding, in: minTransitionSeconds...maxTransitionSeconds)
                     .accessibilityLabel("Transition Duration")
+                    .accessibilityValue(String(format: "%.2f seconds", min(transition.duration.seconds, maxTransitionSeconds)))
             }
 
             Button(role: .destructive) {
