@@ -17,7 +17,11 @@ import CoreVideo
 /// Cached under `~/Library/Caches/<bundleID>/CaptionTailFillers/`, keyed by
 /// (renderSize, frameRate) so a project resize regenerates rather than
 /// stretching a wrong-sized asset through the compositor's transforms.
-enum CaptionTailFiller {
+///
+/// The whole namespace is `nonisolated` because nothing here touches the
+/// main-actor model — composition rebuilds and the `Coordinator` actor both
+/// need to call these statics across isolation domains.
+nonisolated enum CaptionTailFiller {
 
     /// Default length of a freshly-generated filler. Most caption tails are a
     /// few seconds; this stays comfortably above that without bloating the
@@ -58,21 +62,29 @@ enum CaptionTailFiller {
 
         func asset(at url: URL, needed: Double,
                    renderSize: CGSize, frameRate: Double) async throws -> AVURLAsset {
-            let ready: URL
-            if let existing = inFlight[url] {
-                ready = try await existing.value
-            } else {
-                let task = Task<URL, Error> {
-                    try await Self.resolve(at: url, needed: needed,
-                                           renderSize: renderSize, frameRate: frameRate)
-                }
-                inFlight[url] = task
-                defer { inFlight[url] = nil }
-                ready = try await task.value
+            // Wait for any in-flight generation to finish, then evaluate the
+            // cache against *our* `needed`. The disk check + regenerate is
+            // owned by the in-flight task itself — moving it inside the task
+            // is what keeps the slot-claim atomic. Without that, two callers
+            // could each suspend on the disk's `load(.duration)`, then both
+            // create their own `AVAssetWriter` against the same path.
+            // (gemini-code-assist review #1).
+            while let existing = inFlight[url] {
+                _ = try? await existing.value
             }
+            let task = Task<URL, Error> {
+                try await Self.resolve(at: url, needed: needed,
+                                       renderSize: renderSize, frameRate: frameRate)
+            }
+            inFlight[url] = task
+            defer { inFlight[url] = nil }
+            let ready = try await task.value
             return AVURLAsset(url: ready)
         }
 
+        /// Decides whether the cached file already satisfies `needed`, and
+        /// regenerates only when it doesn't. Runs inside the in-flight task
+        /// so the entire decision is serialised per URL.
         private static func resolve(at url: URL, needed: Double,
                                      renderSize: CGSize, frameRate: Double) async throws -> URL {
             if FileManager.default.fileExists(atPath: url.path) {
@@ -118,8 +130,11 @@ enum CaptionTailFiller {
                                   seconds: Double) async throws {
         try? FileManager.default.removeItem(at: url)
 
-        let width = max(2, Int(renderSize.width.rounded()))
-        let height = max(2, Int(renderSize.height.rounded()))
+        // H.264 (and most hardware video encoders) require even dimensions;
+        // mask the low bit off after rounding rather than fail later inside
+        // the writer (gemini-code-assist review #2).
+        let width = max(2, Int(renderSize.width.rounded()) & ~1)
+        let height = max(2, Int(renderSize.height.rounded()) & ~1)
         let fps = max(1.0, frameRate)
         let fpsTimescale = CMTimeScale(max(1, Int(fps.rounded())))
         let frameCount = max(1, Int((seconds * fps).rounded()))
@@ -146,8 +161,16 @@ enum CaptionTailFiller {
         writer.startSession(atSourceTime: .zero)
 
         for frame in 0..<frameCount {
-            while !videoInput.isReadyForMoreMediaData { await Task.yield() }
-            guard let pool = adaptor.pixelBufferPool else { break }
+            // Spin until the input can accept more data, but bail out if the
+            // writer transitions out of `.writing` — otherwise a writer
+            // failure mid-loop would hang this task forever
+            // (gemini-code-assist review #3).
+            while !videoInput.isReadyForMoreMediaData {
+                if writer.status != .writing { break }
+                await Task.yield()
+            }
+            guard writer.status == .writing,
+                  let pool = adaptor.pixelBufferPool else { break }
             var pixelBuffer: CVPixelBuffer?
             CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
             guard let buffer = pixelBuffer else { break }
