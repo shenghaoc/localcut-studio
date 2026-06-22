@@ -77,7 +77,12 @@ struct DiagnosticsView: View {
             GeometryReader { proxy in
                 Path { path in
                     let samples = agent.sparkline
-                    guard let maxValue = samples.max(), maxValue > 0 else { return }
+                    guard let maxSample = samples.max(), maxSample > 0 else { return }
+                    // Floor the y-axis at the 60 fps budget (~16.6 ms) so a
+                    // sub-millisecond render fluctuation doesn't stretch into a
+                    // wildly misleading peak. A real spike past the budget
+                    // pushes the scale up as before.
+                    let maxValue = max(16.6, maxSample)
                     let stepX = samples.count > 1 ? proxy.size.width / CGFloat(samples.count - 1) : 0
                     let scaleY = proxy.size.height / CGFloat(maxValue)
                     for (i, value) in samples.enumerated() {

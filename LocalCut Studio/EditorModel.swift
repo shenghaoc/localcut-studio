@@ -903,6 +903,11 @@ final class EditorModel {
                 // re-creates an item (undo, add clip) doesn't silently auto-resume.
                 isPlaying = false
                 DiagnosticsBridge.shared.setDecoderCount(0)
+                // No compositor will run until the next non-empty rebuild, so
+                // wipe the render-time ring too — otherwise GPU/last/p95 would
+                // keep reporting the previous composition's numbers indefinitely
+                // (Codex P2).
+                DiagnosticsBridge.shared.clearRenderSamples()
                 return
             }
             let item = AVPlayerItem(asset: built.composition)

@@ -114,11 +114,15 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             return
         }
 
-        // Bracket the body so DiagnosticsAgent can compute a real render time
-        // for every frame the compositor processes.
-        let renderStart = CFAbsoluteTimeGetCurrent()
+        // Gate render-time collection on the diagnostics panel actually being
+        // open — otherwise every preview / export frame would pay for a
+        // timestamp + lock + ring-buffer mutation that nobody reads (Codex P2).
+        let diagnosticsEnabled = DiagnosticsBridge.shared.isEnabled
+        let renderStart: CFAbsoluteTime = diagnosticsEnabled ? CFAbsoluteTimeGetCurrent() : 0
         defer {
-            DiagnosticsBridge.shared.recordRenderTime(CFAbsoluteTimeGetCurrent() - renderStart)
+            if diagnosticsEnabled {
+                DiagnosticsBridge.shared.recordRenderTime(CFAbsoluteTimeGetCurrent() - renderStart)
+            }
         }
 
         let renderSize = request.renderContext.size

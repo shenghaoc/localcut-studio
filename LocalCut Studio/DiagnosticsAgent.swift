@@ -15,7 +15,8 @@ final class DiagnosticsAgent {
 
     /// 0…1 across all logical cores. `1.0` means every core is saturated.
     private(set) var cpuUtilisation: Double = 0
-    /// Best-effort estimate: `mean(renderTime) / frameDuration`, clamped 0…1.
+    /// Best-effort estimate: `mean(renderTime) / frameDuration`, clamped 0…1,
+    /// **and zeroed whenever no new frames arrived during the last tick**.
     /// Labelled "GPU (est.)" in the panel — macOS 26 has no entitlement-free
     /// counter API, so this proxies the compositor's share of frame budget
     /// (Core Image runs on Metal under the hood).
@@ -58,6 +59,11 @@ final class DiagnosticsAgent {
     @ObservationIgnored private var previousCPUSeconds: Double?
     @ObservationIgnored private var previousWallClock: CFAbsoluteTime?
     @ObservationIgnored private var previousDroppedFrames: Int = 0
+    /// Snapshot of the bridge's monotonic frame counter at the last tick. The
+    /// delta tells us whether new frames arrived this tick, which gates the
+    /// GPU-utilisation estimate so a paused player reads 0 instead of dragging
+    /// the historical mean off the ring.
+    @ObservationIgnored private var previousTotalFrameCount: Int = 0
 
     /// Visible window into the sparkline — sized so a 1080p panel can plot it
     /// readably without overrun.
@@ -83,10 +89,19 @@ final class DiagnosticsAgent {
     /// `start()` on an already-running agent is a no-op.
     func start() {
         guard !isRunning else { return }
-        DiagnosticsBridge.shared.reset()
+        // Clear render-related state only — the bridge's decoder count was
+        // published by the most recent `EditorModel.rebuild()` and the panel
+        // visibility toggle does *not* schedule a rebuild, so wiping it would
+        // leave the Decoders row stuck at 0 until the next edit (Codex P1).
+        DiagnosticsBridge.shared.clearRenderSamples()
+        DiagnosticsBridge.shared.setEnabled(true)
         previousCPUSeconds = nil
         previousWallClock = nil
-        previousDroppedFrames = 0
+        // Seed the drop baseline from the live cumulative count so the first
+        // tick reports drops that happened during *this* session, not historical
+        // drops accumulated before the panel was opened (Codex P2 / Gemini).
+        previousDroppedFrames = droppedFramesProvider()
+        previousTotalFrameCount = 0
         sampleCount = 0
         cpuUtilisation = 0
         gpuUtilisation = 0
@@ -114,6 +129,9 @@ final class DiagnosticsAgent {
         timer?.invalidate()
         timer = nil
         isRunning = false
+        // Close the hot-path gate so the compositor stops paying for the
+        // timestamp + record call on every preview / export frame.
+        DiagnosticsBridge.shared.setEnabled(false)
     }
 
     /// Drives one sample synchronously. Tests call this instead of waiting on the
@@ -147,10 +165,13 @@ final class DiagnosticsAgent {
         sparkline = Array(times.suffix(Self.sparklineCapacity).map { $0 * 1000 })
 
         // GPU (est.): how much of the per-frame budget the compositor used on
-        // average. Clamped 0…1 because a slow Core Image pass can exceed 100% of
-        // budget — the panel shows that as "saturated".
+        // average. Zeroed when no new frames arrived this tick so the metric
+        // doesn't drag the historical mean off the ring while the player is
+        // paused (Gemini medium #2).
+        let framesThisTick = bridge.totalFrameCount - previousTotalFrameCount
+        previousTotalFrameCount = bridge.totalFrameCount
         let frame = frameDuration()
-        if !times.isEmpty, frame > 0 {
+        if framesThisTick > 0, !times.isEmpty, frame > 0 {
             let mean = times.reduce(0, +) / Double(times.count)
             gpuUtilisation = max(0, min(1, mean / frame))
         } else {
@@ -172,21 +193,42 @@ final class DiagnosticsAgent {
 
     // MARK: - Probes
 
-    /// Cumulative live-thread user + system time, in seconds. `nil` if `task_info`
-    /// fails (which is itself reported as a 0% sample so the panel doesn't NaN).
+    /// Total live + terminated thread CPU time, in seconds. `nil` if either
+    /// `task_info` call fails.
+    ///
+    /// `TASK_THREAD_TIMES_INFO` reports only **live** threads; `MACH_TASK_BASIC_INFO`
+    /// reports the accumulated time of **terminated** threads (where the kernel
+    /// rolls each thread's totals on exit). Summing both gives the total
+    /// CPU time the task has consumed — without that sum, a long-lived editor
+    /// session that has churned through many short-lived background tasks would
+    /// look idle even at peak load (Gemini high).
     nonisolated private func currentCPUSeconds() -> Double? {
-        var info = task_thread_times_info_data_t()
-        var count = mach_msg_type_number_t(
+        // Live-thread component.
+        var threadTimes = task_thread_times_info_data_t()
+        var threadCount = mach_msg_type_number_t(
             MemoryLayout<task_thread_times_info_data_t>.size / MemoryLayout<integer_t>.size)
-        let kr = withUnsafeMutablePointer(to: &info) { ptr -> kern_return_t in
-            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                task_info(mach_task_self_, task_flavor_t(TASK_THREAD_TIMES_INFO), $0, &count)
+        let threadKR = withUnsafeMutablePointer(to: &threadTimes) { ptr -> kern_return_t in
+            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(threadCount)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_THREAD_TIMES_INFO), $0, &threadCount)
             }
         }
-        guard kr == KERN_SUCCESS else { return nil }
-        let user = Double(info.user_time.seconds) + Double(info.user_time.microseconds) / 1_000_000
-        let system = Double(info.system_time.seconds) + Double(info.system_time.microseconds) / 1_000_000
-        return user + system
+        guard threadKR == KERN_SUCCESS else { return nil }
+
+        // Terminated-thread component.
+        var basic = mach_task_basic_info_data_t()
+        var basicCount = mach_msg_type_number_t(MACH_TASK_BASIC_INFO_COUNT)
+        let basicKR = withUnsafeMutablePointer(to: &basic) { ptr -> kern_return_t in
+            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(basicCount)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &basicCount)
+            }
+        }
+        guard basicKR == KERN_SUCCESS else { return nil }
+
+        let liveUser = Double(threadTimes.user_time.seconds) + Double(threadTimes.user_time.microseconds) / 1_000_000
+        let liveSystem = Double(threadTimes.system_time.seconds) + Double(threadTimes.system_time.microseconds) / 1_000_000
+        let deadUser = Double(basic.user_time.seconds) + Double(basic.user_time.microseconds) / 1_000_000
+        let deadSystem = Double(basic.system_time.seconds) + Double(basic.system_time.microseconds) / 1_000_000
+        return liveUser + liveSystem + deadUser + deadSystem
     }
 
     private func sampleCPU(now wallNow: CFAbsoluteTime) -> Double {

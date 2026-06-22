@@ -59,11 +59,11 @@ Five probes resolve once per second on the agent's tick.
 
 ### CPU utilisation
 
-`task_info(mach_task_self_, TASK_THREAD_TIMES_INFO, ...)` returns the live threads' cumulative user + system time. The agent stores the previous reading and divides the delta by wall-clock seconds since the last tick (× 1 / `ProcessInfo.processInfo.activeProcessorCount` to normalise to 0…1 across cores). No entitlements, no private framework. The first tick after `start()` is the calibration — utilisation reads as `0` until the second tick when a delta exists.
+`task_info(mach_task_self_, ...)` returns CPU time, but split across **two** flavors that the agent must sum: `TASK_THREAD_TIMES_INFO` reports the currently-live threads, while `MACH_TASK_BASIC_INFO` reports the time that **terminated** threads contributed before they exited (the kernel rolls each thread's totals into the task's basic-info on exit). Querying only one half undercounts whichever side the workload happens to land on — short-lived background tasks (decode helpers, metadata loaders) finish quickly and show up only in basic-info; long-lived render queues show up only in thread-times. The agent reads both, sums user + system across both, divides the delta by wall-clock seconds since the last tick, and normalises by `ProcessInfo.processInfo.activeProcessorCount` so `1.0` means every core is saturated. No entitlements, no private framework. The first tick after `start()` is the calibration — utilisation reads as `0` until the second tick when a delta exists.
 
 ### GPU utilisation (best-effort proxy)
 
-macOS 26 has no public entitlement-free GPU counter accessor (`IOReport` requires `com.apple.private.iokit.ioreporting`; `MTLCounterSet` requires per-encoder counter buffers we don't allocate). The agent estimates GPU pressure as `mean(renderTime) / frameDuration` clamped to 0…1 — the proportion of frame budget the compositor (Core Image → Metal under the hood) is consuming. The label in the panel reads "GPU (est.)" with a help tooltip explaining the heuristic. When macOS 27 ships a public counter API the probe swaps in without changing the bridge contract.
+macOS 26 has no public entitlement-free GPU counter accessor (`IOReport` requires `com.apple.private.iokit.ioreporting`; `MTLCounterSet` requires per-encoder counter buffers we don't allocate). The agent estimates GPU pressure as `mean(renderTime) / frameDuration` clamped to 0…1 — the proportion of frame budget the compositor (Core Image → Metal under the hood) is consuming. The bridge also exposes a monotonic `totalFrameCount`; if no new frames landed during a tick (player paused, no composition), the agent reports GPU = 0 instead of dragging the historical mean off the ring. The label in the panel reads "GPU (est.)" with a help tooltip explaining the heuristic. When macOS 27 ships a public counter API the probe swaps in without changing the bridge contract.
 
 ### Active decoder count
 
@@ -88,13 +88,21 @@ The task brief mentions `outputItemTimeForHostTime` as a possible signal — tha
 
 `EditorModel.diagnostics: DiagnosticsAgent` is created in the editor's `init` and lives as long as the editor session. The 1 Hz `Timer` is **not** scheduled until `start()` runs, and is invalidated by `stop()` so the timer thread sleeps when the panel is hidden — the panel's `View ▸ Show Diagnostics` toggle drives `start()` / `stop()` through `EditorModel.isDiagnosticsVisible`. The agent is also `stop()`-ed in `EditorModel.deinit` (alongside the existing player observer teardown) so a window close doesn't leak the timer.
 
-On `start()` the agent resets its CPU calibration baseline so a stale "user_time" delta from the previous session doesn't show as a spike on the second tick.
+`start()` resets only the transient state: CPU calibration baseline (so a stale "user_time" delta doesn't show as a spike on the second tick), the render-time ring, and the monotonic frame counter. It deliberately **preserves** the bridge's decoder count and dropped-frame counter, both of which were populated by the editor / player independently of the panel — wiping them would leave the Decoders row stuck at zero until the next composition edit, since the visibility toggle doesn't schedule a rebuild. It also seeds `previousDroppedFrames` from the live counter at start time so historical drops that piled up before the panel opened don't appear as a single massive spike on the first tick.
+
+### Hot-path gate
+
+The bridge exposes a separate `isEnabled` flag (its own `OSAllocatedUnfairLock` so the compositor doesn't contend on the data lock). `EffectCompositor.startRequest` checks the flag **before** taking a timestamp; when the flag is false, the entire timing path is skipped and the compositor pays nothing more than a single uncontended lock acquire per frame. `start()` opens the gate; `stop()` closes it. Tests bypass the gate by calling `recordRenderTime(_:)` directly so they can inject samples without flipping the flag.
+
+### Empty composition
+
+When `EditorModel.rebuild()` produces no composition (last clip deleted, empty project opened), it calls `clearRenderSamples()` in addition to setting decoder count to 0. Otherwise no compositor request would ever run, the ring would freeze on its last contents, and the panel would keep reporting stale GPU / last / p95 numbers indefinitely.
 
 ## UI
 
 `DiagnosticsView` is a SwiftUI overlay anchored top-trailing on the editor, ~280 pt wide. The background is an `NSVisualEffectView` wrapped through `NSViewRepresentable` (material `.hudWindow`, blending `.behindWindow`) so it sits on top of the preview without occluding it like a solid panel would.
 
-Layout: one `LabeledContent` row per probe, with a 60-sample `Path`-based sparkline of render times at the bottom. The sparkline uses `Path.addLines(_:)` over normalised points rather than the `Charts` framework so the panel adds zero weight to the linker.
+Layout: one `LabeledContent` row per probe, with a 60-sample `Path`-based sparkline of render times at the bottom. The sparkline uses `Path.addLines(_:)` over normalised points rather than the `Charts` framework so the panel adds zero weight to the linker. The y-axis is floored at the 60 fps budget (~16.6 ms) so a sub-millisecond fluctuation doesn't get stretched into a misleading peak — a real spike past the budget pushes the scale up as before.
 
 The View menu gains one item — `View ▸ Show Diagnostics` (⌥⌘D) — that toggles `model.isDiagnosticsVisible`. Hidden is the default.
 
@@ -111,7 +119,7 @@ The subsystem is `com.localcutstudio.diagnostics`; the category is `sample`. Con
 
 ## Test injection
 
-The agent exposes `tickForTesting()` so a test can drive a sample synchronously without waiting on the timer. The bridge exposes `recordRenderTime(_:)` so a test can inject a slow frame, tick, and assert `p95RenderTime` updates. CPU calibration is bootstrappable through a single optional `samplerNow: () -> CFAbsoluteTime` injection that defaults to `CFAbsoluteTimeGetCurrent`, so a test can synthesise a known wall-clock delta.
+The agent exposes `tickForTesting()` so a test can drive a sample synchronously without waiting on the timer. The bridge exposes `recordRenderTime(_:)` (ungated — the hot-path gate lives in the compositor, not the bridge) so a test can inject a slow frame, tick, and assert `p95RenderTime` updates. `reset()` clears every field for a clean baseline between cases; `clearRenderSamples()` exists as the scoped variant the agent + editor use in production. CPU calibration is bootstrappable through a single optional `now: () -> CFAbsoluteTime` injection that defaults to `CFAbsoluteTimeGetCurrent`, so a test can synthesise a known wall-clock delta.
 
 ## Trade-offs
 

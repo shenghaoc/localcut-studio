@@ -131,16 +131,21 @@ struct DiagnosticsTests {
         DiagnosticsBridge.shared.reset()
         let drops = DropsCounter()
         let agent = DiagnosticsAgent(droppedFramesProvider: { drops.read() })
+        // Seed the baseline before start() so the test goes through the same
+        // calibration path as a real session.
+        drops.set(5)
         agent.start()
         defer { agent.stop() }
 
-        drops.set(5)
+        // First tick after start(): the live counter still reads 5, so the
+        // delta against the calibration baseline (also 5) is 0 — historical
+        // drops do not bleed into the active session (Codex P2).
         agent.tickForTesting()
-        #expect(agent.frameDropsLastTick == 5)
+        #expect(agent.frameDropsLastTick == 0)
 
         drops.set(7)
         agent.tickForTesting()
-        // Delta only: 7 - 5 = 2, not the cumulative 7.
+        // Delta only: 7 - 5 = 2.
         #expect(agent.frameDropsLastTick == 2)
     }
 
@@ -165,9 +170,24 @@ struct DiagnosticsTests {
         #expect(agent.decoderCount == 4)
     }
 
+    @Test("Decoder count published before start() survives the start reset (Codex P1)")
+    func decoderCountSurvivesStart() {
+        DiagnosticsBridge.shared.reset()
+        // The live editor publishes the decoder count from rebuild(), which can
+        // happen before the panel is ever opened. Opening the panel must not
+        // wipe that value, otherwise the Decoders row reads 0 until the next
+        // composition edit.
+        DiagnosticsBridge.shared.setDecoderCount(7)
+        let agent = DiagnosticsAgent()
+        agent.start()
+        defer { agent.stop() }
+        agent.tickForTesting()
+        #expect(agent.decoderCount == 7)
+    }
+
     // MARK: - Start resets stale state
 
-    @Test("start() clears stale samples from a previous panel session")
+    @Test("start() clears stale render samples from a previous panel session")
     func startResetsState() {
         // Seed the bridge as if a previous session had filled the ring.
         DiagnosticsBridge.shared.reset()
@@ -178,9 +198,66 @@ struct DiagnosticsTests {
         defer { agent.stop() }
         agent.tickForTesting()
 
-        // The bridge was reset by start(); the first post-start tick reads an
-        // empty ring, so p95 is zero rather than reporting the stale 100 ms.
+        // The render ring was cleared by start(); the first post-start tick
+        // reads an empty ring, so p95 is zero rather than reporting the stale
+        // 100 ms.
         #expect(agent.p95RenderTime == 0)
         #expect(agent.lastFrameTime == 0)
+    }
+
+    // MARK: - GPU idle detection (Gemini medium #2)
+
+    @Test("GPU utilisation drops to 0 when no new frames arrive during a tick")
+    func gpuDropsToZeroWhenIdle() {
+        DiagnosticsBridge.shared.reset()
+        let agent = DiagnosticsAgent()
+        agent.start()
+        defer { agent.stop() }
+
+        // Heavy frames → non-zero GPU on the first tick.
+        for _ in 0..<5 { DiagnosticsBridge.shared.recordRenderTime(0.020) }
+        agent.tickForTesting()
+        #expect(agent.gpuUtilisation > 0)
+
+        // No new frames before the next tick: the ring is still populated, but
+        // the agent should report 0 because nothing rendered during this
+        // sample interval.
+        agent.tickForTesting()
+        #expect(agent.gpuUtilisation == 0)
+    }
+
+    // MARK: - Hot-path gate (Codex P2)
+
+    @Test("Bridge enabled flag tracks the agent's lifecycle")
+    func enabledFlagTracksLifecycle() {
+        DiagnosticsBridge.shared.reset()
+        #expect(!DiagnosticsBridge.shared.isEnabled)
+
+        let agent = DiagnosticsAgent()
+        agent.start()
+        #expect(DiagnosticsBridge.shared.isEnabled)
+
+        agent.stop()
+        #expect(!DiagnosticsBridge.shared.isEnabled)
+    }
+
+    // MARK: - clearRenderSamples preserves decoder / drops
+
+    @Test("clearRenderSamples() wipes the ring but preserves decoder count and drops")
+    func clearRenderSamplesIsScoped() {
+        DiagnosticsBridge.shared.reset()
+        DiagnosticsBridge.shared.setDecoderCount(3)
+        DiagnosticsBridge.shared.setDroppedFrames(11)
+        DiagnosticsBridge.shared.recordRenderTime(0.025)
+        DiagnosticsBridge.shared.recordRenderTime(0.025)
+
+        DiagnosticsBridge.shared.clearRenderSamples()
+
+        let snapshot = DiagnosticsBridge.shared.snapshot()
+        #expect(snapshot.renderTimes.isEmpty)
+        #expect(snapshot.lastRenderTime == 0)
+        #expect(snapshot.totalFrameCount == 0)
+        #expect(snapshot.decoderCount == 3)
+        #expect(snapshot.droppedFrames == 11)
     }
 }
