@@ -17,6 +17,23 @@ struct LocalCutStudioApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             DocumentCommands(model: model)
+            ViewCommands(model: model)
+        }
+    }
+}
+
+/// Inserts "Show Diagnostics" into the standard View menu instead of a new
+/// menu, so it sits next to system items like Show/Hide Sidebar rather than
+/// creating a duplicate "View" entry.
+struct ViewCommands: Commands {
+    @Bindable var model: EditorModel
+
+    var body: some Commands {
+        CommandGroup(after: .sidebar) {
+            Toggle(isOn: $model.isDiagnosticsVisible) {
+                Text("Show Diagnostics")
+            }
+            .keyboardShortcut("d", modifiers: [.command, .option])
         }
     }
 }
@@ -77,6 +94,17 @@ struct EditorView: View {
         .navigationTitle(model.project.name)
         .safeAreaInset(edge: .bottom) { statusBar }
         .background(WindowConfigurator(model: model))
+        .overlay(alignment: .topTrailing) {
+            if model.isDiagnosticsVisible {
+                DiagnosticsView(agent: model.diagnostics)
+                    // Clear the unified toolbar (~52 pt on the .unified style)
+                    // plus a few points of breathing room so the panel doesn't
+                    // butt against the window chrome.
+                    .padding(.top, 60)
+                    .padding(.trailing, 16)
+                    .transition(.opacity)
+            }
+        }
     }
 
     @ToolbarContentBuilder
