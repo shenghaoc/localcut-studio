@@ -80,11 +80,14 @@ struct ExportPresetTests {
 
     @Test("Built-in preset ids are stable across constructions")
     func builtInPresetIDsStable() {
-        // Re-reading `BuiltInExportPresets.youTube1080p` must yield the same
-        // UUID — persisted queue jobs that point back to the built-in by id
-        // would otherwise fail to round-trip equal after a relaunch.
-        #expect(BuiltInExportPresets.youTube1080p.id == BuiltInExportPresets.youTube1080p.id)
-        #expect(BuiltInExportPresets.preset(id: BuiltInExportPresets.youTube1080p.id)?.name == "YouTube 1080p")
+        // Compare against the literal hard-coded UUID so the test actually
+        // exercises the value rather than self-comparing (Claude review).
+        // If the id ever changes, persisted queue jobs that reference the
+        // built-in by id would silently fail to round-trip equal after a
+        // relaunch.
+        let expected = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        #expect(BuiltInExportPresets.youTube1080p.id == expected)
+        #expect(BuiltInExportPresets.preset(id: expected)?.name == "YouTube 1080p")
     }
 }
 

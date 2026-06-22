@@ -461,13 +461,22 @@ final class RenderQueue {
         jobs[index].progress = (status == .completed) ? 1 : jobs[index].progress
         jobs[index].runtimeSeconds = Date().timeIntervalSince(startWall)
         let runtime = jobs[index].runtimeSeconds ?? 0
+        let displayName = jobs[index].outputDisplayName
+        // Mirror the transition into `statusMessage` so the editor status bar
+        // reflects completion / cancellation / failure too — the inspector
+        // row's pill catches it but a user looking only at the status bar
+        // would otherwise see no signal that the export finished (Claude
+        // review).
         switch status {
         case .completed:
             log("job \(jobID.uuidString.prefix(8)) completed in \(String(format: "%.1f", runtime))s")
+            statusMessage = "Rendered \(displayName) in \(String(format: "%.1f", runtime))s."
         case .cancelled:
             log("job \(jobID.uuidString.prefix(8)) cancelled")
+            statusMessage = "Cancelled \(displayName)."
         case .failed:
             log("job \(jobID.uuidString.prefix(8)) failed — \(message ?? "")")
+            statusMessage = "Render of \(displayName) failed: \(message ?? "unknown error")"
         default:
             break
         }
@@ -519,12 +528,20 @@ final class RenderQueue {
         activeWriter = writer
 
         let renderSize = preset.targetSize.cgSize
+        // The bracket bitrate scales with frame rate too — honour the
+        // preset's override, fall back to the composition's nominal video
+        // rate, and finally to 30 if neither tells us anything (Claude
+        // review).
+        let inferredRate = built.composition.tracks(withMediaType: .video)
+            .compactMap { Double($0.nominalFrameRate) }
+            .first(where: { $0 > 0 }) ?? 30
+        let frameRate = preset.frameRate ?? inferredRate
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: preset.videoCodec,
             AVVideoWidthKey: Int(renderSize.width),
             AVVideoHeightKey: Int(renderSize.height),
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: preset.bitrate.bitsPerSecond(for: renderSize),
+                AVVideoAverageBitRateKey: preset.bitrate.bitsPerSecond(for: renderSize, frameRate: frameRate),
             ],
         ]
         let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
@@ -662,6 +679,12 @@ final class RenderQueue {
         }
     }
 
+    /// Shared serial queue used by every pump invocation — there's at most
+    /// one writer per job and pumps are sequential, so a single global queue
+    /// is enough and avoids the per-pump allocation (Claude review).
+    private nonisolated static let pumpQueue = DispatchQueue(
+        label: "com.shenghaoc.LocalCutStudio.renderqueue.pump")
+
     /// Pulls one input dry. The progress callback is `@Sendable` because it's
     /// invoked on the writer's serial dispatch queue, not the MainActor.
     private nonisolated static func pump(
@@ -671,9 +694,8 @@ final class RenderQueue {
         progress: (@Sendable (Double) -> Void)?
     ) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let queue = DispatchQueue(label: "com.shenghaoc.LocalCutStudio.renderqueue.pump")
             let resume = ResumeBox()
-            input.requestMediaDataWhenReady(on: queue) {
+            input.requestMediaDataWhenReady(on: pumpQueue) {
                 while input.isReadyForMoreMediaData {
                     if let sample = output.copyNextSampleBuffer() {
                         input.append(sample)
@@ -690,9 +712,13 @@ final class RenderQueue {
                             }
                         }
                     } else {
-                        // Once the reader output is exhausted, tell AVFoundation
-                        // to stop invoking this callback so a late post-finish
-                        // call can't append to a finished input (Gemini review).
+                        // `markAsFinished()` alone tells the writer no more
+                        // samples will arrive, but AVFoundation can still
+                        // re-invoke the block after this return. Calling
+                        // `stopRequestingMediaData()` first suppresses the
+                        // re-invocation so we don't waste work pulling from
+                        // an exhausted reader (Gemini review).
+                        input.stopRequestingMediaData()
                         input.markAsFinished()
                         if resume.tryConsume() {
                             continuation.resume()
@@ -778,37 +804,52 @@ final class RenderQueue {
     }
 
     /// Reads the on-disk queue and reconciles state. Called once at app
-    /// launch from the editor model.
+    /// launch from the editor model. The file read + decode hops off the
+    /// MainActor so `EditorModel.init()` doesn't block the main thread on
+    /// disk I/O at launch (Claude review); the reconciled state is applied
+    /// back on MainActor once decoding finishes.
     func load() {
-        guard let url = Self.queueFileURL(),
-              FileManager.default.fileExists(atPath: url.path) else { return }
-        do {
-            let data = try Data(contentsOf: url)
-            let doc = try JSONDecoder().decode(RenderQueueDoc.self, from: data)
-            // A queue file written by a newer build carries fields we don't
-            // understand. Latch `refusingPersist` so subsequent enqueue /
-            // cancel calls don't overwrite the future-version file with the
-            // current schema and drop the unknown payload (R3.6, codex P1).
-            guard doc.version <= RenderQueueDoc.currentVersion else {
-                refusingPersist = true
-                statusMessage = "Render queue saved by a newer version — pausing persistence until update."
+        guard let url = Self.queueFileURL() else { return }
+        let log = logger
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard FileManager.default.fileExists(atPath: url.path) else { return }
+            let doc: RenderQueueDoc
+            do {
+                let data = try Data(contentsOf: url)
+                doc = try JSONDecoder().decode(RenderQueueDoc.self, from: data)
+            } catch {
+                log.error("queue load failed: \(error.localizedDescription, privacy: .public)")
                 return
             }
-            let reconciled = Self.reconcile(loaded: doc.jobs)
-            let didMutate = reconciled != doc.jobs
-            jobs = reconciled
-            recomputeTotalProgress()
-            log("queue loaded — \(jobs.count) job(s)")
-            // If reconciliation actually changed anything (a running → queued
-            // rewind or a stale-bookmark → failed flip), persist so the
-            // change survives a relaunch — otherwise the same stale state
-            // would be re-resurrected on every launch (codex P2).
-            if didMutate { persist() }
-            // Resume the runner if any survived as queued.
-            start()
-        } catch {
-            logger.error("queue load failed: \(error.localizedDescription, privacy: .public)")
+            await self?.applyLoadedQueue(doc: doc)
         }
+    }
+
+    /// MainActor entry that absorbs the decoded queue document. Split out so
+    /// `load()` can do the file I/O off-thread and only return here for the
+    /// observable state mutation (`jobs`, `statusMessage`) + runner kick-off.
+    private func applyLoadedQueue(doc: RenderQueueDoc) {
+        // A queue file written by a newer build carries fields we don't
+        // understand. Latch `refusingPersist` so subsequent enqueue / cancel
+        // calls don't overwrite the future-version file with the current
+        // schema and drop the unknown payload (R3.6, codex P1).
+        guard doc.version <= RenderQueueDoc.currentVersion else {
+            refusingPersist = true
+            statusMessage = "Render queue saved by a newer version — pausing persistence until update."
+            return
+        }
+        let reconciled = Self.reconcile(loaded: doc.jobs)
+        let didMutate = reconciled != doc.jobs
+        jobs = reconciled
+        recomputeTotalProgress()
+        log("queue loaded — \(jobs.count) job(s)")
+        // If reconciliation actually changed anything (a running → queued
+        // rewind or a stale-bookmark → failed flip), persist so the change
+        // survives a relaunch — otherwise the same stale state would be
+        // re-resurrected on every launch (codex P2).
+        if didMutate { persist() }
+        // Resume the runner if any survived as queued.
+        start()
     }
 
     /// Implements R3.2 + R3.3: any `running` job rewinds to `queued`; any job

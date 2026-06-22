@@ -57,13 +57,15 @@ nonisolated enum ExportBitrateBracket: String, Codable, Hashable, Sendable, Case
         }
     }
 
-    /// Rough per-pixel rate used by the writer fallback. The bracket multiplies
-    /// a baseline of 0.1 bits per pixel per second. Uses `Swift.max` to
+    /// Rough per-pixel rate used by the writer fallback. The bracket
+    /// multiplies a baseline of ~0.1 bits per pixel per second. Frame rate is
+    /// part of the budget — a 60 fps render at the same bracket as a 30 fps
+    /// render gets twice the bitrate (Claude review). Uses `Swift.max` to
     /// disambiguate against the `.max` enum case while inside this enum's
     /// scope.
-    func bitsPerSecond(for renderSize: CGSize) -> Int {
+    func bitsPerSecond(for renderSize: CGSize, frameRate: Double) -> Int {
         let area = Swift.max(1.0, Double(renderSize.width) * Double(renderSize.height))
-        let pixelsPerSecond = area * 30
+        let pixelsPerSecond = area * Swift.max(1, frameRate)
         let perPixel: Double
         switch self {
         case .low: perPixel = 0.05
@@ -376,9 +378,15 @@ extension ExportPreset {
         return nil
     }
 
-    /// Matches the (w, h) tuple in either orientation — a 9:16 1080×1920
-    /// vertical render still lines up against the 1920×1080 preset name.
+    /// Only matches the canonical landscape orientation. Vertical / square /
+    /// other-aspect renders return `nil` from `assetExportSessionPresetName`
+    /// and fall through to the `AVAssetWriter` path, which honours any
+    /// render size; the orientation-flip branch (`aw == bh && ah == bw`)
+    /// would otherwise route a 1080×1920 Instagram preset through
+    /// `AVAssetExportPreset1920x1080`, whose vertical output depends on
+    /// undocumented session behaviour that varies across macOS versions
+    /// (Claude review).
     private func matches(_ aw: Int, _ ah: Int, _ bw: Int, _ bh: Int) -> Bool {
-        (aw == bw && ah == bh) || (aw == bh && ah == bw)
+        aw == bw && ah == bh
     }
 }
