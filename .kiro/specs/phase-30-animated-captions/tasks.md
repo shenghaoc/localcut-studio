@@ -25,11 +25,11 @@
 ## UI
 
 - [x] **T4.1** Inspector "Captions" section: line list, preset picker, import / export buttons, per-line text field, add-line at playhead.
-- [x] **T4.2** Coalesced updates ride on the existing `performUndoable` pattern (single undo step per discrete edit).
+- [x] **T4.2** Coalesced updates: per-line text edits use `performCoalescedUndoable("Edit Caption", target: line.id, rebuild: .debounced)` so a typing burst against one line folds into a single undo step + one rebuild; discrete edits (add/remove/mute) use `performUndoable`.
 - [x] **T4.3** Preset library accessible through the per-track preset picker plus `.lccaption` import / export.
 
 ## Verification
 
 - [x] **T5.1** Snapshot tests for every built-in preset: render each preset's idle frame at 1280×720 and assert the rasteriser returns a non-empty raster whose bounding box sits inside the canvas. Stops short of pixel-golden PNG diffing — a full font-availability-matrix golden suite is left for a follow-up — but catches font lookup failures, layout breakage, and silent rasteriser fallbacks.
 - [x] **T5.2** Smoke: hand-roll SRT → `CaptionImporter` → attach a preset → build composition through `CompositionBuilder` → assert the `AVVideoComposition` instruction covering the caption midpoint carries the caption render item with the expected text and style and forces tweening. Uses `AVAssetWriter` to generate a tiny solid-colour fixture clip in-process (same pattern as `TransitionsIntegrationTests`); no committed binary fixtures.
-- [x] **T5.3** `xcodebuild` (Debug, macOS) green; no test count regression (109 tests passing, was 70).
+- [x] **T5.3** `xcodebuild` (Debug, macOS) green; no test count regression (129 tests passing, was 70 before Phase 30 work began — net +59 covering keyframes, caption tracks, title raster, animation evaluator, preset I/O, and every fix landed through five rounds of bot review).
