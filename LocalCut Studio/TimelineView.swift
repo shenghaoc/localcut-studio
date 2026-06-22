@@ -70,7 +70,7 @@ struct TimelineView: View {
     /// none is selected. Called from the Shift+M key handler.
     private func beginRenamingSelectedMarker() {
         guard let marker = model.selectedMarker else {
-            model.statusMessage = "Select a marker on the ruler before pressing Shift+M to rename."
+            model.statusMessage = "Select a marker on the ruler to rename."
             return
         }
         renameDraft = marker.name
