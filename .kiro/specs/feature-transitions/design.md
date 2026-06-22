@@ -1,6 +1,6 @@
 # Design: Transitions
 
-> Status: **Proposed**. Depends on the custom compositor from [colour grading](../feature-colour-grading/design.md) for filter-based wipes.
+> Status: **Implemented**. Shipped in [#5](https://github.com/shenghaoc/localcut-studio/pull/5). Builds on the custom compositor from [colour grading](../feature-colour-grading/design.md) for filter-based wipes. See [tasks.md](./tasks.md) for the per-box source citations.
 
 ## Approach
 

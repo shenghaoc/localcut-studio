@@ -671,14 +671,21 @@ enum CompositionBuilder {
     /// `AVMutableVideoCompositionLayerInstruction`s with `setOpacityRamp`
     /// over the overlap interval.
     ///
-    /// The custom `EffectCompositor.crossDissolve` does the same alpha-multiply
-    /// math at render time (necessary so the dissolve can co-exist with wipes,
-    /// `CIFilter` effect chains, captions, and working-colour-space tagging in
-    /// one composition). This helper is the spec-faithful version called out by
-    /// feature-transitions T1.2 — it is used by the fast-path video composition
-    /// when a project consists only of cross-dissolves with no effects / captions
-    /// / working-colour overrides, and by the regression test that proves the
-    /// two paths produce the same per-frame opacity values at sample times.
+    /// Production cross-dissolves run through `EffectCompositor.crossDissolve`
+    /// (additive blend — midpoint `(A+B)/2` with α=1), not this helper. An
+    /// earlier draft did wire a fast path that called this helper when a
+    /// project consisted only of cross-dissolves with no effects / captions /
+    /// working-colour overrides, but `setOpacityRamp` does source-over alpha
+    /// compositing (midpoint `(2B+A)/3` with α=0.75) — switching paths on the
+    /// same project would have produced visibly different cross-dissolves and
+    /// violated T3.1 "preview matches export" the moment a user added a
+    /// colour effect. The helper is retained as:
+    ///   1. Spec-compliance infrastructure (Codex P2 — feature-transitions T1.2
+    ///      explicitly calls out `setOpacityRamp` / `AVMutableVideoCompositionLayerInstruction`),
+    ///   2. A reference shape for a future native-export path that doesn't
+    ///      run through the custom compositor.
+    /// Exercised in production-equivalent form by the
+    /// `crossDissolveLayerRamps` regression test in `TransitionsTests.swift`.
     static func crossDissolveLayerInstructions(
         outgoingTrackID: CMPersistentTrackID,
         incomingTrackID: CMPersistentTrackID,

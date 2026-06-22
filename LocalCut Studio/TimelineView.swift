@@ -376,10 +376,16 @@ struct TimelineView: View {
                 model.selectedClipID = clip.id
                 model.splitSelectedClipAtPlayhead()
             }
-            Button("Add Transition Before This Clip") {
-                model.addTransition(toClipID: clip.id)
+            // Transitions are video-only — hide the entry on audio clips
+            // rather than showing it greyed out (canAddTransition would
+            // disable it but the entry would still appear, which is
+            // misleading UX for a concept that never applies to audio).
+            if kind == .video {
+                Button("Add Transition Before This Clip") {
+                    model.addTransition(toClipID: clip.id)
+                }
+                .disabled(!model.canAddTransition(toClipID: clip.id))
             }
-            .disabled(!model.canAddTransition(toClipID: clip.id))
             Divider()
             Button("Delete Clip", role: .destructive) {
                 model.selectedClipID = clip.id

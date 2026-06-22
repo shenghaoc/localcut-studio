@@ -1,6 +1,6 @@
 # Design: Timeline Trim & Drag
 
-> Status: **Proposed**.
+> Status: **Implemented**. Shipped in [#4](https://github.com/shenghaoc/localcut-studio/pull/4). See [tasks.md](./tasks.md) for the per-box source citations.
 
 ## Approach
 

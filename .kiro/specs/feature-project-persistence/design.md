@@ -1,6 +1,6 @@
 # Design: Project Persistence
 
-> Status: **Proposed**.
+> Status: **Implemented**. Shipped in [#6](https://github.com/shenghaoc/localcut-studio/pull/6); schema since carried to v2 (caption tracks, [#10](https://github.com/shenghaoc/localcut-studio/pull/10)) and v3 (project bundles, [#20](https://github.com/shenghaoc/localcut-studio/pull/20)). See [tasks.md](./tasks.md) for the per-box source citations.
 
 ## Approach
 
