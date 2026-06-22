@@ -69,6 +69,10 @@ final class CaptionRasterer: @unchecked Sendable {
     }
 
     nonisolated func purge() { rasterer.purge() }
+
+    /// Diagnostic — number of cached rasters. Exposed for the colour-management
+    /// invalidation test (R6.1).
+    nonisolated var count: Int { rasterer.count }
 }
 
 // MARK: - Drawing

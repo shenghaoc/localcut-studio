@@ -57,10 +57,10 @@ struct TransformCode: Codable, Equatable {
 /// values plus security-scoped bookmarks instead of live `AVURLAsset`s, and a
 /// `schemaVersion` for forward-compatible decoding (R4.2).
 struct ProjectDocument: Codable, Equatable {
-    /// Bumped when the on-disk schema changes incompatibly. v2 added
-    /// `captionTracks`; v3 adds `markers`. A v2-or-older build would otherwise
-    /// open a v3 file and silently strip the markers on the next save, so the
-    /// newer-schema guard in `EditorModel.load(document:from:)` keeps older
+    /// Bumped when the on-disk schema changes incompatibly. v3 adds
+    /// `workingColourSpace` and `markers`; v2 added `captionTracks`. A v2 build
+    /// that opens a v3 file would silently strip those fields on the next save,
+    /// so the version guard in `EditorModel.load(document:from:)` keeps older
     /// builds from overwriting.
     static let currentSchemaVersion = 3
     /// File extension for project documents.
@@ -71,6 +71,7 @@ struct ProjectDocument: Codable, Equatable {
     var renderWidth: Double
     var renderHeight: Double
     var frameRate: Double
+    var workingColourSpace: WorkingColourSpace
     var media: [MediaRef]
     var videoTracks: [TrackDoc]
     var audioTracks: [TrackDoc]
@@ -82,6 +83,7 @@ struct ProjectDocument: Codable, Equatable {
          renderWidth: Double,
          renderHeight: Double,
          frameRate: Double,
+         workingColourSpace: WorkingColourSpace = .sRGB,
          media: [MediaRef],
          videoTracks: [TrackDoc],
          audioTracks: [TrackDoc],
@@ -92,6 +94,7 @@ struct ProjectDocument: Codable, Equatable {
         self.renderWidth = renderWidth
         self.renderHeight = renderHeight
         self.frameRate = frameRate
+        self.workingColourSpace = workingColourSpace
         self.media = media
         self.videoTracks = videoTracks
         self.audioTracks = audioTracks
@@ -100,7 +103,7 @@ struct ProjectDocument: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, name, renderWidth, renderHeight, frameRate,
+        case schemaVersion, name, renderWidth, renderHeight, frameRate, workingColourSpace,
              media, videoTracks, audioTracks, captionTracks, markers
     }
 
@@ -113,6 +116,15 @@ struct ProjectDocument: Codable, Equatable {
         renderWidth = try c.decodeIfPresent(Double.self, forKey: .renderWidth) ?? 1920
         renderHeight = try c.decodeIfPresent(Double.self, forKey: .renderHeight) ?? 1080
         frameRate = try c.decodeIfPresent(Double.self, forKey: .frameRate) ?? 30
+        // Decode through the raw string so an unknown value (a future schema's
+        // additional case) falls back to `.sRGB` instead of throwing — the
+        // `schemaVersion > current` guard in `EditorModel.load(document:from:)`
+        // then runs as intended and the open path doesn't fail outright.
+        if let raw = try c.decodeIfPresent(String.self, forKey: .workingColourSpace) {
+            workingColourSpace = WorkingColourSpace(rawValue: raw) ?? .sRGB
+        } else {
+            workingColourSpace = .sRGB
+        }
         media = try c.decodeIfPresent([MediaRef].self, forKey: .media) ?? []
         videoTracks = try c.decodeIfPresent([TrackDoc].self, forKey: .videoTracks) ?? []
         audioTracks = try c.decodeIfPresent([TrackDoc].self, forKey: .audioTracks) ?? []
@@ -254,6 +266,7 @@ extension ProjectDocument {
             renderWidth: Double(project.renderSize.width),
             renderHeight: Double(project.renderSize.height),
             frameRate: project.frameRate,
+            workingColourSpace: project.workingColourSpace,
             media: project.mediaItems.map(MediaRef.init(item:)),
             videoTracks: project.videoTracks.map(TrackDoc.init(track:)),
             audioTracks: project.audioTracks.map(TrackDoc.init(track:)),

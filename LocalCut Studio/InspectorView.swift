@@ -303,6 +303,7 @@ struct InspectorView: View {
         }
     }
 
+    @ViewBuilder
     private var projectSection: some View {
         Section("Project") {
             Picker("Resolution", selection: resolutionBinding) {
@@ -317,6 +318,14 @@ struct InspectorView: View {
                 Text("60 fps").tag(60.0)
             }
         }
+        Section("Colour") {
+            Picker("Working Space", selection: workingColourSpaceBinding) {
+                ForEach(WorkingColourSpace.allCases) { space in
+                    Text(space.displayName).tag(space)
+                }
+            }
+            Toggle("Show scopes", isOn: $model.showScopes)
+        }
     }
 
     private var resolutionBinding: Binding<CGSize> {
@@ -329,5 +338,11 @@ struct InspectorView: View {
         Binding(
             get: { model.project.frameRate },
             set: { model.setFrameRate($0) })
+    }
+
+    private var workingColourSpaceBinding: Binding<WorkingColourSpace> {
+        Binding(
+            get: { model.project.workingColourSpace },
+            set: { model.setWorkingColourSpace($0) })
     }
 }
