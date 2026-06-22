@@ -81,7 +81,7 @@ extension CMTime {
     /// A generous upper bound (in seconds) for a trusted media duration. Values
     /// beyond this are treated as corrupt: they serve no legitimate editing
     /// purpose and would later trap `Int(seconds)` in timecode formatting.
-    private static let maxSaneSeconds: Double = 100 * 60 * 60   // 100 hours
+    nonisolated private static let maxSaneSeconds: Double = 100 * 60 * 60   // 100 hours
 
     /// Returns a validated time, falling back to `.zero` if the time is invalid,
     /// indefinite, infinite, negative, or implausibly large (any of which could
@@ -103,7 +103,7 @@ extension CGSize {
     /// Upper bound (in pixels) for a plausible media dimension. Beyond this,
     /// values are treated as corrupt — they exceed any real frame size and would
     /// trap `Int(...)` when the inspector formats the dimensions.
-    private static let maxSanePixels: CGFloat = 100_000   // well past 8K
+    nonisolated private static let maxSanePixels: CGFloat = 100_000   // well past 8K
 
     /// Returns a validated size, falling back to `.zero` if non-finite, and
     /// clamping each dimension into `0...maxSanePixels`.
@@ -118,7 +118,7 @@ extension CGAffineTransform {
     /// Upper bound on the magnitude of any transform coefficient. Beyond this,
     /// applying the matrix to a natural size can overflow the oriented bounds to
     /// infinity and produce `inf * 0` / NaN translations during frame fitting.
-    private static let maxSaneCoefficient: CGFloat = 1_000_000
+    nonisolated private static let maxSaneCoefficient: CGFloat = 1_000_000
 
     /// Returns a validated transform, falling back to `.identity` if any
     /// component is non-finite or implausibly large.
