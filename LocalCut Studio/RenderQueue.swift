@@ -712,13 +712,15 @@ final class RenderQueue {
                             }
                         }
                     } else {
-                        // `markAsFinished()` alone tells the writer no more
-                        // samples will arrive, but AVFoundation can still
-                        // re-invoke the block after this return. Calling
-                        // `stopRequestingMediaData()` first suppresses the
-                        // re-invocation so we don't waste work pulling from
-                        // an exhausted reader (Gemini review).
-                        input.stopRequestingMediaData()
+                        // `markAsFinished()` is the only public "stop" signal
+                        // on `AVAssetWriterInput`; the framework documents
+                        // that the request block is no longer invoked once
+                        // the input is finished, so the `ResumeBox` covers
+                        // any in-flight invocation that might race past this
+                        // point. (Earlier comments incorrectly suggested a
+                        // `stopRequestingMediaData()` method exists on the
+                        // writer side — it only exists on AVAssetReader's
+                        // output classes.)
                         input.markAsFinished()
                         if resume.tryConsume() {
                             continuation.resume()
@@ -804,30 +806,44 @@ final class RenderQueue {
     }
 
     /// Reads the on-disk queue and reconciles state. Called once at app
-    /// launch from the editor model. The file read + decode hops off the
-    /// MainActor so `EditorModel.init()` doesn't block the main thread on
-    /// disk I/O at launch (Claude review); the reconciled state is applied
-    /// back on MainActor once decoding finishes.
+    /// launch from the editor model. The file read happens off the MainActor
+    /// so `EditorModel.init()` doesn't block the main thread on disk I/O at
+    /// launch (Claude review); decoding then runs on the MainActor because
+    /// `RenderQueueDoc.init(from:)` is implicitly MainActor-isolated under
+    /// this target's default-isolation setting.
     func load() {
         guard let url = Self.queueFileURL() else { return }
         let log = logger
         Task.detached(priority: .userInitiated) { [weak self] in
             guard FileManager.default.fileExists(atPath: url.path) else { return }
-            let doc: RenderQueueDoc
+            let data: Data
             do {
-                let data = try Data(contentsOf: url)
-                doc = try JSONDecoder().decode(RenderQueueDoc.self, from: data)
+                data = try Data(contentsOf: url)
             } catch {
                 log.error("queue load failed: \(error.localizedDescription, privacy: .public)")
                 return
             }
-            await self?.applyLoadedQueue(doc: doc)
+            await self?.decodeAndApplyLoadedQueue(data: data)
         }
     }
 
-    /// MainActor entry that absorbs the decoded queue document. Split out so
-    /// `load()` can do the file I/O off-thread and only return here for the
-    /// observable state mutation (`jobs`, `statusMessage`) + runner kick-off.
+    /// MainActor entry that decodes the queue document (Codable conformance
+    /// on `RenderQueueDoc` is MainActor-isolated, so the decode must run
+    /// here) and applies the reconciled state.
+    private func decodeAndApplyLoadedQueue(data: Data) {
+        let doc: RenderQueueDoc
+        do {
+            doc = try JSONDecoder().decode(RenderQueueDoc.self, from: data)
+        } catch {
+            logger.error("queue decode failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        applyLoadedQueue(doc: doc)
+    }
+
+    /// MainActor entry that absorbs a decoded queue document. Split out so
+    /// the file I/O can run off-thread and only the observable state
+    /// mutation (`jobs`, `statusMessage`) + runner kick-off happens here.
     private func applyLoadedQueue(doc: RenderQueueDoc) {
         // A queue file written by a newer build carries fields we don't
         // understand. Latch `refusingPersist` so subsequent enqueue / cancel
