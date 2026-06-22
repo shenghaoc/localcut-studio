@@ -50,8 +50,10 @@ nonisolated enum Fingerprint {
 ///
 /// Serialised as a **top-level JSON object** (`{ "assets/<id>.<ext>": "<hex>" }`)
 /// — the documented bundle-format shape — *not* nested under an `entries` field.
-/// The custom Codable below flattens the single stored property so the on-disk
-/// JSON matches the spec exactly.
+/// The custom Codable below flattens the single stored property and writes the
+/// keys in sorted order itself so a re-save without changes produces
+/// byte-identical JSON, independent of any `JSONEncoder.outputFormatting`
+/// quirks around `singleValueContainer`-encoded dictionaries.
 nonisolated struct FingerprintIndex: Codable, Equatable, Sendable {
     var entries: [String: String]
 
@@ -59,21 +61,39 @@ nonisolated struct FingerprintIndex: Codable, Equatable, Sendable {
         self.entries = entries
     }
 
-    /// Decodes a top-level `{ path: digest }` map.
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        self.entries = try container.decode([String: String].self)
+    /// Dynamic CodingKey for arbitrary string keys — lets the encoder emit
+    /// keys in a deterministic order without going through a
+    /// `singleValueContainer.encode([String: String])`, which doesn't
+    /// always respect `.sortedKeys` on the outer encoder.
+    private struct PathKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ s: String) { stringValue = s }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
     }
 
-    /// Encodes the entries map at the JSON root.
+    /// Decodes a top-level `{ path: digest }` map.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: PathKey.self)
+        var entries: [String: String] = [:]
+        for key in container.allKeys {
+            entries[key.stringValue] = try container.decode(String.self, forKey: key)
+        }
+        self.entries = entries
+    }
+
+    /// Encodes the entries map at the JSON root with sorted keys.
     func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(entries)
+        var container = encoder.container(keyedBy: PathKey.self)
+        for path in entries.keys.sorted() {
+            try container.encode(entries[path]!, forKey: PathKey(path))
+        }
     }
 
     func encoded() throws -> Data {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = .prettyPrinted
         return try encoder.encode(self)
     }
 
