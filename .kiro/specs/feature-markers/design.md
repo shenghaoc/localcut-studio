@@ -92,11 +92,14 @@ is scoped two ways to avoid hijacking unrelated keys:
 | Key             | Action                                                       |
 |-----------------|--------------------------------------------------------------|
 | `M`             | Add a marker at the playhead's current time.                 |
-| `Shift+M`       | Open a rename popover anchored to the selected marker.       |
+| `Shift+M`       | Open a rename popover anchored to the selected marker, or report concise status guidance when no marker is selected. |
 | `Delete`        | Remove the selected marker (only when one is selected — does not steal the existing clip/transition delete shortcut). |
 
 Shift+M's rename popover is a small `TextField` + Done button anchored over
-the selected marker glyph. Submitting commits a `Rename Marker` undo step.
+the selected marker glyph. Submitting commits a `Rename Marker` undo step. If
+no marker is selected, the handler leaves selection unchanged and sets
+`statusMessage` so the editor's live status line tells the user to select a
+marker on the ruler to rename instead of silently no-oping.
 
 ### Inspector panel
 
