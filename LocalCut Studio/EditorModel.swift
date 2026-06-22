@@ -31,6 +31,9 @@ final class EditorModel {
     var exportProgress: Double?
     var isExporting = false
 
+    // Skin smoothing debug
+    var showSkinMask = false
+
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
     @ObservationIgnored var pendingRebuildTask: Task<Void, Never>?
@@ -413,6 +416,76 @@ final class EditorModel {
         }
     }
 
+    // MARK: - Skin smoothing
+
+    /// Returns the skin smooth effect for the selected clip, inserting a neutral one if absent.
+    var selectedClipSkinSmooth: SkinSmoothEffect {
+        get {
+            guard let clip = selectedClip else { return .neutral }
+            if let effect = clip.effects.first(where: { if case .skinSmooth = $0 { return true }; return false }),
+               case .skinSmooth(let s) = effect {
+                return s
+            }
+            return .neutral
+        }
+        set {
+            guard let id = selectedClipID else { return }
+            performCoalescedUndoable("Adjust Skin Smooth", target: id, rebuild: .debounced) {
+                for track in allTracks {
+                    guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                    var smooth = newValue
+                    smooth.clamp()
+                    if let effectIndex = track.clips[index].effects.firstIndex(where: {
+                        if case .skinSmooth = $0 { return true }; return false
+                    }) {
+                        track.clips[index].effects[effectIndex] = .skinSmooth(smooth)
+                    } else {
+                        track.clips[index].effects.append(.skinSmooth(smooth))
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    /// Updates the skin smooth effect on the selected clip.
+    func updateSelectedClipSkinSmooth(_ transform: @escaping (inout SkinSmoothEffect) -> Void) {
+        guard let id = selectedClipID else { return }
+        performCoalescedUndoable("Adjust Skin Smooth", target: id, rebuild: .debounced) {
+            for track in allTracks {
+                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                if let effectIndex = track.clips[index].effects.firstIndex(where: {
+                    if case .skinSmooth = $0 { return true }; return false
+                }) {
+                    if case .skinSmooth(var smooth) = track.clips[index].effects[effectIndex] {
+                        transform(&smooth)
+                        smooth.clamp()
+                        track.clips[index].effects[effectIndex] = .skinSmooth(smooth)
+                    }
+                } else {
+                    var smooth = SkinSmoothEffect()
+                    transform(&smooth)
+                    smooth.clamp()
+                    track.clips[index].effects.append(.skinSmooth(smooth))
+                }
+                return
+            }
+        }
+    }
+
+    /// Removes the skin smooth effect from the selected clip.
+    func resetClipSkinSmooth() {
+        guard let id = selectedClipID else { return }
+        performUndoable("Reset Skin Smooth") {
+            for track in allTracks {
+                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                track.clips[index].effects.removeAll { if case .skinSmooth = $0 { return true }; return false }
+                scheduleRebuild()
+                return
+            }
+        }
+    }
+
     var selectedClip: Clip? {
         guard let id = selectedClipID else { return nil }
         for track in allTracks {
@@ -778,7 +851,7 @@ final class EditorModel {
     func rebuild() async {
         let resumeAt = currentTime
         do {
-            let result = try await CompositionBuilder.build(project: project)
+            let result = try await CompositionBuilder.build(project: project, showSkinMask: showSkinMask)
             // A newer rebuild superseded this one; don't clobber the player.
             guard !Task.isCancelled else { return }
             guard let built = result else {

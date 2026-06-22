@@ -33,9 +33,11 @@ enum CompositionBuilder {
         let effects: [Effect]
         let transitionRange: CMTimeRange?
         let transitionType: TransitionType?
+        let showSkinMask: Bool
+        let clipStartTime: CMTime
 
         var layer: CompositorLayer {
-            CompositorLayer(trackID: compTrackID, transform: transform, opacity: opacity, effects: effects)
+            CompositorLayer(trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipStartTime: clipStartTime)
         }
 
         func contains(_ seconds: Double) -> Bool {
@@ -99,7 +101,7 @@ enum CompositionBuilder {
         return visible.map { .layer($0.compTrackID) }
     }
 
-    static func build(project: Project) async throws -> BuiltComposition? {
+    static func build(project: Project, showSkinMask: Bool = false) async throws -> BuiltComposition? {
         let composition = AVMutableComposition()
         let renderSize = project.renderSize
 
@@ -157,7 +159,9 @@ enum CompositionBuilder {
                         opacity: clip.opacity,
                         effects: clip.effects,
                         transitionRange: piece.transitionRange,
-                        transitionType: piece.overlap > .zero ? clip.transition?.type : nil))
+                        transitionType: piece.overlap > .zero ? clip.transition?.type : nil,
+                        showSkinMask: showSkinMask,
+                        clipStartTime: clip.timelineStart))
                 }
             }
             projectTrackSegments.append(segments)

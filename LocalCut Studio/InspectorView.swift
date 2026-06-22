@@ -25,6 +25,7 @@ struct InspectorView: View {
                     clipSection(clip)
                     if clipIsVideo(clip) {
                         colourSection
+                        beautySection
                     }
                 } else if let media = model.selectedMedia {
                     mediaSection(media)
@@ -184,6 +185,90 @@ struct InspectorView: View {
                 }
             }
         )
+    }
+
+    // MARK: - Beauty / Skin Smoothing
+
+    @ViewBuilder
+    private var beautySection: some View {
+        Section("Beauty") {
+            let skinSmooth = model.selectedClipSkinSmooth
+
+            VStack(alignment: .leading) {
+                Text("Strength \(Int(skinSmooth.strength.defaultValue * 100))%")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Slider(
+                    value: Binding(
+                        get: { Double(skinSmooth.strength.defaultValue) },
+                        set: { newValue in
+                            model.updateSelectedClipSkinSmooth { smooth in
+                                smooth.strength.defaultValue = Float(newValue)
+                            }
+                        }),
+                    in: 0...1)
+                .accessibilityLabel("Strength")
+            }
+
+            DisclosureGroup("Advanced") {
+                VStack(alignment: .leading) {
+                    Text("Mask Warmth \(String(format: "%+.2f", skinSmooth.maskWarmthBias))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(
+                        value: Binding(
+                            get: { Double(skinSmooth.maskWarmthBias) },
+                            set: { newValue in
+                                model.updateSelectedClipSkinSmooth { smooth in
+                                    smooth.maskWarmthBias = Float(newValue)
+                                }
+                            }),
+                        in: -1...1,
+                        step: 0.05)
+                    .accessibilityLabel("Mask Warmth")
+                }
+
+                VStack(alignment: .leading) {
+                    Text("Luminance Gate \(String(format: "%.2f", skinSmooth.maskLuminanceGate))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(
+                        value: Binding(
+                            get: { Double(skinSmooth.maskLuminanceGate) },
+                            set: { newValue in
+                                model.updateSelectedClipSkinSmooth { smooth in
+                                    smooth.maskLuminanceGate = Float(newValue)
+                                }
+                            }),
+                        in: 0...1,
+                        step: 0.05)
+                    .accessibilityLabel("Luminance Gate")
+                }
+            }
+
+            Toggle("Bypass", isOn: Binding(
+                get: { skinSmooth.bypass },
+                set: { newValue in
+                    model.updateSelectedClipSkinSmooth { smooth in
+                        smooth.bypass = newValue
+                    }
+                }))
+            .toggleStyle(.switch)
+
+            Toggle("Show Mask", isOn: Binding(
+                get: { model.showSkinMask },
+                set: { newValue in
+                    model.showSkinMask = newValue
+                    model.scheduleRebuild()
+                }))
+            .toggleStyle(.switch)
+
+            HStack {
+                Button("Reset") { model.resetClipSkinSmooth() }
+                    .controlSize(.small)
+                Spacer()
+            }
+        }
     }
 
     @ViewBuilder

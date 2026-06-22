@@ -1,6 +1,6 @@
 # Requirements: Keyframe System
 
-> Status: **Proposed**.
+> Status: **Implemented**.
 
 ## R1 — Core Types
 

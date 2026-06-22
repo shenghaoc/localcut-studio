@@ -83,15 +83,47 @@ struct ColourGrade: Hashable, Codable {
     }
 }
 
+/// Skin smoothing parameters with neutral defaults and clamping.
+nonisolated struct SkinSmoothEffect: Hashable, Codable, Sendable {
+    /// Overall smoothing strength (0 = off, 1 = maximum).
+    var strength: Keyframed<Float>
+    /// Bias for the skin-tone probability mask (positive = more inclusive).
+    var maskWarmthBias: Float = 0
+    /// Luminance gate for the mask (0 = all luminances, 1 = only mid-tones).
+    var maskLuminanceGate: Float = 0.1
+    /// When true, bypass the effect for A/B comparison.
+    var bypass: Bool = false
+
+    init() {
+        self.strength = Keyframed<Float>(defaultValue: 0)
+    }
+
+    static var neutral: SkinSmoothEffect { SkinSmoothEffect() }
+
+    mutating func clamp() {
+        // Clamp static parameters
+        maskWarmthBias = max(-1, min(1, maskWarmthBias))
+        maskLuminanceGate = max(0, min(1, maskLuminanceGate))
+        // Clamp keyframe values and default value efficiently
+        let clampedKeyframes = strength.keyframes.map { kf in
+            Keyframe(id: kf.id, time: kf.time, value: max(0, min(1, kf.value)))
+        }
+        let clampedDefault = max(0, min(1, strength.defaultValue))
+        strength = Keyframed<Float>(keyframes: clampedKeyframes, defaultValue: clampedDefault)
+    }
+}
+
 /// An effect that can be applied to a video clip's source frames.
 enum Effect: Hashable, Codable {
     case colourGrade(ColourGrade)
     case lut(bookmark: Data)
+    case skinSmooth(SkinSmoothEffect)
 
     static func == (lhs: Effect, rhs: Effect) -> Bool {
         switch (lhs, rhs) {
         case (.colourGrade(let a), .colourGrade(let b)): a == b
         case (.lut(bookmark: let a), .lut(bookmark: let b)): a == b
+        case (.skinSmooth(let a), .skinSmooth(let b)): a == b
         default: false
         }
     }
@@ -100,6 +132,7 @@ enum Effect: Hashable, Codable {
         switch self {
         case .colourGrade(let g): hasher.combine(0); hasher.combine(g)
         case .lut(bookmark: let d): hasher.combine(1); hasher.combine(d)
+        case .skinSmooth(let s): hasher.combine(2); hasher.combine(s)
         }
     }
 }

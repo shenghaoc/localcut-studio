@@ -1,6 +1,6 @@
 # Tasks: Keyframe System
 
-> Status: **Implemented** in this branch (independent port; the keyframes code on `feature/phase-32a-skin-smoothing` @ `bbbf527` is parallel and unmerged). Codable uses `CMTimeCode` so the document representation matches the rest of the project.
+> Status: **Implemented**. Codable uses `CMTimeCode` so the document representation matches the rest of the project.
 
 ## Implementation
 

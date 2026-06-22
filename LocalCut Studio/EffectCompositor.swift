@@ -13,6 +13,9 @@ struct CompositorLayer {
     let transform: CGAffineTransform
     let opacity: Float
     let effects: [Effect]
+    let showSkinMask: Bool
+    /// The clip's start time on the timeline, used to compute clip-local time for keyframe evaluation.
+    let clipStartTime: CMTime
 }
 
 /// One caption line scheduled inside a composition instruction. Carries everything
@@ -173,7 +176,25 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         guard let sourceBuffer = request.sourceFrame(byTrackID: layer.trackID) else { return nil }
 
         var image = CIImage(cvPixelBuffer: sourceBuffer)
-        image = applyEffectChain(image, effects: layer.effects)
+
+        // Compute clip-local time for keyframe evaluation
+        let clipLocalTime = request.compositionTime - layer.clipStartTime
+
+        // Apply effect chain, optionally showing skin mask for debugging
+        if layer.showSkinMask {
+            // Find skin smooth params and show mask instead of smoothed image
+            if let skinSmooth = layer.effects.first(where: { if case .skinSmooth = $0 { return true }; return false }),
+               case .skinSmooth(let params) = skinSmooth {
+                if let mask = skinMask(image: image, warmthBias: params.maskWarmthBias, luminanceGate: params.maskLuminanceGate) {
+                    image = mask
+                }
+            } else {
+                image = applyEffectChain(image, effects: layer.effects, at: clipLocalTime)
+            }
+        } else {
+            image = applyEffectChain(image, effects: layer.effects, at: clipLocalTime)
+        }
+
         image = image.transformed(by: layer.transform)
 
         if layer.opacity < 1 {
@@ -338,7 +359,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     // MARK: - Effect chain
 
-    nonisolated private func applyEffectChain(_ image: CIImage, effects: [Effect]) -> CIImage {
+    nonisolated private func applyEffectChain(_ image: CIImage, effects: [Effect], at time: CMTime = .zero) -> CIImage {
         var result = image
         for effect in effects {
             switch effect {
@@ -346,6 +367,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 result = applyColourGrade(result, grade: grade)
             case .lut(bookmark: let data):
                 result = applyLUT(result, bookmarkData: data) ?? result
+            case .skinSmooth(let params):
+                result = applySkinSmooth(result, params: params, at: time) ?? result
             }
         }
         return result
@@ -380,9 +403,110 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         return result
     }
 
-    /// How long a failed LUT load is cached before another attempt: long enough to
-    /// avoid per-frame re-resolution/logging, short enough to recover when a file on
-    /// a removable/network volume (or one still being written) becomes available.
+    // MARK: - Skin smoothing kernels
+
+    /// Skin-tone probability mask kernel — compiled once, reused across all frames.
+    private static let skinMaskKernel: CIColorKernel? = {
+        CIColorKernel(source: """
+            kernel vec4 skinMask(__sample image, float warmthBias, float luminanceGate) {
+                // Unpremultiply to get true colors for YCbCr conversion
+                float alpha = image.a;
+                vec3 rgb = alpha > 0.0 ? image.rgb / alpha : vec3(0.0);
+
+                // YCbCr conversion (normalized 0-1 inputs, 0-1 outputs)
+                float y = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
+                float cb = 0.5 - 0.168736 * rgb.r - 0.331264 * rgb.g + 0.5 * rgb.b;
+                float cr = 0.5 + 0.5 * rgb.r - 0.418688 * rgb.g - 0.081312 * rgb.b;
+
+                // Skin tone detection in Cb-Cr space
+                // Typical skin: Cb in [0.3, 0.5], Cr in [0.5, 0.7]
+                float cbMin = 0.3 + warmthBias * 0.05;
+                float cbMax = 0.5 + warmthBias * 0.05;
+                float crMin = 0.5 + warmthBias * 0.05;
+                float crMax = 0.7 + warmthBias * 0.05;
+
+                // Soft falloff at edges
+                float cbDist = smoothstep(cbMin - 0.05, cbMin, cb) * (1.0 - smoothstep(cbMax, cbMax + 0.05, cb));
+                float crDist = smoothstep(crMin - 0.05, crMin, cr) * (1.0 - smoothstep(crMax, crMax + 0.05, cr));
+
+                float skinProb = cbDist * crDist;
+
+                // Luminance gate: reduce probability in very dark or very bright regions
+                float lumGate = smoothstep(0.0, luminanceGate * 0.5, y) * (1.0 - smoothstep(1.0 - luminanceGate * 0.5, 1.0, y));
+                skinProb *= lumGate;
+
+                // Scale by alpha to prevent transparent regions from accumulating skin probability
+                skinProb *= alpha;
+
+                return vec4(skinProb, skinProb, skinProb, alpha);
+            }
+            """)
+    }()
+
+    /// Blend kernel for compositing smoothed image over original using mask — compiled once.
+    private static let skinBlendKernel: CIColorKernel? = {
+        CIColorKernel(source: """
+            kernel vec4 skinBlend(__sample original, __sample smoothed, __sample mask, float strength) {
+                float maskVal = mask.r * strength;
+                return mix(original, smoothed, maskVal);
+            }
+            """)
+    }()
+
+    // MARK: - Skin smoothing
+
+    /// Applies skin smoothing using a chroma-based skin-tone mask and masked Gaussian blur proxy.
+    nonisolated private func applySkinSmooth(_ image: CIImage, params: SkinSmoothEffect, at time: CMTime) -> CIImage? {
+        guard !params.bypass else { return nil }
+
+        let strength = params.strength.value(at: time)
+        guard strength > 0 else { return nil }
+
+        // Step 1: Generate skin-tone probability mask
+        guard let mask = skinMask(image: image, warmthBias: params.maskWarmthBias, luminanceGate: params.maskLuminanceGate) else {
+            return nil
+        }
+
+        // Step 2: Apply masked Gaussian blur smoothing
+        guard let smoothed = maskedGaussianBlurSmooth(image: image, mask: mask, strength: strength) else {
+            return nil
+        }
+
+        return smoothed
+    }
+
+    /// Generates a single-channel skin-tone probability mask in [0,1].
+    nonisolated private func skinMask(image: CIImage, warmthBias: Float, luminanceGate: Float) -> CIImage? {
+        guard let kernel = Self.skinMaskKernel else { return nil }
+        let bias = CGFloat(warmthBias)
+        let gate = CGFloat(luminanceGate)
+        return kernel.apply(extent: image.extent, arguments: [image, bias, gate])
+    }
+
+    /// Applies the masked Gaussian blur proxy to the selected skin region.
+    ///
+    /// Uses a two-pass approach:
+    /// 1. Blur the image with clamped extent to prevent frame-edge bleeding
+    /// 2. Blend original and smoothed based on mask and strength
+    nonisolated private func maskedGaussianBlurSmooth(image: CIImage, mask: CIImage, strength: Float) -> CIImage? {
+        // Clamp to extent before blurring to prevent transparent edge bleeding
+        let clamped = image.clampedToExtent()
+
+        // Apply a moderate blur — radius scales with strength
+        let blurFilter = CIFilter.gaussianBlur()
+        blurFilter.inputImage = clamped
+        blurFilter.radius = strength * 10.0
+        guard let blurred = blurFilter.outputImage else { return nil }
+
+        // Clip blurred image back to original extent
+        let clippedBlurred = blurred.cropped(to: image.extent)
+
+        // Blend using the pre-compiled kernel
+        guard let kernel = Self.skinBlendKernel else { return nil }
+        return kernel.apply(extent: image.extent, arguments: [image, clippedBlurred, mask, CGFloat(strength)])
+    }
+
+    // MARK: - LUT
     nonisolated private static let lutRetryInterval: TimeInterval = 3
 
     nonisolated private func applyLUT(_ image: CIImage, bookmarkData: Data) -> CIImage? {

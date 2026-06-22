@@ -1,6 +1,6 @@
 # Design: Keyframe System
 
-> Status: **Proposed**. Infrastructure prerequisite for Phase 30, 32a, 35, 38, 43.
+> Status: **Implemented**. Infrastructure prerequisite for Phase 30, 32a, 35, 38, 43.
 
 ## Goal
 
@@ -78,7 +78,9 @@ extension Keyframed {
 
 ## Integration with Effect Chain
 
-Effects that support keyframing use `Keyframed<Float>` for their animatable parameters. The compositor evaluates the keyframed value at the current composition time and passes it to the CIFilter.
+Effects that support keyframing use `Keyframed<Float>` for their animatable parameters. The compositor evaluates the keyframed value at clip-local render time and passes it to the filter/compositor node, so moving a clip on the timeline does not change the look of its internal animation.
+
+The Phase 32a inspector exposes a static default-strength slider only. Timeline keyframe authoring UI is intentionally deferred; this spec supplies the model, Codable shape, mutation helpers, and evaluation path that later UI can edit.
 
 ## Codable representation
 
@@ -102,3 +104,4 @@ Effects that support keyframing use `Keyframed<Float>` for their animatable para
 - Multi-dimensional keyframes (position, scale, etc.)
 - Velocity-based interpolation
 - Keyframe snapping/quantization
+- Timeline/inspector keyframe authoring UI in Phase 32a
