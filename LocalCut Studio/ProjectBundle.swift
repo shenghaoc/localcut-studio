@@ -285,6 +285,9 @@ nonisolated enum ProjectBundle {
         let assetsURL = bundleURL.appendingPathComponent(ProjectBundleLayout.assetsSubdirectory)
         try fm.createDirectory(at: assetsURL, withIntermediateDirectories: true)
 
+        // Collect digests during the copy/skip loop so we don't re-hash
+        // every file a second time at the end.
+        var index = FingerprintIndex()
         for media in bundledMedia {
             let destination = bundleURL.appendingPathComponent(media.bundleRelativePath)
 
@@ -293,6 +296,9 @@ nonisolated enum ProjectBundle {
             // otherwise delete-and-recopy from a file we just removed. The only
             // existing copy of the user's media would be lost.
             if media.sourceURL.standardizedFileURL == destination.standardizedFileURL {
+                if let digest = try? Fingerprint.sha256(of: destination) {
+                    index.entries[media.bundleRelativePath] = digest
+                }
                 continue
             }
 
@@ -309,6 +315,7 @@ nonisolated enum ProjectBundle {
             if let storedDigest,
                sourceDigest == storedDigest,
                destinationDigest == storedDigest {
+                index.entries[media.bundleRelativePath] = storedDigest
                 continue
             }
 
@@ -319,6 +326,7 @@ nonisolated enum ProjectBundle {
             if sourceDigest == nil,
                let storedDigest,
                destinationDigest == storedDigest {
+                index.entries[media.bundleRelativePath] = storedDigest
                 continue
             }
 
@@ -326,23 +334,21 @@ nonisolated enum ProjectBundle {
             // destination — a mid-flight crash leaves the previous destination
             // (if any) intact rather than partially-written or empty.
             let temp = destination.appendingPathExtension("tmp-\(UUID().uuidString)")
+            defer { try? fm.removeItem(at: temp) }
             try fm.copyItem(at: media.sourceURL, to: temp)
             if destinationExists {
                 _ = try fm.replaceItemAt(destination, withItemAt: temp)
             } else {
                 try fm.moveItem(at: temp, to: destination)
             }
-        }
 
-        // Re-fingerprint the assets directory from scratch — anything left
-        // behind by a previous run (e.g. an asset whose media item was deleted)
-        // shouldn't appear in the index. The caller can prune orphaned files in
-        // a future tidy-up pass; for now we leave them on disk but unindexed.
-        var index = FingerprintIndex()
-        for media in bundledMedia {
-            let url = bundleURL.appendingPathComponent(media.bundleRelativePath)
-            let digest = try Fingerprint.sha256(of: url)
-            index.entries[media.bundleRelativePath] = digest
+            // The copied file's digest is identical to the source digest we
+            // already computed above.
+            if let sourceDigest {
+                index.entries[media.bundleRelativePath] = sourceDigest
+            } else if let digest = try? Fingerprint.sha256(of: destination) {
+                index.entries[media.bundleRelativePath] = digest
+            }
         }
 
         try index.encoded().write(to: bundleURL.appendingPathComponent(ProjectBundleLayout.fingerprintsJSON),

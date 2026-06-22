@@ -213,20 +213,6 @@ extension TrackInputDoc {
     var trackInput: TrackInput {
         TrackInput(id: trackID, pan: pan, gain: gain)
     }
-
-    func encode(to encoder: any Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(schemaVersion, forKey: .schemaVersion)
-        try c.encodeIfPresent(bundleFormat, forKey: .bundleFormat)
-        try c.encode(name, forKey: .name)
-        try c.encode(renderWidth, forKey: .renderWidth)
-        try c.encode(renderHeight, forKey: .renderHeight)
-        try c.encode(frameRate, forKey: .frameRate)
-        try c.encode(media, forKey: .media)
-        try c.encode(videoTracks, forKey: .videoTracks)
-        try c.encode(audioTracks, forKey: .audioTracks)
-        try c.encode(captionTracks, forKey: .captionTracks)
-    }
 }
 
 // MARK: - Caption track persistence

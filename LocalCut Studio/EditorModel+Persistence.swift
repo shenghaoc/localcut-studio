@@ -696,6 +696,9 @@ extension EditorModel {
                 bundleURL.stopAccessingSecurityScopedResource()
             }
         }
+        // Capture original paths so we can restore them if the write fails,
+        // leaving the in-memory model consistent with the on-disk state.
+        let originalPaths = project.mediaItems.map { ($0, $0.bundleRelativePath) }
         do {
             let savedRevision = mutationRevision
             // Items the user wants bundled (default: every imported MediaItem)
@@ -731,6 +734,9 @@ extension EditorModel {
             adoptSaved(url: bundleURL, cleanIfRevision: savedRevision)
             statusMessage = "Saved \(bundleURL.lastPathComponent)."
         } catch {
+            for (item, path) in originalPaths {
+                item.bundleRelativePath = path
+            }
             statusMessage = "Save failed: \(error.localizedDescription)"
         }
     }
@@ -994,6 +1000,9 @@ extension EditorModel {
                 bundleURL.stopAccessingSecurityScopedResource()
             }
         }
+        // Capture original paths so we can restore them if the conversion fails,
+        // leaving the in-memory model consistent with the on-disk state.
+        let originalPaths = project.mediaItems.map { ($0, $0.bundleRelativePath) }
         do {
             // Stamp a bundle-relative path onto every currently-resolved media
             // item the user wants bundled. Items with `wantsBundling == false`
@@ -1042,6 +1051,9 @@ extension EditorModel {
             await rebuild()
             statusMessage = "Converted to bundle — original .lcstudio left in place."
         } catch {
+            for (item, path) in originalPaths {
+                item.bundleRelativePath = path
+            }
             statusMessage = "Convert failed: \(error.localizedDescription)"
         }
     }
