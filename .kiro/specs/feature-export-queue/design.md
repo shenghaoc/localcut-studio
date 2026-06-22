@@ -129,6 +129,19 @@ final class RenderQueue {
 chooses the export path, and awaits completion. On finish (success / failure /
 cancellation) it updates status + persists, then loops.
 
+**Source-bookmark resolution.** Resolving source-media bookmarks (which may
+touch sleeping drives or network shares) happens off MainActor via
+`Task.detached`; only `startAccessingSecurityScopedResource()` and
+`MediaItem` assembly stay on MainActor. A `false` return from
+`startAccessing` counts as a missing source, failing the job cleanly
+rather than producing a silently partial export.
+
+**Writer pump.** The `AVAssetWriter` fallback uses
+`input.markAsFinished()` to signal exhaustion. Note:
+`stopRequestingMediaData()` does **not** exist on `AVAssetWriterInput` —
+it is an `AVAssetReaderOutput` API only. The `ResumeBox` pattern handles
+any in-flight callback race after `markAsFinished()`.
+
 **Path selection.** Each job picks one of two paths at start:
 
 1. **`AVAssetExportSession` (preferred).** A preset name table maps
@@ -206,6 +219,7 @@ A new `Renders` section in the inspector, beside `Captions`:
     • Web 720p          [Add to Queue…]
 
   [Queue]
+    [═══════════════░░░░░░░░] 62%          ← totalProgress (visible while running)
     • clip.mp4         [running 42%]   [⎯]   ← cancel
     • clip2.mov        [queued]         [⎯]
     • clip-old.mp4     [completed]

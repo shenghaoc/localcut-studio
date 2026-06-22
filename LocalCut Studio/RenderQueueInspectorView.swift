@@ -72,6 +72,11 @@ struct RenderQueueInspectorView: View {
                 .foregroundStyle(.secondary)
         } else {
             VStack(alignment: .leading, spacing: 4) {
+                if model.renderQueue.isRunning {
+                    ProgressView(value: model.renderQueue.totalProgress)
+                        .progressViewStyle(.linear)
+                        .accessibilityLabel("Overall render progress: \(Int(model.renderQueue.totalProgress * 100))%")
+                }
                 ForEach(model.renderQueue.jobs) { job in
                     queueRow(job)
                 }

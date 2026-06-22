@@ -76,9 +76,12 @@
   the preset's container, then enqueues a job for the picked destination.
 - **R4.2** The same section lists the current queue with each job's status
   pill (`queued`, `running NN%`, `completed`, `cancelled`, `failed`) and a
-  cancel button for queued / running rows.
+  cancel button for queued / running rows. Failed rows surface the job's
+  `errorMessage` beneath the pill so the user can act on the failure reason.
 - **R4.3** The existing single-shot Export toolbar action becomes a shortcut
   for "queue with the default preset (YouTube 1080p) and start immediately".
+- **R4.4** A `ProgressView` renders `totalProgress` as an aggregate progress
+  bar above the job list while the queue is running (`isRunning == true`).
 
 ## R5 — Verification
 

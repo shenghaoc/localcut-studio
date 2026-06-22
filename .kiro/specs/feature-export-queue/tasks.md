@@ -45,8 +45,11 @@
   `CaptionsInspectorView`'s shape; surface every built-in preset with an
   "Add to Queue…" button.
 - [x] **T4.2** Show the live queue with status pills + cancel buttons.
+  Failed rows surface `errorMessage` beneath the pill.
 - [x] **T4.3** Re-route the existing toolbar/menu Export action through
   `RenderQueue.enqueueWithDefaultPreset(outputURL:)`.
+- [x] **T4.4** Render `totalProgress` as a `ProgressView` above the job
+  list while `isRunning` is true (R4.4).
 
 ## Verification
 

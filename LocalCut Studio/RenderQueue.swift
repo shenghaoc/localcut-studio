@@ -383,7 +383,16 @@ final class RenderQueue {
         // against a 1920×1080 project actually renders 1080×1920 — without
         // this step the UI advertises an aspect that the encode wouldn't
         // produce (codex P1).
-        let reconstructed = reconstructProject(from: snapshot, applying: preset)
+        //
+        // Source-bookmark resolution is expensive on sleeping drives or
+        // network shares, so the heavy I/O happens off MainActor; only
+        // the `startAccessing` calls and project assembly stay here
+        // (Claude review).
+        let resolved = await Task.detached(priority: .userInitiated) {
+            Self.resolveSourceBookmarks(from: snapshot.media)
+        }.value
+        let reconstructed = reconstructProject(from: snapshot, applying: preset,
+                                               preResolved: resolved)
         let project = reconstructed.project
         let heldSources = reconstructed.accessedSources
         let missingSources = reconstructed.missingBookmarks
@@ -712,15 +721,19 @@ final class RenderQueue {
                             }
                         }
                     } else {
-                        // `markAsFinished()` is the only public "stop" signal
-                        // on `AVAssetWriterInput`; the framework documents
+                        // `markAsFinished()` signals the writer that no
+                        // more samples will arrive. AVFoundation documents
                         // that the request block is no longer invoked once
-                        // the input is finished, so the `ResumeBox` covers
-                        // any in-flight invocation that might race past this
-                        // point. (Earlier comments incorrectly suggested a
-                        // `stopRequestingMediaData()` method exists on the
-                        // writer side — it only exists on AVAssetReader's
-                        // output classes.)
+                        // the input is finished. `ResumeBox` covers any
+                        // in-flight invocation that might race past this
+                        // point.
+                        //
+                        // Note: `stopRequestingMediaData()` does NOT exist
+                        // on `AVAssetWriterInput` — only on
+                        // `AVAssetReaderOutput` subclasses. The previous
+                        // comment claiming otherwise was incorrect
+                        // (confirmed by build: AVAssetWriterInput has no
+                        // such member).
                         input.markAsFinished()
                         if resume.tryConsume() {
                             continuation.resume()
@@ -900,6 +913,32 @@ final class RenderQueue {
 
     // MARK: Helpers
 
+    /// Pre-resolved bookmark result. The URL is resolved off MainActor;
+    // `startAccessing` and `MediaItem` assembly stay on MainActor.
+    private struct ResolvedSource: Sendable {
+        let refID: UUID
+        let url: URL?
+    }
+
+    /// Resolves every non-empty source-media bookmark to a URL on a background
+    /// thread so sleeping drives or network shares don't stall the UI
+    /// (Claude review). Pure function — no MainActor access.
+    private nonisolated static func resolveSourceBookmarks(
+        from media: [MediaRef]
+    ) -> [ResolvedSource] {
+        media.map { ref in
+            guard !ref.bookmark.isEmpty else {
+                return ResolvedSource(refID: ref.id, url: nil)
+            }
+            var stale = false
+            let url = try? URL(resolvingBookmarkData: ref.bookmark,
+                               options: [.withSecurityScope],
+                               relativeTo: nil,
+                               bookmarkDataIsStale: &stale)
+            return ResolvedSource(refID: ref.id, url: url)
+        }
+    }
+
     private func resolveBookmark(_ data: Data) -> URL? {
         guard !data.isEmpty else { return nil }
         var stale = false
@@ -922,28 +961,36 @@ final class RenderQueue {
     /// render settings so a preset-driven render actually produces the
     /// advertised dimensions even if the project was authored at a different
     /// canvas size.
-    private func reconstructProject(from doc: ProjectDocument, applying preset: ExportPreset)
+    ///
+    /// `preResolved` carries URLs already resolved off MainActor by
+    /// `resolveSourceBookmarks`; this method only calls
+    /// `startAccessingSecurityScopedResource()` and assembles `MediaItem`s.
+    private func reconstructProject(from doc: ProjectDocument, applying preset: ExportPreset,
+                                    preResolved: [ResolvedSource])
         -> (project: Project, accessedSources: [URL], missingBookmarks: Int) {
         let project = Project()
         project.name = doc.name
         project.renderSize = preset.targetSize.cgSize
         project.frameRate = preset.frameRate ?? doc.frameRate
 
+        // Index pre-resolved results by ref ID for O(1) lookup.
+        var resolvedByID: [UUID: URL?] = [:]
+        for r in preResolved { resolvedByID[r.refID] = r.url }
+
         var rebuilt: [MediaItem] = []
         var accessed: [URL] = []
         var missing = 0
         for ref in doc.media {
             guard !ref.bookmark.isEmpty else { missing += 1; continue }
-            var stale = false
-            guard let url = try? URL(resolvingBookmarkData: ref.bookmark,
-                                     options: [.withSecurityScope],
-                                     relativeTo: nil,
-                                     bookmarkDataIsStale: &stale) else {
+            guard let url = resolvedByID[ref.id] ?? nil else {
                 missing += 1
                 continue
             }
             if url.startAccessingSecurityScopedResource() {
                 accessed.append(url)
+            } else {
+                missing += 1
+                continue
             }
             let item = MediaItem(url: url, id: ref.id)
             item.name = ref.displayName
