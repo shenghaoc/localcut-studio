@@ -67,17 +67,17 @@ final class ScopeSampler: @unchecked Sendable {
     nonisolated(unsafe) static let shared = ScopeSampler()
     nonisolated static let minIntervalSeconds = 1.0 / 30.0
 
-    nonisolated func shouldSample() -> Bool          // checks `enabled` + 1/30s gate
+    nonisolated func shouldSample(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool  // checks `enabled` + 1/30s gate (monotonic clock)
     nonisolated func sample(image:context:colorSpace:) -> ScopeSample
     nonisolated func publish(_ sample: ScopeSample)  // drops out-of-order arrivals
     nonisolated var snapshot: (sample: ScopeSample?, revision: Int)  // pulled by view
 }
 ```
 
-- **Waveform**: First folds RGB into a luma-only R channel via `CIFilter.colorMatrix` (BT.709 weights). Then 32 column slices, each through `CIFilter.areaHistogram(count: 64)`. The result is read back as `.RGBAf` so per-bin pixel counts aren't clamped. Bins normalise against the global max across all columns so relative brightness across the frame is preserved.
-- **Vectorscope**: 8×8 grid. For each cell, `CIFilter.areaAverage` produces a 1×1 image; the average RGB is read as `.RGBAf` and converted to (U, V) chroma offsets. The Canvas plots them on a circular UV plane.
+- **Waveform**: First folds RGB into a luma-only R channel via `CIFilter.colorMatrix` (BT.709 weights). Then 32 column slices, each through `CIFilter.areaHistogram(count: 64)`. The result is read back as `.RGBAf` so per-bin pixel counts aren't clamped. Each column normalises independently against its own max bin; cross-column luma magnitude is not preserved (a per-row average is a Phase 38 extension).
+- **Vectorscope**: 8×8 grid. The frame is scaled down to 8×8 in a single GPU pass (two `CGAffineTransform` applications) and the entire grid is read back in one `context.render` call as `.RGBAf`, then each cell's average RGB is converted to (U, V) chroma offsets. The Canvas plots them on a circular UV plane.
 
-Per-frame cost is dominated by the 32 small histogram renders plus the 64 averages; on Apple Silicon they fit comfortably in the existing per-frame budget. The 30 Hz cap means a 60 fps preview pays this once per two frames, and never when the panel is hidden (the sampler shortcuts on `enabled == false` before any filter work).
+Per-frame cost is dominated by the 32 small histogram renders plus one 8×8 scale-and-readback for the vectorscope; on Apple Silicon they fit comfortably in the existing per-frame budget. The 30 Hz cap means a 60 fps preview pays this once per two frames, and never when the panel is hidden (the sampler shortcuts on `enabled == false` before any filter work).
 
 ## UI
 
@@ -97,7 +97,7 @@ Per-frame cost is dominated by the 32 small histogram renders plus the 64 averag
 - **Per-space CIContext cache vs. one context** — Apple's `CIContext.workingColorSpace` is constructor-only. We pay a few extra Metal-context bytes for predictable per-space behaviour rather than juggling render-time conversions.
 - **CV attachments per buffer vs. one configuration-level setting** — `AVVideoComposition.Configuration` exposes `colorPrimaries` / `colorTransferFunction` / `colorYCbCrMatrix`, but those describe the *source*; the per-buffer attachments are what AVAssetExportSession writes into the output file. Setting both keeps preview and export in sync.
 - **Throttle the sampler vs. opt in per frame** — A 30 Hz cap is enough for the eye and keeps the compositor's hot path predictable; opting in per frame would expose to the entire pipeline.
-- **Grid-based vectorscope vs. per-pixel scatter** — A per-pixel scatter would need a Metal compute kernel. The 8×8 average grid is a reasonable preview proxy; Phase 38 can swap in a richer kernel without changing the view contract.
+- **Grid-based vectorscope vs. per-pixel scatter** — A per-pixel scatter would need a Metal compute kernel. The 8×8 grid (scaled in one GPU pass, read back in one call) is a reasonable preview proxy; Phase 38 can swap in a richer kernel without changing the view contract.
 - **Calling purge from the model vs. observing the project** — The model already knows when the space changes (its setter) and owns the seam; an observation-driven purge would re-purge across undo replays whether or not the space actually changed.
 
 ## Risks

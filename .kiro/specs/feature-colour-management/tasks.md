@@ -18,7 +18,7 @@
 ## Scopes
 
 - [x] **T3.1** Implement `ScopeSampler` (`@unchecked Sendable`, lock-guarded state) with `shouldSample()` 30 Hz gate, `sample(image:context:colorSpace:)`, and `publish(_:)`.
-- [x] **T3.2** Implement waveform sampling with `CIFilter.areaHistogram` (32 column slices, 64 bins each) and vectorscope sampling with `CIFilter.areaAverage` (8×8 grid of UV averages).
+- [x] **T3.2** Implement waveform sampling with `CIFilter.areaHistogram` (32 column slices, 64 bins each, per-column normalisation) and vectorscope sampling by scaling the frame to 8×8 in a single GPU pass with one `context.render` readback (avoids 64 sequential `areaAverage` round-trips).
 - [x] **T3.3** Implement `ScopesView` (SwiftUI + Canvas) rendering waveform columns and vectorscope points; the view sets `ScopeSampler.shared.enabled` to mirror its visibility.
 - [x] **T3.4** Hook the sampler into `EffectCompositor.startRequest(_:)` — call it after compositing, only when `shouldSample()` says yes.
 

@@ -76,7 +76,7 @@ func pixelBufferColourAttachmentsSRGB() {
     #expect(matrix == kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
 }
 
-@Test("applyColourAttachments tags a pixel buffer with Display P3 primaries")
+@Test("applyColourAttachments tags a pixel buffer with Display P3 primaries + sRGB transfer + BT.709 matrix")
 func pixelBufferColourAttachmentsDisplayP3() {
     guard let buffer = makePixelBuffer(width: 64, height: 36) else {
         Issue.record("Could not allocate test pixel buffer")
@@ -84,7 +84,12 @@ func pixelBufferColourAttachmentsDisplayP3() {
     }
     EffectCompositor.applyColourAttachments(.displayP3, to: buffer)
     let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
+    let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil) as? String
+    let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
     #expect(primaries == kCVImageBufferColorPrimaries_P3_D65 as String)
+    // Display P3 uses the sRGB transfer function (unlike rec709 which uses ITU_R_709_2).
+    #expect(transfer == kCVImageBufferTransferFunction_sRGB as String)
+    #expect(matrix == kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
 }
 
 @Test("applyColourAttachments tags a Rec.709 buffer with the BT.709 transfer (NOT sRGB)")
@@ -218,6 +223,9 @@ struct ScopeSamplerGateTests {
         #expect(ScopeSampler.shared.shouldSample(now: now + 0.001) == false)
         #expect(ScopeSampler.shared.shouldSample(now: now + 1) == true)
 
+        // Reset lastSampleAt to 0 so Xcode's "run test repeatedly" feature
+        // does not see a stale timestamp from the prior run.
+        _ = ScopeSampler.shared.shouldSample(now: 0)
         // Restore disabled-by-default so peer tests don't see a hot sampler.
         ScopeSampler.shared.setEnabled(false)
     }
