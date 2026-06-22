@@ -193,42 +193,28 @@ final class DiagnosticsAgent {
 
     // MARK: - Probes
 
-    /// Total live + terminated thread CPU time, in seconds. `nil` if either
-    /// `task_info` call fails.
+    /// Total live + terminated thread CPU time, in seconds. `nil` if the
+    /// `proc_pidinfo` call fails.
     ///
-    /// `TASK_THREAD_TIMES_INFO` reports only **live** threads; `MACH_TASK_BASIC_INFO`
-    /// reports the accumulated time of **terminated** threads (where the kernel
-    /// rolls each thread's totals on exit). Summing both gives the total
-    /// CPU time the task has consumed — without that sum, a long-lived editor
-    /// session that has churned through many short-lived background tasks would
-    /// look idle even at peak load (Gemini high).
+    /// We deliberately go through libproc rather than `task_info` here. The
+    /// Mach interface splits the same number across two flavors —
+    /// `TASK_THREAD_TIMES_INFO` for live threads and `MACH_TASK_BASIC_INFO`
+    /// for the time terminated threads contributed on exit — which means
+    /// querying only one half undercounts whichever side the workload happens
+    /// to land on (Gemini high). On macOS 26 the SDK also marks
+    /// `MACH_TASK_BASIC_INFO_COUNT` unavailable, so the two-step Mach query
+    /// won't compile. `proc_pidinfo(PROC_PIDTASKINFO)` returns
+    /// `pti_total_user` + `pti_total_system` in nanoseconds covering both
+    /// live and terminated threads in one call, works on the own-process pid
+    /// without entitlements, and avoids the deprecated Mach surface entirely.
     nonisolated private func currentCPUSeconds() -> Double? {
-        // Live-thread component.
-        var threadTimes = task_thread_times_info_data_t()
-        var threadCount = mach_msg_type_number_t(
-            MemoryLayout<task_thread_times_info_data_t>.size / MemoryLayout<integer_t>.size)
-        let threadKR = withUnsafeMutablePointer(to: &threadTimes) { ptr -> kern_return_t in
-            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(threadCount)) {
-                task_info(mach_task_self_, task_flavor_t(TASK_THREAD_TIMES_INFO), $0, &threadCount)
-            }
-        }
-        guard threadKR == KERN_SUCCESS else { return nil }
-
-        // Terminated-thread component.
-        var basic = mach_task_basic_info_data_t()
-        var basicCount = mach_msg_type_number_t(MACH_TASK_BASIC_INFO_COUNT)
-        let basicKR = withUnsafeMutablePointer(to: &basic) { ptr -> kern_return_t in
-            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(basicCount)) {
-                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &basicCount)
-            }
-        }
-        guard basicKR == KERN_SUCCESS else { return nil }
-
-        let liveUser = Double(threadTimes.user_time.seconds) + Double(threadTimes.user_time.microseconds) / 1_000_000
-        let liveSystem = Double(threadTimes.system_time.seconds) + Double(threadTimes.system_time.microseconds) / 1_000_000
-        let deadUser = Double(basic.user_time.seconds) + Double(basic.user_time.microseconds) / 1_000_000
-        let deadSystem = Double(basic.system_time.seconds) + Double(basic.system_time.microseconds) / 1_000_000
-        return liveUser + liveSystem + deadUser + deadSystem
+        var info = proc_taskinfo()
+        let size = Int32(MemoryLayout<proc_taskinfo>.size)
+        let result = proc_pidinfo(getpid(), PROC_PIDTASKINFO, 0, &info, size)
+        guard result == size else { return nil }
+        let user = Double(info.pti_total_user) / 1_000_000_000
+        let system = Double(info.pti_total_system) / 1_000_000_000
+        return user + system
     }
 
     private func sampleCPU(now wallNow: CFAbsoluteTime) -> Double {
