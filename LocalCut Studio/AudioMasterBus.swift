@@ -61,8 +61,8 @@ final class AudioMasterBus {
     @ObservationIgnored private var liveTapInstalled = false
     @ObservationIgnored private var offlineTapInstalled = false
 
-    @ObservationIgnored private(set) var isLiveRunning = false
-    @ObservationIgnored private(set) var isOfflineRunning = false
+    private(set) var isLiveRunning = false
+    private(set) var isOfflineRunning = false
 
     /// Audio-thread-published meter snapshot. `nonisolated` because the lock
     /// itself is `Sendable` and is the actual synchronisation primitive — the
