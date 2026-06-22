@@ -408,12 +408,15 @@ enum CompositionBuilder {
                fillerTrackID != kCMPersistentTrackID_Invalid,
                tail.containsTime(CMTime(seconds: midpoint, preferredTimescale: 600)) {
                 units.append(.layer(CompositorLayer(
+                    clipID: UUID(),  // filler; no real clip
                     trackID: fillerTrackID,
                     transform: .identity,
                     opacity: 1,
                     effects: [],
                     showSkinMask: false,
-                    clipStartTime: tail.start)))
+                    clipStartTime: tail.start,
+                    sourceRange: tail,
+                    timeRange: tail)))
             }
 
             let captionsForInterval = activeCaptionItems(
