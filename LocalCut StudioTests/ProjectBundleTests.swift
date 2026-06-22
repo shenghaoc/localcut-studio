@@ -339,6 +339,12 @@ struct ProjectBundleTests {
         #expect(model.project.mediaItems.count == 1)
         #expect(model.project.mediaItems.first === media)
         #expect(model.project.mediaItems.first?.url == source)
+        // The original media object's bundleRelativePath was stamped by
+        // convertToBundle before replaceMediaItemsForBundle created the
+        // replacement; undo restores the same object, so the stamp is
+        // still present. This is safe — bundleRelativePath(for:) returns
+        // the pre-set value and writeBundle copies from the external URL.
+        #expect(media.bundleRelativePath != nil)
     }
 
     // MARK: - P1 regression: bundleRelativePath must be validated on read too

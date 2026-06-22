@@ -362,6 +362,14 @@ nonisolated enum ProjectBundle {
 
     /// Whether the URL points to a `.lcbundle` directory. Used by the open path
     /// to dispatch between bundle and single-file loads.
+    ///
+    /// The `project.json` fallback after the extension check is intentional: the
+    /// open panel already filters to `.lcbundle`/`.lcstudio`, so the fallback
+    /// only fires for edge cases where a bundle arrives without the canonical
+    /// extension (e.g. a file-sync service that strips extensions, or a user
+    /// who renamed the directory). A random directory opened by mistake will
+    /// fail the `project.json` existence check and fall through to the
+    /// single-file decode path, which returns its own error.
     static func isBundle(url: URL) -> Bool {
         // Extension first — the cheap check — then a directory test in case the
         // user (or a synced volume) saved a bundle without the canonical suffix.

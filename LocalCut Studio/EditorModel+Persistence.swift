@@ -782,6 +782,10 @@ extension EditorModel {
     func writeSynchronously(to url: URL) -> Bool {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        // Capture original paths so the bundle branch can restore them on
+        // failure, matching the transactional-safety pattern in writeBundle
+        // and convertToBundle.
+        let originalPaths = project.mediaItems.map { ($0, $0.bundleRelativePath) }
         do {
             if url.pathExtension == ProjectBundleLayout.fileExtension {
                 let bundledMedia: [ProjectBundle.BundledMedia] = project.mediaItems.compactMap { item in
@@ -794,9 +798,9 @@ extension EditorModel {
                 }
                 let projectJSON = try encodedDocument(forBundle: true)
                 let index = try ProjectBundle.write(projectJSON: projectJSON,
-                                                    to: url,
-                                                    bundledMedia: bundledMedia,
-                                                    previousFingerprints: lastBundleFingerprints)
+                                                     to: url,
+                                                     bundledMedia: bundledMedia,
+                                                     previousFingerprints: lastBundleFingerprints)
                 lastBundleFingerprints = index
             } else {
                 let data = try encodedDocument(forBundle: false)
@@ -806,6 +810,9 @@ extension EditorModel {
             statusMessage = "Saved \(url.lastPathComponent)."
             return true
         } catch {
+            for (item, path) in originalPaths {
+                item.bundleRelativePath = path
+            }
             statusMessage = "Save failed: \(error.localizedDescription)"
             return false
         }

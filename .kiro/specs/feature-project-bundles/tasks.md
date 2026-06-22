@@ -16,7 +16,7 @@
 ## Bundle I/O
 
 - [x] **T3.1** Add `ProjectBundle.read(url:)`: opens the bundle, decodes `project.json`, reads `fingerprints.json` (missing OK), returns the document + the parsed index for the caller to verify on-disk asset state.
-- [x] **T3.2** Add `ProjectBundle.write(_:to:bundledMedia:fingerprintCache:)`: creates the bundle directory, copies bundled media into `assets/<id>.<ext>` skipping copies that already match the stored fingerprint, writes `fingerprints.json`, writes `project.json` atomically. Returns the updated fingerprint index.
+- [x] **T3.2** Add `ProjectBundle.write(_:to:bundledMedia:previousFingerprints:)`: creates the bundle directory, copies bundled media into `assets/<id>.<ext>` skipping copies that already match the stored fingerprint, writes `fingerprints.json`, writes `project.json` atomically. Returns the updated fingerprint index.
 
 ## Document lifecycle
 
