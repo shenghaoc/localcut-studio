@@ -1,6 +1,6 @@
 # Tasks: Phase 32a — GPU Skin Smoothing (no ML)
 
-> Status: **Implemented** (T3.1 snapshot tests deferred). Depends on `feature-colour-grading` and the keyframe system.
+> Status: **Implemented** (T3.1 snapshot tests and keyframe authoring UI deferred). Depends on `feature-colour-grading` and the keyframe system.
 
 ## Engine
 
@@ -8,7 +8,7 @@
 - [x] **T1.2** Document choice in `design.md` — Gaussian blur proxy, not true guided filter.
 - [x] **T1.3** Implement skin-probability mask kernel (chroma + luminance) with two tunable parameters.
 - [x] **T1.4** Implement smoothing kernel (Gaussian blur + mask blend); `clampedToExtent()` to prevent edge bleeding.
-- [x] **T1.5** `SkinSmoothEffect` value type conforming to the `Effect` protocol; codable + keyframable strength.
+- [x] **T1.5** `SkinSmoothEffect` value type conforming to the `Effect` protocol; codable + keyframable strength in the model/compositor. Inspector keyframe authoring UI is deferred.
 
 ## UI
 

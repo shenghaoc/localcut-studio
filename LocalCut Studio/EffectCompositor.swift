@@ -455,7 +455,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     // MARK: - Skin smoothing
 
-    /// Applies skin smoothing using a chroma-based skin-tone mask and guided filter.
+    /// Applies skin smoothing using a chroma-based skin-tone mask and masked Gaussian blur proxy.
     nonisolated private func applySkinSmooth(_ image: CIImage, params: SkinSmoothEffect, at time: CMTime) -> CIImage? {
         guard !params.bypass else { return nil }
 
@@ -467,8 +467,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             return nil
         }
 
-        // Step 2: Apply guided filter smoothing
-        guard let smoothed = guidedFilterSmooth(image: image, mask: mask, strength: strength) else {
+        // Step 2: Apply masked Gaussian blur smoothing
+        guard let smoothed = maskedGaussianBlurSmooth(image: image, mask: mask, strength: strength) else {
             return nil
         }
 
@@ -483,12 +483,12 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         return kernel.apply(extent: image.extent, arguments: [image, bias, gate])
     }
 
-    /// Applies edge-preserving smoothing to the masked region.
+    /// Applies the masked Gaussian blur proxy to the selected skin region.
     ///
-    /// Uses a two-pass approach to approximate a guided filter:
-    /// 1. Compute local mean via box blur (clamped to extent to prevent edge bleeding)
+    /// Uses a two-pass approach:
+    /// 1. Blur the image with clamped extent to prevent frame-edge bleeding
     /// 2. Blend original and smoothed based on mask and strength
-    nonisolated private func guidedFilterSmooth(image: CIImage, mask: CIImage, strength: Float) -> CIImage? {
+    nonisolated private func maskedGaussianBlurSmooth(image: CIImage, mask: CIImage, strength: Float) -> CIImage? {
         // Clamp to extent before blurring to prevent transparent edge bleeding
         let clamped = image.clampedToExtent()
 
