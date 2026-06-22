@@ -95,7 +95,18 @@ final class EditorModel {
     @ObservationIgnored var mutationRevision = 0
 
     /// Security-scoped resources retained for the session, stopped on teardown.
+    /// Holds **per-file** bookmark-resolved URLs only — never the outer
+    /// `.lcbundle` directory URL. The bundle's grant lives on
+    /// `bundleAccessURL` so `reconcileAccessedURLs` (which compares this set
+    /// to `project.mediaItems.map(\.url)`) can't accidentally revoke it on
+    /// undo/redo (the bundle URL is never equal to any media item URL —
+    /// item URLs point at files *inside* the bundle).
     @ObservationIgnored nonisolated(unsafe) var accessedURLs: Set<URL> = []
+
+    /// Security-scoped access on the outer `.lcbundle` directory, when the
+    /// current document is a bundle. Tracked separately from `accessedURLs`
+    /// for the reason in that property's doc. Stopped on session teardown.
+    @ObservationIgnored nonisolated(unsafe) var bundleAccessURL: URL?
 
     /// Bumped on every session swap (New/Open). Async import/relink capture it
     /// and bail if it changes across their awaits, so work started for one
@@ -1005,7 +1016,19 @@ final class EditorModel {
         // pull a source file out from under the in-flight write.
         let exportSources = Set(project.mediaItems.map(\.url))
         let heldSources = exportSources.filter { $0.startAccessingSecurityScopedResource() }
-        defer { for source in heldSources { source.stopAccessingSecurityScopedResource() } }
+        // For bundled projects the per-file start above returns `false` (no
+        // grant needed — the bundle directory is the grant). The export
+        // therefore retains its OWN start on the bundle URL: if the user
+        // opens a different document mid-export, `releaseSession()` stops
+        // the model's `bundleAccessURL`, but this independent ref-count keeps
+        // the kernel grant alive until the export finishes.
+        let heldBundle: URL? = bundleAccessURL.flatMap { url in
+            url.startAccessingSecurityScopedResource() ? url : nil
+        }
+        defer {
+            for source in heldSources { source.stopAccessingSecurityScopedResource() }
+            heldBundle?.stopAccessingSecurityScopedResource()
+        }
         do {
             guard let built = try await CompositionBuilder.build(project: project) else {
                 statusMessage = "Nothing to export."

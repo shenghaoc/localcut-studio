@@ -373,6 +373,30 @@ extension EditorModel {
         audioBus.teardownLive()
         audioBus.teardownOffline()
         lastBundleFingerprints = FingerprintIndex()
+        if let bundleURL = bundleAccessURL {
+            bundleURL.stopAccessingSecurityScopedResource()
+            bundleAccessURL = nil
+        }
+    }
+
+    /// Adopts ownership of a successful `startAccessingSecurityScopedResource()`
+    /// on `bundleURL` for the session. Stored separately from `accessedURLs`
+    /// so `reconcileAccessedURLs` cannot revoke the bundle's grant on undo /
+    /// redo (the per-file `accessedURLs` set is keyed off media item URLs,
+    /// which always point *inside* the bundle, never at the directory itself).
+    func adoptBundleAccess(_ bundleURL: URL, didStart: Bool) {
+        guard didStart else { return }
+        // A previous bundle access on a different URL must be released first.
+        if let existing = bundleAccessURL, existing != bundleURL {
+            existing.stopAccessingSecurityScopedResource()
+        }
+        // If we already hold the SAME URL, balance the redundant start so the
+        // kernel ref-count matches the single stop on teardown.
+        if bundleAccessURL == bundleURL {
+            bundleURL.stopAccessingSecurityScopedResource()
+        } else {
+            bundleAccessURL = bundleURL
+        }
     }
 
     /// Reads and opens either a `.lcstudio` document or a `.lcbundle` package.
@@ -469,10 +493,11 @@ extension EditorModel {
         lastBundleFingerprints = bundleFingerprints
 
         // Hand the bundle's outer security-scoped access into the new session.
-        // `releaseSession()` cleared the previous session's accessedURLs, so
-        // we insert the bundle URL now — it stays alive until the next swap.
+        // Stored on `bundleAccessURL` (not in `accessedURLs`) so undo/redo's
+        // `reconcileAccessedURLs` pass can't revoke it — that function only
+        // touches the per-file set, which never contains the bundle root.
         if let bundleURL, bundleAccessDidStart {
-            retainAccess(bundleURL, didStart: true)
+            adoptBundleAccess(bundleURL, didStart: true)
         }
 
         project.name = url?.deletingPathExtension().lastPathComponent ?? document.name
@@ -561,6 +586,12 @@ extension EditorModel {
     private func resolveMedia(_ ref: MediaRef, bundleURL: URL?) -> MediaItem? {
         // Bundled asset: the bundle URL grants access; we read off the bundle root.
         if let relative = ref.bundleRelativePath, let bundleURL {
+            // Validate the path BEFORE appending: a corrupt or hostile
+            // `project.json` could store `../escape.mov` and resolve to a URL
+            // outside the bundle. Mirror the write-side guard.
+            guard ProjectBundleLayout.isSafeAssetRelativePath(relative) else {
+                return ref.bookmark.isEmpty ? nil : resolveMediaViaBookmark(ref)
+            }
             let fileURL = bundleURL.appendingPathComponent(relative)
             guard FileManager.default.isReadableFile(atPath: fileURL.path) else {
                 // The asset went missing from the bundle (manual deletion); fall
@@ -689,26 +720,53 @@ extension EditorModel {
             }.value
             lastBundleFingerprints = index
 
-            // Re-point bundled MediaItems to the bundled copy and drop their
-            // bookmark — the bundle URL is the grant. This is idempotent: a
-            // Save to an already-opened bundle finds `item.url` already at the
-            // bundled path; a Save As from a `.lcstudio` (or a different
-            // bundle) repoints to the new location.
-            for item in project.mediaItems {
-                guard let relative = item.bundleRelativePath else { continue }
-                let bundled = bundleURL.appendingPathComponent(relative)
-                if item.url.standardizedFileURL != bundled.standardizedFileURL {
-                    item.repoint(to: bundled)
-                }
-                item.bookmark = nil
-            }
-            retainAccess(bundleURL, didStart: scoped)
+            // Replace bundled MediaItems with new instances pointed at the
+            // bundled copies. Replacing — not mutating — preserves the
+            // pre-save references held by any in-flight undo snapshot, so a
+            // later undo restores the original external URLs / asset.
+            replaceMediaItemsForBundle(at: bundleURL)
+            adoptBundleAccess(bundleURL, didStart: scoped)
             didTransferAccess = scoped
 
             adoptSaved(url: bundleURL, cleanIfRevision: savedRevision)
             statusMessage = "Saved \(bundleURL.lastPathComponent)."
         } catch {
             statusMessage = "Save failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Replaces every bundled `MediaItem` whose `url` is not already the
+    /// bundled path with a NEW `MediaItem` (same id, same metadata, new url +
+    /// fresh `AVURLAsset`) pointing at `bundleURL/<bundleRelativePath>`.
+    ///
+    /// Replacement — rather than in-place mutation of the existing object —
+    /// matters for undo correctness: `ProjectState` captures `media` as an
+    /// array of class references, so mutating an item's URL would silently
+    /// retroactively edit every undo snapshot that holds that reference.
+    /// New objects leave the snapshots' old references untouched.
+    private func replaceMediaItemsForBundle(at bundleURL: URL) {
+        project.mediaItems = project.mediaItems.map { item in
+            guard let relative = item.bundleRelativePath else { return item }
+            let bundled = bundleURL.appendingPathComponent(relative)
+            if item.url.standardizedFileURL == bundled.standardizedFileURL {
+                // Already at the bundled path — just drop the per-file bookmark
+                // (the bundle's outer URL is the grant for everything inside).
+                item.bookmark = nil
+                return item
+            }
+            let replacement = MediaItem(url: bundled, id: item.id)
+            replacement.name = item.name
+            replacement.duration = item.duration
+            replacement.naturalSize = item.naturalSize
+            replacement.preferredTransform = item.preferredTransform
+            replacement.hasVideo = item.hasVideo
+            replacement.hasAudio = item.hasAudio
+            replacement.bundleRelativePath = relative
+            replacement.wantsBundling = item.wantsBundling
+            replacement.thumbnail = item.thumbnail
+            // No bookmark — the bundle grant covers contents.
+            replacement.bookmark = nil
+            return replacement
         }
     }
 
@@ -964,21 +1022,18 @@ extension EditorModel {
             }.value
             lastBundleFingerprints = index
 
-            // Re-point every bundled MediaItem at its newly-written copy in
-            // assets/. Without this, preview/export would keep reading from
-            // the original external file, and moving/deleting that original
-            // would break the project even though the bundle is self-contained.
-            // Bookmarks for bundled items are cleared — the bundle's outer
-            // URL is the grant for everything inside.
-            for item in project.mediaItems {
-                guard let relative = item.bundleRelativePath else { continue }
-                item.repoint(to: bundleURL.appendingPathComponent(relative))
-                item.bookmark = nil
-            }
-            // Retain the bundle URL's access for the rest of the session so
-            // future reads off `assets/` keep working; releaseSession() pairs
-            // the stop on the next document swap.
-            retainAccess(bundleURL, didStart: scoped)
+            // Replace every bundled MediaItem with a fresh instance pointed
+            // at the newly-written copy under assets/. Replacement — rather
+            // than in-place mutation — preserves the pre-Convert references
+            // held by any in-flight undo snapshot, so undoing a prior edit
+            // past the conversion does not silently corrupt the captured
+            // external URLs.
+            replaceMediaItemsForBundle(at: bundleURL)
+            // Retain the bundle URL's access on `bundleAccessURL` (separate
+            // from the per-file `accessedURLs` set) so reads off `assets/`
+            // keep working past this function's return and undo/redo's
+            // `reconcileAccessedURLs` cannot revoke the directory grant.
+            adoptBundleAccess(bundleURL, didStart: scoped)
             didTransferAccess = scoped
 
             adoptSaved(url: bundleURL)

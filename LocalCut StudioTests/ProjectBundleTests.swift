@@ -271,6 +271,110 @@ struct ProjectBundleTests {
                 == bundledItemURL.standardizedFileURL)
     }
 
+    // MARK: - P0 regression: undo/redo must not revoke the bundle's security scope
+
+    @Test("Undo's reconcileAccessedURLs leaves bundleAccessURL alone (Claude P0)")
+    func undoDoesNotRevokeBundleAccess() {
+        let model = EditorModel()
+        // Stand in for the open-bundle path: hand the model a bundle URL on
+        // `bundleAccessURL` (and not in `accessedURLs`). A non-security-scoped
+        // tmp URL is fine here — the test exercises the bookkeeping, not the
+        // kernel grant.
+        let bundleURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("Sample.lcbundle")
+        model.adoptBundleAccess(bundleURL, didStart: true)
+        #expect(model.bundleAccessURL == bundleURL)
+
+        // A media item pointed *inside* the bundle: the per-file URL is what
+        // `reconcileAccessedURLs` compares against, and it never equals the
+        // bundle root, which is the exact condition that caused the original
+        // bug to revoke the bundle grant on undo.
+        let mediaURL = bundleURL.appendingPathComponent("assets/dummy.mov")
+        let media = MediaItem(url: mediaURL)
+        model.project.mediaItems = [media]
+
+        // Drive an undoable mutation, then undo it — applyState calls
+        // `reconcileAccessedURLs` along the way.
+        model.performUndoable("Edit") {
+            model.project.name = "Edited"
+        }
+        model.undo()
+
+        #expect(model.bundleAccessURL == bundleURL)
+        #expect(!model.accessedURLs.contains(bundleURL))
+    }
+
+    @Test("Convert: undo of a pre-Convert edit restores the original media (Claude P1)")
+    func convertUndoRestoresOriginalMedia() async throws {
+        let tmp = try makeTempDirectory("convertundo")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let source = try writeAsset([0xAB, 0xCD], name: "source.bin", in: tmp)
+
+        let model = EditorModel()
+        let media = MediaItem(url: source)
+        media.duration = time(1)
+        media.hasVideo = true
+        model.project.mediaItems.append(media)
+
+        // Capture a pre-Convert undoable edit.
+        model.performUndoable("Pre-convert edit") {
+            model.project.name = "Edited"
+        }
+
+        let bundleURL = tmp.appendingPathComponent("Sample.lcbundle")
+        await model.convertToBundle(to: bundleURL)
+
+        // The live project should now hold a *different* MediaItem instance
+        // pointed at the bundled copy — Convert must replace the item, not
+        // mutate its url/asset, otherwise the snapshot held by the pre-edit
+        // undo entry would be silently corrupted (its `media` array references
+        // the same MediaItem).
+        #expect(model.project.mediaItems.first !== media)
+        #expect(media.url == source)
+
+        // Undo the pre-Convert edit. The captured snapshot restores its
+        // original `[media]` reference — and because we never mutated
+        // `media.url`, it still points at the external source.
+        model.undo()
+        #expect(model.project.mediaItems.count == 1)
+        #expect(model.project.mediaItems.first === media)
+        #expect(model.project.mediaItems.first?.url == source)
+    }
+
+    // MARK: - P1 regression: bundleRelativePath must be validated on read too
+
+    @Test("resolveMedia rejects an unsafe bundleRelativePath from a hostile project.json")
+    func bundleResolveRejectsUnsafePath() async throws {
+        let tmp = try makeTempDirectory("hostileopen")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Hostile.lcbundle")
+        try FileManager.default.createDirectory(at: bundleURL, withIntermediateDirectories: true)
+
+        // A bundle whose project.json claims a bundleRelativePath that escapes
+        // the bundle directory. The MediaRef carries no fallback bookmark, so
+        // the loader must return `nil` for it (treat as unresolved) — never
+        // resolve through the appended path.
+        let document = ProjectDocument(
+            schemaVersion: ProjectDocument.currentSchemaVersion,
+            bundleFormat: ProjectDocument.currentBundleFormat,
+            name: "Hostile",
+            renderWidth: 1920, renderHeight: 1080, frameRate: 30,
+            media: [MediaRef(
+                id: UUID(), displayName: "Escape", bookmark: Data(),
+                duration: CMTimeCode(time(1)),
+                naturalWidth: 1920, naturalHeight: 1080,
+                preferredTransform: TransformCode(.identity),
+                hasVideo: true, hasAudio: false,
+                bundleRelativePath: "../escape.mov")],
+            videoTracks: [], audioTracks: [])
+        try document.encoded().write(to: bundleURL.appendingPathComponent("project.json"))
+
+        let model = EditorModel()
+        await model.open(url: bundleURL)
+        #expect(model.project.mediaItems.isEmpty)
+        #expect(model.unresolvedMedia.count == 1)
+    }
+
     // MARK: - P0 regression: source == destination must not delete the only copy
 
     @Test("Bundle save with source URL equal to bundled destination keeps the file (review P0)")

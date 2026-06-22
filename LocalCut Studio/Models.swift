@@ -140,15 +140,8 @@ extension CGAffineTransform {
 @Observable
 final class MediaItem: Identifiable {
     let id: UUID
-    /// Source URL of the media. Mutable so that `Convert to Bundle…` can
-    /// re-point the item at its bundled copy (`bundleURL/assets/<id>.<ext>`)
-    /// after a successful conversion; otherwise preview/export would keep
-    /// reading the external original and the bundle would not be
-    /// self-contained until the user closes and reopens.
-    private(set) var url: URL
-    /// The asset paired with `url`. Re-created in `repoint(to:)` so an updated
-    /// `url` is actually used by AVFoundation for the next composition rebuild.
-    private(set) var asset: AVURLAsset
+    let url: URL
+    let asset: AVURLAsset
 
     var name: String
     var duration: CMTime = .zero
@@ -184,16 +177,6 @@ final class MediaItem: Identifiable {
         self.url = url
         self.asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         self.name = url.deletingPathExtension().lastPathComponent
-    }
-
-    /// Re-points the item at a new URL. Used after `Convert to Bundle…`
-    /// succeeds, to swap external source URLs over to their bundled copies.
-    /// The cached metadata (`duration`, `naturalSize`, etc.) is unchanged —
-    /// the bundled copy has byte-identical content to the source so the
-    /// values stay valid; only `url` and `asset` need to be refreshed.
-    func repoint(to newURL: URL) {
-        self.url = newURL
-        self.asset = AVURLAsset(url: newURL, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
     }
 
     var durationSeconds: Double { duration.seconds.isFinite ? duration.seconds : 0 }
