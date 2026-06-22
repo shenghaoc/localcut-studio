@@ -17,14 +17,17 @@ extension EditorModel {
         }
     }
 
-    /// File ▸ Open — offers to save first, then presents an open panel.
+    /// File ▸ Open — offers to save first, then presents an open panel that
+    /// accepts both `.lcstudio` (legacy single-file) and `.lcbundle` (package).
     func requestOpen() {
         Task {
             guard await confirmSaveIfNeeded() else { return }
             let panel = NSOpenPanel()
-            panel.allowedContentTypes = [.lcStudioProject]
+            panel.allowedContentTypes = [.lcStudioProjectBundle, .lcStudioProject]
             panel.allowsMultipleSelection = false
-            panel.canChooseDirectories = false
+            // A `.lcbundle` is a directory (UTType.package), so the panel needs
+            // to allow directory selection for the bundle case.
+            panel.canChooseDirectories = true
             panel.canChooseFiles = true
             guard panel.runModal() == .OK, let url = panel.url else { return }
             await open(url: url)
@@ -51,13 +54,34 @@ extension EditorModel {
 
     // MARK: - Panels & prompts
 
-    /// Presents a save panel for a `.lcstudio` document; returns the chosen URL.
+    /// Presents a save panel that defaults to `.lcbundle` (the package format)
+    /// but also accepts `.lcstudio` for the legacy single-file shape. Returns
+    /// the chosen URL.
     func runSavePanel() -> URL? {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.lcStudioProject]
-        panel.nameFieldStringValue = "\(project.name).\(ProjectDocument.fileExtension)"
+        // Bundle first so it's the default content type for new documents.
+        panel.allowedContentTypes = [.lcStudioProjectBundle, .lcStudioProject]
+        panel.nameFieldStringValue = "\(project.name).\(ProjectBundleLayout.fileExtension)"
         panel.canCreateDirectories = true
         return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    /// File ▸ Convert to Bundle… — writes a fresh `.lcbundle` alongside the
+    /// existing `.lcstudio`, leaving the original untouched (R4.2 / R4.3).
+    func requestConvertToBundle() {
+        guard canConvertToBundle else { return }
+        Task {
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [.lcStudioProjectBundle]
+            panel.nameFieldStringValue = "\(project.name).\(ProjectBundleLayout.fileExtension)"
+            // Default the panel to the directory containing the current document.
+            if let docURL = documentURL {
+                panel.directoryURL = docURL.deletingLastPathComponent()
+            }
+            panel.canCreateDirectories = true
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            await convertToBundle(to: url)
+        }
     }
 
     /// If there are unsaved changes, asks whether to save. Returns `true` if the

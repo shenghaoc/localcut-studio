@@ -372,17 +372,51 @@ extension EditorModel {
         coalescedUndoTarget = nil
         audioBus.teardownLive()
         audioBus.teardownOffline()
+        lastBundleFingerprints = FingerprintIndex()
     }
 
-    /// Reads and opens a `.lcstudio` document. The file read happens off the main
-    /// actor; reconstruction (which touches the player/model) happens back on it.
+    /// Reads and opens either a `.lcstudio` document or a `.lcbundle` package.
+    /// The file read happens off the main actor; reconstruction (which touches
+    /// the player/model) happens back on it.
+    ///
+    /// Sandbox note: for a `.lcbundle`, the outer URL's security-scoped access
+    /// is retained for the lifetime of the session — see `load(document:…)`'s
+    /// post-`releaseSession` retain. The bundle's grant covers every file
+    /// inside, and bundled `MediaRef`s do not carry their own bookmarks.
     func open(url: URL) async {
-        let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        // Start access for the bundle directory or single-file document. For
+        // bundles, the access is *not* stopped here — `load(document:…)` moves
+        // ownership of the start into the new session (post-`releaseSession`)
+        // so further reads off `assets/<id>.<ext>` keep working. For
+        // single-file documents the local defer stops it after the JSON read.
+        let initialAccess = url.startAccessingSecurityScopedResource()
+        let isBundle = ProjectBundle.isBundle(url: url)
+        defer {
+            if !isBundle, initialAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
         do {
-            let data = try await Task.detached { try Data(contentsOf: url) }.value
-            let document = try ProjectDocument(data: data)
-            await load(document: document, from: url)
+            if isBundle {
+                let bundleURL = url
+                let raw = try await Task.detached {
+                    try ProjectBundle.readData(url: bundleURL)
+                }.value
+                let contents = try ProjectBundle.decode(raw)
+                let mismatches = ProjectBundle.mismatches(in: url, against: contents.fingerprints)
+                lastBundleFingerprints = contents.fingerprints
+                // Hand the bundle's outer access into the freshly-reset session
+                // via `load`, which retains it after `releaseSession()`.
+                await load(document: contents.document, from: url, bundleURL: url,
+                           bundleAccessDidStart: initialAccess,
+                           externallyEditedAssets: mismatches)
+            } else {
+                let data = try await Task.detached { try Data(contentsOf: url) }.value
+                let document = try ProjectDocument(data: data)
+                lastBundleFingerprints = FingerprintIndex()
+                await load(document: document, from: url, bundleURL: nil,
+                           externallyEditedAssets: [])
+            }
         } catch {
             statusMessage = "Open failed: \(error.localizedDescription)"
         }
@@ -391,8 +425,32 @@ extension EditorModel {
     /// Rebuilds the runtime project from a decoded document, resolving media
     /// bookmarks. Clips whose media can't be resolved are preserved and surfaced
     /// for relinking — never silently dropped (R1.3).
-    func load(document: ProjectDocument, from url: URL?) async {
+    ///
+    /// `bundleURL` is the root of a `.lcbundle` directory when opening a bundle,
+    /// `nil` for legacy `.lcstudio` single-file documents. Bundled `MediaRef`s
+    /// (those with `bundleRelativePath`) resolve directly off the bundle's outer
+    /// URL — see `Sandbox` in the project-bundles design.
+    ///
+    /// `bundleAccessDidStart` carries the result of the caller's
+    /// `startAccessingSecurityScopedResource()` on `bundleURL` so the freshly-
+    /// reset session can take ownership of that start (`releaseSession` clears
+    /// the previous session's accessedURLs first; we re-insert ours after).
+    ///
+    /// `externallyEditedAssets` lists bundle-relative paths whose SHA-256 no
+    /// longer matches the recorded fingerprint; the loader surfaces a status
+    /// note so the user knows their media drifted underneath the project.
+    func load(document: ProjectDocument, from url: URL?,
+              bundleURL: URL? = nil,
+              bundleAccessDidStart: Bool = false,
+              externallyEditedAssets: [String] = []) async {
         releaseSession()
+
+        // Hand the bundle's outer security-scoped access into the new session.
+        // `releaseSession()` cleared the previous session's accessedURLs, so
+        // we insert the bundle URL now — it stays alive until the next swap.
+        if let bundleURL, bundleAccessDidStart {
+            retainAccess(bundleURL, didStart: true)
+        }
 
         project.name = url?.deletingPathExtension().lastPathComponent ?? document.name
         project.renderSize = CGSize(width: document.renderWidth, height: document.renderHeight)
@@ -407,7 +465,7 @@ extension EditorModel {
         var unresolved: [MediaRef] = []
         var refreshedBookmark = false
         for ref in document.media {
-            if let item = resolveMedia(ref) {
+            if let item = resolveMedia(ref, bundleURL: bundleURL) {
                 // resolveMedia regenerates the bookmark when the stored one resolved
                 // stale; flag the document dirty so the fresh bookmark is persisted
                 // on the next save instead of being re-derived on every launch.
@@ -446,6 +504,9 @@ extension EditorModel {
         if isNewerSchema { notes.append("saved in a newer format — saving downconverts to this version") }
         if refreshedBookmark { notes.append("media moved — save to update its location") }
         if !unresolved.isEmpty { notes.append("\(unresolved.count) media file(s) need relinking") }
+        if !externallyEditedAssets.isEmpty {
+            notes.append("\(externallyEditedAssets.count) bundled asset(s) changed externally — re-import or accept on next save")
+        }
         statusMessage = notes.isEmpty
             ? "Opened \(project.name)."
             : "Opened \(project.name) — " + notes.joined(separator: "; ") + "."
@@ -463,10 +524,37 @@ extension EditorModel {
         }
     }
 
-    /// Resolves a media reference's bookmark and reconstructs a `MediaItem` from
-    /// cached metadata (no asset re-decode). Returns `nil` if the file can't be
-    /// reached, so the caller can route it to the relink flow.
-    private func resolveMedia(_ ref: MediaRef) -> MediaItem? {
+    /// Resolves a media reference and reconstructs a `MediaItem` from cached
+    /// metadata (no asset re-decode). Two paths:
+    ///
+    /// - **Bundled** (`ref.bundleRelativePath != nil` and `bundleURL` provided):
+    ///   resolve to `bundleURL/<bundleRelativePath>` directly. The bundle's
+    ///   outer URL is the sandbox grant; no per-file security-scoped bookmark
+    ///   is required.
+    /// - **External** (otherwise): the existing security-scoped bookmark path.
+    ///
+    /// Returns `nil` if the file can't be reached, so the caller can route it
+    /// to the relink flow.
+    private func resolveMedia(_ ref: MediaRef, bundleURL: URL?) -> MediaItem? {
+        // Bundled asset: the bundle URL grants access; we read off the bundle root.
+        if let relative = ref.bundleRelativePath, let bundleURL {
+            let fileURL = bundleURL.appendingPathComponent(relative)
+            guard FileManager.default.isReadableFile(atPath: fileURL.path) else {
+                // The asset went missing from the bundle (manual deletion); fall
+                // through to the bookmark path if one was also recorded.
+                return ref.bookmark.isEmpty ? nil : resolveMediaViaBookmark(ref)
+            }
+            let item = MediaItem(url: fileURL, id: ref.id)
+            populate(item: item, from: ref)
+            item.bundleRelativePath = relative
+            // Bundled media doesn't carry an own bookmark — the bundle is the grant.
+            item.bookmark = nil
+            return item
+        }
+        return resolveMediaViaBookmark(ref)
+    }
+
+    private func resolveMediaViaBookmark(_ ref: MediaRef) -> MediaItem? {
         guard !ref.bookmark.isEmpty else { return nil }
         var isStale = false
         guard let url = try? URL(resolvingBookmarkData: ref.bookmark,
@@ -478,16 +566,20 @@ extension EditorModel {
         retainAccess(url, didStart: access)
 
         let item = MediaItem(url: url, id: ref.id)
+        populate(item: item, from: ref)
+        item.bookmark = isStale
+            ? (try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil))
+            : ref.bookmark
+        return item
+    }
+
+    private func populate(item: MediaItem, from ref: MediaRef) {
         item.name = ref.displayName
         item.duration = ref.duration.cmTime.sanitized
         item.naturalSize = CGSize(width: ref.naturalWidth, height: ref.naturalHeight).sanitized
         item.preferredTransform = ref.preferredTransform.cgTransform.sanitized
         item.hasVideo = ref.hasVideo
         item.hasAudio = ref.hasAudio
-        item.bookmark = isStale
-            ? (try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil))
-            : ref.bookmark
-        return item
     }
 
     // MARK: Save
@@ -505,6 +597,14 @@ extension EditorModel {
     }
 
     private func write(to url: URL) async {
+        if url.pathExtension == ProjectBundleLayout.fileExtension {
+            await writeBundle(to: url)
+        } else {
+            await writeSingleFile(to: url)
+        }
+    }
+
+    private func writeSingleFile(to url: URL) async {
         // The destination may be a security-scoped URL (panel/bookmark); access
         // must be held for the duration of the write under the sandbox.
         let scoped = url.startAccessingSecurityScopedResource()
@@ -514,11 +614,51 @@ extension EditorModel {
             // editing during the off-main write, those edits aren't in `data`,
             // so we must not mark the document clean.
             let savedRevision = mutationRevision
-            let data = try encodedDocument()
+            let data = try encodedDocument(forBundle: false)
             // Atomic write so a failure never corrupts the previous file (R4.1).
             try await Task.detached { try data.write(to: url, options: .atomic) }.value
             adoptSaved(url: url, cleanIfRevision: savedRevision)
             statusMessage = "Saved \(url.lastPathComponent)."
+        } catch {
+            statusMessage = "Save failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Writes the project to a `.lcbundle` directory: copies bundled media into
+    /// `assets/`, fingerprints them, then writes `project.json`. The skip-recopy
+    /// fast path checks every source's current SHA-256 against the previously-
+    /// stored fingerprint, so repeat saves don't re-touch media that hasn't
+    /// changed (R3.2).
+    private func writeBundle(to bundleURL: URL) async {
+        let scoped = bundleURL.startAccessingSecurityScopedResource()
+        defer { if scoped { bundleURL.stopAccessingSecurityScopedResource() } }
+        do {
+            let savedRevision = mutationRevision
+            // Decide which media are *bundled* (default for everything currently
+            // resolved on disk) vs *external-only* (kept via bookmark). The
+            // current heuristic: any resolved MediaItem is bundled. The
+            // "Don't copy" import path will set `bundleRelativePath = nil`
+            // explicitly on the item to opt out.
+            let bundledMedia: [ProjectBundle.BundledMedia] = project.mediaItems.compactMap { item in
+                let relative = bundleRelativePath(for: item)
+                guard let relative else { return nil }
+                item.bundleRelativePath = relative
+                return ProjectBundle.BundledMedia(
+                    mediaID: item.id,
+                    sourceURL: item.url,
+                    bundleRelativePath: relative)
+            }
+            let projectJSON = try encodedDocument(forBundle: true)
+            let previous = lastBundleFingerprints
+            let bundleURLCopy = bundleURL
+            let index = try await Task.detached {
+                try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
+                                        bundledMedia: bundledMedia,
+                                        previousFingerprints: previous)
+            }.value
+            lastBundleFingerprints = index
+            adoptSaved(url: bundleURL, cleanIfRevision: savedRevision)
+            statusMessage = "Saved \(bundleURL.lastPathComponent)."
         } catch {
             statusMessage = "Save failed: \(error.localizedDescription)"
         }
@@ -531,8 +671,25 @@ extension EditorModel {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
-            let data = try encodedDocument()
-            try data.write(to: url, options: .atomic)
+            if url.pathExtension == ProjectBundleLayout.fileExtension {
+                let bundledMedia: [ProjectBundle.BundledMedia] = project.mediaItems.compactMap { item in
+                    guard let relative = bundleRelativePath(for: item) else { return nil }
+                    item.bundleRelativePath = relative
+                    return ProjectBundle.BundledMedia(
+                        mediaID: item.id,
+                        sourceURL: item.url,
+                        bundleRelativePath: relative)
+                }
+                let projectJSON = try encodedDocument(forBundle: true)
+                let index = try ProjectBundle.write(projectJSON: projectJSON,
+                                                    to: url,
+                                                    bundledMedia: bundledMedia,
+                                                    previousFingerprints: lastBundleFingerprints)
+                lastBundleFingerprints = index
+            } else {
+                let data = try encodedDocument(forBundle: false)
+                try data.write(to: url, options: .atomic)
+            }
             adoptSaved(url: url)
             statusMessage = "Saved \(url.lastPathComponent)."
             return true
@@ -542,18 +699,47 @@ extension EditorModel {
         }
     }
 
-    private func encodedDocument() throws -> Data {
-        try makeDocumentForSave().encoded()
+    private func encodedDocument(forBundle: Bool) throws -> Data {
+        try makeDocumentForSave(forBundle: forBundle).encoded()
     }
 
     /// Builds the document to persist. Unresolved media refs are carried through
     /// so saving before relinking never drops the references (and metadata) that
     /// still-missing media — and the clips that point at it — depend on.
-    func makeDocumentForSave() -> ProjectDocument {
-        ensureBookmarks()
+    ///
+    /// `forBundle == true` writes `schemaVersion = 3` + `bundleFormat = "1"`;
+    /// otherwise the single-file `schemaVersion = 2` is preserved so older
+    /// builds keep opening freshly-written `.lcstudio` documents.
+    func makeDocumentForSave(forBundle: Bool = false) -> ProjectDocument {
+        ensureBookmarks(forBundle: forBundle)
         var document = ProjectDocument(project: project)
+        document.schemaVersion = forBundle
+            ? ProjectDocument.currentSchemaVersion
+            : ProjectDocument.singleFileSchemaVersion
+        document.bundleFormat = forBundle ? ProjectDocument.currentBundleFormat : nil
+        if !forBundle {
+            // Single-file save: drop any bundle-relative paths that were set
+            // for the previous bundle save (a Save As back to .lcstudio should
+            // not leak bundle-internal paths into the JSON).
+            document.media = document.media.map { ref in
+                var copy = ref
+                copy.bundleRelativePath = nil
+                return copy
+            }
+        }
         document.media.append(contentsOf: unresolvedMedia)
         return document
+    }
+
+    /// Bundle-relative path for `item` if it should be copied into the bundle.
+    /// Returns `nil` for items the user has explicitly opted out of bundling
+    /// (their `bundleRelativePath` is left `nil` by the import path).
+    private func bundleRelativePath(for item: MediaItem) -> String? {
+        // When the item already carries an explicit choice (set by a future
+        // "Don't copy" import option), respect it. Otherwise default to bundling.
+        if let existing = item.bundleRelativePath { return existing }
+        let ext = item.url.pathExtension
+        return ProjectBundleLayout.assetRelativePath(mediaID: item.id, sourceExtension: ext)
     }
 
     /// Adopts a saved URL. Only clears the dirty flag when no edit has landed
@@ -566,8 +752,15 @@ extension EditorModel {
     }
 
     /// Ensures every media item carries a security-scoped bookmark before saving.
-    private func ensureBookmarks() {
+    ///
+    /// On the bundle save path, media that the user has chosen to include in the
+    /// bundle does not need a bookmark — the bundle's outer URL is the sandbox
+    /// grant. We still record bookmarks for any item that will end up as an
+    /// external-only ref (`bundleRelativePath == nil`), and unconditionally for
+    /// the single-file save path.
+    private func ensureBookmarks(forBundle: Bool = false) {
         for item in project.mediaItems where item.bookmark == nil {
+            if forBundle && item.bundleRelativePath != nil { continue }
             item.bookmark = try? item.url.bookmarkData(options: .withSecurityScope,
                                                        includingResourceValuesForKeys: nil,
                                                        relativeTo: nil)
@@ -654,6 +847,58 @@ extension EditorModel {
             url.stopAccessingSecurityScopedResource()
         } else {
             accessedURLs.insert(url)
+        }
+    }
+
+    // MARK: Bundle conversion
+
+    /// Whether the current document can be converted to a bundle. True when the
+    /// document is a saved single-file `.lcstudio` (a fresh unsaved doc goes
+    /// straight to the bundle via Save As; an already-bundled doc has nothing
+    /// to convert).
+    var canConvertToBundle: Bool {
+        guard let url = documentURL else { return false }
+        return url.pathExtension == ProjectDocument.fileExtension
+    }
+
+    /// Converts the current single-file project into a `.lcbundle` package at
+    /// `bundleURL`. Copies every resolved media item into `assets/`, fingerprints
+    /// them, and writes `project.json`. The **original `.lcstudio` file is left
+    /// untouched** — the user verifies the bundle, then deletes the old file
+    /// manually if they choose (R4.2). Adopts the new bundle URL as the current
+    /// document URL; further saves go into the bundle.
+    ///
+    /// Undo history is preserved (R4.3) — Convert does not call `releaseSession`
+    /// or `undoManager.removeAllActions()`, so every edit made before the
+    /// conversion is still undoable afterwards.
+    func convertToBundle(to bundleURL: URL) async {
+        let scoped = bundleURL.startAccessingSecurityScopedResource()
+        defer { if scoped { bundleURL.stopAccessingSecurityScopedResource() } }
+        do {
+            // Stamp a bundle-relative path onto every currently-resolved media
+            // item so the document JSON we produce already references the
+            // bundled copies (the ones we're about to write).
+            let bundledMedia: [ProjectBundle.BundledMedia] = project.mediaItems.compactMap { item in
+                let ext = item.url.pathExtension
+                let relative = ProjectBundleLayout.assetRelativePath(
+                    mediaID: item.id, sourceExtension: ext)
+                item.bundleRelativePath = relative
+                return ProjectBundle.BundledMedia(
+                    mediaID: item.id, sourceURL: item.url, bundleRelativePath: relative)
+            }
+            let projectJSON = try encodedDocument(forBundle: true)
+            let bundleURLCopy = bundleURL
+            let previous = lastBundleFingerprints
+            let index = try await Task.detached {
+                try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
+                                        bundledMedia: bundledMedia,
+                                        previousFingerprints: previous)
+            }.value
+            lastBundleFingerprints = index
+            adoptSaved(url: bundleURL)
+            statusMessage = "Converted to bundle — original .lcstudio left in place."
+        } catch {
+            statusMessage = "Convert failed: \(error.localizedDescription)"
         }
     }
 }

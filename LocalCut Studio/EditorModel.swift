@@ -71,6 +71,10 @@ final class EditorModel {
     var isDirty = false
     /// Media references whose files couldn't be resolved on open; awaiting relink.
     var unresolvedMedia: [MediaRef] = []
+    /// SHA-256 of every bundled asset as of the last successful bundle read or
+    /// write. Used by the next bundle save's fast path to skip re-copying media
+    /// whose source hasn't changed since the previous save.
+    @ObservationIgnored var lastBundleFingerprints = FingerprintIndex()
 
     // MARK: Undo state
     @ObservationIgnored let undoManager = UndoManager()

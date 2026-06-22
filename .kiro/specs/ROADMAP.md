@@ -64,10 +64,10 @@ These currently-proposed feature specs are **prerequisites** for many of the pha
 | [feature-render-cache](./feature-render-cache/) | Post-effect-chain `CIImage` cache keyed on (clip id, effect chain hash, time, render size) under Caches/ | 35, 37 |
 | [feature-capability-tiers](./feature-capability-tiers/) | Chip / memory / encoder probe → `baseline` / `accelerated` / `pro` verdicts | 37, 41, 45 |
 | [feature-audio-master-bus](./feature-audio-master-bus/) | `AVAudioEngine` master bus (live + offline graphs), per-clip envelopes, meters | 35, 36, 46 |
+| [feature-project-bundles](./feature-project-bundles/) | `.lcbundle` directory format with `project.json` + `assets/` + fingerprints | 30, 34, 38, 48 |
 
 The following infrastructure was implied by browser phases referenced in the prompts (P10 markers, P14 GPU title raster, P15 keyframes, P16 audio buses, P17/24 export expansion, P19 proxy/render cache, P21 colour management, P22 caption tracks, P25 diagnostics, P26 capability tiers). P10 / P14 / P15 / P16 / P19 / P21 / P22 / P25 / P26 are now specced above. The rest are **not yet specced** for the native port and each spec calls out the ones it needs in its design `Prerequisites` section. Spec them as they become blocking; do not pre-spec speculatively.
 | Export presets / render queue (P17/P24) | Preset + queue model on top of `AVAssetExportSession` / `AVAssetWriter` | 39 |
-| Project bundles (P23) | Bundle directory format with `project.json` + `assets/` + fingerprints | 30, 34, 38, 48 |
 
 ## Why "Core AI on macOS 27" replaces the browser ML runtime
 

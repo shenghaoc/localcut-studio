@@ -57,17 +57,31 @@ struct TransformCode: Codable, Equatable {
 /// values plus security-scoped bookmarks instead of live `AVURLAsset`s, and a
 /// `schemaVersion` for forward-compatible decoding (R4.2).
 struct ProjectDocument: Codable, Equatable {
-    /// Bumped when the on-disk schema changes incompatibly. v3 adds
-    /// `workingColourSpace`, `markers`, and the audio master bus (`audioBus` +
-    /// per-clip `volumeEnvelope`). v2 added `captionTracks`. A v2 build that
-    /// opens a v3 file would silently strip those fields on the next save,
-    /// so the version guard in `EditorModel.load(document:from:)` keeps older
-    /// builds from overwriting.
+    /// Bumped when the on-disk schema changes incompatibly.
+    /// - v2 added `captionTracks` (PR #10).
+    /// - v3 adds `workingColourSpace`, `markers`, the audio master bus (`audioBus` +
+    ///   per-clip `volumeEnvelope`), and optional `bundleFormat` +
+    ///   `MediaRef.bundleRelativePath` for the `.lcbundle` package format.
+    ///   `bundleFormat` and `bundleRelativePath` are optional so a v2 single-file
+    ///   reader can still open a v3 bundle's `project.json` — only the bundle
+    ///   layout itself is gated on v3.
+    /// The single-file `.lcstudio` save path keeps writing v2 to stay readable
+    /// by older builds; the bundle save path writes v3.
     static let currentSchemaVersion = 3
-    /// File extension for project documents.
+    /// Schema version used by the single-file (`.lcstudio`) writer. Held at v2
+    /// so a build that predates bundles can still open a freshly-written file.
+    static let singleFileSchemaVersion = 2
+    /// `bundleFormat` value written on the bundle save path. Versioned separately
+    /// from `schemaVersion` so the bundle layout can evolve without re-rev'ing
+    /// the document JSON itself.
+    static let currentBundleFormat = "1"
+    /// File extension for single-file project documents.
     static let fileExtension = "lcstudio"
 
     var schemaVersion: Int
+    /// `"1"` when written into a `.lcbundle`; `nil` for legacy single-file
+    /// documents. Optional so a v2 reader opens a v3 bundle's `project.json`.
+    var bundleFormat: String?
     var name: String
     var renderWidth: Double
     var renderHeight: Double
@@ -82,6 +96,7 @@ struct ProjectDocument: Codable, Equatable {
     var audioBus: AudioBusDoc
 
     init(schemaVersion: Int = ProjectDocument.currentSchemaVersion,
+         bundleFormat: String? = nil,
          name: String,
          renderWidth: Double,
          renderHeight: Double,
@@ -94,6 +109,7 @@ struct ProjectDocument: Codable, Equatable {
          markers: [TimelineMarker] = [],
          audioBus: AudioBusDoc = AudioBusDoc()) {
         self.schemaVersion = schemaVersion
+        self.bundleFormat = bundleFormat
         self.name = name
         self.renderWidth = renderWidth
         self.renderHeight = renderHeight
@@ -108,8 +124,9 @@ struct ProjectDocument: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, name, renderWidth, renderHeight, frameRate, workingColourSpace,
-             media, videoTracks, audioTracks, captionTracks, markers, audioBus
+        case schemaVersion, bundleFormat, name, renderWidth, renderHeight, frameRate,
+             workingColourSpace, media, videoTracks, audioTracks, captionTracks,
+             markers, audioBus
     }
 
     // Lenient decoding: missing fields fall back to defaults and unknown keys are
@@ -117,6 +134,7 @@ struct ProjectDocument: Codable, Equatable {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? ProjectDocument.currentSchemaVersion
+        bundleFormat = try c.decodeIfPresent(String.self, forKey: .bundleFormat)
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Untitled"
         renderWidth = try c.decodeIfPresent(Double.self, forKey: .renderWidth) ?? 1920
         renderHeight = try c.decodeIfPresent(Double.self, forKey: .renderHeight) ?? 1080
@@ -195,6 +213,20 @@ extension TrackInputDoc {
     var trackInput: TrackInput {
         TrackInput(id: trackID, pan: pan, gain: gain)
     }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encodeIfPresent(bundleFormat, forKey: .bundleFormat)
+        try c.encode(name, forKey: .name)
+        try c.encode(renderWidth, forKey: .renderWidth)
+        try c.encode(renderHeight, forKey: .renderHeight)
+        try c.encode(frameRate, forKey: .frameRate)
+        try c.encode(media, forKey: .media)
+        try c.encode(videoTracks, forKey: .videoTracks)
+        try c.encode(audioTracks, forKey: .audioTracks)
+        try c.encode(captionTracks, forKey: .captionTracks)
+    }
 }
 
 // MARK: - Caption track persistence
@@ -232,6 +264,13 @@ struct CaptionTrackDoc: Codable, Equatable {
 
 /// A referenced source media file: a security-scoped bookmark plus the metadata
 /// needed to reconstruct a `MediaItem` without re-decoding the asset.
+///
+/// In the `.lcbundle` format a `MediaRef` may additionally carry a
+/// `bundleRelativePath` pointing at `assets/<id>.<ext>` inside the bundle. When
+/// present, the loader resolves the asset off the bundle root directly — the
+/// bundle's outer URL is the sandbox grant, so no per-file security-scoped
+/// bookmark is needed for the copy. External-only refs (bundleRelativePath ==
+/// nil) keep going through the bookmark path exactly as before.
 struct MediaRef: Codable, Equatable {
     var id: UUID
     var displayName: String
@@ -242,6 +281,66 @@ struct MediaRef: Codable, Equatable {
     var preferredTransform: TransformCode
     var hasVideo: Bool
     var hasAudio: Bool
+    /// `assets/<id>.<ext>` for media copied into the bundle. `nil` for legacy
+    /// single-file documents and for external-only refs ("Don't copy" at import).
+    var bundleRelativePath: String?
+
+    init(id: UUID,
+         displayName: String,
+         bookmark: Data,
+         duration: CMTimeCode,
+         naturalWidth: Double,
+         naturalHeight: Double,
+         preferredTransform: TransformCode,
+         hasVideo: Bool,
+         hasAudio: Bool,
+         bundleRelativePath: String? = nil) {
+        self.id = id
+        self.displayName = displayName
+        self.bookmark = bookmark
+        self.duration = duration
+        self.naturalWidth = naturalWidth
+        self.naturalHeight = naturalHeight
+        self.preferredTransform = preferredTransform
+        self.hasVideo = hasVideo
+        self.hasAudio = hasAudio
+        self.bundleRelativePath = bundleRelativePath
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, displayName, bookmark, duration, naturalWidth, naturalHeight,
+             preferredTransform, hasVideo, hasAudio, bundleRelativePath
+    }
+
+    // Custom decoder so the new optional `bundleRelativePath` decodes leniently
+    // (a v2 single-file document simply omits it).
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        displayName = try c.decode(String.self, forKey: .displayName)
+        bookmark = try c.decodeIfPresent(Data.self, forKey: .bookmark) ?? Data()
+        duration = try c.decode(CMTimeCode.self, forKey: .duration)
+        naturalWidth = try c.decode(Double.self, forKey: .naturalWidth)
+        naturalHeight = try c.decode(Double.self, forKey: .naturalHeight)
+        preferredTransform = try c.decode(TransformCode.self, forKey: .preferredTransform)
+        hasVideo = try c.decodeIfPresent(Bool.self, forKey: .hasVideo) ?? false
+        hasAudio = try c.decodeIfPresent(Bool.self, forKey: .hasAudio) ?? false
+        bundleRelativePath = try c.decodeIfPresent(String.self, forKey: .bundleRelativePath)
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(displayName, forKey: .displayName)
+        try c.encode(bookmark, forKey: .bookmark)
+        try c.encode(duration, forKey: .duration)
+        try c.encode(naturalWidth, forKey: .naturalWidth)
+        try c.encode(naturalHeight, forKey: .naturalHeight)
+        try c.encode(preferredTransform, forKey: .preferredTransform)
+        try c.encode(hasVideo, forKey: .hasVideo)
+        try c.encode(hasAudio, forKey: .hasAudio)
+        try c.encodeIfPresent(bundleRelativePath, forKey: .bundleRelativePath)
+    }
 }
 
 /// Codable lane of clips.
@@ -385,7 +484,8 @@ extension MediaRef {
             naturalHeight: Double(item.naturalSize.height),
             preferredTransform: TransformCode(item.preferredTransform),
             hasVideo: item.hasVideo,
-            hasAudio: item.hasAudio)
+            hasAudio: item.hasAudio,
+            bundleRelativePath: item.bundleRelativePath)
     }
 }
 

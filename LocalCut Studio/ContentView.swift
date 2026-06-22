@@ -54,6 +54,9 @@ struct DocumentCommands: Commands {
                 .keyboardShortcut("s", modifiers: .command)
             Button("Save As…") { model.requestSaveAs() }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+            Divider()
+            Button("Convert to Bundle…") { model.requestConvertToBundle() }
+                .disabled(!model.canConvertToBundle)
         }
         CommandGroup(replacing: .undoRedo) {
             Button(model.undoTitle) { model.undo() }
