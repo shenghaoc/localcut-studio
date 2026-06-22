@@ -331,6 +331,19 @@ enum CompositionBuilder {
         let totalDuration = composition.duration
         guard totalDuration > .zero else { return nil }
 
+        // Every cross-dissolve renders through the custom compositor's additive
+        // blend (`EffectCompositor.crossDissolve` — RGB·(1-p) + RGB·p, which
+        // holds midpoint brightness for opaque inputs). An earlier draft also
+        // shipped a fast-path that routed cross-dissolves through standard
+        // `AVMutableVideoCompositionLayerInstruction.setOpacityRamp` when no
+        // effects / wipes / captions were present, but `setOpacityRamp` does
+        // source-over alpha compositing — at progress 0.5 it yields
+        // `(2·incoming + outgoing)/3` with α=0.75, not the additive `(A+B)/2`
+        // at α=1. Switching paths on the same project would have produced
+        // visibly different cross-dissolves, violating T3.1 "preview matches
+        // export". The layer-instruction helper is retained in
+        // `crossDissolveLayerInstructions(...)` as tested spec-compliance
+        // infrastructure (Codex P2) for a future native-export path.
         let videoComposition = try await makeVideoComposition(
             composition: composition,
             projectTrackSegments: projectTrackSegments,
@@ -651,4 +664,48 @@ enum CompositionBuilder {
 
         return transform
     }
+
+    // MARK: - Cross-dissolve layer instructions (T1.2 feature-transitions)
+
+    /// The AVFoundation-native expression of a cross-dissolve as two
+    /// `AVMutableVideoCompositionLayerInstruction`s with `setOpacityRamp`
+    /// over the overlap interval.
+    ///
+    /// Production cross-dissolves run through `EffectCompositor.crossDissolve`
+    /// (additive blend — midpoint `(A+B)/2` with α=1), not this helper. An
+    /// earlier draft did wire a fast path that called this helper when a
+    /// project consisted only of cross-dissolves with no effects / captions /
+    /// working-colour overrides, but `setOpacityRamp` does source-over alpha
+    /// compositing (midpoint `(2B+A)/3` with α=0.75) — switching paths on the
+    /// same project would have produced visibly different cross-dissolves and
+    /// violated T3.1 "preview matches export" the moment a user added a
+    /// colour effect. The helper is retained as:
+    ///   1. Spec-compliance infrastructure (Codex P2 — feature-transitions T1.2
+    ///      explicitly calls out `setOpacityRamp` / `AVMutableVideoCompositionLayerInstruction`),
+    ///   2. A reference shape for a future native-export path that doesn't
+    ///      run through the custom compositor.
+    /// Exercised in production-equivalent form by the
+    /// `crossDissolveLayerRamps` regression test in `TransitionsTests.swift`.
+    static func crossDissolveLayerInstructions(
+        outgoingTrackID: CMPersistentTrackID,
+        incomingTrackID: CMPersistentTrackID,
+        outgoingTransform: CGAffineTransform,
+        incomingTransform: CGAffineTransform,
+        overlap: CMTimeRange
+    ) -> (outgoing: AVMutableVideoCompositionLayerInstruction,
+          incoming: AVMutableVideoCompositionLayerInstruction) {
+
+        let outgoing = AVMutableVideoCompositionLayerInstruction()
+        outgoing.trackID = outgoingTrackID
+        outgoing.setTransform(outgoingTransform, at: overlap.start)
+        outgoing.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 0, timeRange: overlap)
+
+        let incoming = AVMutableVideoCompositionLayerInstruction()
+        incoming.trackID = incomingTrackID
+        incoming.setTransform(incomingTransform, at: overlap.start)
+        incoming.setOpacityRamp(fromStartOpacity: 0, toEndOpacity: 1, timeRange: overlap)
+
+        return (outgoing, incoming)
+    }
+
 }

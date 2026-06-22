@@ -466,10 +466,13 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     // MARK: - Effect chain
 
-    nonisolated private func applyEffectChain(_ image: CIImage,
-                                              effects: [Effect],
-                                              cacheKey: RenderCacheKey?,
-                                              at time: CMTime = .zero) -> CIImage {
+    // `internal` (not `private`) so the test target can verify the identity
+    // pass-through invariant — an empty effect chain must return the input
+    // image byte-for-byte (R5.1 from feature-colour-grading / EffectsTests).
+    nonisolated func applyEffectChain(_ image: CIImage,
+                                      effects: [Effect],
+                                      cacheKey: RenderCacheKey?,
+                                      at time: CMTime = .zero) -> CIImage {
         if effects.isEmpty { return image }
         if let cacheKey, let cached = RenderCache.shared.image(for: cacheKey) {
             return cached

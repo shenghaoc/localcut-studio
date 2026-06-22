@@ -453,13 +453,23 @@ final class EditorModel {
         }
     }
 
-    /// Removes all colour effects from the selected clip.
+    /// Removes only the *colour* effects (`colourGrade` + `lut`) from the
+    /// selected clip. An earlier version called `effects.removeAll()`
+    /// unconditionally, which silently wiped non-colour effects like
+    /// `skinSmooth` when the user clicked Reset on the Colour section —
+    /// surprising data loss. Mirrors the per-effect filter used in
+    /// `resetClipSkinSmooth()`.
     func resetClipColourEffects() {
         guard let id = selectedClipID else { return }
         performUndoable("Reset Colour") {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-                track.clips[index].effects.removeAll()
+                track.clips[index].effects.removeAll { effect in
+                    switch effect {
+                    case .colourGrade, .lut: true
+                    case .skinSmooth: false
+                    }
+                }
                 RenderCache.shared.invalidate(clipID: id)
                 scheduleRebuild()
                 return
@@ -636,11 +646,28 @@ final class EditorModel {
     /// Whether a transition can be added at the current clip selection: a video
     /// clip that follows an adjacent clip and does not already have one.
     var canAddTransitionAtSelection: Bool {
-        guard let id = selectedClipID,
-              let context = adjacentPredecessor(of: id),
+        guard let id = selectedClipID else { return false }
+        return canAddTransition(toClipID: id)
+    }
+
+    /// Per-clip transition eligibility check, used by the timeline's
+    /// per-clip context menu so the menu item can disable itself when the
+    /// user right-clicks a clip that already has a transition or has no
+    /// predecessor on the same video track.
+    func canAddTransition(toClipID id: Clip.ID) -> Bool {
+        guard let context = adjacentPredecessor(of: id),
               context.track.kind == .video,
               context.clip.transition == nil else { return false }
         return true
+    }
+
+    /// Adds a cross-dissolve at the given clip's incoming cut without going
+    /// through the selection. The timeline's context menu uses this so a
+    /// right-click on a clip can add a transition without first selecting it.
+    func addTransition(toClipID id: Clip.ID) {
+        selectedClipID = id
+        selectedTransitionClipID = nil
+        addTransitionToSelectedClip()
     }
 
     /// The largest overlap available to the selected transition, accounting for

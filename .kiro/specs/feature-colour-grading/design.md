@@ -1,6 +1,6 @@
 # Design: Colour Grading
 
-> Status: **Proposed**.
+> Status: **Implemented**. Shipped in [#2](https://github.com/shenghaoc/localcut-studio/pull/2). See [tasks.md](./tasks.md) for the per-box source citations.
 
 ## Approach
 
