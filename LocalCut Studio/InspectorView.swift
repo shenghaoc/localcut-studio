@@ -209,64 +209,29 @@ struct InspectorView: View {
     @ViewBuilder
     private var beautySection: some View {
         Section("Beauty") {
-            let skinSmooth = model.selectedClipSkinSmooth
-
-            VStack(alignment: .leading) {
-                Text("Strength \(Int(skinSmooth.strength.defaultValue * 100))%")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                Slider(
-                    value: Binding(
-                        get: { Double(model.selectedClipSkinSmooth.strength.defaultValue) },
-                        set: { newValue in
-                            model.updateSelectedClipSkinSmooth { smooth in
-                                smooth.strength.defaultValue = Float(newValue)
-                            }
-                        }),
-                    in: 0...1)
-                .accessibilityLabel("Strength")
-                .accessibilityValue("\(Int(skinSmooth.strength.defaultValue * 100))%")
-            }
+            beautySlider(
+                label: "Strength",
+                value: skinSmoothBinding(\.strength.defaultValue),
+                range: Float(0)...Float(1),
+                display: "\(Int(model.selectedClipSkinSmooth.strength.defaultValue * 100))%"
+            )
 
             DisclosureGroup("Advanced") {
-                VStack(alignment: .leading) {
-                    Text("Mask Warmth \(String(format: "%+.2f", skinSmooth.maskWarmthBias))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                    Slider(
-                        value: Binding(
-                            get: { Double(model.selectedClipSkinSmooth.maskWarmthBias) },
-                            set: { newValue in
-                                model.updateSelectedClipSkinSmooth { smooth in
-                                    smooth.maskWarmthBias = Float(newValue)
-                                }
-                            }),
-                        in: -1...1,
-                        step: 0.05)
-                    .accessibilityLabel("Mask Warmth")
-                    .accessibilityValue(String(format: "%+.2f", skinSmooth.maskWarmthBias))
-                }
+                beautySlider(
+                    label: "Mask Warmth",
+                    value: skinSmoothBinding(\.maskWarmthBias),
+                    range: Float(-1)...Float(1),
+                    step: Float(0.05),
+                    display: String(format: "%+.2f", model.selectedClipSkinSmooth.maskWarmthBias)
+                )
 
-                VStack(alignment: .leading) {
-                    Text("Luminance Gate \(String(format: "%.2f", skinSmooth.maskLuminanceGate))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                    Slider(
-                        value: Binding(
-                            get: { Double(model.selectedClipSkinSmooth.maskLuminanceGate) },
-                            set: { newValue in
-                                model.updateSelectedClipSkinSmooth { smooth in
-                                    smooth.maskLuminanceGate = Float(newValue)
-                                }
-                            }),
-                        in: 0...1,
-                        step: 0.05)
-                    .accessibilityLabel("Luminance Gate")
-                    .accessibilityValue(String(format: "%.2f", skinSmooth.maskLuminanceGate))
-                }
+                beautySlider(
+                    label: "Luminance Gate",
+                    value: skinSmoothBinding(\.maskLuminanceGate),
+                    range: Float(0)...Float(1),
+                    step: Float(0.05),
+                    display: String(format: "%.2f", model.selectedClipSkinSmooth.maskLuminanceGate)
+                )
             }
 
             Toggle("Bypass", isOn: Binding(
@@ -292,6 +257,36 @@ struct InspectorView: View {
                 Spacer()
             }
         }
+    }
+
+    @ViewBuilder
+    private func beautySlider(label: String, value: Binding<Float>, range: ClosedRange<Float>, step: Float? = nil, display: String) -> some View {
+        VStack(alignment: .leading) {
+            Text("\(label) \(display)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            if let step {
+                Slider(value: value, in: range, step: step)
+                    .accessibilityLabel(label)
+                    .accessibilityValue(display)
+            } else {
+                Slider(value: value, in: range)
+                    .accessibilityLabel(label)
+                    .accessibilityValue(display)
+            }
+        }
+    }
+
+    private func skinSmoothBinding(_ keyPath: WritableKeyPath<SkinSmoothEffect, Float>) -> Binding<Float> {
+        Binding(
+            get: { model.selectedClipSkinSmooth[keyPath: keyPath] },
+            set: { newValue in
+                model.updateSelectedClipSkinSmooth { smooth in
+                    smooth[keyPath: keyPath] = newValue
+                }
+            }
+        )
     }
 
     @ViewBuilder
