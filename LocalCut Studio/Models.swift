@@ -65,7 +65,7 @@ enum TrackKind: Hashable {
 // MARK: - Colour Grading
 
 /// Perceptual colour-adjustment parameters with neutral defaults and clamping.
-struct ColourGrade: Hashable, Codable {
+nonisolated struct ColourGrade: Hashable, Codable, Sendable {
     var exposure: Float = 0        // CIExposureAdjust.inputEV, range [-2, 2]
     var contrast: Float = 1        // CIColorControls.inputContrast, range [0.5, 1.5]
     var saturation: Float = 1      // CIColorControls.inputSaturation, range [0, 2]

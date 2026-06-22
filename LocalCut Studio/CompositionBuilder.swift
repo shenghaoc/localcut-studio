@@ -26,6 +26,7 @@ enum CompositionBuilder {
     /// `transitionRange`/`transitionType` are set on the incoming clip of a
     /// transition so the compositor can blend it with its predecessor.
     private struct VideoSegment {
+        let clipID: UUID
         let compTrackID: CMPersistentTrackID
         let timeRange: CMTimeRange
         let transform: CGAffineTransform
@@ -37,7 +38,7 @@ enum CompositionBuilder {
         let clipStartTime: CMTime
 
         var layer: CompositorLayer {
-            CompositorLayer(trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipStartTime: clipStartTime)
+            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipStartTime: clipStartTime)
         }
 
         func contains(_ seconds: Double) -> Bool {
@@ -153,6 +154,7 @@ enum CompositionBuilder {
                     pool[poolIndex].lastEnd = piece.effectiveEnd
 
                     segments.append(VideoSegment(
+                        clipID: clip.id,
                         compTrackID: compTrack.trackID,
                         timeRange: CMTimeRange(start: start, duration: piece.duration),
                         transform: transform,
