@@ -67,12 +67,9 @@ func pixelBufferColourAttachmentsSRGB() {
     }
     EffectCompositor.applyColourAttachments(.sRGB, to: buffer)
 
-    let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil)?
-        .takeRetainedValue() as? String
-    let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil)?
-        .takeRetainedValue() as? String
-    let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil)?
-        .takeRetainedValue() as? String
+    let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
+    let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil) as? String
+    let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
 
     #expect(primaries == kCVImageBufferColorPrimaries_ITU_R_709_2 as String)
     #expect(transfer == kCVImageBufferTransferFunction_sRGB as String)
@@ -86,8 +83,7 @@ func pixelBufferColourAttachmentsDisplayP3() {
         return
     }
     EffectCompositor.applyColourAttachments(.displayP3, to: buffer)
-    let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil)?
-        .takeRetainedValue() as? String
+    let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
     #expect(primaries == kCVImageBufferColorPrimaries_P3_D65 as String)
 }
 
@@ -98,12 +94,9 @@ func pixelBufferColourAttachmentsRec2020() {
         return
     }
     EffectCompositor.applyColourAttachments(.rec2020, to: buffer)
-    let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil)?
-        .takeRetainedValue() as? String
-    let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil)?
-        .takeRetainedValue() as? String
-    let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil)?
-        .takeRetainedValue() as? String
+    let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
+    let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil) as? String
+    let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
     #expect(primaries == kCVImageBufferColorPrimaries_ITU_R_2020 as String)
     #expect(transfer == kCVImageBufferTransferFunction_ITU_R_2020 as String)
     #expect(matrix == kCVImageBufferYCbCrMatrix_ITU_R_2020 as String)
