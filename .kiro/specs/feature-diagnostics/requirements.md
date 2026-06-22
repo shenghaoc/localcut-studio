@@ -5,7 +5,7 @@
 ## R1 — Probes
 
 - **R1.1** A `DiagnosticsAgent` samples once per second on its own timer; no probe runs more often than 1 Hz.
-- **R1.2** CPU utilisation is derived from `task_info(mach_task_self_, ...)` deltas, summing **both** `TASK_THREAD_TIMES_INFO` (live threads) and `MACH_TASK_BASIC_INFO` (terminated threads), and normalised by `ProcessInfo.processInfo.activeProcessorCount` so 1.0 = "every core saturated". Using only one flavor would undercount whichever side the workload happens to land on.
+- **R1.2** CPU utilisation is derived from `proc_pidinfo(getpid(), PROC_PIDTASKINFO, ...)` deltas — `pti_total_user + pti_total_system` covers live and terminated threads in a single libproc call — and normalised by `ProcessInfo.processInfo.activeProcessorCount` so 1.0 = "every core saturated". The two-step Mach path (`TASK_THREAD_TIMES_INFO` + `MACH_TASK_BASIC_INFO`) would also work, but macOS 26 marks `MACH_TASK_BASIC_INFO_COUNT` unavailable, so libproc is the path we ship.
 - **R1.3** GPU utilisation is a best-effort estimate derived from the ratio of mean compositor render time to the project's frame duration, clamped to 0…1. The label discloses "GPU (est.)". The metric resolves to 0 whenever no new frames arrived during the previous tick (player paused, no composition) — the historical ring must not drag the value off zero when the GPU isn't actually doing work.
 - **R1.4** The probe reports the active VideoToolbox decoder count as the number of video tracks in the current `AVMutableComposition` (the path that drives `AVAssetReaderTrackOutput`-equivalent decoder allocation in playback).
 - **R1.5** The agent exposes `lastFrameTime` (most recent compositor render-time sample) and `p95RenderTime` (95th percentile over a rolling 256-sample ring).
