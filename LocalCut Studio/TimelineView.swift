@@ -224,6 +224,7 @@ struct TimelineView: View {
                 .fill(fill)
                 .overlay(MarkerDiamond().stroke(strokeColor, lineWidth: strokeWidth))
                 .frame(width: markerGlyphSize, height: markerGlyphSize)
+                .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
                 .onTapGesture { model.selectMarker(id: marker.id) }
                 .popover(isPresented: Binding(
@@ -655,7 +656,9 @@ private struct MarkerKeyHandler: NSViewRepresentable {
         }
 
         deinit {
-            if let monitor { NSEvent.removeMonitor(monitor) }
+            if let m = monitor {
+                DispatchQueue.main.async { NSEvent.removeMonitor(m) }
+            }
         }
 
         /// Returns whether the event should be consumed (true) or passed
