@@ -302,7 +302,7 @@ enum CompositionBuilder {
                 frameRate: project.frameRate,
                 minimumDuration: chunkSeconds)
             let fillerVideoTracks = try await filler.loadTracks(withMediaType: .video)
-            let fillerAssetDuration = try await filler.load(.duration)
+            let fillerAssetDuration = try await filler.load(.duration).sanitized
             if let fillerVideoSource = fillerVideoTracks.first,
                fillerAssetDuration > .zero,
                let fillerCompTrack = composition.addMutableTrack(

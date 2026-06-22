@@ -46,12 +46,12 @@ nonisolated enum CaptionTailFiller {
                       frameRate: Double,
                       minimumDuration: CMTime) async throws -> AVURLAsset {
         let url = try cacheURL(renderSize: renderSize, frameRate: frameRate)
-        let needed = max(minimumDuration.seconds, 0)
+        let needed = minimumDuration.sanitized.seconds
 
         if FileManager.default.fileExists(atPath: url.path) {
             let cached = AVURLAsset(url: url)
-            let cachedDuration = (try? await cached.load(.duration)) ?? .zero
-            if cachedDuration.seconds + 1e-3 >= needed {
+            let cachedDuration = ((try? await cached.load(.duration)) ?? .zero).sanitized
+            if isCachedDurationUsable(cachedDuration, neededSeconds: needed) {
                 return cached
             }
         }
@@ -110,6 +110,10 @@ nonisolated enum CaptionTailFiller {
     }
 
     // MARK: - Internals
+
+    static func isCachedDurationUsable(_ cachedDuration: CMTime, neededSeconds: Double) -> Bool {
+        cachedDuration > .zero && cachedDuration.seconds + 1e-3 >= neededSeconds
+    }
 
     private static func cacheURL(renderSize: CGSize, frameRate: Double) throws -> URL {
         guard let caches = try? FileManager.default.url(
