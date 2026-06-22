@@ -94,12 +94,21 @@ func pixelBufferColourAttachmentsRec2020() {
         return
     }
     EffectCompositor.applyColourAttachments(.rec2020, to: buffer)
+    // The mapping the compositor wrote, in the same form the OS exposes via
+    // CFString-as-String bridging — so any mismatch in the assertion below
+    // also surfaces in the failure message.
     let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
     let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil) as? String
     let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
-    #expect(primaries == kCVImageBufferColorPrimaries_ITU_R_2020 as String)
-    #expect(transfer == kCVImageBufferTransferFunction_ITU_R_2020 as String)
-    #expect(matrix == kCVImageBufferYCbCrMatrix_ITU_R_2020 as String)
+    let expectedPrimaries = kCVImageBufferColorPrimaries_ITU_R_2020 as String
+    let expectedTransfer = kCVImageBufferTransferFunction_ITU_R_2020 as String
+    let expectedMatrix = kCVImageBufferYCbCrMatrix_ITU_R_2020 as String
+    #expect(primaries == expectedPrimaries,
+            "primaries: got \(primaries ?? "nil"), expected \(expectedPrimaries)")
+    #expect(transfer == expectedTransfer,
+            "transfer: got \(transfer ?? "nil"), expected \(expectedTransfer)")
+    #expect(matrix == expectedMatrix,
+            "matrix: got \(matrix ?? "nil"), expected \(expectedMatrix)")
 }
 
 // MARK: - R6.3 — scope sampler waveform is non-empty for a non-black frame
