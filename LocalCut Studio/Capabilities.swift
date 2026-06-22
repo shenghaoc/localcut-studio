@@ -110,7 +110,7 @@ nonisolated struct Capabilities: Sendable, Hashable {
 
 extension Capabilities {
 
-    static func probe() -> Capabilities {
+    nonisolated static func probe() -> Capabilities {
         let chip = probeChipFamily()
         let memory = sysctlUInt64("hw.memsize") ?? 0
         let encoders = probeHardwareEncoderCount()
@@ -121,7 +121,7 @@ extension Capabilities {
                             osVersion: os)
     }
 
-    private static func probeChipFamily() -> ChipFamily {
+    nonisolated private static func probeChipFamily() -> ChipFamily {
         let isAppleSilicon = sysctlInt("hw.optional.arm64") == 1
         guard isAppleSilicon else { return .intel }
         let board = sysctlString("hw.model") ?? ""
@@ -132,7 +132,7 @@ extension Capabilities {
     /// a handful of board prefixes per generation; the table covers shipping
     /// Macs through M4. New boards land here on each Mac release. Unknown ⇒ 0,
     /// which the resolver treats as baseline.
-    static func appleSiliconGeneration(forBoard board: String) -> Int {
+    nonisolated static func appleSiliconGeneration(forBoard board: String) -> Int {
         let lower = board.lowercased()
         // The `Mac` family numbering is stable per generation. `Mac13` = M1,
         // `Mac14` = M2, `Mac15` = M3, `Mac16` = M4 (and Studio variants share
@@ -142,19 +142,19 @@ extension Capabilities {
         if lower.hasPrefix("mac15") { return 3 }
         if lower.hasPrefix("mac14") { return 2 }
         if lower.hasPrefix("mac13") { return 1 }
+        // Pre-`MacNN,X` board strings shipped on the original M1 line
+        // (MacBookAir10,1, MacBookPro17/18,X, Macmini9,1, iMac21,X).
         if lower.hasPrefix("macbookair10")
             || lower.hasPrefix("macbookpro17")
             || lower.hasPrefix("macbookpro18")
             || lower.hasPrefix("macmini9")
-            || lower.hasPrefix("imac21")
-            || lower.hasPrefix("mac13,1")
-            || lower.hasPrefix("mac13,2") {
+            || lower.hasPrefix("imac21") {
             return 1
         }
         return 0
     }
 
-    private static func probeHardwareEncoderCount() -> Int {
+    nonisolated private static func probeHardwareEncoderCount() -> Int {
         // `kVTVideoEncoderListOption_MustBeHardwareAccelerated` filters the
         // list to entries the OS will run on the hardware encoder block. On
         // Intel Macs without a hardware H.264/HEVC path the list comes back
@@ -175,7 +175,7 @@ extension Capabilities {
 
     /// Resolves the tier for a feature plus the reason behind it. Pure: the
     /// resolver inspects the snapshot in memory; no syscalls after launch.
-    func tier(for feature: CapabilityFeature) -> CapabilityVerdict {
+    nonisolated func tier(for feature: CapabilityFeature) -> CapabilityVerdict {
         switch feature {
         case .frameInterpolation:
             return resolveFrameInterpolation()
@@ -186,7 +186,7 @@ extension Capabilities {
         }
     }
 
-    private func resolveFrameInterpolation() -> CapabilityVerdict {
+    private nonisolated func resolveFrameInterpolation() -> CapabilityVerdict {
         // OS gate first — `VTFrameProcessor` is macOS 15.4+. Apple Silicon on
         // an older OS still resolves to baseline.
         if chip == .intel {
@@ -204,25 +204,33 @@ extension Capabilities {
                 tier: .baseline,
                 reason: "Unknown Apple Silicon generation — treating as baseline")
         }
-        if generation == 1 {
-            return CapabilityVerdict(
-                tier: .accelerated,
-                reason: "VTFrameProcessor available — Apple Silicon M1")
-        }
+        // Phase 37 reserves `.pro` (`preview-and-export`) for high-tier Apple
+        // Silicon — M3 Pro/Max/Ultra and newer with the Neural Engine and
+        // memory headroom for sustained 1080p. M1 and M2 always sit at
+        // `.accelerated` (`export-only`); we approximate the Pro/Max/Ultra
+        // split on M3+ via a unified-memory threshold of ≥ 24 GiB, since
+        // sysctl doesn't expose the binned-die distinction directly.
         let memoryGiB = unifiedMemoryGiB
-        if memoryGiB < 16 {
+        if generation < 3 {
             return CapabilityVerdict(
                 tier: .accelerated,
                 reason: "VTFrameProcessor available — Apple Silicon M\(generation); "
-                    + "only \(Int(memoryGiB.rounded())) GiB unified memory")
+                    + "pro tier requires M3 Pro/Max/Ultra+")
+        }
+        if memoryGiB < 24 {
+            return CapabilityVerdict(
+                tier: .accelerated,
+                reason: "VTFrameProcessor available — Apple Silicon M\(generation); "
+                    + "only \(Int(memoryGiB.rounded())) GiB unified memory "
+                    + "(pro tier needs ≥ 24 GiB to approximate Pro/Max/Ultra)")
         }
         return CapabilityVerdict(
             tier: .pro,
-            reason: "VTFrameProcessor available — Apple Silicon M\(generation)+; "
-                + "≥ 16 GiB unified memory")
+            reason: "VTFrameProcessor available — Apple Silicon M\(generation) "
+                + "Pro/Max/Ultra-class (≥ 24 GiB unified memory)")
     }
 
-    private func resolveSimultaneousCaptureStreams(count requested: Int) -> CapabilityVerdict {
+    private nonisolated func resolveSimultaneousCaptureStreams(count requested: Int) -> CapabilityVerdict {
         guard requested > 0 else {
             return CapabilityVerdict(
                 tier: .baseline,
@@ -254,7 +262,7 @@ extension Capabilities {
             reason: "\(videoEncoderCount) hardware encoder(s); request for \(requested) fits")
     }
 
-    private func resolveMetalEffectChain() -> CapabilityVerdict {
+    private nonisolated func resolveMetalEffectChain() -> CapabilityVerdict {
         if chip == .intel {
             // Intel Macs have a Metal-capable GPU but no unified memory; the
             // effect chain runs but loses zero-copy IOSurface ↔ texture, so we
@@ -279,7 +287,7 @@ extension Capabilities {
             reason: "Apple Silicon M\(generation); ≥ 16 GiB unified memory")
     }
 
-    private var osVersionString: String {
+    private nonisolated var osVersionString: String {
         "\(osVersion.major).\(osVersion.minor).\(osVersion.patch)"
     }
 }

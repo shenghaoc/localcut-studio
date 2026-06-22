@@ -68,16 +68,20 @@ struct Capabilities: Sendable, Hashable {
   it as baseline rather than guessing high.
 - **Unified memory.** `sysctlbyname("hw.memsize")` returns the byte count;
   on Apple Silicon all of it is unified GPU-addressable.
-- **Encoder count.** VideoToolbox exposes a per-session count via
-  `VTSessionCopyProperty` against a probe `VTCompressionSession`; we read
-  `kVTCompressionPropertyKey_NumberOfPendingFrames`'s *availability* and the
-  documented `kVTVideoEncoderListOptionKey_RequireHardwareAcceleratedVideoEncoder`-filtered
-  encoder list (`VTCopyVideoEncoderList`) to count hardware encoders. The count
-  is the number of distinct hardware encoder entries — typically 1 on baseline
-  Apple Silicon and ≥ 2 on Pro / Max / Ultra; Intel Macs report 0 hardware
-  encoders for these codecs even when they ship with a different (lower-tier)
-  hardware path. The count drives the multi-stream gate (Phase 41 / 45) rather
-  than the codec choice.
+- **Encoder count.** `VTCopyVideoEncoderList` filtered by
+  `kVTVideoEncoderListOption_MustBeHardwareAccelerated`, counted by
+  `CFArrayGetCount`. This is a **rough proxy** for concurrent hardware
+  capacity — the list returns one row per (codec, encoder) implementation,
+  not per concurrent encoder instance. A Mac with one H.264 + HEVC engine
+  reports two rows even though the silicon is one block. For the v1
+  multi-stream gate (Phase 41 / 45) this proxy is acceptable: Intel Macs
+  return 0, baseline Apple Silicon returns 2–3, and Pro/Max/Ultra return
+  more — enough signal to distinguish a single-stream host from a
+  multi-stream one. A future revision can read
+  `kVTVideoEncoderList_InstanceLimit` per encoder for finer-grained
+  capacity gating; the API stays unchanged because the gate consumers
+  (`.simultaneousCaptureStreams(count:)`) speak in stream count, not
+  encoder rows.
 - **OS version.** `ProcessInfo.processInfo.operatingSystemVersion` — needed by
   `Capabilities.tier(for:)` so APIs that ship in a specific macOS revision
   (`VTFrameProcessor` on macOS 15.4+, etc.) cannot be reached by a higher chip
@@ -120,19 +124,33 @@ Example: `frameInterpolation` resolver
 2. macOS < 15.4? → `.baseline`, reason `"VTFrameProcessor requires macOS 15.4+"`.
 3. Unknown Apple Silicon generation? → `.baseline`, reason `"Unknown Apple
    Silicon generation — treating as baseline"` (errs low).
-4. M1? → `.accelerated` (export-only is the surface, see Phase 37 R5.1),
-   reason `"VTFrameProcessor available — Apple Silicon M1"`.
-5. M2+ with < 16 GiB unified memory? → `.accelerated`, reason
-   `"VTFrameProcessor available — Apple Silicon M2; only 8 GiB unified memory"`.
-6. M2+ with ≥ 16 GiB unified memory? → `.pro`, reason
-   `"VTFrameProcessor available — Apple Silicon M2+; ≥ 16 GiB unified memory"`.
+4. M1 / M2 (any memory)? → `.accelerated` (export-only is the surface, see
+   Phase 37 R5.1), reason `"VTFrameProcessor available — Apple Silicon M1"`
+   or similar. Phase 37 reserves `.pro` for **M3 Pro/Max/Ultra and newer**,
+   so M1 / M2 hosts — even with abundant memory — stay one tier down.
+5. M3+ with < 24 GiB unified memory? → `.accelerated`, reason
+   `"VTFrameProcessor available — Apple Silicon M3; only 16 GiB unified
+   memory (pro tier needs ≥ 24 GiB to approximate Pro/Max/Ultra)"`.
+6. M3+ with ≥ 24 GiB unified memory? → `.pro`, reason `"VTFrameProcessor
+   available — Apple Silicon M3 Pro/Max/Ultra-class (≥ 24 GiB unified
+   memory)"`. The 24 GiB threshold approximates the Pro/Max/Ultra binned-die
+   split, since sysctl doesn't expose it directly: M3 base ships at 8 / 16 /
+   24 GiB, Pro starts at 18 GiB, Max starts at 36 GiB. A base M3 with 24 GiB
+   would falsely promote — accept this as the closest sysctl-only proxy.
 
 The exact thresholds belong in the resolver source, not the spec — the spec
 specifies that there ARE per-feature gates, the code names them.
 
-`simultaneousCaptureStreams(count:)` is the only feature that takes a parameter;
-the count is the requested simultaneous capture count (used by Phase 41 / 45),
-checked against `videoEncoderCount`.
+`simultaneousCaptureStreams(count:)` is the only feature that takes a
+parameter; the count is the requested simultaneous capture count (used by
+Phase 41 / 45), checked against `videoEncoderCount`. The v1 surface
+deliberately does NOT take resolution / fps — those concerns belong to
+Phase 41's own per-source preflight (`SCStreamConfiguration` /
+`AVCaptureSession` settings probe). The tier resolver answers "can this Mac
+run N simultaneous streams at all?"; the per-source budget probe answers
+"can it sustain this resolution and fps for that source?". The two compose:
+a host that fails the per-source preflight at 4K60 may still pass at 1080p30,
+so folding resolution into the tier verdict would collapse useful nuance.
 
 ## Forward references
 

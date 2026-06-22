@@ -101,7 +101,7 @@ func frameInterpolationM1() {
     #expect(verdict.reason.contains("M1"))
 }
 
-@Test("Frame interpolation: M2 with 8 GiB → accelerated (memory ceiling)")
+@Test("Frame interpolation: M2 with 8 GiB → accelerated (chip-class ceiling)")
 func frameInterpolationM2LowMem() {
     let m2 = Capabilities(
         chip: .appleSilicon(generation: 2),
@@ -113,7 +113,31 @@ func frameInterpolationM2LowMem() {
     #expect(verdict.reason.contains("M2"))
 }
 
-@Test("Frame interpolation: M3 with 32 GiB → pro")
+@Test("Frame interpolation: M2 with 64 GiB → accelerated (pro reserved for M3+)")
+func frameInterpolationM2HighMem() {
+    let m2 = Capabilities(
+        chip: .appleSilicon(generation: 2),
+        unifiedMemoryBytes: 64 * 1024 * 1024 * 1024,
+        videoEncoderCount: 2,
+        osVersion: Capabilities.OSVersion(major: 26, minor: 0))
+    let verdict = m2.tier(for: .frameInterpolation)
+    #expect(verdict.tier == .accelerated)
+    #expect(verdict.reason.contains("M2"))
+}
+
+@Test("Frame interpolation: M3 with 16 GiB → accelerated (memory below pro threshold)")
+func frameInterpolationM3BaseMem() {
+    let m3 = Capabilities(
+        chip: .appleSilicon(generation: 3),
+        unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
+        videoEncoderCount: 1,
+        osVersion: Capabilities.OSVersion(major: 26, minor: 0))
+    let verdict = m3.tier(for: .frameInterpolation)
+    #expect(verdict.tier == .accelerated)
+    #expect(verdict.reason.contains("M3"))
+}
+
+@Test("Frame interpolation: M3 with 32 GiB → pro (Pro/Max/Ultra-class)")
 func frameInterpolationM3Pro() {
     let m3 = Capabilities(
         chip: .appleSilicon(generation: 3),
