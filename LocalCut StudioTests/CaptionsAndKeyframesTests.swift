@@ -762,7 +762,7 @@ func presetSnapshotShape() {
 /// This proves the SRT → model → compositor wiring end-to-end without needing
 /// committed binary fixtures.
 @MainActor
-@Suite("Phase 30 — smoke")
+@Suite("Phase 30 — smoke", .serialized)
 struct PhaseThirtySmokeTests {
 
     private func time(_ seconds: Double) -> CMTime {
@@ -778,18 +778,21 @@ struct PhaseThirtySmokeTests {
         try? FileManager.default.removeItem(at: url)
 
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        // H.264 rejects odd dimensions; mask the low bit off after rounding.
+        let w = max(2, Int(size.width.rounded()) & ~1)
+        let h = max(2, Int(size.height.rounded()) & ~1)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Int(size.width),
-            AVVideoHeightKey: Int(size.height),
+            AVVideoWidthKey: w,
+            AVVideoHeightKey: h,
         ])
         input.expectsMediaDataInRealTime = false
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(
             assetWriterInput: input,
             sourcePixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-                kCVPixelBufferWidthKey as String: Int(size.width),
-                kCVPixelBufferHeightKey as String: Int(size.height),
+                kCVPixelBufferWidthKey as String: w,
+                kCVPixelBufferHeightKey as String: h,
             ])
         writer.add(input)
 
@@ -798,17 +801,24 @@ struct PhaseThirtySmokeTests {
 
         let frameCount = Int(seconds * Double(fps))
         for frame in 0..<frameCount {
-            while !input.isReadyForMoreMediaData { await Task.yield() }
-            guard let pool = adaptor.pixelBufferPool else { break }
+            // Bail out if the writer entered a non-`.writing` status so a
+            // failure mid-loop surfaces as a clean test failure instead of
+            // hanging on `isReadyForMoreMediaData` forever (Claude bot P1 #2).
+            while !input.isReadyForMoreMediaData {
+                guard writer.status == .writing else { break }
+                await Task.yield()
+            }
+            guard writer.status == .writing,
+                  let pool = adaptor.pixelBufferPool else { break }
             var pixelBuffer: CVPixelBuffer?
             CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
             guard let buffer = pixelBuffer else { break }
             CVPixelBufferLockBaseAddress(buffer, [])
             if let base = CVPixelBufferGetBaseAddress(buffer) {
-                memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
+                memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * h)
             }
             CVPixelBufferUnlockBaseAddress(buffer, [])
-            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps))
+            guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else { break }
         }
 
         input.markAsFinished()
@@ -873,4 +883,100 @@ struct PhaseThirtySmokeTests {
         // re-evaluated rather than reusing one rendered frame for the interval.
         #expect(captioned.containsTweening == true)
     }
+
+    /// A 1 s AV clip plus a caption that ends at 1.5 s. Without the tail filler
+    /// the composition's duration is truncated to the AV end (1 s) and the
+    /// caption disappears half a second early; with the filler inserted, the
+    /// composition runs to the caption's true end and a video-composition
+    /// instruction covers the tail interval. Mirrors the limitation that
+    /// `phase-30-animated-captions/design.md` previously documented.
+    @Test("Composition extends past the last AV clip when a caption tail runs longer")
+    func compositionExtendsForCaptionTail() async throws {
+        let url = try await makeVideoFixture(seconds: 1)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let project = Project()
+        // Smaller canvas keeps the cached filler generation fast for tests.
+        project.renderSize = CGSize(width: 320, height: 180)
+
+        let media = try await loadedMedia(from: url)
+        project.mediaItems.append(media)
+
+        let videoTrack = project.videoTracks.first!
+        videoTrack.clips = [Clip(mediaID: media.id, sourceStart: .zero,
+                                 duration: time(1), timelineStart: .zero)]
+
+        let captionTrack = CaptionTrack(name: "Tail")
+        captionTrack.addLine(CaptionLine(
+            range: CMTimeRange(start: time(0.5), duration: time(1.0)),
+            text: "Past the end"))
+        project.captionTracks = [captionTrack]
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+
+        // Filler pushed composition.duration to the caption end (1.5 s), not the
+        // AV-only 1.0 s previously seen. Allow ~1 frame of slop for timescale
+        // rounding inside `insertTimeRange`.
+        #expect(built.duration >= 1.5 - 1.0 / 30.0,
+                "Expected composition to extend to caption end (~1.5 s), got \(built.duration)")
+
+        // The video composition must have an instruction covering t = 1.25 s
+        // (past the AV end, mid-caption-tail) and that instruction must carry
+        // the caption render item.
+        let videoComposition = try #require(built.videoComposition)
+        let probe = CMTime(seconds: 1.25, preferredTimescale: 600)
+        let tailInstruction = videoComposition.instructions.first { instr in
+            CMTimeRangeContainsTime(instr.timeRange, time: probe)
+        }
+        let captioned = try #require(tailInstruction as? EffectCompositionInstruction)
+        #expect(captioned.captions.contains { $0.text == "Past the end" })
+    }
+
+    /// Exports the same 1 s AV clip + 1.5 s caption project and verifies the
+    /// exported file's duration extends past the AV end, proving the filler
+    /// extension survives the full `AVAssetExportSession` pipeline.
+    @Test("Exported file extends past the AV end for a caption tail")
+    func exportedFileCarriesCaptionTail() async throws {
+        let url = try await makeVideoFixture(seconds: 1)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let project = Project()
+        project.renderSize = CGSize(width: 320, height: 180)
+
+        let media = try await loadedMedia(from: url)
+        project.mediaItems.append(media)
+
+        let videoTrack = project.videoTracks.first!
+        videoTrack.clips = [Clip(mediaID: media.id, sourceStart: .zero,
+                                 duration: time(1), timelineStart: .zero)]
+
+        let captionTrack = CaptionTrack(name: "Tail")
+        captionTrack.addLine(CaptionLine(
+            range: CMTimeRange(start: time(0.5), duration: time(1.0)),
+            text: "Past the end"))
+        project.captionTracks = [captionTrack]
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+
+        let exportURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("caption-tail-export-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: exportURL) }
+
+        let session = try #require(AVAssetExportSession(
+            asset: built.composition,
+            presetName: AVAssetExportPresetHighestQuality))
+        session.videoComposition = built.videoComposition
+        session.audioMix = built.audioMix
+        try await session.export(to: exportURL, as: .mov)
+
+        // Verify the exported file's video track extends past the 1 s AV clip.
+        let exported = AVURLAsset(url: exportURL)
+        let videoTracks = try await exported.loadTracks(withMediaType: .video)
+        let exportedVideoTrack = try #require(videoTracks.first,
+                                              "Exported file has no video track")
+        let exportedDuration = try await exportedVideoTrack.load(.timeRange).end
+        #expect(exportedDuration.seconds > 1.0 + 1.0 / 30.0,
+                "Expected exported video track to extend past AV end, got \(exportedDuration.seconds) s")
+    }
+
 }
