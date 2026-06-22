@@ -50,7 +50,7 @@ nonisolated enum CaptionTailFiller {
 
         if FileManager.default.fileExists(atPath: url.path) {
             let cached = AVURLAsset(url: url)
-            let cachedDuration = (try? await cached.load(.duration)) ?? .zero
+            let cachedDuration = ((try? await cached.load(.duration)) ?? .zero).sanitized
             if cachedDuration.seconds + 1e-3 >= needed {
                 return cached
             }
