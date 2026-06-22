@@ -261,11 +261,10 @@ struct DiagnosticsTests {
 
     // MARK: - clearRenderSamples preserves decoder / drops
 
-    @Test("clearRenderSamples() wipes the ring but preserves decoder count and drops")
+    @Test("clearRenderSamples() wipes the ring but preserves decoder count")
     func clearRenderSamplesIsScoped() {
         DiagnosticsBridge.shared.reset()
         DiagnosticsBridge.shared.setDecoderCount(3)
-        DiagnosticsBridge.shared.setDroppedFrames(11)
         DiagnosticsBridge.shared.recordRenderTime(0.025)
         DiagnosticsBridge.shared.recordRenderTime(0.025)
 
@@ -276,6 +275,5 @@ struct DiagnosticsTests {
         #expect(snapshot.lastRenderTime == 0)
         #expect(snapshot.totalFrameCount == 0)
         #expect(snapshot.decoderCount == 3)
-        #expect(snapshot.droppedFrames == 11)
     }
 }

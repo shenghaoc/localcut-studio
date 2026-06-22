@@ -39,8 +39,8 @@ final class DiagnosticsAgent {
 
     // MARK: - Wiring
 
-    /// Wall-clock source — overridable so tests can synthesise a known delta.
-    @ObservationIgnored private let now: @Sendable () -> CFAbsoluteTime
+    /// Monotonic clock source — overridable so tests can synthesise a known delta.
+    @ObservationIgnored private let now: @Sendable () -> TimeInterval
     /// Frame-duration provider — defaults to 30 fps when the editor has no
     /// project yet; the live agent wires it to `project.frameRate`.
     @ObservationIgnored private let frameDuration: @MainActor () -> Double
@@ -57,7 +57,7 @@ final class DiagnosticsAgent {
 
     /// CPU calibration baseline. `nil` until the first tick after `start()`.
     @ObservationIgnored private var previousCPUSeconds: Double?
-    @ObservationIgnored private var previousWallClock: CFAbsoluteTime?
+    @ObservationIgnored private var previousWallClock: TimeInterval?
     @ObservationIgnored private var previousDroppedFrames: Int = 0
     /// Snapshot of the bridge's monotonic frame counter at the last tick. The
     /// delta tells us whether new frames arrived this tick, which gates the
@@ -70,7 +70,7 @@ final class DiagnosticsAgent {
     private static let sparklineCapacity = 60
 
     init(
-        now: @escaping @Sendable () -> CFAbsoluteTime = { CFAbsoluteTimeGetCurrent() },
+        now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         frameDuration: @escaping @MainActor () -> Double = { 1.0 / 30.0 },
         droppedFramesProvider: @escaping @MainActor () -> Int = { 0 }
     ) {
@@ -155,11 +155,8 @@ final class DiagnosticsAgent {
         let bridge = DiagnosticsBridge.shared.snapshot()
         let wallNow = now()
 
-        // Dropped frames: pull from the player, publish the cumulative count to
-        // the bridge so the snapshot reads a coherent value, then report the
-        // per-tick delta.
+        // Dropped frames: pull from the player and report the per-tick delta.
         let cumulativeDrops = droppedFramesProvider()
-        DiagnosticsBridge.shared.setDroppedFrames(cumulativeDrops)
         let delta = max(0, cumulativeDrops - previousDroppedFrames)
         previousDroppedFrames = cumulativeDrops
         frameDropsLastTick = delta
@@ -226,7 +223,7 @@ final class DiagnosticsAgent {
         return user + system
     }
 
-    private func sampleCPU(now wallNow: CFAbsoluteTime) -> Double {
+    private func sampleCPU(now wallNow: TimeInterval) -> Double {
         guard let nowSec = currentCPUSeconds() else {
             previousCPUSeconds = nil
             previousWallClock = nil

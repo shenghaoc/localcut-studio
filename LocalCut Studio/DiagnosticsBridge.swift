@@ -21,7 +21,6 @@ final class DiagnosticsBridge: Sendable {
         let renderTimes: [Double]
         let lastRenderTime: Double
         let decoderCount: Int
-        let droppedFrames: Int
         /// Monotonic count of every render the compositor has recorded since
         /// the last `reset()` / `clearRenderSamples()`. The agent uses this to
         /// detect a quiet tick (no new frames since last sample) and report
@@ -33,7 +32,6 @@ final class DiagnosticsBridge: Sendable {
         var renderTimes: [Double] = []
         var lastRenderTime: Double = 0
         var decoderCount: Int = 0
-        var droppedFrames: Int = 0
         var totalFrameCount: Int = 0
     }
 
@@ -76,19 +74,12 @@ final class DiagnosticsBridge: Sendable {
         state.withLock { $0.decoderCount = count }
     }
 
-    /// Latest cumulative dropped-frame count read from the player's access log;
-    /// the agent computes the per-tick delta itself.
-    nonisolated func setDroppedFrames(_ count: Int) {
-        state.withLock { $0.droppedFrames = count }
-    }
-
     /// A coherent read of every published value at a single instant.
     nonisolated func snapshot() -> Snapshot {
         state.withLock { s in
             Snapshot(renderTimes: s.renderTimes,
                      lastRenderTime: s.lastRenderTime,
                      decoderCount: s.decoderCount,
-                     droppedFrames: s.droppedFrames,
                      totalFrameCount: s.totalFrameCount)
         }
     }
@@ -112,7 +103,6 @@ final class DiagnosticsBridge: Sendable {
             s.renderTimes.removeAll()
             s.lastRenderTime = 0
             s.decoderCount = 0
-            s.droppedFrames = 0
             s.totalFrameCount = 0
         }
         enabledFlag.withLock { $0 = false }

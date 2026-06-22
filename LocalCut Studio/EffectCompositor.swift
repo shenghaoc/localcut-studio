@@ -118,10 +118,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // open — otherwise every preview / export frame would pay for a
         // timestamp + lock + ring-buffer mutation that nobody reads (Codex P2).
         let diagnosticsEnabled = DiagnosticsBridge.shared.isEnabled
-        let renderStart: CFAbsoluteTime = diagnosticsEnabled ? CFAbsoluteTimeGetCurrent() : 0
+        let renderStart: TimeInterval = diagnosticsEnabled ? ProcessInfo.processInfo.systemUptime : 0
         defer {
             if diagnosticsEnabled {
-                DiagnosticsBridge.shared.recordRenderTime(CFAbsoluteTimeGetCurrent() - renderStart)
+                DiagnosticsBridge.shared.recordRenderTime(ProcessInfo.processInfo.systemUptime - renderStart)
             }
         }
 
