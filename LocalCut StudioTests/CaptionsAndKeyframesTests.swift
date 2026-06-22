@@ -873,4 +873,104 @@ struct PhaseThirtySmokeTests {
         // re-evaluated rather than reusing one rendered frame for the interval.
         #expect(captioned.containsTweening == true)
     }
+
+    /// A 1 s AV clip plus a caption that ends at 1.5 s. Without the tail filler
+    /// the composition's duration is truncated to the AV end (1 s) and the
+    /// caption disappears half a second early; with the filler inserted, the
+    /// composition runs to the caption's true end and a video-composition
+    /// instruction covers the tail interval. Mirrors the limitation that
+    /// `phase-30-animated-captions/design.md` previously documented.
+    @Test("Composition extends past the last AV clip when a caption tail runs longer")
+    func compositionExtendsForCaptionTail() async throws {
+        let url = try await makeVideoFixture(seconds: 1)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let project = Project()
+        // Smaller canvas keeps the cached filler generation fast for tests.
+        project.renderSize = CGSize(width: 320, height: 180)
+
+        let media = try await loadedMedia(from: url)
+        project.mediaItems.append(media)
+
+        let videoTrack = project.videoTracks.first!
+        videoTrack.clips = [Clip(mediaID: media.id, sourceStart: .zero,
+                                 duration: time(1), timelineStart: .zero)]
+
+        let captionTrack = CaptionTrack(name: "Tail")
+        captionTrack.addLine(CaptionLine(
+            range: CMTimeRange(start: time(0.5), duration: time(1.0)),
+            text: "Past the end"))
+        project.captionTracks = [captionTrack]
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+
+        // Filler pushed composition.duration to the caption end (1.5 s), not the
+        // AV-only 1.0 s previously seen. Allow ~1 frame of slop for timescale
+        // rounding inside `insertTimeRange`.
+        #expect(built.duration >= 1.5 - 1.0 / 30.0,
+                "Expected composition to extend to caption end (~1.5 s), got \(built.duration)")
+
+        // The video composition must have an instruction covering t = 1.25 s
+        // (past the AV end, mid-caption-tail) and that instruction must carry
+        // the caption render item.
+        let videoComposition = try #require(built.videoComposition)
+        let probe = CMTime(seconds: 1.25, preferredTimescale: 600)
+        let tailInstruction = videoComposition.instructions.first { instr in
+            CMTimeRangeContainsTime(instr.timeRange, time: probe)
+        }
+        let captioned = try #require(tailInstruction as? EffectCompositionInstruction)
+        #expect(captioned.captions.contains { $0.text == "Past the end" })
+    }
+
+    /// Exports the project and pulls a frame past the AV end via
+    /// `AVAssetImageGenerator`. Proves the extension survives all the way
+    /// through `AVAssetExportSession`, not just through the in-memory
+    /// `AVComposition`.
+    @Test("Exported .mov carries a frame past the AV end of a caption tail")
+    func exportedFileCarriesCaptionTail() async throws {
+        let url = try await makeVideoFixture(seconds: 1)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let project = Project()
+        project.renderSize = CGSize(width: 320, height: 180)
+
+        let media = try await loadedMedia(from: url)
+        project.mediaItems.append(media)
+        project.videoTracks.first!.clips = [
+            Clip(mediaID: media.id, sourceStart: .zero,
+                 duration: time(1), timelineStart: .zero)
+        ]
+
+        let captionTrack = CaptionTrack(name: "Tail")
+        captionTrack.addLine(CaptionLine(
+            range: CMTimeRange(start: time(0.5), duration: time(1.0)),
+            text: "Tail line"))
+        project.captionTracks = [captionTrack]
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("caption-tail-export-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let exporter = try #require(AVAssetExportSession(
+            asset: built.composition, presetName: AVAssetExportPresetHighestQuality))
+        exporter.videoComposition = built.videoComposition
+        try await exporter.export(to: outputURL, as: .mov)
+
+        let exported = AVURLAsset(url: outputURL)
+        let exportedDuration = try await exported.load(.duration)
+        #expect(exportedDuration.seconds >= 1.5 - 1.0 / 30.0,
+                "Exported asset truncated to \(exportedDuration.seconds) s")
+
+        // Frame past the AV end (1.0 s) must still decode — proves the filler
+        // extended the file, not just the in-memory composition.
+        let generator = AVAssetImageGenerator(asset: exported)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.05, preferredTimescale: 600)
+        let probe = CMTime(seconds: 1.2, preferredTimescale: 600)
+        let frame = try await generator.image(at: probe)
+        #expect(frame.actualTime.seconds >= 1.0,
+                "Image generator served a frame from before the AV end: \(frame.actualTime.seconds)")
+    }
 }

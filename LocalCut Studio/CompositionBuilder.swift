@@ -215,13 +215,33 @@ enum CompositionBuilder {
 
         let captionTracks = project.captionTracks.filter { !$0.isMuted }
 
-        // Known limitation: a caption that ends past the last AV clip is
-        // truncated to the AV duration on preview / export. Extending via
-        // `AVMutableComposition.insertEmptyTimeRange` did not reliably update
-        // `composition.duration` on macOS 26; the proper fix is to insert a
-        // placeholder source media (a tiny black/silent .mov) into the
-        // composition for the tail. Tracked as a follow-up; see Phase 30
-        // spec's "Known limitations".
+        // Extend the composition to cover any caption tail that runs past the
+        // last AV clip. `insertEmptyTimeRange` does not reliably push
+        // `composition.duration` forward, so we insert a cached black-frame
+        // filler asset instead — see `CaptionTailFiller`. The compositor still
+        // emits captions-over-black for the tail interval (no clip segment is
+        // recorded for the filler track, so `units` stays empty there).
+        let captionEnd = captionTracks.reduce(CMTime.zero) {
+            CMTimeMaximum($0, $1.endTime)
+        }
+        if captionEnd > composition.duration {
+            let tailStart = composition.duration
+            let tailDuration = captionEnd - tailStart
+            let filler = try await CaptionTailFiller.asset(
+                renderSize: renderSize,
+                frameRate: project.frameRate,
+                minimumDuration: tailDuration)
+            let fillerVideoTracks = try await filler.loadTracks(withMediaType: .video)
+            if let fillerVideoSource = fillerVideoTracks.first,
+               let fillerCompTrack = composition.addMutableTrack(
+                withMediaType: .video,
+                preferredTrackID: kCMPersistentTrackID_Invalid) {
+                let sourceRange = CMTimeRange(start: .zero, duration: tailDuration)
+                try fillerCompTrack.insertTimeRange(
+                    sourceRange, of: fillerVideoSource, at: tailStart)
+            }
+        }
+
         let totalDuration = composition.duration
         guard totalDuration > .zero else { return nil }
 

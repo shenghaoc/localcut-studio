@@ -8,10 +8,10 @@ Add a styling engine over caption tracks: stroke, fill, shadow, glow, per-line b
 
 ## Prerequisites
 
-All five infrastructure deps are now specced. The first three land in the same change-set as Phase 30 on this branch; the latter two are already on `main`.
+All five infrastructure deps are now shipped on `main`.
 
 - [`feature-keyframes`](../feature-keyframes/) (P15) — `Keyframe<T>`, `Keyframed<T>`, `Interpolatable`, binary-search evaluator. Phase 30's keyframable style parameters (`fillColour`, `scale`, `offset`, `opacity`, `letterSpacing` — see R2.3) ride on top.
-- [`feature-caption-tracks`](../feature-caption-tracks/) (P22) — `CaptionTrack` / `CaptionLine` / `WordTiming` model, SRT and VTT importers, Codable round-trip via `ProjectDocument`.
+- [`feature-caption-tracks`](../feature-caption-tracks/) (P22) — `CaptionTrack` / `CaptionLine` / `WordTiming` model, SRT and VTT importers, Codable round-trip via `ProjectDocument`. `Project.duration` widens to include caption tails; `CompositionBuilder` inserts a cached `CaptionTailFiller` asset so `composition.duration` actually extends to the caption end (not just the `Project.duration` accessor).
 - [`feature-title-raster`](../feature-title-raster/) (P14) — `TitleRasterer` that draws Core Text attributed strings into a render-canvas-sized BGRA bitmap with an LRU cache.
 - [`feature-colour-grading`](../feature-colour-grading/) — shipped; the custom `AVVideoCompositing` (`EffectCompositor`) is the integration point: caption rasters layer above clip layers.
 - [`feature-project-persistence`](../feature-project-persistence/) — shipped; caption tracks and per-line `CaptionStyle` overrides round-trip through the existing Codable document (R1.3).
@@ -36,10 +36,6 @@ All five infrastructure deps are now specced. The first three land in the same c
 - Font availability across macOS versions: presets must reference fonts shipped with the system; absent fonts fall back with a visible warning.
 - Sub-pixel positioning during animation can cause shimmer; snap to pixel grid on integer time positions, ease only in between.
 - Bundle round-trip must include any user font referenced as an embedded asset, or pin to a system font name with a fallback policy.
-
-## Known limitations
-
-- **Caption tails past the last AV clip are truncated.** If a caption ends after every video clip ends, preview and export stop at the AV duration rather than the caption end. `AVMutableComposition.insertEmptyTimeRange` did not reliably extend `composition.duration` in our test runs on macOS 26; the correct fix is to insert a placeholder source media (tiny black/silent `.mov`) into the composition for the tail, tracked as a follow-up. Most projects keep at least one AV clip running until the final caption fades, so this is not commonly hit in practice.
 
 ## Non-goals
 
