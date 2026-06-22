@@ -144,10 +144,10 @@ struct EditorView: View {
 
             Spacer()
 
-            if model.isExporting, let progress = model.exportProgress {
-                ProgressView(value: progress)
+            if model.renderQueue.isRunning {
+                ProgressView(value: model.renderQueue.totalProgress)
                     .frame(width: 120)
-                    .accessibilityLabel("Export progress")
+                    .accessibilityLabel("Render queue progress")
             }
 
             Button {
@@ -155,8 +155,8 @@ struct EditorView: View {
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
-            .disabled(model.isExporting || model.totalDuration <= 0)
-            .help("Export movie…")
+            .disabled(model.totalDuration <= 0)
+            .help("Queue an export with the default preset.")
         }
     }
 
@@ -200,9 +200,14 @@ struct EditorView: View {
     }
 
     private func exportTapped() {
+        // Match the default preset's container so the panel filter, suggested
+        // filename, and the actual encode line up.
+        let preset = BuiltInExportPresets.defaultPreset
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.quickTimeMovie]
-        panel.nameFieldStringValue = "\(model.project.name).mov"
+        if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
+            panel.allowedContentTypes = [type]
+        }
+        panel.nameFieldStringValue = "\(model.project.name).\(preset.defaultFilenameExtension)"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task { await model.export(to: url) }
