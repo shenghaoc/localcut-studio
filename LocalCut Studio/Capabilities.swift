@@ -304,10 +304,9 @@ private nonisolated func sysctlString(_ name: String) -> String? {
     guard size > 0 else { return nil }
     var buffer = [UInt8](repeating: 0, count: size)
     if sysctlbyname(name, &buffer, &size, nil, 0) != 0 { return nil }
-    // `sysctlbyname` populates a NUL-terminated C string; drop the trailing
-    // NUL bytes before decoding so the resulting Swift string doesn't carry
-    // them either.
-    while buffer.last == 0 { buffer.removeLast() }
+    // `sysctlbyname` populates a NUL-terminated C string; truncate at the
+    // first NUL byte so the resulting Swift string is clean.
+    if let nul = buffer.firstIndex(of: 0) { buffer.removeSubrange(nul...) }
     return String(decoding: buffer, as: UTF8.self)
 }
 
