@@ -1,6 +1,6 @@
 # Design: Timeline Markers (P10 native equivalent)
 
-> Status: **Proposed**. Infrastructure prerequisite for Phase 34 (beat-tools) and Phase 44 (tutorial finishing).
+> Status: **Implemented**. Infrastructure prerequisite for Phase 34 (beat-tools) and Phase 44 (tutorial finishing).
 
 ## Goal
 
@@ -112,6 +112,16 @@ the selected marker glyph. Submitting commits a `Rename Marker` undo step.
 
 The inspector list is purely a navigation surface — the timeline ruler is the
 canonical view of marker placement.
+
+### Selection exclusivity
+
+Every marker-selection path (ruler tap, inspector row tap, seek button, `M`
+keyboard) funnels through `selectMarker(id:)` on `EditorModel`. This single
+function sets `selectedMarkerID` **and** clears `selectedClipID`,
+`selectedTransitionClipID`, and `selectedMediaID`, maintaining the mutual-
+exclusivity invariant that the rest of the codebase relies on (only one kind of
+object is "selected" at a time). The inspector's timecode chip button calls
+`seekToMarker(id:)` which also invokes `selectMarker` internally.
 
 ## Editor commands
 
