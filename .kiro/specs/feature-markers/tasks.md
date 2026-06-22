@@ -35,6 +35,7 @@
 - [x] **T4.2** Hit-testing: tapping a marker glyph selects it; tapping the
   ruler away from a glyph clears the selection.
 - [x] **T4.3** Keyboard: `M` adds, `Shift+M` opens the rename popover,
+  `Shift+M` reports a status-line hint when no marker is selected, and
   `Delete` removes the selected marker without disturbing the existing clip /
   transition delete shortcut.
 - [x] **T4.4** `MarkersInspectorView` section listing markers with

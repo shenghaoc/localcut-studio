@@ -40,7 +40,9 @@
   glyph clears the selection.
 - **R4.3** `M` adds a marker at the playhead's current time.
 - **R4.4** `Shift+M` opens a rename popover anchored to the selected marker;
-  submitting commits a `Rename Marker` undo step.
+  submitting commits a `Rename Marker` undo step. If no marker is selected,
+  the editor sets `statusMessage` to tell the user to select a marker on the
+  ruler first.
 - **R4.5** `Delete`, when a marker is selected, removes it. The existing
   clip / transition `Delete` behaviour is unchanged when no marker is selected.
 - **R4.6** The Inspector grows a Markers section listing every marker sorted
