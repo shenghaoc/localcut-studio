@@ -148,6 +148,11 @@ before promoting either destination. This prevents encode/write failures from up
 file while leaving the other untouched; the project-bundles spec still documents the remaining
 power-loss window between final file promotions.
 
+### `MediaBinView.swift`
+The media-bin header has a native "Copy into Bundle" checkbox that controls the next file import.
+The value is passed to `EditorModel.importMedia(urls:wantsBundling:)`, so external-only imports keep
+their bookmark and do not receive a bundle-relative path on save.
+
 ### `DiagnosticsView.swift`
 `capabilitiesSection` reads `Capabilities.current` and renders a `capabilityRow` per feature with
 `tierLabel`/`tierTint` (view-local, keeping `Capabilities.swift` SwiftUI-free) and the verdict

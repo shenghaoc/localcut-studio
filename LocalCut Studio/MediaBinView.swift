@@ -7,21 +7,31 @@ import UniformTypeIdentifiers
 struct MediaBinView: View {
     @Bindable var model: EditorModel
     @State private var showImporter = false
+    @State private var copyImportsIntoBundle = true
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Media")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    showImporter = true
-                } label: {
-                    Image(systemName: "plus")
+            VStack(spacing: 6) {
+                HStack {
+                    Text("Media")
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        showImporter = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Import media…")
+                    .accessibilityLabel("Import media")
                 }
-                .buttonStyle(.borderless)
-                .help("Import media…")
-                .accessibilityLabel("Import media")
+
+                Toggle("Copy into Bundle", isOn: $copyImportsIntoBundle)
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help("Copy newly imported media into .lcbundle saves")
+                    .accessibilityLabel("Copy imported media into bundle")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -64,7 +74,8 @@ struct MediaBinView: View {
             allowsMultipleSelection: true
         ) { result in
             if case .success(let urls) = result {
-                Task { await model.importMedia(urls: urls) }
+                let wantsBundling = copyImportsIntoBundle
+                Task { await model.importMedia(urls: urls, wantsBundling: wantsBundling) }
             }
         }
     }

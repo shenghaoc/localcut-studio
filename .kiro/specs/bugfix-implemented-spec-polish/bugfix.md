@@ -224,6 +224,16 @@ new fingerprints and old project metadata.
   successful saves leave no `.staged-*` metadata files behind. This is still not a cross-file
   filesystem transaction under power loss, so the project-bundles spec keeps that edge documented.
 
+### U14 — `wantsBundling` had no import UI
+
+feature-project-bundles carried `MediaItem.wantsBundling` so bundle saves could keep selected files
+external-only, but every imported item used the default `true` value because the media import surface
+had no "don't copy" control.
+
+- **Fix:** `MediaBinView` now exposes a native checkbox for the next import. The selected value is
+  passed into `EditorModel.importMedia(urls:wantsBundling:)` and stored on each imported
+  `MediaItem`; bundle JSON tests cover the external-only path.
+
 ---
 
 ## Correctness
@@ -318,7 +328,6 @@ change to a tuned look), or large enough to deserve its own spec.
   progress.
 
 **Smaller hygiene:**
-- Bundle "Don't copy" import toggle (`wantsBundling` is dead in the UI); stale-bookmark refresh on
-  the queue path; `RenderQueue.isRunning` reset TOCTOU; typewriter mask excludes the pill; word-range
-  by token index instead of substring scan; golden snapshot tests (skin-smooth T3.1, caption presets
-  T5.1).
+- Stale-bookmark refresh on the queue path; `RenderQueue.isRunning` reset TOCTOU; typewriter mask
+  excludes the pill; word-range by token index instead of substring scan; golden snapshot tests
+  (skin-smooth T3.1, caption presets T5.1).

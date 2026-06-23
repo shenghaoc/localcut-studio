@@ -121,6 +121,24 @@ struct ProjectBundleTests {
         #expect(!names.contains { $0.contains(".staged-") })
     }
 
+    @Test("Bundle save keeps media external when import opts out of copying")
+    func bundleDocumentRespectsDontCopyImportFlag() throws {
+        let tmp = try makeTempDirectory("dont-copy")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let source = try writeAsset([0x01, 0x02, 0x03], name: "external.mov", in: tmp)
+        let model = EditorModel()
+        let item = MediaItem(url: source)
+        item.wantsBundling = false
+        item.bookmark = Data([0xBA, 0x5E])
+        model.project.mediaItems.append(item)
+
+        let document = model.makeDocumentForSave(forBundle: true)
+        let ref = try #require(document.media.first)
+
+        #expect(ref.bundleRelativePath == nil)
+        #expect(ref.bookmark == Data([0xBA, 0x5E]))
+    }
+
     // MARK: - T6.2 — fingerprint detects an external edit
 
     @Test("Fingerprint detects an external edit on a tracked asset")

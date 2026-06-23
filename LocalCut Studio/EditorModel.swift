@@ -188,12 +188,13 @@ final class EditorModel {
 
     /// Loads the given files into the media bin, reading metadata and a poster
     /// frame for each. Security-scoped access is retained for the session.
-    func importMedia(urls: [URL]) async {
+    func importMedia(urls: [URL], wantsBundling: Bool = true) async {
         let generation = sessionGeneration
         var loaded: [MediaItem] = []
         for url in urls {
             let didAccess = url.startAccessingSecurityScopedResource()
             let item = MediaItem(url: url)
+            item.wantsBundling = wantsBundling
             do {
                 item.duration = try await item.asset.load(.duration).sanitized
 

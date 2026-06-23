@@ -35,7 +35,8 @@
 
 - **R5.1** Reading or writing files inside a `.lcbundle` directory the user just opened does not require a security-scoped bookmark; the user's grant on the bundle is the grant on its contents.
 - **R5.2** External-only `MediaRef`s — media imported with the "Don't copy" option, or items not (yet) copied into the bundle — continue to use security-scoped bookmarks exactly as before.
-- **R5.3** The two paths are documented in `design.md` (`## Sandbox`) and the `EditorModel+Persistence.swift` code references that section.
+- **R5.3** The media import UI exposes the copy/external-only choice and stores it on `MediaItem.wantsBundling` before bundle save.
+- **R5.4** The two paths are documented in `design.md` (`## Sandbox`) and the `EditorModel+Persistence.swift` code references that section.
 
 ## R6 — Verification
 
