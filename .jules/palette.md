@@ -21,3 +21,6 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 
 **Learning:** Similar to other custom layout sliders, the Strength, Mask Warmth, and Luminance Gate sliders in the Beauty section of the Inspector announced generic values and had redundant visual text read by VoiceOver.
 **Action:** Hid the visual labels with `.accessibilityHidden(true)` and added `.accessibilityValue` to the sliders directly to ensure a clean VoiceOver experience, matching the existing accessible slider pattern.
+## 2026-06-23 - Add Call to Action to Empty State
+**Learning:** Empty states without a clear, prominent Call to Action (CTA) button force the user to hunt for the standard UI control (like a small `+` in a header toolbar) to proceed. In `MediaBinView`, the `ContentUnavailableView` instructed the user to import media but lacked a button to do so.
+**Action:** Whenever using `ContentUnavailableView` or any empty state screen, leverage the `actions` parameter to include a prominent `Button` that directly initiates the primary action needed to populate the view.
