@@ -19,6 +19,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] C1 — Cancelling a running export deletes the partial file (export-queue R2.4 / release gate)
 - [x] C2 — Karaoke word highlight holds across inter-word gaps + tail (phase-30 R3.3)
 - [x] C3 — `setRenderSize` purges the caption raster cache (title-raster R2.3 / T1.4)
+- [x] C4 — Snap-to-playhead authored-time conversion when transitions exist (trim/drag R3.1)
 
 ## Tests (no count regression; all extend existing suites)
 - [x] `EffectsTests` — `replacingLUT` / `removingLUT` / `hasLUT`; LUT display-name cache pruning
@@ -26,6 +27,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] `CaptionsAndKeyframesTests` — `activeWordIndex` gap-hold + empty; `renameCaptionTrack` undo
 - [x] `MarkersTests` — next/prev nav + clamp-at-ends + exact-on-marker movement
 - [x] `ExportQueueTests` — `retry` requeues cancelled and failed; no-op for non-terminal
+- [x] `TransitionsTests` / `TrimAndDragTests` — transition-window authored inverse + snap-through-ripple
 
 ## Docs
 - [x] `docs/keyboard-shortcuts.md` — add marker navigation (⌘⇧[ / ⌘⇧]) and refresh the table
@@ -42,8 +44,8 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] Claude issue comment — stale LUT display-name cache entries are pruned after replace/remove
 - [x] Local macOS validation — `xcodebuild test -project "LocalCut Studio.xcodeproj" -scheme "LocalCut Studio" -destination "platform=macOS" -derivedDataPath /private/tmp/LocalCutStudio-DerivedData`
 
-## Deferred follow-ups (catalogued, not in this PR)
-- [ ] Snap-to-playhead authored-time conversion when transitions exist (trim/drag R3.1) — P1
+## Follow-up backlog
+- [x] Snap-to-playhead authored-time conversion when transitions exist (trim/drag R3.1) — P1
 - [ ] Directional wipe: stored angle + inspector control + Codable migration (transitions R1.2)
 - [ ] Skin-smooth resolution-independent blur radius (needs look decision)
 - [ ] Keyframe authoring UI (feature-keyframes non-goal)

@@ -26,6 +26,13 @@ for LUTs no clip references anymore.
 `last(where: $0.time < now)` (the list is sorted) and route through the existing `seekToMarker(id:)`
 funnel, so selection exclusivity + the past-duration seek behaviour are inherited.
 
+### Transition-aware snap targets — `TransitionLayout.swift` / `EditorModel.swift`
+`TransitionLayout.authoredTimes(forEffective:cuts:)` inverts the authored-to-effective transition
+ripple used by placements. It returns one authored time outside transition windows and both authored
+sides inside a transition overlap. `EditorModel.snapTargets` feeds the effective playhead through
+that inverse before appending it to the authored clip-edge targets, so trim/drag candidates remain in
+one coordinate space.
+
 ### Caption rename — `EditorModel+Captions.swift`
 `renameCaptionTrack(_:in:)` mirrors `updateMarkerCoalesced`: `performCoalescedUndoable(target:
 trackID, rebuild: .skip)` so per-keystroke edits fold into one undo step and the name (which doesn't
@@ -93,12 +100,15 @@ Modified chords (not bare `[`/`]`) so they don't fire while typing in a text fie
 New tests extend existing suites (no new files): `EffectsTests` (LUT helpers + filename-cache pruning),
 `AudioMasterBusTests` (gain mapping + reachable silence floor), `CaptionsAndKeyframesTests`
 (word-highlight + rename), `MarkersTests` (nav, including exact-on-marker movement),
-`ExportQueueTests` (retry for cancelled + failed jobs). Pure helpers are tested directly; MainActor
-commands via `EditorModel`.
+`ExportQueueTests` (retry for cancelled + failed jobs), `TransitionsTests`/`TrimAndDragTests`
+(transition-window authored inverse + snap-through-ripple). Pure helpers are tested directly;
+MainActor commands via `EditorModel`.
 
 ## Risks
 - **Build gate** — verified with local `xcodebuild test` on macOS using the macOS 26.5 SDK; CI remains
   the authoritative zero-warning gate. The biggest behaviour change (U4 dB fader) is isolated to two
   bindings + a tested pure mapping and is trivially revertible.
+- **Transition snap math** is P0-sensitive, but the fix is a pure inverse of the existing cut list:
+  it does not alter composition assembly, transition overlaps, or preview/export render paths.
 - **Reopened-project LUT names** fall back to a generic "Applied" label because the inspector avoids
   resolving security-scoped bookmarks on the main actor; a new import refreshes the session cache.

@@ -23,8 +23,9 @@ authoritative zero-warning gate**; this branch has also been locally verified wi
 on macOS using the macOS 26.5 SDK.
 
 **Scope discipline:** changes are additive SwiftUI + small, unit-tested pure helpers + view-layer
-data plumbing. No composition time-range math (P0-sensitive) is touched. New logic ships with tests
-and the test count only grows.
+data plumbing. The initial pass avoided composition time-range math; the follow-up snap fix touches
+only pure `TransitionLayout` authored/effective mapping and is covered by unit tests. New logic ships
+with tests and the test count only grows.
 
 ---
 
@@ -170,6 +171,19 @@ contradicts the documented call site and wastes memory.)
 - **Fix:** `setRenderSize` now calls `EffectCompositor.purgeCaptionRasterCache()` inside its
   undoable block.
 
+### C4 — Snap-to-playhead used the wrong coordinate space when transitions exist
+
+`EditorModel.snapTargets` mixed authored clip-edge targets with the playhead's effective
+(rippled/rendered) time. Once a transition ripples the timeline, snapping a trim or drag candidate to
+the playhead could land one transition-overlap early. Inside a transition window one effective
+playhead legitimately maps to both sides of the cut, so a single global authored time is not enough.
+
+- **Fix:** `TransitionLayout.authoredTimes(forEffective:cuts:)` returns every authored time that
+  renders at the effective playhead. Outside overlaps this is one target; inside an overlap it is
+  both the outgoing and incoming side. `snapTargets` now adds those authored playhead target(s) while
+  leaving clip boundaries authored, so trim/drag candidates snap to the side of the transition they
+  are actually manipulating.
+
 ---
 
 ## Verification
@@ -182,7 +196,8 @@ contradicts the documented call site and wastes memory.)
   `AudioGainMapping` round-trip + floor + slider-minimum reachability (4),
   `EffectCompositor.activeWordIndex` gap-hold + empty (2), marker next/prev nav + exact-on-marker
   navigation (3), `RenderQueue.retry` requeues cancelled + failed jobs and no-ops for non-terminal
-  rows (3), `renameCaptionTrack` undo (1).
+  rows (3), `renameCaptionTrack` undo (1), `TransitionLayout.authoredTimes` and transition-aware
+  snap-to-playhead conversion (2).
 - **V3** — Manual smoke (recommended pre-release): Diagnostics shows capability tiers with reasons in
   `.help`; LUT import shows the filename and replacing it doesn't stack; ⌘⇧[ / ⌘⇧] jump markers;
   Reveal/Retry behave; scopes show the graticule; the master fader feels log-mapped; cancelling an
@@ -196,10 +211,6 @@ Catalogued so the audit's value isn't lost. Each is either higher-risk (composit
 change to a tuned look), or large enough to deserve its own spec.
 
 **Correctness / behaviour (own spec recommended):**
-- **Snap-to-playhead coordinate space** — `EditorModel.snapTargets` adds the playhead in *effective*
-  (rippled) time while clip edges use *authored* time, so snapping to the playhead is off by the
-  cumulative transition overlap once any transition exists. Convert via the per-cut shift like the
-  split path does. (P1.)
 - **Directional wipe** — `TransitionType.wipe` is hardcoded to the bars-swipe default angle;
   feature-transitions R1.2 says "directional". Needs a stored direction/angle + Codable migration +
   inspector control.

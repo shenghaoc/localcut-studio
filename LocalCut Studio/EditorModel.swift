@@ -962,13 +962,13 @@ final class EditorModel {
         return bestStart
     }
 
-    /// Collects all snap targets: playhead position, every clip boundary
-    /// (excluding the given clip), and the timeline origin (0).
+    /// Collects all authored snap targets: playhead position(s), every clip
+    /// boundary (excluding the given clip), and the timeline origin (0).
     func snapTargets(excluding clipID: Clip.ID? = nil) -> [CMTime] {
-        var targets: [CMTime] = [
-            .zero,
-            CMTime(seconds: currentTime, preferredTimescale: 600)
-        ]
+        var targets: [CMTime] = [.zero]
+        let effectivePlayhead = CMTime(seconds: currentTime, preferredTimescale: 600)
+        let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks)
+        targets.append(contentsOf: TransitionLayout.authoredTimes(forEffective: effectivePlayhead, cuts: cuts))
         for track in allTracks {
             for clip in track.clips where clip.id != clipID {
                 targets.append(clip.timelineStart)

@@ -178,6 +178,37 @@ enum TransitionLayout {
         return shift
     }
 
+    /// Authored times that draw at the given effective timeline time.
+    ///
+    /// Outside transition windows this returns one time. Inside a transition
+    /// window it returns both sides of the overlap: the outgoing clip's authored
+    /// time before the cut and the incoming clip's authored time after the cut.
+    static func authoredTimes(forEffective effective: CMTime, cuts: [Cut]) -> [CMTime] {
+        let ordered = cuts.sorted { $0.time < $1.time }
+        var results: [CMTime] = []
+        var cumulativeShift = CMTime.zero
+        var lowerBound = CMTime.zero
+
+        for index in 0...ordered.count {
+            let upperBound = index < ordered.count ? ordered[index].time : nil
+            let authored = effective + cumulativeShift
+            let aboveLower = authored.seconds >= lowerBound.seconds - adjacencyTolerance
+            let belowUpper = upperBound.map { authored.seconds <= $0.seconds + adjacencyTolerance } ?? true
+
+            if authored >= .zero, aboveLower, belowUpper,
+               !results.contains(where: { abs(($0 - authored).seconds) < adjacencyTolerance }) {
+                results.append(authored)
+            }
+
+            if index < ordered.count {
+                lowerBound = ordered[index].time
+                cumulativeShift = cumulativeShift + ordered[index].overlap
+            }
+        }
+
+        return results.sorted { $0 < $1 }
+    }
+
     /// Placements for one track's clips, rippled by the project-wide cut list.
     static func placements(for clips: [Clip], cuts: [Cut]) -> [Placement] {
         let ordered = clips.sorted { $0.timelineStart < $1.timelineStart }

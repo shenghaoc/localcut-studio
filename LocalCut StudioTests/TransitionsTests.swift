@@ -180,6 +180,15 @@ struct TransitionsTests {
         #expect(TransitionLayout.shift(at: time(5), cuts: cuts) == time(2))
     }
 
+    @Test("Authored inverse returns both sides of an effective transition window")
+    func authoredTimesForEffectiveTransitionWindow() {
+        let cuts = [TransitionLayout.Cut(time: time(5), overlap: time(1))]
+
+        #expect(TransitionLayout.authoredTimes(forEffective: time(3), cuts: cuts) == [time(3)])
+        #expect(TransitionLayout.authoredTimes(forEffective: time(6), cuts: cuts) == [time(7)])
+        #expect(TransitionLayout.authoredTimes(forEffective: time(4.5), cuts: cuts) == [time(4.5), time(5.5)])
+    }
+
     // MARK: - Spanning-clip splitting (A/V sync across cuts)
 
     @Test("A clip that spans a transition cut splits and ripples each side")
