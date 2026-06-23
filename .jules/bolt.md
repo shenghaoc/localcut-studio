@@ -11,8 +11,3 @@ Append a dated entry whenever you learn something about keeping LocalCut Studio 
 
 **Learning:** Generating bin thumbnails with a fresh `AVAssetImageGenerator` per item, synchronously, would block import and churn memory.
 **Action:** Generate thumbnails asynchronously after metadata load, with a bounded `maximumSize` and `appliesPreferredTrackTransform = true`, in a detached `Task` per item; never hold the generator past the single `image(at:)` call.
-
-## 2026-06-23 — Core Image kernels: Metal Shading Language, not CIKL
-
-**Learning:** The skin-smoothing kernels used `CIColorKernel(source:)` (Core Image Kernel Language, deprecated since macOS 10.14). CIKL kernels compile at runtime on first use; MSL kernels are precompiled into the app's default `metallib`, so they initialise faster and surface errors at build time instead of returning `nil` at runtime.
-**Action:** Author Core Image kernels in a `*.ci.metal` file. The `.ci.metal` suffix + the project's synchronized file-system group (objectVersion 90 / Xcode 26) make Xcode apply the CI kernel build flags automatically — no pbxproj/per-file flag surgery. Load via `try CIColorKernel(functionName:fromMetalLibraryData:)` from `Bundle.main.url(forResource: "default", withExtension: "metallib")`, keep the compiled kernel in a `static let`, and degrade to a logged no-op if the load throws.

@@ -23,25 +23,24 @@ Three concentric rings, each gated on the previous staying green:
 ### Core Image kernel migration (D1)
 
 The deprecated `CIColorKernel(source:)` takes Core Image Kernel Language (a GLSL dialect).
-The supported path on macOS 26 is **Metal Shading Language**, loaded via
-`CIColorKernel(functionName:fromMetalLibraryData:)`. MSL kernels are precompiled, so they
-init faster and surface errors at *build* time instead of returning `nil` at runtime.
+The shipped path uses **Metal Shading Language** source compiled once at runtime with
+`CIKernel.kernels(withMetalString:)`. A precompiled `.ci.metal` → `default.metallib` attempt
+was abandoned because the synchronized file-system group did not reliably thread the Metal
+`-cikernel` link flag, leaving the kernels absent from `default.metallib` in CI.
 
-- Add `SkinSmoothKernels.ci.metal`. The `.ci.metal` extension makes Xcode apply the Core
-  Image kernel compiler/linker flags and emit the kernels into the app's default Metal
-  library — no manual `OTHER_METAL_COMPILER_FLAGS`/`MTLLINKER_FLAGS` editing if the suffix
-  convention is honoured; verify the flags are present after adding the file.
-- Port `skinMask` and `skinBlend` line-for-line: CIKL `__sample`/`vec4` → MSL
-  `sample_t`/`float4`, wrapped in `extern "C" { namespace coreimage { … } }` with
-  `#include <CoreImage/CoreImage.h>`. The maths (YCbCr skin probability, `mix` blend) is
+- Port `skinMask` and `skinBlend` line-for-line from CIKL to Metal Shading Language (MSL)
+  as a runtime string, wrapped in `extern "C" { namespace coreimage { ... } }` with
+  `#include <CoreImage/CoreImage.h>`. The maths (YCbCr skin probability, mix blend) is
   identical.
-- Load once into the existing `static let` slots from
-  `Bundle.main.url(forResource: "default", withExtension: "metallib")` → `Data` →
-  `try CIColorKernel(functionName:…)`. A throw/`nil` logs via the existing `os_log` channel
-  and leaves smoothing as a no-op — the same degradation the optional kernels already model.
+- Compile once at runtime via `CIKernel.kernels(withMetalString:)` and load into the
+  `static let` slots. A throw/`nil` logs via the existing `os_log` channel and leaves
+  smoothing as a no-op — the same degradation the optional kernels already model. This
+  runtime string compilation avoids build-system complexity around precompiled
+  `.ci.metal` files and works in app, test-host, and CI bundle contexts.
 
 This is the only change touching a runtime render path; `KeyframesAndSkinSmoothTests` is the
-oracle that the port is exact.
+oracle that the port is exact and includes a render-path assertion that the compiled kernels
+alter a skin-tone fixture.
 
 ### Concurrency annotations (C1–C3)
 
@@ -74,5 +73,5 @@ or increased; the suite must stay green with no count regression.
 
 - Composition track-insertion dedup (R4) — deferred, see `bugfix.md`.
 - Any product behaviour, UI layout, or rendered-output change.
-- New entitlements, dependencies, or build configurations beyond the `.ci.metal` source the
-  kernel migration requires.
+- New entitlements, dependencies, or build configurations; the runtime MSL string keeps the
+  kernel migration out of project build settings.
