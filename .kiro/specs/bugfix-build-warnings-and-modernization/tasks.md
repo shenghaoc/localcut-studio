@@ -13,14 +13,20 @@
 - [x] **D1-test** `skinSmoothRenderPathAltersPixels()` renders a skin-tone fixture through the
   compiled kernels and asserts pixels change — fails loudly if a kernel can't load (Codex
   review). `applySkinSmooth` exposed `internal` for the test.
+- [x] **D2** `CompositionBuilder.crossDissolveLayerInstructions` migrated off the macOS-26-
+  deprecated `AVMutableVideoCompositionLayerInstruction` to
+  `AVVideoCompositionLayerInstruction.Configuration` (`init(trackID:)` + `setTransform` +
+  `addOpacityRamp`), returning the immutable `AVVideoCompositionLayerInstruction`. Test reads
+  ramps via the modern `opacityRamp(at:)`. CI-only deprecation (Xcode 26.5); no behaviour change.
 
 ## Swift 6 concurrency warnings
 
 - [x] **C1** `ScopeSampler` — `nonisolated(unsafe) static let shared` → `nonisolated`.
-- [x] **C2** `AudioInspectorView.fadeRow` — `set` parameter now `@escaping @MainActor
-  (Double) -> Void`. `@MainActor` (not `@Sendable`) is correct: global-actor-isolated
-  closures are implicitly `Sendable` *and* keep the isolation needed to touch `model`. Landed
-  with R1.
+- [x] **C2** `AudioInspectorView` fades — build the `Binding<Double>` inline in a
+  `fadeBinding(_:)` helper (the `masterGainBinding` shape) so the setter's main-actor isolation
+  is *inferred*, no annotated closure forwarded. (An interim `@escaping @MainActor (Double) ->
+  Void` parameter fixed the warning locally but **crashed Swift 6.3.2 on CI** in IRGen emitting
+  the `@MainActor`→`@Sendable` reabstraction thunk for `Binding.set` — see the CI-crash note.)
 - [x] **C3** `RenderQueue.pump` — `input`/`output` confined via `nonisolated(unsafe)` locals
   with a comment documenting the serial-`pumpQueue` ownership invariant.
 
@@ -63,15 +69,11 @@
 ## Verification
 
 - [x] **V1** Build (Debug/macOS, app + tests via `buildForTesting`) — **zero warnings**, zero
-  errors.
+  errors on **both** the macOS 27 dev host and the macOS 26 / Xcode 26.5 CI toolchain
+  (the D2 deprecation only appeared on CI; confirmed cleared in the CI build log).
 - [x] **V2** Suite green: **320 / 320** (up from 311; parameterized cases register
   individually + the render-path test — no count regression).
 - [x] **V3** Skin-smoothing render path verified end-to-end by `skinSmoothRenderPathAltersPixels`
   (compiled kernels load and alter pixels).
 - [ ] **V4** Manual VoiceOver pass on audio/colour/beauty sliders after R1 (recommended
   before release; not blocking the diff).
-
-## Notes / out of scope
-
-- The `ProjectBundleTests.fingerprintIndexCodableRoundTrip` flake (non-deterministic Codable
-  key ordering) was fixed independently on `main` (#30) and is included here via rebase.

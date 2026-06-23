@@ -1,10 +1,12 @@
 # Bugfix: Build Warnings & Swift 6 Modernization
 
-Zero-warning hardening pass. A clean Debug build currently emits **7 warnings** across
-5 files — deprecated Core Image API, Swift 6 concurrency annotations, and a dead binding.
-This spec drives the build back to zero warnings, then folds in the low-risk modernization
-the user asked for: consolidating copy-pasted view/engine code and tightening the test
-suite onto current Swift Testing idioms.
+Zero-warning hardening pass. A clean Debug build emits **7 warnings** across 5 files locally
+(deprecated Core Image API, Swift 6 concurrency annotations, a dead binding) plus a macOS 26
+**deprecation that only surfaces on CI's Xcode 26.5** (`AVMutableVideoCompositionLayerInstruction`,
+D2). This spec drives the build back to zero warnings on **both** the macOS 27 dev host and the
+macOS 26 CI toolchain, then folds in the low-risk modernization the user asked for:
+consolidating copy-pasted view/engine code and tightening the test suite onto current Swift
+Testing idioms.
 
 **Invariant: no behaviour change.** Every item here is either a warning fix, a structural
 refactor that preserves output exactly, or a test-only change. The one item that touches
@@ -31,17 +33,36 @@ Metal Shading Language kernel loaded with `CIColorKernel(functionName:fromMetalL
 — precompiled, so it initialises faster and gets compile-time diagnostics instead of
 runtime `nil`.
 
-- **Fix**: Port both kernels verbatim from CIKL to MSL into a `SkinSmoothKernels.ci.metal`
-  source file (the `.ci.metal` suffix makes Xcode compile it with the Core Image kernel
-  flags into the app's default Metal library). Load them once via
-  `try CIColorKernel(functionName:fromMetalLibraryData:)` from the bundle's default
-  `metallib`, keeping the existing compile-once-`static`-let shape. Surface a load failure
-  through the existing `os_log(.error,…)` channel; a `nil`/throwing load degrades to the
-  same "smoothing is a no-op" path the optional kernels already have.
-- **Regression**: `KeyframesAndSkinSmoothTests` already exercises the skin-smooth output —
-  it must stay green, confirming the MSL port matches the CIKL maths.
+- **Fix (as shipped)**: Port both kernels verbatim from CIKL to **`[[ stitchable ]]` Metal
+  Shading Language**, compiled once at runtime via `CIKernel.kernels(withMetalString:)`,
+  keeping the compile-once-`static`-let shape. A load/compile failure logs via
+  `os_log(.error,…)` and degrades to the existing "smoothing is a no-op" path.
+  - *First attempt (abandoned):* a precompiled `SkinSmoothKernels.ci.metal` →
+    `default.metallib` loaded with `CIColorKernel(functionName:fromMetalLibraryData:)`. The
+    project's synchronized file-system group never threaded the Metal `-cikernel` link flag,
+    so the kernels weren't in `default.metallib` and `applySkinSmooth` silently no-op'd. The
+    runtime-string path needs no build-flag plumbing and works in every bundle context.
+- **Regression**: `skinSmoothRenderPathAltersPixels` renders a skin-tone fixture *through the
+  compiled kernels* and asserts pixels change — it caught the silent no-op above and guards
+  against a missing/renamed kernel that the model-only tests miss. `applySkinSmooth` is
+  `internal` for the test.
 - **Fallback (documented, not chosen)**: defining `CI_SILENCE_GL_DEPRECATION` silences the
   warning without migrating. Rejected — it hides a real deprecation the user asked to address.
+
+### D2 — `AVMutableVideoCompositionLayerInstruction` deprecated (macOS 26)
+
+`CompositionBuilder.crossDissolveLayerInstructions` built two
+`AVMutableVideoCompositionLayerInstruction`s with `setTransform`/`setOpacityRamp`. The whole
+mutable class is deprecated in the macOS 26 SDK (only surfaced on CI's Xcode 26.5, not the
+macOS 27 dev host):
+
+> `'AVMutableVideoCompositionLayerInstruction' was deprecated in macOS 26.0: Use AVVideoCompositionLayerInstruction.Configuration instead`
+
+- **Fix**: Build each instruction from an `AVVideoCompositionLayerInstruction.Configuration`
+  (`init(trackID:)` + `setTransform(_:at:)` + `addOpacityRamp(_:)`) and return the immutable
+  `AVVideoCompositionLayerInstruction(configuration:)`. The regression test reads ramps via
+  the modern `opacityRamp(at:)` (a returned struct) instead of the out-param `getOpacityRamp`.
+  No behaviour change — same trackID, transform, and 1→0 / 0→1 opacity ramp.
 
 ---
 
@@ -69,12 +90,14 @@ proves the singleton safe under plain `nonisolated`; the `(unsafe)` escape hatch
 `fadeRow(label:seconds:set:)` forwards its `set: @escaping (Double) -> Void` into
 `Binding(get:set:)`, whose setter is now `@Sendable` in the SDK.
 
-- **Fix**: Annotate the parameter `set: @escaping @MainActor (Double) -> Void`. `@MainActor`
-  — *not* `@Sendable` — is the right tool: a global-actor-isolated closure is implicitly
-  `Sendable` (satisfying `Binding.set`) while keeping the isolation the call-site closures
-  need to mutate the `@MainActor` `EditorModel`. (Marking it bare `@Sendable` strips the
-  isolation and the call-site `model` access fails to compile — confirmed during the build.)
-  Folded into the R1 helper so the fix lands once.
+- **Fix (as shipped)**: Build the `Binding<Double>` **inline** in a `fadeBinding(_:)` helper
+  (the same shape as the existing `masterGainBinding`) so the setter's main-actor isolation is
+  *inferred* — no isolation-annotated closure is forwarded at all.
+  - *Interim attempt (reverted):* annotating the forwarded parameter `@escaping @MainActor
+    (Double) -> Void` silenced the warning on the macOS 27 host, but **crashed the Swift 6.3.2
+    compiler on CI** (Xcode 26.5) in IRGen while emitting the `@MainActor`→`@Sendable`
+    reabstraction thunk for `Binding.set`. Building the binding inline sidesteps the thunk
+    entirely (see CI-crash note below).
 
 ### C3 — Non-`Sendable` AVFoundation captures in `@Sendable` request block
 
@@ -129,7 +152,7 @@ accessibility shape:
   common structure — caption row, `monospacedDigit`, `.accessibilityLabel`/`.accessibilityValue`,
   the `.accessibilityHidden(true)` on the redundant visual label (the pattern Palette's
   journal mandates). Adopt it at all three sites with their existing labels/formats intact.
-  Carries the C2 `@Sendable` fix for the fade setter.
+  (The fade rows feed it a `Binding<Double>` built inline per C2.)
 
 ### R2 — Collapse colour-grade `CIFilter` boilerplate
 
@@ -203,10 +226,26 @@ several test files.
 
 ## Verification
 
-- **V1** — Debug/macOS build (app + tests): **zero warnings**, zero errors.
-- **V2** — Full test suite green: **315 / 315** (up from 311; parameterized cases register
-  individually, so no count regression).
-- **V3** — Skin-smoothing output unchanged after the MSL kernel port (D1) — confirmed by
-  `KeyframesAndSkinSmoothTests`.
+- **V1** — Debug/macOS build (app + tests): **zero warnings**, zero errors on **both** the
+  macOS 27 dev host and the macOS 26 / Xcode 26.5 CI toolchain (D2 only surfaced on CI).
+- **V2** — Full test suite green: **320 / 320** (parameterized cases + the render-path test
+  register individually; no count regression).
+- **V3** — Skin-smoothing render path verified end-to-end by `skinSmoothRenderPathAltersPixels`
+  (compiled kernels load and alter pixels).
 - **V4** — Manual: inspector sliders (audio fades, colour grade, beauty) still render and
   read correctly under VoiceOver after the R1 consolidation (recommended pre-release).
+
+---
+
+## CI / toolchain notes
+
+The dev host is macOS 27 / Xcode 27 (Swift 6.4); CI and the deployment target are macOS 26 /
+Xcode 26.5 (Swift 6.3.2). Two issues only reproduced on the CI toolchain:
+
+- **Compiler crash (C2):** the interim `@MainActor`-annotated `Binding.set` closure crashed
+  Swift 6.3.2 in IRGen (reabstraction thunk `@$sSdScA_pSgIeAghyg_SdIeAghn_TR`). Building the
+  binding inline avoids the thunk. Don't reintroduce isolation-annotated closures forwarded
+  into `Binding(get:set:)`.
+- **macOS 26 deprecation (D2):** `AVMutableVideoCompositionLayerInstruction` is only flagged
+  deprecated by the macOS 26 SDK, so it was invisible on the dev host. Treat the CI build log
+  as the authoritative zero-warning gate — a clean local build isn't sufficient.
