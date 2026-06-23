@@ -118,6 +118,12 @@ struct EditorView: View {
         .toolbar { toolbarContent }
         .navigationTitle(model.project.name)
         .safeAreaInset(edge: .bottom) { statusBar }
+        .onAppear {
+            if shouldStartAudioMeteringAutomatically {
+                model.prepareAudioMetering()
+            }
+        }
+        .onDisappear { model.teardownAudioMetering() }
         .background(WindowConfigurator(model: model))
         .overlay(alignment: .topTrailing) {
             if model.isDiagnosticsVisible {
@@ -130,6 +136,16 @@ struct EditorView: View {
                     .transition(.opacity)
             }
         }
+    }
+
+    private var shouldStartAudioMeteringAutomatically: Bool {
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        return environment["XCTestConfigurationFilePath"] == nil
+            && environment["XCTestSessionIdentifier"] == nil
+        #else
+        return true
+        #endif
     }
 
     @ToolbarContentBuilder

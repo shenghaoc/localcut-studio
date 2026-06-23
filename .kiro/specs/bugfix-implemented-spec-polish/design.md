@@ -59,6 +59,12 @@ the render cache, schedule a rebuild, and register discrete undo steps:
 - remove at playhead,
 - seek to previous/next keyframe.
 
+### Audio meter lifecycle — `EditorModel.swift`
+`prepareAudioMetering()` starts `audioBus.prepareLive()` from the app shell and mirrors any start
+failure into `statusMessage`; `teardownAudioMetering()` stops the live graph. Export-time metering is
+not wired here because the current `AVAssetExportSession` path does not expose rendered PCM blocks
+for the offline bus tap.
+
 ### Word-highlight hold — `EffectCompositor.swift`
 `activeWordIndex` becomes a thin instance wrapper over a new `static nonisolated
 activeWordIndex(words:at:)`: containment match first, else hold the most-recently-started word, else
@@ -98,6 +104,17 @@ if/else is `_ConditionalContent`.
   default angle.
 - Beauty section: skin-smooth strength keyframe disclosure showing clip-local playhead time,
   evaluated value, keyframe count, add/update, remove, and previous/next controls.
+
+### `ContentView.swift`
+`EditorView.onAppear` starts live audio metering and `onDisappear` tears it down. The view does not
+touch `AVAudioEngine` directly; it delegates lifecycle and status handling to `EditorModel`. The
+automatic start is skipped under XCTest because the app test host can crash before bootstrapping when
+an audio device graph is started during runner launch; targeted audio-bus tests still exercise the
+engine explicitly.
+
+### `AudioInspectorView.swift`
+The meter strip renders whenever the live bus is running. If startup fails, the placeholder reflects
+`AudioMasterBus.lastStartError` instead of the old permanent "not connected" copy.
 
 ### `ScopesView.swift`
 - `drawWaveformGraticule` — five horizontal lines + IRE labels, drawn after the frame outline and

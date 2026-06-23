@@ -1230,6 +1230,19 @@ final class EditorModel {
                     toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
+    // MARK: - Audio metering
+
+    func prepareAudioMetering() {
+        audioBus.prepareLive()
+        if let error = audioBus.lastStartError {
+            statusMessage = "Audio metering unavailable: \(error)"
+        }
+    }
+
+    func teardownAudioMetering() {
+        audioBus.teardownLive()
+    }
+
     // MARK: - Export
 
     /// Toolbar/menu Export shortcut. Captures a security-scoped bookmark for

@@ -167,6 +167,19 @@ skin-smooth keyframe.
   deferred feature; this lands the minimal reachable authoring path for the existing animated
   parameter.
 
+### U9 — Live audio meter did not start with the editor
+
+feature-audio-master-bus added a live `AVAudioEngine` graph and inspector meter, but `prepareLive()`
+was never called from the app shell. The inspector therefore stayed in its "not connected" state for
+normal use even though the bus lifecycle was implemented.
+
+- **Fix:** `EditorView` starts the live bus on appear and tears it down on disappear through
+  `EditorModel.prepareAudioMetering()` / `teardownAudioMetering()`. Start failures are surfaced in
+  the status line and the inspector. Export-time offline meter animation is intentionally re-scoped:
+  the default export path still uses `AVAssetExportSession`, which exposes progress but not PCM
+  blocks to feed the offline bus tap. Driving the meter during export belongs with Phase 36's
+  `AVAssetReader`/`AVAssetWriter` audio path.
+
 ---
 
 ## Correctness
@@ -256,9 +269,9 @@ change to a tuned look), or large enough to deserve its own spec.
 **Deferred feature surfaces:**
 - **Keyframable caption style params** (phase-30 R2.3) — `CaptionStyle` stores plain values, no
   `Keyframed<T>` fields; the requirement is silently unmet.
-- **Live + offline audio metering** (audio-master-bus R3.3/R5.1) — `prepareLive()` is never called
-  and export runs through `AVAssetExportSession` without the offline graph, so the meter never
-  animates; the inspector shows a permanent "not connected" placeholder.
+- **Export-time offline audio meter animation** (audio-master-bus R3.3) — export still runs through
+  `AVAssetExportSession`, which has progress but no PCM callback for the offline bus tap. Phase 36's
+  reader/writer audio pipeline owns the point where rendered blocks can update the meter.
 
 **Performance / toolchain:**
 - **Render-cache + title-raster LRU** are O(n) per access (`firstIndex`+`remove`); the design names

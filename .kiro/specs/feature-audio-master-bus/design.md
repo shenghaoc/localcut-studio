@@ -61,12 +61,13 @@ specifies for parity with preview.
 through the offline graph by reading the composition with `AVAssetReader`,
 feeding samples into the offline `AVAudioEngine`'s `AVAudioPlayerNode`
 inputs, pulling rendered blocks, and writing them through `AVAssetWriter`.
-Preview wiring is staged: until Phase 36 lands the inserts, the bus exists,
-publishes meters from a silent / passthrough tap, and answers gain/pan
-queries; the `AVPlayer` preview is unchanged. Phase 36 flips the preview path
-to the bus by replacing the `AVPlayer` audio with an `AVAudioEngine`-backed
-`AVAudioPlayerNode` chain at the bus's inputs. This staging is explicit so
-landing the bus does not regress current playback.
+Preview wiring is staged: the editor starts the live bus on window appearance
+so the inspector meter is connected, but until Phase 36 lands the inserts and
+audio routing the live graph renders silence while `AVPlayer` preview remains
+unchanged. Phase 36 flips the preview path to the bus by replacing the
+`AVPlayer` audio with an `AVAudioEngine`-backed `AVAudioPlayerNode` chain at
+the bus's inputs. This staging is explicit so landing the bus does not regress
+current playback.
 
 ## Engine types
 

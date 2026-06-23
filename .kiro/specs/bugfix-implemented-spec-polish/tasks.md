@@ -17,6 +17,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] U6 — Directional wipe angle stored, persisted, shown in inspector, and passed to compositor (transitions R1.2)
 - [x] U7 — Caption line Start/Duration controls + draggable caption timeline lanes (caption-tracks R4.1)
 - [x] U8 — Minimal skin-smooth strength keyframe authoring controls (feature-keyframes R6)
+- [x] U9 — Live audio meter starts with the editor window; export meter is re-scoped to Phase 36's offline PCM path
 
 ## Correctness
 - [x] C1 — Cancelling a running export deletes the partial file (export-queue R2.4 / release gate)
@@ -57,7 +58,8 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] Keyframe authoring UI for skin-smooth strength (feature-keyframes R6)
 - [ ] Keyframable caption style params (phase-30 R2.3)
 - [x] Caption line retiming controls + caption timeline lane (caption-tracks R4.1)
-- [ ] Live + offline audio metering wiring (`prepareLive`, export-time meter) (audio-master-bus R3.3/R5.1)
+- [x] Live audio meter startup (`prepareLive`) (audio-master-bus R5.1)
+- [ ] Export-time offline meter animation through the Phase 36 reader/writer PCM path (audio-master-bus R3.3)
 - [ ] Render-cache + title-raster O(1) LRU; render-cache disk spill (render-cache R2.3)
 - [ ] Scopes: revision-gated redraw; single-pass histogram; per-pixel vectorscope + colour targets
 - [ ] Document model: `ReferenceFileDocument`/Open Recent; async window-close save; staged bundle swap
