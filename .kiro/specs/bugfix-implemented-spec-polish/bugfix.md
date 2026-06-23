@@ -142,6 +142,17 @@ Core Image bars-swipe default angle and the inspector exposed only type/duration
   in degrees, and the shared compositor maps the stored radians to
   `CIFilter.barsSwipeTransition().angle`, so preview and export stay identical.
 
+### U7 — Caption line retiming existed in the model but had no surface
+
+feature-caption-tracks R4.1 includes retiming caption lines, and `CaptionTrack.updateLine` already
+re-sorts edited lines. The inspector only exposed text editing and delete, and the timeline had no
+caption lane, so timing edits were not reachable.
+
+- **Fix:** `retimeCaptionLine` updates a line through the existing coalesced `updateCaptionLine`
+  path, preserving undo and sorted order. The caption inspector now exposes Start and Duration
+  fields, and the timeline draws one caption lane per track with draggable caption blocks. Caption
+  line times stay in effective/rendered timeline space, matching how the compositor schedules them.
+
 ---
 
 ## Correctness
@@ -209,7 +220,7 @@ playhead legitimately maps to both sides of the cut, so a single global authored
   navigation (3), `RenderQueue.retry` requeues cancelled + failed jobs and no-ops for non-terminal
   rows (3), `renameCaptionTrack` undo (1), `TransitionLayout.authoredTimes` and transition-aware
   snap-to-playhead conversion (2), directional wipe angle planning + persistence/bundle migration
-  + shared video-composition propagation (5).
+  + shared video-composition propagation (5), caption-line retiming (1).
 - **V3** — Manual smoke (recommended pre-release): Diagnostics shows capability tiers with reasons in
   `.help`; LUT import shows the filename and replacing it doesn't stack; ⌘⇧[ / ⌘⇧] jump markers;
   Reveal/Retry behave; scopes show the graticule; the master fader feels log-mapped; cancelling an
@@ -232,8 +243,6 @@ change to a tuned look), or large enough to deserve its own spec.
   strength is keyframable in the model, but nothing in the UI creates a keyframe.
 - **Keyframable caption style params** (phase-30 R2.3) — `CaptionStyle` stores plain values, no
   `Keyframed<T>` fields; the requirement is silently unmet.
-- **Caption line retiming + timeline lane** (feature-caption-tracks R4.1) — start/end are read-only
-  in the inspector and captions have no timeline lane, so retiming is unreachable.
 - **Live + offline audio metering** (audio-master-bus R3.3/R5.1) — `prepareLive()` is never called
   and export runs through `AVAssetExportSession` without the offline graph, so the meter never
   animates; the inspector shows a permanent "not connected" placeholder.

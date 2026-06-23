@@ -15,6 +15,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] U4 — `AudioGainMapping`: master + track faders log-mapped in dB (audio-master-bus design)
 - [x] U5 — Caption track rename + "styling is burn-in only" notice (caption-tracks R2.6 / R6.2)
 - [x] U6 — Directional wipe angle stored, persisted, shown in inspector, and passed to compositor (transitions R1.2)
+- [x] U7 — Caption line Start/Duration controls + draggable caption timeline lanes (caption-tracks R4.1)
 
 ## Correctness
 - [x] C1 — Cancelling a running export deletes the partial file (export-queue R2.4 / release gate)
@@ -30,6 +31,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] `ExportQueueTests` — `retry` requeues cancelled and failed; no-op for non-terminal
 - [x] `TransitionsTests` / `TrimAndDragTests` — transition-window authored inverse + snap-through-ripple
 - [x] `TransitionsTests` / `TransitionsIntegrationTests` / `PersistenceTests` / `ProjectBundleTests` — directional wipe angle planning + shared video-composition propagation + document/bundle round trips
+- [x] `CaptionsAndKeyframesTests` — caption retiming sorts, shifts word timings, and is undoable
 
 ## Docs
 - [x] `docs/keyboard-shortcuts.md` — add marker navigation (⌘⇧[ / ⌘⇧]) and refresh the table
@@ -52,7 +54,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [ ] Skin-smooth resolution-independent blur radius (needs look decision)
 - [ ] Keyframe authoring UI (feature-keyframes non-goal)
 - [ ] Keyframable caption style params (phase-30 R2.3)
-- [ ] Caption line retiming controls + caption timeline lane (caption-tracks R4.1)
+- [x] Caption line retiming controls + caption timeline lane (caption-tracks R4.1)
 - [ ] Live + offline audio metering wiring (`prepareLive`, export-time meter) (audio-master-bus R3.3/R5.1)
 - [ ] Render-cache + title-raster O(1) LRU; render-cache disk spill (render-cache R2.3)
 - [ ] Scopes: revision-gated redraw; single-pass histogram; per-pixel vectorscope + colour targets

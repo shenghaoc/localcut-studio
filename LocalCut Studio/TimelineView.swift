@@ -29,6 +29,10 @@ struct TimelineView: View {
         model.project.videoTracks + model.project.audioTracks
     }
 
+    private var captionTracks: [CaptionTrack] {
+        model.project.captionTracks
+    }
+
     /// Project-wide transition cuts used to ripple clip positions so the timeline
     /// matches the rendered composition.
     private var transitionCuts: [TransitionLayout.Cut] {
@@ -44,7 +48,14 @@ struct TimelineView: View {
     }
 
     @State private var dragMode: DragMode?
+    @State private var captionDrag: CaptionLineDrag?
     @State private var hoverEdge: HoverEdge?
+
+    private struct CaptionLineDrag: Equatable {
+        let lineID: CaptionLine.ID
+        let trackID: CaptionTrack.ID
+        let candidateStart: CMTime
+    }
 
     enum HoverEdge: Equatable {
         case left(Clip.ID)
@@ -125,6 +136,19 @@ struct TimelineView: View {
                 .frame(height: laneHeight)
                 .foregroundStyle(.secondary)
             }
+            ForEach(captionTracks) { track in
+                Divider()
+                HStack(spacing: 4) {
+                    Image(systemName: "captions.bubble")
+                        .font(.caption)
+                    Text(track.name)
+                        .font(.caption)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .frame(height: laneHeight)
+                .foregroundStyle(track.isMuted ? .tertiary : .secondary)
+            }
         }
         .frame(width: gutterWidth)
     }
@@ -139,6 +163,10 @@ struct TimelineView: View {
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { trackIndex, track in
                         Divider()
                         lane(for: track, trackIndex: trackIndex)
+                    }
+                    ForEach(captionTracks) { track in
+                        Divider()
+                        captionLane(for: track)
                     }
                 }
                 playhead
@@ -288,6 +316,63 @@ struct TimelineView: View {
         }
         .frame(height: laneHeight)
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func captionLane(for track: CaptionTrack) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    model.selectedClipID = nil
+                    model.selectedTransitionClipID = nil
+                    model.selectedMarkerID = nil
+                }
+            ForEach(track.lines) { line in
+                captionLineBlock(line, in: track)
+            }
+        }
+        .frame(height: laneHeight)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .opacity(track.isMuted ? 0.45 : 1)
+    }
+
+    private func captionLineBlock(_ line: CaptionLine, in track: CaptionTrack) -> some View {
+        let candidateStart = captionDrag?.lineID == line.id ? captionDrag?.candidateStart : nil
+        let start = candidateStart ?? line.range.start
+        let x = CGFloat(start.seconds) * pps
+        let width = max(CGFloat(line.range.duration.seconds) * pps, 18)
+        let label = line.text.isEmpty ? "Caption" : line.text
+
+        return RoundedRectangle(cornerRadius: 5)
+            .fill(Color.indigo.opacity(captionDrag?.lineID == line.id ? 0.25 : 0.38))
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(Color.indigo.opacity(0.75), lineWidth: 1))
+            .overlay(alignment: .leading) {
+                Text(label)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .foregroundStyle(.primary)
+            }
+            .frame(width: width, height: laneHeight - 14)
+            .offset(x: x, y: 7)
+            .contentShape(Rectangle())
+            .gesture(captionLineDragGesture(line: line, trackID: track.id))
+            .contextMenu {
+                Button("Move to Playhead") {
+                    let start = CMTime(seconds: max(0, model.currentTime), preferredTimescale: 600)
+                    model.retimeCaptionLine(line.id, in: track.id, start: start)
+                    model.commitCoalescedUndo()
+                }
+                Divider()
+                Button("Delete Caption Line", role: .destructive) {
+                    model.removeCaptionLine(line.id, in: track.id)
+                }
+            }
+            .accessibilityLabel("Caption \(label)")
+            .accessibilityValue("Starts \(TimeFormatting.timecode(start.seconds)), \(TimeFormatting.timecode(line.range.duration.seconds)) long")
+            .accessibilityAddTraits(.isButton)
     }
 
     /// A selectable glyph drawn over the overlap region at a transition's cut.
@@ -550,6 +635,19 @@ struct TimelineView: View {
             }
     }
 
+    private func captionLineDragGesture(line: CaptionLine, trackID: CaptionTrack.ID) -> some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { value in
+                let originalX = CGFloat(line.range.start.seconds) * pps
+                let newX = originalX + value.translation.width
+                let candidate = CMTime(seconds: max(0, Double(newX / pps)), preferredTimescale: 600)
+                captionDrag = CaptionLineDrag(lineID: line.id, trackID: trackID, candidateStart: candidate)
+            }
+            .onEnded { _ in
+                commitCaptionDrag()
+            }
+    }
+
     private func commitDrag() {
         guard let mode = dragMode else { return }
         dragMode = nil
@@ -567,6 +665,13 @@ struct TimelineView: View {
             let targetTrack = tracks[targetIndex]
             model.moveClip(id: id, toTrack: targetTrack.id, start: candidateStart)
         }
+    }
+
+    private func commitCaptionDrag() {
+        guard let drag = captionDrag else { return }
+        captionDrag = nil
+        model.retimeCaptionLine(drag.lineID, in: drag.trackID, start: drag.candidateStart)
+        model.commitCoalescedUndo()
     }
 
     // MARK: - Playhead

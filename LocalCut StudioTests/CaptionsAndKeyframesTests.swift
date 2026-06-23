@@ -334,6 +334,43 @@ func captionTextEditCoalesces() async {
     #expect(track.lines[0].text == "")
 }
 
+@MainActor
+@Test("retimeCaptionLine updates start and duration, shifts words, sorts, and is undoable")
+func captionLineRetimingSortsAndUndo() {
+    func time(_ seconds: Double) -> CMTime {
+        CMTime(seconds: seconds, preferredTimescale: 600)
+    }
+
+    let model = EditorModel()
+    let track = CaptionTrack(name: "T")
+    let early = CaptionLine(
+        range: CMTimeRange(start: time(1), duration: time(1)),
+        text: "early")
+    let late = CaptionLine(
+        range: CMTimeRange(start: time(5), duration: time(2)),
+        text: "late",
+        words: [WordTiming(range: CMTimeRange(start: time(5.5), duration: time(0.5)),
+                           word: "late")])
+    track.addLine(early)
+    track.addLine(late)
+    model.project.captionTracks = [track]
+
+    model.retimeCaptionLine(late.id, in: track.id, start: time(0.5), duration: time(3))
+    model.commitCoalescedUndo()
+
+    #expect(track.lines.map(\.id) == [late.id, early.id])
+    let retimed = track.lines[0]
+    #expect(retimed.range.start == time(0.5))
+    #expect(retimed.range.duration == time(3))
+    #expect(retimed.words?.first?.range.start == time(1))
+
+    model.undo()
+    let restoredLate = track.lines.first { $0.id == late.id }
+    #expect(restoredLate?.range.start == time(5))
+    #expect(restoredLate?.range.duration == time(2))
+    #expect(restoredLate?.words?.first?.range.start == time(5.5))
+}
+
 @Test("setCaptionTrackMuted: routes through undo (Claude review #4)")
 func captionMuteIsUndoable() {
     let model = EditorModel()

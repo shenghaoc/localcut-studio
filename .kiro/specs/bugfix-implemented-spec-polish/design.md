@@ -44,6 +44,12 @@ sets `CIFilter.barsSwipeTransition().angle`; no preview/export fork is introduce
 trackID, rebuild: .skip)` so per-keystroke edits fold into one undo step and the name (which doesn't
 affect rendering) skips the composition rebuild.
 
+### Caption retiming — `EditorModel+Captions.swift`
+`retimeCaptionLine(_:in:start:duration:)` looks up the current line by id, clamps start to zero and
+duration to at least one frame, shifts word timings by the same delta when the line start moves, then
+calls `updateCaptionLine` so sorting, undo coalescing, and rebuild scheduling stay in the existing
+caption mutation path.
+
 ### Word-highlight hold — `EffectCompositor.swift`
 `activeWordIndex` becomes a thin instance wrapper over a new `static nonisolated
 activeWordIndex(words:at:)`: containment match first, else hold the most-recently-started word, else
@@ -94,7 +100,15 @@ if/else is `_ConditionalContent`.
 
 ### `CaptionsInspectorView.swift`
 Rename `TextField` at the top of each track's disclosure (bound to `renameCaptionTrack`); a burn-in
-caption after the track list.
+caption after the track list. Each line row exposes compact Start and Duration second fields bound
+to `retimeCaptionLine`.
+
+### `TimelineView.swift`
+Caption tracks render as lightweight lanes below video/audio tracks. Caption blocks are positioned
+by `CaptionLine.range` in effective timeline coordinates and can be dragged horizontally to retime
+their start; context actions can move a line to the playhead or delete it. The lane intentionally
+does not use authored clip-edge snap targets because captions are scheduled directly in the rendered
+timeline.
 
 ### `RenderQueueInspectorView.swift`
 Reveal-in-Finder button on `.completed` rows (`NSWorkspace.activateFileViewerSelecting` via
@@ -111,8 +125,9 @@ New tests extend existing suites (no new files): `EffectsTests` (LUT helpers + f
 `ExportQueueTests` (retry for cancelled + failed jobs), `TransitionsTests`/`TrimAndDragTests`
 (transition-window authored inverse + snap-through-ripple; directional wipe angle render planning),
 `TransitionsIntegrationTests` (angle reaches the shared video composition), `PersistenceTests`/
-`ProjectBundleTests` (transition-angle document and bundle round trips). Pure helpers are tested
-directly; MainActor commands via `EditorModel`.
+`ProjectBundleTests` (transition-angle document and bundle round trips), `CaptionsAndKeyframesTests`
+(caption-line retiming sort/undo/word shift). Pure helpers are tested directly; MainActor commands
+via `EditorModel`.
 
 ## Risks
 - **Build gate** — verified with local `xcodebuild test` on macOS using the macOS 26.5 SDK; CI remains

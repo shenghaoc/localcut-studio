@@ -119,14 +119,12 @@ struct CaptionsInspectorView: View {
     private func lineRow(_ line: CaptionLine, in track: CaptionTrack) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(TimeFormatting.timecode(line.range.start.seconds))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Text("→")
-                    .foregroundStyle(.secondary)
-                Text(TimeFormatting.timecode(line.range.end.seconds))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                compactSecondsField("Start",
+                                    value: captionStartBinding(for: line, in: track),
+                                    accessibilityLabel: "Caption line start")
+                compactSecondsField("Duration",
+                                    value: captionDurationBinding(for: line, in: track),
+                                    accessibilityLabel: "Caption line duration")
                 Spacer()
                 Button(role: .destructive) {
                     model.removeCaptionLine(line.id, in: track.id)
@@ -145,6 +143,50 @@ struct CaptionsInspectorView: View {
                 .lineLimit(1...3)
         }
         .padding(.vertical, 2)
+    }
+
+    private func compactSecondsField(_ label: String,
+                                     value: Binding<Double>,
+                                     accessibilityLabel: String) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(label, value: value, format: .number.precision(.fractionLength(2)))
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 64)
+                .monospacedDigit()
+                .accessibilityLabel(accessibilityLabel)
+                .onSubmit { model.commitCoalescedUndo() }
+            Text("s")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func captionStartBinding(for line: CaptionLine, in track: CaptionTrack) -> Binding<Double> {
+        Binding(
+            get: { currentLine(line.id, in: track)?.range.start.seconds ?? line.range.start.seconds },
+            set: { seconds in
+                model.retimeCaptionLine(line.id, in: track.id, start: captionTime(seconds))
+            })
+    }
+
+    private func captionDurationBinding(for line: CaptionLine, in track: CaptionTrack) -> Binding<Double> {
+        Binding(
+            get: { currentLine(line.id, in: track)?.range.duration.seconds ?? line.range.duration.seconds },
+            set: { seconds in
+                model.retimeCaptionLine(line.id, in: track.id, duration: captionTime(seconds))
+            })
+    }
+
+    private func currentLine(_ id: CaptionLine.ID, in track: CaptionTrack) -> CaptionLine? {
+        track.lines.first { $0.id == id }
+    }
+
+    private func captionTime(_ seconds: Double) -> CMTime {
+        let finite = seconds.isFinite ? seconds : 0
+        return CMTime(seconds: finite, preferredTimescale: 600)
     }
 
     // MARK: - Preset binding
