@@ -1,10 +1,13 @@
 # Design: Implemented-Spec Reachability & UX Polish
 
 How each item in `bugfix.md` is implemented. The guiding constraints: additive SwiftUI + small
-pure helpers that are unit-testable; no new files (so the `.xcodeproj` is untouched and there is no
-target-membership risk); no edits to composition time-range math; new logic is `nonisolated` where
-it must be callable from both the MainActor UI and nonisolated engine/tests (mirroring the existing
-`[Effect].renderCacheHash` pattern).
+pure helpers that are unit-testable; no edits to composition time-range math; new logic is
+`nonisolated` where it must be callable from both the MainActor UI and nonisolated engine/tests
+(mirroring the existing `[Effect].renderCacheHash` pattern). The only project-setting change is the
+release-validation cleanup that disables unused Swift localization-string extraction and links the
+system AppIntents framework for the app and test targets so Xcode 26's metadata extractor completes
+without a false "missing dependency" warning. The app does not ship any App Intents implementation
+in this PR.
 
 ## Engine / model
 
@@ -19,7 +22,8 @@ Pure value transforms, so they're tested directly (no security-scoped bookmark n
 and the new `removeLUT` call them; `selectedClipHasLUT` plus an import-time filename cache drive the
 inspector indicator without resolving security-scoped bookmarks from `selectedClipLUTName`. That
 cache is pruned to active LUT bookmarks after replace/remove so a long session does not retain names
-for LUTs no clip references anymore.
+for LUTs no clip references anymore, and it is captured in `ProjectState` so undo/redo restores the
+filename associated with the restored LUT effect chain.
 
 ### Marker navigation — `EditorModel+Markers.swift`
 `selectNextMarker()` / `selectPreviousMarker()` use `project.markers.first(where: $0.time > now)` /
@@ -187,7 +191,8 @@ Previous/Next Marker commands in the Edit group (⌘⇧[ / ⌘⇧]), disabled wh
 Modified chords (not bare `[`/`]`) so they don't fire while typing in a text field.
 
 ## Testing
-New tests extend existing suites (no new files): `EffectsTests` (LUT helpers + filename-cache pruning),
+New tests extend existing suites (no new files): `EffectsTests` (LUT helpers + filename-cache pruning
+and undo/redo restoration),
 `AudioMasterBusTests` (gain mapping + reachable silence floor), `CaptionsAndKeyframesTests`
 (word-highlight + rename), `MarkersTests` (nav, including exact-on-marker movement),
 `ExportQueueTests` (retry for cancelled + failed jobs), `TransitionsTests`/`TrimAndDragTests`

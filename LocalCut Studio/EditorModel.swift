@@ -56,7 +56,7 @@ final class EditorModel {
     /// inspector can show a LUT's name without resolving the security-scoped
     /// bookmark on the main actor on every render. Not persisted; a LUT from a
     /// reopened project shows a generic label until re-imported.
-    @ObservationIgnored private var lutDisplayNames: [Data: String] = [:]
+    @ObservationIgnored private(set) var lutDisplayNames: [Data: String] = [:]
 
     // Diagnostics
     /// Drives whether the diagnostics overlay is on screen and whether the
@@ -560,7 +560,7 @@ final class EditorModel {
         }
     }
 
-    private func pruneLUTDisplayNames() {
+    func pruneLUTDisplayNames() {
         let activeBookmarks = Set(allTracks.flatMap(\.clips).flatMap { clip in
             clip.effects.compactMap { effect -> Data? in
                 guard case .lut(let bookmark) = effect else { return nil }
@@ -568,6 +568,11 @@ final class EditorModel {
             }
         })
         lutDisplayNames = lutDisplayNames.filter { activeBookmarks.contains($0.key) }
+    }
+
+    func restoreLUTDisplayNames(_ names: [Data: String]) {
+        lutDisplayNames = names
+        pruneLUTDisplayNames()
     }
 
     #if DEBUG

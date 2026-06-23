@@ -34,6 +34,10 @@ struct ProjectState: Equatable {
     var audioTracks: [TrackClips]
     var captionTracks: [CaptionTrackSnapshot]
     var markers: [TimelineMarker]
+    /// Session-only LUT filename cache, keyed by bookmark, so undo/redo of LUT
+    /// replace/remove keeps the inspector label aligned with the restored effect
+    /// chain without resolving security-scoped bookmarks on the main actor.
+    var lutDisplayNames: [Data: String]
     /// Master-bus gain (linear, 0…2). Per-clip volume envelopes ride along
     /// inside `clips`; only bus-level parameters live here directly.
     var masterGain: Float
@@ -54,6 +58,7 @@ struct ProjectState: Equatable {
             && lhs.audioTracks == rhs.audioTracks
             && lhs.captionTracks == rhs.captionTracks
             && lhs.markers == rhs.markers
+            && lhs.lutDisplayNames == rhs.lutDisplayNames
             && lhs.masterGain == rhs.masterGain
             && lhs.trackInputs == rhs.trackInputs
             && lhs.selectedClipID == rhs.selectedClipID
@@ -92,6 +97,7 @@ extension EditorModel {
                     defaultStyle: $0.defaultStyle, lines: $0.lines)
             },
             markers: project.markers,
+            lutDisplayNames: lutDisplayNames,
             masterGain: project.masterGain,
             trackInputs: project.trackInputs,
             selectedClipID: selectedClipID,
@@ -169,6 +175,7 @@ extension EditorModel {
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID
+        restoreLUTDisplayNames(state.lutDisplayNames)
         reconcileAccessedURLs()
     }
 

@@ -131,6 +131,55 @@ func lutDisplayNameCachePrunesStaleEntries() {
     #expect(model._testLUTDisplayNameCacheCount == 0)
 }
 
+@MainActor
+@Test("EditorModel restores LUT display names across undo and redo")
+func lutDisplayNameCacheRestoresWithUndoRedo() {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    model.project.mediaItems.append(media)
+    let first = Data([0x11])
+    let second = Data([0x22])
+    let clip = Clip(mediaID: media.id,
+                    sourceStart: .zero,
+                    duration: CMTime(seconds: 5, preferredTimescale: 600),
+                    timelineStart: .zero)
+    var effected = clip
+    effected.effects = [.lut(bookmark: first)]
+    model.project.videoTracks.first!.clips = [effected]
+    model.selectedClipID = clip.id
+    model._testCacheLUTDisplayName("first.cube", for: first)
+    model._testPruneLUTDisplayNames()
+
+    model.performUndoable("Replace LUT") {
+        model._testCacheLUTDisplayName("second.cube", for: second)
+        model.project.videoTracks.first!.clips[0].effects =
+            model.project.videoTracks.first!.clips[0].effects.replacingLUT(bookmark: second)
+        model._testPruneLUTDisplayNames()
+    }
+    #expect(model.selectedClipLUTName == "second.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+
+    model.undo()
+    #expect(model.selectedClipLUTName == "first.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+
+    model.redo()
+    #expect(model.selectedClipLUTName == "second.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+
+    model.performUndoable("Remove LUT") {
+        model.project.videoTracks.first!.clips[0].effects =
+            model.project.videoTracks.first!.clips[0].effects.removingLUT()
+        model._testPruneLUTDisplayNames()
+    }
+    #expect(model.selectedClipLUTName == nil)
+    #expect(model._testLUTDisplayNameCacheCount == 0)
+
+    model.undo()
+    #expect(model.selectedClipLUTName == "second.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+}
+
 @Test("Clip has empty effects by default")
 func clipDefaultEffects() {
     let clip = Clip(mediaID: UUID(), sourceStart: .zero, duration: CMTime(seconds: 10, preferredTimescale: 600), timelineStart: .zero)

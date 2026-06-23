@@ -55,8 +55,10 @@ filename, no "a LUT is active" indicator, and no way to remove just the LUT (onl
 - **Fix:** A clip holds one LUT. `importLUT` now **replaces** the slot (`[Effect].replacingLUT`);
   the Colour section shows the import-time filename from a session cache with a remove (✕) control
   (`removeLUT` / `[Effect].removingLUT`), and the import button reads "Replace LUT…" when one is
-  present. Reopened projects avoid main-actor bookmark resolution and show a generic applied label
-  until the LUT is re-imported in the session.
+  present. The session filename cache is captured in undo snapshots, so replacing/removing a LUT and
+  then undoing restores the matching inspector label without resolving bookmarks on the main actor.
+  Reopened projects avoid main-actor bookmark resolution and show a generic applied label until the
+  LUT is re-imported in the session.
 
 ### S3 — Markers can be added but not traversed
 

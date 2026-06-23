@@ -28,6 +28,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 
 ## Tests (no count regression; all extend existing suites)
 - [x] `EffectsTests` — `replacingLUT` / `removingLUT` / `hasLUT`; LUT display-name cache pruning
+- [x] `EffectsTests` — LUT display-name cache restores across undo/redo of replace/remove
 - [x] `AudioMasterBusTests` — `AudioGainMapping` unity / round-trip / floor; slider-minimum reachability
 - [x] `CaptionsAndKeyframesTests` — `activeWordIndex` gap-hold + empty; `renameCaptionTrack` undo
 - [x] `MarkersTests` — next/prev nav + clamp-at-ends + exact-on-marker movement
@@ -51,7 +52,8 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] Claude issue comment — `AudioGainMapping` slider minimum is exactly reachable as silence
 - [x] Claude issue comment — marker navigation from exactly on a marker moves to the neighbouring marker
 - [x] Claude issue comment — stale LUT display-name cache entries are pruned after replace/remove
-- [x] Release validation — app target disables unused Swift localization-string extraction so Release builds do not run AppIntents metadata extraction without an AppIntents dependency
+- [x] Claude issue comment — LUT display names restore across undo/redo of replace/remove instead of degrading to "Applied"
+- [x] Release validation — app/test targets disable unused Swift localization-string extraction and link the system AppIntents framework so Xcode 26 metadata extraction completes without a false missing-dependency warning
 - [x] Local macOS validation — `xcodebuild test -project "LocalCut Studio.xcodeproj" -scheme "LocalCut Studio" -destination "platform=macOS" -derivedDataPath /private/tmp/LocalCutStudio-DerivedData`
 
 ## Follow-up backlog
