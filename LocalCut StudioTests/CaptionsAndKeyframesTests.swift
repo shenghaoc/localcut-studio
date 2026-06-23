@@ -631,15 +631,18 @@ func presetDecodeSurfacesUnderlyingError() {
         Issue.record("expected IOError.decodeFailed, got \(String(describing: caught))")
         return
     }
-    #expect(detail != nil)
-    #expect(!(detail ?? "").isEmpty)
+    // Compute every assertion into a plain Bool *outside* `#expect`: the macro
+    // emits spurious warnings when it decomposes `??` / `.contains` on Swift 6.3,
+    // so keep those operators out of the macro argument.
+    let detailText = detail ?? ""
+    let hasDetail = detail != nil
+    let detailIsNonEmpty = !detailText.isEmpty
     // The user-facing description should embed that detail rather than the
-    // generic fallback message. Bind both sides into locals so the `#expect`
-    // macro evaluates a plain `description.contains(needle)` rather than
-    // decomposing the `??` operators (which trips spurious macro warnings).
-    let description = caught?.errorDescription ?? ""
-    let needle = detail ?? "💥"
-    #expect(description.contains(needle))
+    // generic fallback message.
+    let describesDetail = (caught?.errorDescription ?? "").contains(detail ?? "💥")
+    #expect(hasDetail)
+    #expect(detailIsNonEmpty)
+    #expect(describesDetail)
 }
 
 @Test("CaptionPresetV1: rejects unknown version")
@@ -739,7 +742,7 @@ func titleRastererPositiveBox() {
 /// font lookup failures, layout breakage, and the rasterer returning the empty
 /// transparent fallback when something throws.
 @Test("BuiltInCaptionPresets: every preset renders to a non-empty raster (T5.1)")
-func presetSnapshotShape() throws {
+func presetSnapshotShape() {
     let canvas = CGSize(width: 1280, height: 720)
     let rasterer = CaptionRasterer()
     for preset in BuiltInCaptionPresets.all {
@@ -747,9 +750,11 @@ func presetSnapshotShape() throws {
             range: CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600)),
             text: "Sample caption")
         // A nil raster means the preset stopped rasterizing (font/layout failure) —
-        // that's the regression this test guards, so fail rather than skip.
-        let raster = try #require(rasterer.idleRaster(line: line, style: preset.style, renderSize: canvas),
-                                  "Preset \(preset.name) failed to rasterize")
+        // that's the regression this test guards, so record a failure rather than skip.
+        guard let raster = rasterer.idleRaster(line: line, style: preset.style, renderSize: canvas) else {
+            Issue.record("Preset \(preset.name) failed to rasterize")
+            continue
+        }
         #expect(raster.boundingBox.width > 0, "Preset \(preset.name) produced an empty bounding box")
         #expect(raster.boundingBox.height > 0, "Preset \(preset.name) produced an empty bounding box")
         // Bounding box must sit inside the canvas (with padding for stroke / pill).

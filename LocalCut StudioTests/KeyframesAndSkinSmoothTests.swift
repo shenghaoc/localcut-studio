@@ -1,6 +1,8 @@
 import Testing
 import AVFoundation
 import CoreGraphics
+import CoreImage
+import CoreImage.CIFilterBuiltins
 @testable import LocalCut_Studio
 
 // MARK: - Keyframe Tests
@@ -205,4 +207,46 @@ func skinSmoothCodableRoundTrip() throws {
     #expect(decoded.maskWarmthBias == effect.maskWarmthBias)
     #expect(decoded.maskLuminanceGate == effect.maskLuminanceGate)
     #expect(decoded.bypass == effect.bypass)
+}
+
+// MARK: - Skin-smooth render path (D1: MSL kernel migration)
+
+/// Exercises the *compiled* Metal kernels end-to-end, not just the model. A
+/// missing `default.metallib` or a renamed kernel function makes `skinMaskKernel`
+/// nil → `applySkinSmooth` returns nil here, so this fails loudly instead of the
+/// effect silently no-op-ing in preview/export while the model tests stay green.
+@Test("Skin-smooth render path: MSL kernels load and change a skin-tone fixture")
+func skinSmoothRenderPathAltersPixels() throws {
+    // 64×64 checkerboard of two skin-tones: high-frequency detail inside a region
+    // the chroma mask classifies as skin, so the masked blur has something to smooth.
+    let extent = CGRect(x: 0, y: 0, width: 64, height: 64)
+    let checker = CIFilter.checkerboardGenerator()
+    checker.color0 = CIColor(red: 0.85, green: 0.65, blue: 0.55)
+    checker.color1 = CIColor(red: 0.55, green: 0.38, blue: 0.32)
+    checker.width = 4
+    checker.center = CGPoint(x: 0, y: 0)
+    let fixture = try #require(checker.outputImage).cropped(to: extent)
+
+    var params = SkinSmoothEffect()
+    params.strength.defaultValue = 1.0  // full strength so the change is unmistakable
+
+    let compositor = EffectCompositor()
+    let smoothed = try #require(
+        compositor.applySkinSmooth(fixture, params: params, at: .zero),
+        "Skin-smooth Metal kernels failed to load or run")
+
+    // Render both to bitmaps (software renderer for deterministic headless CI) and
+    // assert the blend kernel actually changed pixels.
+    let ctx = CIContext(options: [.useSoftwareRenderer: true])
+    let space = CGColorSpaceCreateDeviceRGB()
+    func bitmap(_ image: CIImage) -> [UInt8] {
+        let rowBytes = 64 * 4
+        var buffer = [UInt8](repeating: 0, count: rowBytes * 64)
+        buffer.withUnsafeMutableBytes { raw in
+            ctx.render(image, toBitmap: raw.baseAddress!, rowBytes: rowBytes,
+                       bounds: extent, format: .RGBA8, colorSpace: space)
+        }
+        return buffer
+    }
+    #expect(bitmap(fixture) != bitmap(smoothed))
 }
