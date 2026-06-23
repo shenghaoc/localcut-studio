@@ -503,16 +503,17 @@ final class EditorModel {
             return
         }
 
-        // Remember the filename now (we already hold the URL) so the inspector
-        // never resolves the bookmark on the main actor just to display it.
-        lutDisplayNames[bookmark] = url.lastPathComponent
-
         performUndoable("Import LUT") {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                // Remember the filename now (we already hold the URL) so the
+                // inspector never resolves the bookmark on the main actor just
+                // to display it.
+                lutDisplayNames[bookmark] = url.lastPathComponent
                 // Replace the existing LUT slot rather than stacking a second
                 // cube — a clip carries one LUT (R1.2).
                 track.clips[index].effects = track.clips[index].effects.replacingLUT(bookmark: bookmark)
+                pruneLUTDisplayNames()
                 RenderCache.shared.invalidate(clipID: id)
                 statusMessage = "Imported LUT \(url.lastPathComponent)."
                 scheduleRebuild()
@@ -549,6 +550,7 @@ final class EditorModel {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 track.clips[index].effects = track.clips[index].effects.removingLUT()
+                pruneLUTDisplayNames()
                 RenderCache.shared.invalidate(clipID: id)
                 statusMessage = "Removed LUT."
                 scheduleRebuild()
@@ -556,6 +558,30 @@ final class EditorModel {
             }
         }
     }
+
+    private func pruneLUTDisplayNames() {
+        let activeBookmarks = Set(allTracks.flatMap(\.clips).flatMap { clip in
+            clip.effects.compactMap { effect -> Data? in
+                guard case .lut(let bookmark) = effect else { return nil }
+                return bookmark
+            }
+        })
+        lutDisplayNames = lutDisplayNames.filter { activeBookmarks.contains($0.key) }
+    }
+
+    #if DEBUG
+    var _testLUTDisplayNameCacheCount: Int {
+        lutDisplayNames.count
+    }
+
+    func _testCacheLUTDisplayName(_ name: String, for bookmark: Data) {
+        lutDisplayNames[bookmark] = name
+    }
+
+    func _testPruneLUTDisplayNames() {
+        pruneLUTDisplayNames()
+    }
+    #endif
 
     // MARK: - Skin smoothing
 

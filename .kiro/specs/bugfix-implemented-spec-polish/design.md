@@ -17,7 +17,9 @@ it must be callable from both the MainActor UI and nonisolated engine/tests (mir
 
 Pure value transforms, so they're tested directly (no security-scoped bookmark needed). `importLUT`
 and the new `removeLUT` call them; `selectedClipHasLUT` plus an import-time filename cache drive the
-inspector indicator without resolving security-scoped bookmarks from `selectedClipLUTName`.
+inspector indicator without resolving security-scoped bookmarks from `selectedClipLUTName`. That
+cache is pruned to active LUT bookmarks after replace/remove so a long session does not retain names
+for LUTs no clip references anymore.
 
 ### Marker navigation — `EditorModel+Markers.swift`
 `selectNextMarker()` / `selectPreviousMarker()` use `project.markers.first(where: $0.time > now)` /
@@ -88,9 +90,11 @@ Previous/Next Marker commands in the Edit group (⌘⇧[ / ⌘⇧]), disabled wh
 Modified chords (not bare `[`/`]`) so they don't fire while typing in a text field.
 
 ## Testing
-New tests extend existing suites (no new files): `EffectsTests` (LUT helpers), `AudioMasterBusTests`
-(gain mapping), `CaptionsAndKeyframesTests` (word-highlight + rename), `MarkersTests` (nav),
-`ExportQueueTests` (retry). Pure helpers are tested directly; MainActor commands via `EditorModel`.
+New tests extend existing suites (no new files): `EffectsTests` (LUT helpers + filename-cache pruning),
+`AudioMasterBusTests` (gain mapping + reachable silence floor), `CaptionsAndKeyframesTests`
+(word-highlight + rename), `MarkersTests` (nav, including exact-on-marker movement),
+`ExportQueueTests` (retry for cancelled + failed jobs). Pure helpers are tested directly; MainActor
+commands via `EditorModel`.
 
 ## Risks
 - **Build gate** — verified with local `xcodebuild test` on macOS using the macOS 26.5 SDK; CI remains

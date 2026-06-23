@@ -280,6 +280,22 @@ struct RenderQueueTests {
         #expect(queue.jobs[0].progress == 0)
     }
 
+    @Test("Retry: a failed job is requeued without relying on queued-cancel semantics")
+    func retryRequeuesFailed() {
+        var job = makeJob(name: "X")
+        job.status = .failed
+        job.errorMessage = "Previous export failed"
+        job.progress = 0.4
+        job.runtimeSeconds = 12
+        let queue = RenderQueue(jobs: [job], persistsToDisk: false)
+
+        queue.retry(jobID: job.id, autoStart: false)
+        #expect(queue.jobs[0].status == .queued)
+        #expect(queue.jobs[0].errorMessage == nil)
+        #expect(queue.jobs[0].progress == 0)
+        #expect(queue.jobs[0].runtimeSeconds == nil)
+    }
+
     @Test("Retry: a non-terminal (queued) job is left untouched")
     func retryNoOpForNonTerminal() {
         let queue = RenderQueue(persistsToDisk: false)

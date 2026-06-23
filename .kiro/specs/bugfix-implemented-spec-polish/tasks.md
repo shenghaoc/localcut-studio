@@ -21,11 +21,11 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] C3 — `setRenderSize` purges the caption raster cache (title-raster R2.3 / T1.4)
 
 ## Tests (no count regression; all extend existing suites)
-- [x] `EffectsTests` — `replacingLUT` / `removingLUT` / `hasLUT`
-- [x] `AudioMasterBusTests` — `AudioGainMapping` unity / round-trip / floor
+- [x] `EffectsTests` — `replacingLUT` / `removingLUT` / `hasLUT`; LUT display-name cache pruning
+- [x] `AudioMasterBusTests` — `AudioGainMapping` unity / round-trip / floor; slider-minimum reachability
 - [x] `CaptionsAndKeyframesTests` — `activeWordIndex` gap-hold + empty; `renameCaptionTrack` undo
-- [x] `MarkersTests` — next/prev nav + clamp-at-ends
-- [x] `ExportQueueTests` — `retry` requeues cancelled; no-op for non-terminal
+- [x] `MarkersTests` — next/prev nav + clamp-at-ends + exact-on-marker movement
+- [x] `ExportQueueTests` — `retry` requeues cancelled and failed; no-op for non-terminal
 
 ## Docs
 - [x] `docs/keyboard-shortcuts.md` — add marker navigation (⌘⇧[ / ⌘⇧]) and refresh the table
@@ -36,6 +36,10 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] Codex P2 — `replacingLUT` collapses pre-existing stacked LUTs to one slot (+ test)
 - [x] Codex P2 — `applyState` purges the caption raster cache on undo/redo of a resolution change (+ tests)
 - [x] Codex P2 — LUT display name read from a session cache; no main-actor bookmark resolve in the inspector
+- [x] Claude issue comment — retry coverage no longer depends only on queued-cancel semantics
+- [x] Claude issue comment — `AudioGainMapping` slider minimum is exactly reachable as silence
+- [x] Claude issue comment — marker navigation from exactly on a marker moves to the neighbouring marker
+- [x] Claude issue comment — stale LUT display-name cache entries are pruned after replace/remove
 - [x] Local macOS validation — `xcodebuild test -project "LocalCut Studio.xcodeproj" -scheme "LocalCut Studio" -destination "platform=macOS" -derivedDataPath /private/tmp/LocalCutStudio-DerivedData`
 
 ## Deferred follow-ups (catalogued, not in this PR)

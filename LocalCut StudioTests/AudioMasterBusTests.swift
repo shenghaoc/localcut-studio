@@ -55,6 +55,13 @@ func gainMappingFloor() {
     #expect(AudioGainMapping.linear(fromDecibels: -120) == 0)
 }
 
+@Test("AudioGainMapping: slider minimum is exactly reachable as silence")
+func gainMappingSliderMinimum() {
+    let stepsFromZero = AudioGainMapping.minDecibels / AudioGainMapping.sliderStepDecibels
+    #expect(stepsFromZero.rounded() == stepsFromZero)
+    #expect(AudioGainMapping.linear(fromDecibels: AudioGainMapping.minDecibels) == 0)
+}
+
 @MainActor
 @Test("AudioMasterBus: coalesced gain drags fold into a single undo step")
 func masterGainCoalescesAcrossDrag() {

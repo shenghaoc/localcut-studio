@@ -178,9 +178,11 @@ contradicts the documented call site and wastes memory.)
   CI toolchain (authoritative gate per PR #31) and on a local macOS `xcodebuild test` run with
   `-derivedDataPath /private/tmp/LocalCutStudio-DerivedData`.
 - **V2** — Full test suite green with **no count regression**. New tests:
-  `[Effect].replacingLUT/removingLUT/hasLUT` (3), `AudioGainMapping` round-trip + floor (3),
-  `EffectCompositor.activeWordIndex` gap-hold + empty (2), marker next/prev nav (2),
-  `RenderQueue.retry` requeue + no-op (2), `renameCaptionTrack` undo (1).
+  `[Effect].replacingLUT/removingLUT/hasLUT` + LUT display-name cache pruning (4),
+  `AudioGainMapping` round-trip + floor + slider-minimum reachability (4),
+  `EffectCompositor.activeWordIndex` gap-hold + empty (2), marker next/prev nav + exact-on-marker
+  navigation (3), `RenderQueue.retry` requeues cancelled + failed jobs and no-ops for non-terminal
+  rows (3), `renameCaptionTrack` undo (1).
 - **V3** — Manual smoke (recommended pre-release): Diagnostics shows capability tiers with reasons in
   `.help`; LUT import shows the filename and replacing it doesn't stack; ⌘⇧[ / ⌘⇧] jump markers;
   Reveal/Retry behave; scopes show the graticule; the master fader feels log-mapped; cancelling an

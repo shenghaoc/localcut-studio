@@ -242,6 +242,23 @@ struct MarkersEditorTests {
         #expect(abs(model.currentTime - 0.0) < 1e-6)
     }
 
+    @Test("Marker navigation moves off a marker when the playhead is exactly on it")
+    func markerNavigationMovesOffCurrentMarker() {
+        let model = EditorModel()
+        for seconds in [1.0, 3.0, 5.0] {
+            model.currentTime = seconds
+            model.addMarkerAtPlayhead()
+        }
+
+        model.currentTime = 3.0
+        model.selectNextMarker()
+        #expect(abs(model.currentTime - 5.0) < 1e-6)
+
+        model.currentTime = 3.0
+        model.selectPreviousMarker()
+        #expect(abs(model.currentTime - 1.0) < 1e-6)
+    }
+
     @Test("seekToMarker bypasses the totalDuration clamp for markers past project end (Codex review #5)")
     func seekPastProjectEnd() {
         let model = EditorModel()

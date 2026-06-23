@@ -96,6 +96,41 @@ func lutRemovePreservesOthers() {
     #expect(result.contains { if case .skinSmooth = $0 { return true }; return false })
 }
 
+@MainActor
+@Test("EditorModel prunes stale LUT display names after replace and remove")
+func lutDisplayNameCachePrunesStaleEntries() {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    model.project.mediaItems.append(media)
+    let first = Data([0x01])
+    let second = Data([0x02])
+    let clip = Clip(mediaID: media.id,
+                    sourceStart: .zero,
+                    duration: CMTime(seconds: 5, preferredTimescale: 600),
+                    timelineStart: .zero)
+    var effected = clip
+    effected.effects = [.lut(bookmark: first)]
+    model.project.videoTracks.first!.clips = [effected]
+    model.selectedClipID = clip.id
+    model._testCacheLUTDisplayName("first.cube", for: first)
+    model._testPruneLUTDisplayNames()
+    #expect(model.selectedClipLUTName == "first.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+
+    model._testCacheLUTDisplayName("second.cube", for: second)
+    model.project.videoTracks.first!.clips[0].effects =
+        model.project.videoTracks.first!.clips[0].effects.replacingLUT(bookmark: second)
+    model._testPruneLUTDisplayNames()
+    #expect(model.selectedClipLUTName == "second.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+
+    model.project.videoTracks.first!.clips[0].effects =
+        model.project.videoTracks.first!.clips[0].effects.removingLUT()
+    model._testPruneLUTDisplayNames()
+    #expect(model.selectedClipLUTName == nil)
+    #expect(model._testLUTDisplayNameCacheCount == 0)
+}
+
 @Test("Clip has empty effects by default")
 func clipDefaultEffects() {
     let clip = Clip(mediaID: UUID(), sourceStart: .zero, duration: CMTime(seconds: 10, preferredTimescale: 600), timelineStart: .zero)

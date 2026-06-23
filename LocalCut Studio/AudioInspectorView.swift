@@ -10,6 +10,7 @@ import AVFoundation
 nonisolated enum AudioGainMapping {
     static let minDecibels: Double = -60
     static let maxDecibels: Double = 6
+    static let sliderStepDecibels: Double = 0.5
 
     /// Linear amplitude → clamped slider decibels. Zero / sub-threshold gain
     /// pins to the −60 dB floor instead of −∞.
@@ -46,7 +47,7 @@ struct AudioInspectorView: View {
                 Slider(
                     value: masterGainBinding,
                     in: AudioGainMapping.minDecibels...AudioGainMapping.maxDecibels,
-                    step: 0.5,
+                    step: AudioGainMapping.sliderStepDecibels,
                     onEditingChanged: { editing in
                         // Drag end commits the coalesced gesture so a quick
                         // click→drag→release maps to exactly one undo step
@@ -104,7 +105,7 @@ struct AudioInspectorView: View {
             display: formattedGain(input.gain),
             value: trackGainBinding(track: track),
             range: AudioGainMapping.minDecibels...AudioGainMapping.maxDecibels,
-            step: 0.5,
+            step: AudioGainMapping.sliderStepDecibels,
             captionStyle: .leadingTrailing,
             onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
             resetAction: {
