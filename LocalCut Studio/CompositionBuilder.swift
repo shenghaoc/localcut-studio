@@ -334,10 +334,10 @@ enum CompositionBuilder {
         // Every cross-dissolve renders through the custom compositor's additive
         // blend (`EffectCompositor.crossDissolve` — RGB·(1-p) + RGB·p, which
         // holds midpoint brightness for opaque inputs). An earlier draft also
-        // shipped a fast-path that routed cross-dissolves through standard
-        // `AVMutableVideoCompositionLayerInstruction.setOpacityRamp` when no
-        // effects / wipes / captions were present, but `setOpacityRamp` does
-        // source-over alpha compositing — at progress 0.5 it yields
+        // shipped a fast-path that routed cross-dissolves through a standard
+        // layer-instruction opacity ramp when no effects / wipes / captions
+        // were present, but an opacity ramp does source-over alpha
+        // compositing — at progress 0.5 it yields
         // `(2·incoming + outgoing)/3` with α=0.75, not the additive `(A+B)/2`
         // at α=1. Switching paths on the same project would have produced
         // visibly different cross-dissolves, violating T3.1 "preview matches
@@ -668,8 +668,10 @@ enum CompositionBuilder {
     // MARK: - Cross-dissolve layer instructions (T1.2 feature-transitions)
 
     /// The AVFoundation-native expression of a cross-dissolve as two
-    /// `AVMutableVideoCompositionLayerInstruction`s with `setOpacityRamp`
-    /// over the overlap interval.
+    /// `AVVideoCompositionLayerInstruction`s with an opacity ramp over the
+    /// overlap interval, each built from an
+    /// `AVVideoCompositionLayerInstruction.Configuration` (the macOS 26
+    /// replacement for the deprecated mutable layer-instruction API).
     ///
     /// Production cross-dissolves run through `EffectCompositor.crossDissolve`
     /// (additive blend — midpoint `(A+B)/2` with α=1), not this helper. An
@@ -681,7 +683,7 @@ enum CompositionBuilder {
     /// violated T3.1 "preview matches export" the moment a user added a
     /// colour effect. The helper is retained as:
     ///   1. Spec-compliance infrastructure (Codex P2 — feature-transitions T1.2
-    ///      explicitly calls out `setOpacityRamp` / `AVMutableVideoCompositionLayerInstruction`),
+    ///      explicitly calls out an opacity ramp on a layer instruction),
     ///   2. A reference shape for a future native-export path that doesn't
     ///      run through the custom compositor.
     /// Exercised in production-equivalent form by the
@@ -692,20 +694,19 @@ enum CompositionBuilder {
         outgoingTransform: CGAffineTransform,
         incomingTransform: CGAffineTransform,
         overlap: CMTimeRange
-    ) -> (outgoing: AVMutableVideoCompositionLayerInstruction,
-          incoming: AVMutableVideoCompositionLayerInstruction) {
+    ) -> (outgoing: AVVideoCompositionLayerInstruction,
+          incoming: AVVideoCompositionLayerInstruction) {
 
-        let outgoing = AVMutableVideoCompositionLayerInstruction()
-        outgoing.trackID = outgoingTrackID
+        var outgoing = AVVideoCompositionLayerInstruction.Configuration(trackID: outgoingTrackID)
         outgoing.setTransform(outgoingTransform, at: overlap.start)
-        outgoing.setOpacityRamp(fromStartOpacity: 1, toEndOpacity: 0, timeRange: overlap)
+        outgoing.addOpacityRamp(.init(timeRange: overlap, start: 1, end: 0))
 
-        let incoming = AVMutableVideoCompositionLayerInstruction()
-        incoming.trackID = incomingTrackID
+        var incoming = AVVideoCompositionLayerInstruction.Configuration(trackID: incomingTrackID)
         incoming.setTransform(incomingTransform, at: overlap.start)
-        incoming.setOpacityRamp(fromStartOpacity: 0, toEndOpacity: 1, timeRange: overlap)
+        incoming.addOpacityRamp(.init(timeRange: overlap, start: 0, end: 1))
 
-        return (outgoing, incoming)
+        return (AVVideoCompositionLayerInstruction(configuration: outgoing),
+                AVVideoCompositionLayerInstruction(configuration: incoming))
     }
 
 }

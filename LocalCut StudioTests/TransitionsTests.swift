@@ -389,7 +389,7 @@ struct TransitionsTests {
     // MARK: - T1.2 Opacity-ramp layer instructions
 
     @Test("crossDissolveLayerInstructions: ramps opacity from 1→0 (outgoing) and 0→1 (incoming) across the overlap")
-    func crossDissolveLayerRamps() {
+    func crossDissolveLayerRamps() throws {
         let overlap = CMTimeRange(start: time(5), duration: time(1))
         let pair = CompositionBuilder.crossDissolveLayerInstructions(
             outgoingTrackID: 100,
@@ -402,34 +402,17 @@ struct TransitionsTests {
         #expect(pair.incoming.trackID == 200)
 
         // The opacity ramp is the spec-faithful expression of the cross-dissolve.
-        // `getOpacityRamp` returns the ramp endpoints + range into out-params;
-        // we verify outgoing ramps 1 → 0 and incoming ramps 0 → 1 over the
-        // exact overlap window.
-        var outStart: Float = -1
-        var outEnd: Float = -1
-        var outRange = CMTimeRange.zero
-        let outFound = pair.outgoing.getOpacityRamp(
-            for: overlap.start,
-            startOpacity: &outStart,
-            endOpacity: &outEnd,
-            timeRange: &outRange)
-        #expect(outFound)
-        #expect(outStart == 1)
-        #expect(outEnd == 0)
-        #expect(outRange == overlap)
+        // `opacityRamp(at:)` returns the ramp covering the given time; we verify
+        // outgoing ramps 1 → 0 and incoming ramps 0 → 1 over the exact overlap.
+        let outRamp = try #require(pair.outgoing.opacityRamp(at: overlap.start))
+        #expect(outRamp.start == 1)
+        #expect(outRamp.end == 0)
+        #expect(outRamp.timeRange == overlap)
 
-        var inStart: Float = -1
-        var inEnd: Float = -1
-        var inRange = CMTimeRange.zero
-        let inFound = pair.incoming.getOpacityRamp(
-            for: overlap.start,
-            startOpacity: &inStart,
-            endOpacity: &inEnd,
-            timeRange: &inRange)
-        #expect(inFound)
-        #expect(inStart == 0)
-        #expect(inEnd == 1)
-        #expect(inRange == overlap)
+        let inRamp = try #require(pair.incoming.opacityRamp(at: overlap.start))
+        #expect(inRamp.start == 0)
+        #expect(inRamp.end == 1)
+        #expect(inRamp.timeRange == overlap)
     }
 
 }
