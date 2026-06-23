@@ -623,6 +623,23 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     // MARK: - Skin smoothing
 
+    nonisolated static let skinSmoothReferenceHeight: CGFloat = 1080
+    nonisolated static let skinSmoothReferenceMaxRadius: Float = 10
+
+    /// Maps user strength to a source-pixel Gaussian radius. Radius is authored
+    /// against a 1080p source frame, then scaled by the actual source height so
+    /// 4K footage does not look half as smooth as 1080p at the same strength.
+    nonisolated static func skinSmoothBlurRadius(strength: Float, imageHeight: CGFloat) -> Float {
+        let clampedStrength = max(0, min(1, strength))
+        let heightScale: Float
+        if imageHeight.isFinite, imageHeight > 0 {
+            heightScale = Float(imageHeight / skinSmoothReferenceHeight)
+        } else {
+            heightScale = 1
+        }
+        return clampedStrength * skinSmoothReferenceMaxRadius * heightScale
+    }
+
     /// Applies skin smoothing using a chroma-based skin-tone mask and masked Gaussian blur proxy.
     /// Internal (not private) so the render-path test can exercise the compiled MSL kernels
     /// directly — a missing `metallib` or renamed kernel makes this return `nil`.
@@ -662,10 +679,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // Clamp to extent before blurring to prevent transparent edge bleeding
         let clamped = image.clampedToExtent()
 
-        // Apply a moderate blur — radius scales with strength
+        // Apply a moderate blur — radius scales with strength and source height.
         let blurFilter = CIFilter.gaussianBlur()
         blurFilter.inputImage = clamped
-        blurFilter.radius = strength * 10.0
+        blurFilter.radius = Self.skinSmoothBlurRadius(strength: strength,
+                                                      imageHeight: image.extent.height)
         guard let blurred = blurFilter.outputImage else { return nil }
 
         // Clip blurred image back to original extent

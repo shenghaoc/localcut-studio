@@ -56,7 +56,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 ## Follow-up backlog
 - [x] Snap-to-playhead authored-time conversion when transitions exist (trim/drag R3.1) — P1
 - [x] Directional wipe: stored angle + inspector control + Codable migration (transitions R1.2)
-- [ ] Skin-smooth resolution-independent blur radius (needs look decision)
+- [x] Skin-smooth resolution-independent blur radius (1080p source-height reference)
 - [x] Keyframe authoring UI for skin-smooth strength (feature-keyframes R6)
 - [ ] Keyframable caption style params (phase-30 R2.3)
 - [x] Caption line retiming controls + caption timeline lane (caption-tracks R4.1)

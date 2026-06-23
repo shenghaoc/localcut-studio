@@ -137,6 +137,11 @@ The sampler does one bounded `.RGBAf` readback per sampled frame (max 160×90), 
 32×64 waveform histogram and per-pixel vectorscope scatter from that same buffer. This replaces the
 old 32 histogram filter readbacks plus 8×8 vectorscope proxy.
 
+### `EffectCompositor.swift`
+`skinSmoothBlurRadius(strength:imageHeight:)` is the single source of truth for the Gaussian proxy's
+radius: 10 source pixels at strength 1.0 on a 1080p source frame, scaled linearly by source height.
+Preview and export share this helper through the existing skin-smooth compositor path.
+
 ### `DiagnosticsView.swift`
 `capabilitiesSection` reads `Capabilities.current` and renders a `capabilityRow` per feature with
 `tierLabel`/`tierTint` (view-local, keeping `Capabilities.swift` SwiftUI-free) and the verdict

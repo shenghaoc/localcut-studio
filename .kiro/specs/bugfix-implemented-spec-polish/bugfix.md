@@ -203,6 +203,16 @@ unimplemented.
   refresh task that only updates SwiftUI state when `revision` changes, and the vectorscope draws
   75%-saturation colour target boxes behind the live trace.
 
+### U12 — Skin-smooth blur strength was source-resolution dependent
+
+phase-32a's Gaussian proxy used `strength * 10` source pixels for every clip. A strength that looked
+right on 1080p footage therefore looked too weak on 4K footage because the blur radius covered half
+as much image detail.
+
+- **Fix:** `EffectCompositor.skinSmoothBlurRadius(strength:imageHeight:)` now treats 1080p source
+  height as the reference (`strength == 1` → 10 px) and scales linearly by source-frame height.
+  Preview and export stay aligned because both call the same compositor helper.
+
 ---
 
 ## Correctness
@@ -283,11 +293,6 @@ playhead legitimately maps to both sides of the cut, so a single global authored
 
 Catalogued so the audit's value isn't lost. Each is either higher-risk (composition math, behaviour
 change to a tuned look), or large enough to deserve its own spec.
-
-**Correctness / behaviour (own spec recommended):**
-- **Skin-smooth resolution independence** — blur radius is `strength * 10` in source pixels, so the
-  same clip smooths differently at 1080p vs 4K source. Scaling by image height changes the look of
-  existing projects; needs a design decision, not a silent change.
 
 **Deferred feature surfaces:**
 - **Keyframable caption style params** (phase-30 R2.3) — `CaptionStyle` stores plain values, no

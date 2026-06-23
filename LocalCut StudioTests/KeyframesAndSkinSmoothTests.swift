@@ -155,6 +155,19 @@ func skinSmoothClampPreservesInRange() {
     #expect(effect.strength.defaultValue == 0.3)
 }
 
+@Test("Skin-smooth blur radius scales from a 1080p source-height reference")
+func skinSmoothBlurRadiusScalesWithSourceHeight() {
+    let full = EffectCompositor.skinSmoothBlurRadius(strength: 1, imageHeight: 1080)
+    let fourK = EffectCompositor.skinSmoothBlurRadius(strength: 1, imageHeight: 2160)
+    let half = EffectCompositor.skinSmoothBlurRadius(strength: 1, imageHeight: 540)
+    let halfStrength = EffectCompositor.skinSmoothBlurRadius(strength: 0.5, imageHeight: 2160)
+
+    #expect(abs(full - 10) < 0.001)
+    #expect(abs(fourK - 20) < 0.001)
+    #expect(abs(half - 5) < 0.001)
+    #expect(abs(halfStrength - 10) < 0.001)
+}
+
 @Test("Effect.skinSmooth stores effect")
 func effectSkinSmoothStores() {
     let effect = Effect.skinSmooth(SkinSmoothEffect())
