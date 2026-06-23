@@ -500,9 +500,53 @@ final class EditorModel {
         performUndoable("Import LUT") {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-                track.clips[index].effects.append(.lut(bookmark: bookmark))
+                // Replace the existing LUT slot rather than stacking a second
+                // cube — a clip carries one LUT (R1.2).
+                track.clips[index].effects = track.clips[index].effects.replacingLUT(bookmark: bookmark)
                 RenderCache.shared.invalidate(clipID: id)
                 statusMessage = "Imported LUT \(url.lastPathComponent)."
+                scheduleRebuild()
+                return
+            }
+        }
+    }
+
+    /// Whether the selected clip currently has a LUT applied — drives the
+    /// inspector's LUT indicator + remove control.
+    var selectedClipHasLUT: Bool {
+        selectedClip?.effects.hasLUT ?? false
+    }
+
+    /// Best-effort filename of the selected clip's LUT, resolved from its
+    /// security-scoped bookmark for display only. Returns nil when no LUT is
+    /// applied or the bookmark no longer resolves (the inspector then falls back
+    /// to a generic "Applied" label). Resolving a bookmark to a URL does not
+    /// require starting security-scoped access, so this is cheap enough for an
+    /// inspector that only re-reads on selection change.
+    var selectedClipLUTName: String? {
+        guard let clip = selectedClip else { return nil }
+        for effect in clip.effects {
+            guard case .lut(let bookmark) = effect else { continue }
+            var stale = false
+            let url = try? URL(resolvingBookmarkData: bookmark,
+                               options: [.withSecurityScope],
+                               relativeTo: nil,
+                               bookmarkDataIsStale: &stale)
+            return url?.lastPathComponent
+        }
+        return nil
+    }
+
+    /// Removes only the LUT effect from the selected clip, leaving the colour
+    /// grade and skin-smooth effects in place.
+    func removeLUT() {
+        guard let id = selectedClipID else { return }
+        performUndoable("Remove LUT") {
+            for track in allTracks {
+                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+                track.clips[index].effects = track.clips[index].effects.removingLUT()
+                RenderCache.shared.invalidate(clipID: id)
+                statusMessage = "Removed LUT."
                 scheduleRebuild()
                 return
             }
@@ -946,6 +990,10 @@ final class EditorModel {
         performUndoable("Change Resolution") {
             project.renderSize = size
             RenderCache.shared.invalidate(notMatchingRenderSize: size)
+            // Caption rasters are keyed on render size, so the old-resolution
+            // bitmaps are now dead weight; drop them instead of waiting for LRU
+            // eviction (feature-title-raster R2.3 / T1.4).
+            EffectCompositor.purgeCaptionRasterCache()
             scheduleRebuild()
         }
     }

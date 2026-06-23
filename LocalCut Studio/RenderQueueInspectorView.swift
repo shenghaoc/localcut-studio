@@ -113,6 +113,26 @@ struct RenderQueueInspectorView: View {
                     .help("Cancel render")
                     .accessibilityLabel("Cancel \(job.outputDisplayName)")
                 }
+                if job.status == .completed {
+                    Button {
+                        revealInFinder(job)
+                    } label: {
+                        Image(systemName: "magnifyingglass.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Reveal in Finder")
+                    .accessibilityLabel("Reveal \(job.outputDisplayName) in Finder")
+                }
+                if job.status == .failed || job.status == .cancelled {
+                    Button {
+                        model.renderQueue.retry(jobID: job.id)
+                    } label: {
+                        Image(systemName: "arrow.clockwise.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Retry this render against the same destination")
+                    .accessibilityLabel("Retry \(job.outputDisplayName)")
+                }
             }
             // Surface the underlying failure so the user can act on it
             // rather than guessing why the pill went red (codex P2).
@@ -146,6 +166,16 @@ struct RenderQueueInspectorView: View {
             .background(colour.opacity(0.18), in: Capsule())
             .foregroundStyle(colour)
             .accessibilityLabel("Status: \(job.status.displayName)")
+    }
+
+    /// Reveals a completed render in Finder. Resolving the bookmark to a URL is
+    /// enough for `activateFileViewerSelecting`; no security-scoped read needed.
+    private func revealInFinder(_ job: QueueJob) {
+        guard let url = model.renderQueue.outputURL(forJobID: job.id) else {
+            model.statusMessage = "Could not locate \(job.outputDisplayName)."
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     // MARK: - Add to queue

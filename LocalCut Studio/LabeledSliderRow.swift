@@ -38,8 +38,24 @@ struct LabeledSliderRow<Value: BinaryFloatingPoint>: View where Value.Stride: Bi
     /// Forwarded to the underlying `Slider`; the gain/fade rows use it to commit
     /// a coalesced undo step on drag end.
     var onEditingChanged: (Bool) -> Void = { _ in }
+    /// Optional "reset to default" action. When non-nil the row gains a
+    /// right-click context menu that restores the parameter to its neutral
+    /// value — the NLE-standard affordance for sliders. The caller owns the
+    /// reset (set the value through the model and commit) so the row stays
+    /// model-agnostic.
+    var resetAction: (() -> Void)? = nil
 
     var body: some View {
+        if let resetAction {
+            content.contextMenu {
+                Button("Reset", systemImage: "arrow.uturn.backward", action: resetAction)
+            }
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: captionSpacing) {
             caption
             slider

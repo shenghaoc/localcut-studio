@@ -278,6 +278,33 @@ enum Effect: Hashable, Codable {
     }
 }
 
+extension Array where Element == Effect {
+    /// Whether the chain carries a LUT effect.
+    nonisolated var hasLUT: Bool {
+        contains { if case .lut = $0 { return true }; return false }
+    }
+
+    /// Returns the chain with its single LUT slot set to `bookmark` — replacing
+    /// an existing LUT in place (a clip holds one LUT, per feature-colour-grading
+    /// R1.2) or appending one when none is present. Importing a second LUT used
+    /// to silently stack, applying two cubes in sequence with no UI feedback.
+    nonisolated func replacingLUT(bookmark: Data) -> [Effect] {
+        var copy = self
+        if let index = copy.firstIndex(where: { if case .lut = $0 { return true }; return false }) {
+            copy[index] = .lut(bookmark: bookmark)
+        } else {
+            copy.append(.lut(bookmark: bookmark))
+        }
+        return copy
+    }
+
+    /// Returns the chain with any LUT effect removed, leaving grade / skin-smooth
+    /// untouched.
+    nonisolated func removingLUT() -> [Effect] {
+        filter { if case .lut = $0 { return false }; return true }
+    }
+}
+
 // MARK: - Transitions
 
 /// The kinds of transition supported in v1.

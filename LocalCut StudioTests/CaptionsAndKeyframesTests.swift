@@ -763,6 +763,51 @@ func presetSnapshotShape() {
     }
 }
 
+// MARK: - Karaoke word highlight (phase-30 R3.3)
+
+private func wordTiming(_ start: Double, _ end: Double, _ text: String) -> WordTiming {
+    WordTiming(range: CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600),
+                                  duration: CMTime(seconds: end - start, preferredTimescale: 600)),
+               word: text)
+}
+
+@Test("activeWordIndex holds the last word across inter-word gaps and the tail")
+func activeWordIndexHolds() {
+    let words = [wordTiming(1, 2, "a"), wordTiming(3, 4, "b")]
+    func idx(_ t: Double) -> Int? {
+        EffectCompositor.activeWordIndex(words: words, at: CMTime(seconds: t, preferredTimescale: 600))
+    }
+    #expect(idx(0.5) == nil)   // before the first word → idle, no highlight
+    #expect(idx(1.5) == 0)     // inside first word
+    #expect(idx(2.5) == 0)     // gap between words → hold first (no flicker)
+    #expect(idx(3.5) == 1)     // inside second word
+    #expect(idx(9.0) == 1)     // tail after last word → hold last
+}
+
+@Test("activeWordIndex returns nil when there are no word timings")
+func activeWordIndexNoWords() {
+    #expect(EffectCompositor.activeWordIndex(words: nil, at: .zero) == nil)
+    #expect(EffectCompositor.activeWordIndex(words: [], at: .zero) == nil)
+}
+
+// MARK: - Caption track rename (feature-caption-tracks R2.6)
+
+@MainActor
+@Test("renameCaptionTrack updates the name and is undoable")
+func captionTrackRename() {
+    let model = EditorModel()
+    model.addEmptyCaptionTrack()
+    let trackID = model.project.captionTracks[0].id
+    let original = model.project.captionTracks[0].name
+
+    model.renameCaptionTrack("Lyrics", in: trackID)
+    model.commitCoalescedUndo()
+    #expect(model.project.captionTracks[0].name == "Lyrics")
+
+    model.undo()
+    #expect(model.project.captionTracks[0].name == original)
+}
+
 // MARK: - Smoke test (Phase 30 T5.2)
 
 /// Generates a 2 s solid-colour fixture clip via `AVAssetWriter`, builds a

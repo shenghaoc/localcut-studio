@@ -80,6 +80,13 @@ struct DocumentCommands: Commands {
                 .disabled(!model.canAddTransitionAtSelection)
             Button("Remove Transition") { model.removeSelectedTransition() }
                 .disabled(model.selectedTransitionClipID == nil)
+            Divider()
+            Button("Previous Marker") { model.selectPreviousMarker() }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
+                .disabled(model.project.markers.isEmpty)
+            Button("Next Marker") { model.selectNextMarker() }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+                .disabled(model.project.markers.isEmpty)
         }
     }
 }

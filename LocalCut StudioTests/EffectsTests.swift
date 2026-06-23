@@ -48,6 +48,39 @@ func noClampingWhenInRange() {
     #expect(grade.tintOffset == -50)
 }
 
+// MARK: - LUT slot helpers (feature-colour-grading R1.2)
+
+@Test("replacingLUT appends a LUT when none is present")
+func lutAppendWhenAbsent() {
+    let effects: [Effect] = [.colourGrade(.neutral)]
+    let result = effects.replacingLUT(bookmark: Data([0x01]))
+    #expect(result.count == 2)
+    #expect(result.hasLUT)
+}
+
+@Test("replacingLUT replaces the existing LUT in place rather than stacking a second cube")
+func lutReplaceInPlace() {
+    let effects: [Effect] = [.lut(bookmark: Data([0x01])), .colourGrade(.neutral)]
+    let result = effects.replacingLUT(bookmark: Data([0x02]))
+    let lutCount = result.filter { if case .lut = $0 { return true }; return false }.count
+    #expect(lutCount == 1)
+    if case .lut(let bookmark) = result[0] {
+        #expect(bookmark == Data([0x02]))
+    } else {
+        Issue.record("first effect should still be the replaced LUT")
+    }
+}
+
+@Test("removingLUT drops only the LUT, preserving grade + skin-smooth")
+func lutRemovePreservesOthers() {
+    let effects: [Effect] = [.colourGrade(.neutral), .lut(bookmark: Data([0x01])), .skinSmooth(.neutral)]
+    let result = effects.removingLUT()
+    #expect(!result.hasLUT)
+    #expect(result.count == 2)
+    #expect(result.contains { if case .colourGrade = $0 { return true }; return false })
+    #expect(result.contains { if case .skinSmooth = $0 { return true }; return false })
+}
+
 @Test("Clip has empty effects by default")
 func clipDefaultEffects() {
     let clip = Clip(mediaID: UUID(), sourceStart: .zero, duration: CMTime(seconds: 10, preferredTimescale: 600), timelineStart: .zero)

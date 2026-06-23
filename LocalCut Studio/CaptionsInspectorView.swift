@@ -30,6 +30,12 @@ struct CaptionsInspectorView: View {
             ForEach(model.project.captionTracks) { track in
                 trackBlock(track)
             }
+
+            if !model.project.captionTracks.isEmpty {
+                Text("Caption styling shows in preview and burned-in video exports; SRT/VTT sidecars stay plain text.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .fileImporter(
             isPresented: $showSRTImporter,
@@ -55,6 +61,12 @@ struct CaptionsInspectorView: View {
     @ViewBuilder
     private func trackBlock(_ track: CaptionTrack) -> some View {
         DisclosureGroup {
+            TextField("Track name", text: Binding(
+                get: { track.name },
+                set: { model.renameCaptionTrack($0, in: track.id) }))
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Caption track name")
+
             Toggle("Muted", isOn: Binding(
                 get: { track.isMuted },
                 set: { new in

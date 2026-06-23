@@ -210,6 +210,38 @@ struct MarkersEditorTests {
         #expect(abs(model.currentTime - 1.0) < 1e-6)
     }
 
+    @Test("selectNextMarker / selectPreviousMarker seek to the neighbouring marker")
+    func nextPrevMarkerNavigation() {
+        let model = EditorModel()
+        for seconds in [1.0, 3.0, 5.0] {
+            model.currentTime = seconds
+            model.addMarkerAtPlayhead()
+        }
+        // From 2 s: next is 3 s, previous is 1 s.
+        model.currentTime = 2.0
+        model.selectNextMarker()
+        #expect(abs(model.currentTime - 3.0) < 1e-6)
+
+        model.currentTime = 2.0
+        model.selectPreviousMarker()
+        #expect(abs(model.currentTime - 1.0) < 1e-6)
+    }
+
+    @Test("Marker navigation past the ends is a no-op")
+    func markerNavigationClampsAtEnds() {
+        let model = EditorModel()
+        model.currentTime = 1.0
+        model.addMarkerAtPlayhead()
+
+        model.currentTime = 5.0          // past the only marker
+        model.selectNextMarker()          // nothing ahead → no move
+        #expect(abs(model.currentTime - 5.0) < 1e-6)
+
+        model.currentTime = 0.0          // before the only marker
+        model.selectPreviousMarker()      // nothing behind → no move
+        #expect(abs(model.currentTime - 0.0) < 1e-6)
+    }
+
     @Test("seekToMarker bypasses the totalDuration clamp for markers past project end (Codex review #5)")
     func seekPastProjectEnd() {
         let model = EditorModel()

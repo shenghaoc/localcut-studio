@@ -266,6 +266,30 @@ struct RenderQueueTests {
         #expect(queue.jobs[0] == snapshot, "second cancel should be a no-op")
     }
 
+    @Test("Retry: a cancelled job is requeued for another run (R3.3)")
+    func retryRequeuesCancelled() {
+        let queue = RenderQueue(persistsToDisk: false)
+        let job = makeJob(name: "X")
+        queue.enqueue(job, autoStart: false)
+        queue.cancel(jobID: job.id)
+        #expect(queue.jobs[0].status == .cancelled)
+
+        queue.retry(jobID: job.id, autoStart: false)
+        #expect(queue.jobs[0].status == .queued)
+        #expect(queue.jobs[0].errorMessage == nil)
+        #expect(queue.jobs[0].progress == 0)
+    }
+
+    @Test("Retry: a non-terminal (queued) job is left untouched")
+    func retryNoOpForNonTerminal() {
+        let queue = RenderQueue(persistsToDisk: false)
+        let job = makeJob(name: "X")
+        queue.enqueue(job, autoStart: false)
+        let before = queue.jobs[0]
+        queue.retry(jobID: job.id, autoStart: false)
+        #expect(queue.jobs[0] == before, "retrying a queued job should be a no-op")
+    }
+
     @Test("clearCompleted drops terminal jobs only")
     func clearCompletedDropsTerminal() {
         let queue = RenderQueue(persistsToDisk: false)

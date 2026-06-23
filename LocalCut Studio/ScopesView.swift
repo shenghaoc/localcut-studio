@@ -75,6 +75,7 @@ struct ScopesView: View {
         // Frame outline.
         let frameRect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
         context.stroke(Path(frameRect), with: .color(.white.opacity(0.15)), lineWidth: 0.5)
+        drawWaveformGraticule(into: context, frameRect: frameRect)
 
         guard let sample, !sample.waveform.isEmpty else {
             placeholder(into: context, size: size, label: "No frames yet")
@@ -99,6 +100,23 @@ struct ScopesView: View {
         }
     }
 
+    /// Horizontal IRE reference lines (0/25/50/75/100) with small labels so luma
+    /// levels read against a scale instead of empty black. Static — drawn behind
+    /// the live trace, no per-frame sampling cost.
+    private func drawWaveformGraticule(into context: GraphicsContext, frameRect: CGRect) {
+        for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let y = frameRect.maxY - CGFloat(fraction) * frameRect.height
+            var line = Path()
+            line.move(to: CGPoint(x: frameRect.minX, y: y))
+            line.addLine(to: CGPoint(x: frameRect.maxX, y: y))
+            context.stroke(line, with: .color(.white.opacity(0.12)), lineWidth: 0.5)
+            let label = Text("\(Int(fraction * 100))")
+                .font(.system(size: 8))
+                .foregroundStyle(.white.opacity(0.35))
+            context.draw(label, at: CGPoint(x: frameRect.minX + 10, y: y), anchor: .center)
+        }
+    }
+
     // MARK: - Vectorscope
 
     private func drawVectorscope(into context: GraphicsContext, size: CGSize, sample: ScopeSample?) {
@@ -108,8 +126,11 @@ struct ScopesView: View {
                           y: frameRect.midY - plotSide / 2,
                           width: plotSide, height: plotSide)
 
-        // Outer chroma circle + crosshairs as a reference grid.
+        // Outer chroma circle + a 75%-saturation reference ring (colour-bar
+        // targets sit on/near it) + crosshairs as a reference grid.
         context.stroke(Path(ellipseIn: plot), with: .color(.white.opacity(0.2)), lineWidth: 0.5)
+        let inner = plot.insetBy(dx: plot.width * 0.125, dy: plot.height * 0.125)
+        context.stroke(Path(ellipseIn: inner), with: .color(.white.opacity(0.12)), lineWidth: 0.5)
         var crosshair = Path()
         crosshair.move(to: CGPoint(x: plot.midX, y: plot.minY))
         crosshair.addLine(to: CGPoint(x: plot.midX, y: plot.maxY))

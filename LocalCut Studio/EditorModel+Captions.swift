@@ -92,6 +92,18 @@ extension EditorModel {
         }
     }
 
+    /// Renames a caption track. Coalesced + rebuild-skipped so a run of
+    /// keystrokes in the inspector folds into one undo step without rebuilding
+    /// the composition (the name doesn't affect rendering) — satisfies
+    /// feature-caption-tracks R2.6 ("the user can rename it").
+    func renameCaptionTrack(_ name: String, in trackID: CaptionTrack.ID) {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              track.name != name else { return }
+        performCoalescedUndoable("Rename Caption Track", target: trackID, rebuild: .skip) {
+            track.name = name
+        }
+    }
+
     /// Updates the default style for a track. Used by the inspector preset picker.
     func updateCaptionTrackDefaultStyle(_ style: CaptionStyle, in trackID: CaptionTrack.ID) {
         guard let track = project.captionTracks.first(where: { $0.id == trackID }) else { return }

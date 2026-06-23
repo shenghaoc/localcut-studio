@@ -412,11 +412,26 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     }
 
     nonisolated private func activeWordIndex(for item: CaptionRenderItem, at time: CMTime) -> Int? {
-        guard let words = item.words, !words.isEmpty else { return nil }
+        Self.activeWordIndex(words: item.words, at: time)
+    }
+
+    /// Index of the word to highlight at `time`. A word whose range contains
+    /// `time` wins; otherwise the most-recently-started word is *held* so the
+    /// karaoke highlight doesn't snap back to the un-highlighted base fill in
+    /// the gaps ASR leaves between words, or after the final word while the line
+    /// is still on screen (R3.3). Before the first word starts, returns nil so
+    /// the line renders idle. Pure + `static` so it's unit-testable without a
+    /// compositor instance; `words` are assumed sorted ascending by start.
+    nonisolated static func activeWordIndex(words: [WordTiming]?, at time: CMTime) -> Int? {
+        guard let words, !words.isEmpty else { return nil }
         for (i, word) in words.enumerated() where word.range.containsTime(time) {
             return i
         }
-        return nil
+        var held: Int?
+        for (i, word) in words.enumerated() where word.range.start <= time {
+            held = i
+        }
+        return held
     }
 
     // MARK: - Transitions

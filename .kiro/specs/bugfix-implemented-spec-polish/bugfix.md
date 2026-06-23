@@ -1,0 +1,225 @@
+# Bugfix: Implemented-Spec Reachability & UX Polish
+
+A cross-cutting audit of **every implemented spec** (Phase 1 + the colour-grading, colour-management,
+skin-smoothing, transitions, trim/drag, keyframes, caption, title-raster, markers, diagnostics,
+capability-tiers, render-cache, audio-master-bus, export-queue, project-persistence, and
+project-bundle features) for anything *left over, deferred, incorrect, or improvable with the
+current toolchain*. Where PR #31 hardened the **language and platform** (zero warnings, Swift 6,
+macOS 26 deprecations) without changing behaviour, this pass changes **behaviour for the better**:
+it surfaces shipped-but-unreachable features and closes the highest-value UX and correctness gaps
+the audit found.
+
+**The recurring finding:** several features shipped a complete, tested *engine* but no reachable
+*surface*. The capability resolver is computed once at launch and read by nothing. LUTs apply with
+no on-screen indication and silently stack on re-import. Markers can be added but not traversed.
+Finished renders can't be revealed; failed ones can't be retried. Scopes draw without a reference
+graticule. The audio fader the design specified as log-mapped shipped linear. This spec lands the
+missing surfaces and a set of low-risk correctness fixes; the larger structural items the audit
+turned up are catalogued under **Deferred follow-ups** with enough detail to spec them later.
+
+**Platform:** target & CI are macOS 26 (`MACOSX_DEPLOYMENT_TARGET = 26.0`); dev host is macOS 27.
+Every API used below is available on macOS 26. Per PR #31's lesson, the **CI build log is the
+authoritative zero-warning gate** — a clean local build is not sufficient.
+
+**Scope discipline:** changes are additive SwiftUI + small, unit-tested pure helpers + view-layer
+data plumbing. No composition time-range math (P0-sensitive) is touched. New logic ships with tests
+and the test count only grows.
+
+---
+
+## Reachability — surface features that shipped without a UI
+
+### S1 — Capability tiers are computed but read by nothing
+
+`Capabilities.current` (a `nonisolated static let` probed once at launch) resolves a
+`baseline`/`accelerated`/`pro` verdict + human-readable reason per feature, but a project-wide grep
+finds **no consumer outside `Capabilities.swift`** — neither `feature-capability-tiers` nor
+`feature-diagnostics` actually surfaced it (each spec pointed at the other). The reason strings,
+engineered to always be non-empty and explain *why* a feature is degraded, reach no user.
+
+- **Fix:** Add a "Capabilities" section to `DiagnosticsView` — the agreed home
+  (feature-capability-tiers R3.3, feature-diagnostics) — listing the tier for `.metalEffectChain`,
+  `.frameInterpolation`, and `.simultaneousCaptureStreams(count: 2)`, each verdict's `reason` in
+  `.help`. Pure read of a `Sendable` snapshot; no concurrency risk. The engine stays SwiftUI-free —
+  the tier label + tint mapping lives in the view.
+
+### S2 — LUTs apply invisibly and stack silently on re-import
+
+`importLUT` did `effects.append(.lut(...))` with no dedup, so a second import stacked a second cube,
+applied in sequence, with zero UI feedback. The Colour section showed only "Import LUT…" — no
+filename, no "a LUT is active" indicator, and no way to remove just the LUT (only the section-wide
+"Reset", which also wipes the grade). feature-colour-grading R1.2 specifies **one** LUT slot.
+
+- **Fix:** A clip holds one LUT. `importLUT` now **replaces** the slot (`[Effect].replacingLUT`);
+  the Colour section shows the loaded LUT's filename (resolved best-effort from its bookmark) with a
+  remove (✕) control (`removeLUT` / `[Effect].removingLUT`), and the import button reads
+  "Replace LUT…" when one is present.
+
+### S3 — Markers can be added but not traversed
+
+`feature-markers` shipped add/rename/delete/seek but explicitly deferred next/previous navigation
+("trivial to add later once the marker list lives somewhere stable" — it now lives in the sorted
+`Project.markers`). A keyboard/menu user couldn't jump between markers — a core NLE expectation.
+
+- **Fix:** `selectNextMarker()` / `selectPreviousMarker()` on `EditorModel` seek to the nearest
+  marker after/before the playhead (the list is kept sorted), exposed as Edit-menu commands
+  **⌘⇧]** / **⌘⇧[**, disabled when there are no markers.
+
+### S4 — Finished renders can't be revealed; failed renders can't be retried
+
+The render-queue inspector had only a cancel button. A completed render couldn't be opened in
+Finder; a `.failed`/`.cancelled` row was a dead end even though `RenderQueue` keeps the snapshot +
+destination bookmark — feature-export-queue R3.3 explicitly promises "the user keeps the row to
+retry against a destination."
+
+- **Fix:** `RenderQueue.retry(jobID:)` requeues a terminal job (reusing snapshot + bookmark);
+  `RenderQueue.outputURL(forJobID:)` resolves the bookmark so the inspector can
+  `NSWorkspace.activateFileViewerSelecting`. The inspector gains **Reveal in Finder** on completed
+  rows and **Retry** on failed/cancelled rows.
+
+---
+
+## UX polish
+
+### U1 — Per-parameter slider reset (NLE-standard)
+
+Colour, beauty, opacity, and gain sliders could only be reset section-wide; an individual parameter
+couldn't be returned to neutral. `LabeledSliderRow` gains an opt-in `resetAction` that attaches a
+right-click **Reset** context menu. Wired for the five colour-grade parameters, clip opacity, and
+master/track gain (each resetting to its documented neutral and committing one undo step). Beauty
+keeps its section reset (its neutral mask values aren't an obvious single number).
+
+### U2 — Wide-gamut working space carries no advisory
+
+feature-colour-management's design risk says to keep sRGB the default and "document the others as
+'advanced — verify on a reference monitor'." The picker listed all four spaces flat with no caveat.
+
+- **Fix:** A `.help` on the Working Space picker and a caption footnote shown when a non-sRGB space
+  is selected.
+
+### U3 — Scopes have no reference graticule
+
+The waveform drew a bare outline (no IRE scale); the vectorscope had only an outer circle. Below the
+pro-tool bar ui-standards sets.
+
+- **Fix:** Horizontal IRE reference lines (0/25/50/75/100) with labels on the waveform; a
+  75%-saturation reference ring on the vectorscope. Static overlays drawn behind the live trace — no
+  per-frame sampling cost. (Per-pixel vectorscope scatter + colour-target boxes remain a Phase-38
+  item — see D-list.)
+
+### U4 — Audio fader is linear, not the specified log/dB mapping
+
+feature-audio-master-bus's design specifies a "−∞…+6 dB log-mapped" master fader; both master and
+track gain shipped as linear `0…2` sliders, cramping all useful control around unity. The dB *label*
+was honest but the *control* wasn't log-mapped.
+
+- **Fix:** `AudioGainMapping` (pure, unit-tested) maps the sliders in dB space (−60…+6 dB) ↔ linear
+  amplitude, so equal travel is equal dB. Model gain values are unchanged — only the slider's
+  get/set transform — so all existing gain-math tests and the default-project bit-identity invariant
+  are untouched.
+
+### U5 — Captions: track rename + burn-in notice missing
+
+feature-caption-tracks R2.6 promises the user "can rename" an imported track, but the track name was
+non-editable. R6.2 promises the UI states styling is preview/burn-in only — no such statement
+existed.
+
+- **Fix:** A `renameCaptionTrack` command (coalesced, rebuild-skipped) behind an inspector
+  `TextField`; a one-line caption stating caption styling is preview/burn-in only while SRT/VTT
+  sidecars stay plain text.
+
+---
+
+## Correctness
+
+### C1 — Cancelling a running export leaves a partial file (P0 release gate)
+
+`AVAssetExportSession.cancelExport()` leaves the partially-written file at the user's path (the
+`AVAssetWriter` fallback cleans up after itself; the session path does not). `RELEASE-READINESS.md`
+lists "cancelling an export leaves no partial file at the user's path" as a gate, and
+feature-export-queue R2.4 requires it.
+
+- **Fix:** `runJob` deletes the output file in every **post-encode** cancel arm (cancel-after-write,
+  `CancellationError`, and the generic-error-treated-as-cancel path). The pre-encode cancel arm is
+  deliberately untouched — nothing was written there, so the user's pre-existing file must survive.
+
+### C2 — Karaoke word highlight drops to base fill in inter-word gaps
+
+`activeWordIndex` returned `nil` whenever the playhead sat between two `WordTiming` ranges or past
+the last word — so the highlight visibly flickered back to the un-highlighted fill in the gaps ASR
+routinely leaves, and after the final word while the line was still on screen (phase-30 R3.3 wants
+≤ 1-frame desync, not a flicker).
+
+- **Fix:** A word whose range contains the time still wins; otherwise the **most-recently-started**
+  word is held, clamped to the last word for the line's tail. Before the first word starts it stays
+  idle (nil). Factored to a `static` pure function and unit-tested.
+
+### C3 — Render-size change doesn't purge the caption raster cache
+
+feature-title-raster R2.3 / T1.4 says the editor calls `purge()` on render-size change;
+`setWorkingColourSpace` did, but `setRenderSize` did not, leaving old-resolution rasters resident
+until LRU eviction. (Not a stale-bitmap bug — render size is in the raster cache key — but it
+contradicts the documented call site and wastes memory.)
+
+- **Fix:** `setRenderSize` now calls `EffectCompositor.purgeCaptionRasterCache()` inside its
+  undoable block.
+
+---
+
+## Verification
+
+- **V1** — Debug/macOS build (app + tests): zero warnings, zero errors on the macOS 26 / Xcode 26.5
+  CI toolchain (authoritative gate per PR #31).
+- **V2** — Full test suite green with **no count regression**. New tests:
+  `[Effect].replacingLUT/removingLUT/hasLUT` (3), `AudioGainMapping` round-trip + floor (3),
+  `EffectCompositor.activeWordIndex` gap-hold + empty (2), marker next/prev nav (2),
+  `RenderQueue.retry` requeue + no-op (2), `renameCaptionTrack` undo (1).
+- **V3** — Manual smoke (recommended pre-release): Diagnostics shows capability tiers with reasons in
+  `.help`; LUT import shows the filename and replacing it doesn't stack; ⌘⇧[ / ⌘⇧] jump markers;
+  Reveal/Retry behave; scopes show the graticule; the master fader feels log-mapped; cancelling an
+  export leaves no file behind.
+
+---
+
+## Deferred follow-ups (audit findings not in this PR)
+
+Catalogued so the audit's value isn't lost. Each is either higher-risk (composition math, behaviour
+change to a tuned look), or large enough to deserve its own spec.
+
+**Correctness / behaviour (own spec recommended):**
+- **Snap-to-playhead coordinate space** — `EditorModel.snapTargets` adds the playhead in *effective*
+  (rippled) time while clip edges use *authored* time, so snapping to the playhead is off by the
+  cumulative transition overlap once any transition exists. Convert via the per-cut shift like the
+  split path does. (P1.)
+- **Directional wipe** — `TransitionType.wipe` is hardcoded to the bars-swipe default angle;
+  feature-transitions R1.2 says "directional". Needs a stored direction/angle + Codable migration +
+  inspector control.
+- **Skin-smooth resolution independence** — blur radius is `strength * 10` in source pixels, so the
+  same clip smooths differently at 1080p vs 4K source. Scaling by image height changes the look of
+  existing projects; needs a design decision, not a silent change.
+
+**Deferred feature surfaces:**
+- **Keyframe authoring UI** (feature-keyframes non-goal) — the evaluator ships and skin-smooth
+  strength is keyframable in the model, but nothing in the UI creates a keyframe.
+- **Keyframable caption style params** (phase-30 R2.3) — `CaptionStyle` stores plain values, no
+  `Keyframed<T>` fields; the requirement is silently unmet.
+- **Caption line retiming + timeline lane** (feature-caption-tracks R4.1) — start/end are read-only
+  in the inspector and captions have no timeline lane, so retiming is unreachable.
+- **Live + offline audio metering** (audio-master-bus R3.3/R5.1) — `prepareLive()` is never called
+  and export runs through `AVAssetExportSession` without the offline graph, so the meter never
+  animates; the inspector shows a permanent "not connected" placeholder.
+
+**Performance / toolchain:**
+- **Render-cache + title-raster LRU** are O(n) per access (`firstIndex`+`remove`); the design names
+  `OrderedDictionary` / a doubly-linked list. Render-cache disk spill is wired but unimplemented.
+- **Scopes:** revision-gated redraw (the sampler exposes `revision`, the view ignores it and repaints
+  at 30 Hz when paused); single-pass histogram; per-pixel vectorscope scatter + colour-target boxes.
+- **Document model:** evaluate `ReferenceFileDocument`/`DocumentGroup` (Open Recent, async save);
+  async window-close save (multi-GB bundle IO currently blocks the close prompt); staged
+  `fingerprints.json`+`project.json` swap; bundle-open verify progress.
+
+**Smaller hygiene:**
+- Bundle "Don't copy" import toggle (`wantsBundling` is dead in the UI); stale-bookmark refresh on
+  the queue path; `RenderQueue.isRunning` reset TOCTOU; typewriter mask excludes the pill; word-range
+  by token index instead of substring scan; golden snapshot tests (skin-smooth T3.1, caption presets
+  T5.1).

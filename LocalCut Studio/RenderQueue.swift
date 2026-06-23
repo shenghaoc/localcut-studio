@@ -283,6 +283,36 @@ final class RenderQueue {
         }
     }
 
+    /// Requeues a terminal job that didn't finish (`.failed` / `.cancelled`) so
+    /// the runner picks it up again, reusing the stored snapshot + destination
+    /// bookmark — the user keeps the row to retry instead of rebuilding it from
+    /// scratch (export-queue R3.3). No-op for `.queued` / `.running` / a job
+    /// that already `.completed`.
+    func retry(jobID: UUID, autoStart: Bool = true) {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        switch jobs[index].status {
+        case .failed, .cancelled:
+            jobs[index].status = .queued
+            jobs[index].errorMessage = nil
+            jobs[index].progress = 0
+            jobs[index].runtimeSeconds = nil
+            log("job \(jobID.uuidString.prefix(8)) requeued for retry")
+            persist()
+            recomputeTotalProgress()
+            if autoStart { start() }
+        case .queued, .running, .completed:
+            break
+        }
+    }
+
+    /// Resolves a job's output URL from its security-scoped bookmark so the
+    /// inspector can reveal a finished render in Finder. Returns nil if the
+    /// bookmark no longer resolves.
+    func outputURL(forJobID jobID: UUID) -> URL? {
+        guard let job = jobs.first(where: { $0.id == jobID }) else { return nil }
+        return resolveBookmark(job.outputBookmark)
+    }
+
     /// Drops every terminal (completed / cancelled / failed) job from the list.
     func clearCompleted() {
         let before = jobs.count
@@ -371,6 +401,13 @@ final class RenderQueue {
         let didStart = outputURL.startAccessingSecurityScopedResource()
         defer { if didStart { outputURL.stopAccessingSecurityScopedResource() } }
 
+        // A mid-encode cancel via `AVAssetExportSession.cancelExport()` leaves
+        // the partially-written file at the user's path (the writer path cleans
+        // up after itself; the session path does not). Delete it on cancel so a
+        // cancel never leaves a corrupt artefact behind — an explicit
+        // release-readiness gate. `try?` no-ops when the writer already removed it.
+        let removePartialOutput = { _ = try? FileManager.default.removeItem(at: outputURL) }
+
         // Build the composition from the snapshot. The runner reconstructs a
         // throwaway `Project` from the document so it can reuse
         // `CompositionBuilder.build(project:)` without touching the editor's
@@ -437,6 +474,7 @@ final class RenderQueue {
 
             if cancelInFlightID == id {
                 cancelInFlightID = nil
+                removePartialOutput()
                 finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
                 return
             }
@@ -444,6 +482,7 @@ final class RenderQueue {
             finish(jobID: id, status: .completed, message: nil, startWall: startWall)
         } catch is CancellationError {
             cancelInFlightID = nil
+            removePartialOutput()
             finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
         } catch {
             // `AVAssetExportSession.cancelExport()` makes the awaited export
@@ -452,6 +491,7 @@ final class RenderQueue {
             // it actually is so the row doesn't persist as `.failed` (codex P2).
             if cancelInFlightID == id {
                 cancelInFlightID = nil
+                removePartialOutput()
                 finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
             } else {
                 finish(jobID: id, status: .failed,
