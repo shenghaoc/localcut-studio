@@ -50,6 +50,15 @@ duration to at least one frame, shifts word timings by the same delta when the l
 calls `updateCaptionLine` so sorting, undo coalescing, and rebuild scheduling stay in the existing
 caption mutation path.
 
+### Skin-smooth keyframe authoring — `EditorModel.swift`
+Selected-clip skin-smooth helpers expose the same clip-local time basis used by the compositor
+(`currentTime - clip.timelineStart`) and gate authoring when the playhead is outside the clip. The
+commands mutate `SkinSmoothEffect.strength` through the tested `Keyframed<Float>` helpers, invalidate
+the render cache, schedule a rebuild, and register discrete undo steps:
+- add/update at playhead,
+- remove at playhead,
+- seek to previous/next keyframe.
+
 ### Word-highlight hold — `EffectCompositor.swift`
 `activeWordIndex` becomes a thin instance wrapper over a new `static nonisolated
 activeWordIndex(words:at:)`: containment match first, else hold the most-recently-started word, else
@@ -87,6 +96,8 @@ if/else is `_ConditionalContent`.
 - Working-space `.help` + a caption shown when `workingColourSpace != .sRGB`.
 - Transition section: wipe-only Direction slider in degrees, with right-click reset to the legacy
   default angle.
+- Beauty section: skin-smooth strength keyframe disclosure showing clip-local playhead time,
+  evaluated value, keyframe count, add/update, remove, and previous/next controls.
 
 ### `ScopesView.swift`
 - `drawWaveformGraticule` — five horizontal lines + IRE labels, drawn after the frame outline and
@@ -126,8 +137,8 @@ New tests extend existing suites (no new files): `EffectsTests` (LUT helpers + f
 (transition-window authored inverse + snap-through-ripple; directional wipe angle render planning),
 `TransitionsIntegrationTests` (angle reaches the shared video composition), `PersistenceTests`/
 `ProjectBundleTests` (transition-angle document and bundle round trips), `CaptionsAndKeyframesTests`
-(caption-line retiming sort/undo/word shift). Pure helpers are tested directly; MainActor commands
-via `EditorModel`.
+(caption-line retiming sort/undo/word shift; skin-smooth keyframe authoring + navigation). Pure
+helpers are tested directly; MainActor commands via `EditorModel`.
 
 ## Risks
 - **Build gate** — verified with local `xcodebuild test` on macOS using the macOS 26.5 SDK; CI remains

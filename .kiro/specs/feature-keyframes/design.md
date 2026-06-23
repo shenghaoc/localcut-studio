@@ -80,7 +80,10 @@ extension Keyframed {
 
 Effects that support keyframing use `Keyframed<Float>` for their animatable parameters. The compositor evaluates the keyframed value at clip-local render time and passes it to the filter/compositor node, so moving a clip on the timeline does not change the look of its internal animation.
 
-The Phase 32a inspector exposes a static default-strength slider only. Timeline keyframe authoring UI is intentionally deferred; this spec supplies the model, Codable shape, mutation helpers, and evaluation path that later UI can edit.
+The Phase 32a inspector keeps the static default-strength slider and adds a minimal authoring surface
+for skin-smooth strength: add/update at the selected clip's local playhead time, remove at playhead,
+and previous/next keyframe seek. The controls route through `EditorModel` so undo, render-cache
+invalidation, and preview rebuilds stay in the same path as other skin-smooth edits.
 
 ## Codable representation
 
@@ -104,4 +107,5 @@ The Phase 32a inspector exposes a static default-strength slider only. Timeline 
 - Multi-dimensional keyframes (position, scale, etc.)
 - Velocity-based interpolation
 - Keyframe snapping/quantization
-- Timeline/inspector keyframe authoring UI in Phase 32a
+- Timeline keyframe lanes
+- Generic authoring UI for every keyframable parameter

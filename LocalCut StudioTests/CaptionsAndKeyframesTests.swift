@@ -96,6 +96,84 @@ func keyframesRoundTrip() throws {
     #expect(back == k)
 }
 
+@MainActor
+@Test("Skin-smooth strength keyframes author at the selected clip playhead")
+func skinSmoothStrengthKeyframeAuthoringAtPlayhead() {
+    let (model, clipID) = makeSkinSmoothKeyframeModel(timelineStart: 2, duration: 8)
+    model.selectedClipID = clipID
+    model.currentTime = 5
+
+    model.updateSelectedClipSkinSmooth { smooth in
+        smooth.strength.defaultValue = 0.4
+    }
+    model.commitCoalescedUndo()
+    model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe()
+
+    #expect(model.selectedClipSkinSmoothLocalPlayheadTime?.seconds == 3)
+    #expect(model.selectedClipSkinSmooth.strength.keyframes.count == 1)
+    #expect(model.selectedClipSkinSmooth.strength.keyframes[0].time.seconds == 3)
+    #expect(model.selectedClipSkinSmooth.strength.keyframes[0].value == 0.4)
+    #expect(model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead != nil)
+
+    model.updateSelectedClipSkinSmooth { smooth in
+        smooth.strength.defaultValue = 0.8
+    }
+    model.commitCoalescedUndo()
+    model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe()
+
+    #expect(model.selectedClipSkinSmooth.strength.keyframes.count == 1)
+    #expect(model.selectedClipSkinSmooth.strength.keyframes[0].value == 0.8)
+
+    model.removeSelectedClipSkinSmoothStrengthKeyframe()
+    #expect(model.selectedClipSkinSmooth.strength.keyframes.isEmpty)
+
+    model.undo()
+    #expect(model.selectedClipSkinSmooth.strength.keyframes.count == 1)
+    #expect(model.selectedClipSkinSmooth.strength.keyframes[0].value == 0.8)
+}
+
+@MainActor
+@Test("Skin-smooth strength keyframe navigation seeks within the selected clip")
+func skinSmoothStrengthKeyframeNavigation() {
+    let (model, clipID) = makeSkinSmoothKeyframeModel(timelineStart: 2, duration: 8)
+    model.selectedClipID = clipID
+    model.totalDuration = 12
+
+    for (globalTime, value) in [(3.0, 0.2 as Float), (5.0, 0.5 as Float), (7.0, 0.9 as Float)] {
+        model.currentTime = globalTime
+        model.updateSelectedClipSkinSmooth { smooth in
+            smooth.strength.defaultValue = value
+        }
+        model.commitCoalescedUndo()
+        model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe()
+    }
+
+    model.currentTime = 6
+    model.seekToPreviousSelectedClipSkinSmoothStrengthKeyframe()
+    #expect(model.currentTime == 5)
+
+    model.currentTime = 6
+    model.seekToNextSelectedClipSkinSmoothStrengthKeyframe()
+    #expect(model.currentTime == 7)
+}
+
+@MainActor
+private func makeSkinSmoothKeyframeModel(timelineStart: Double, duration: Double) -> (EditorModel, Clip.ID) {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    media.duration = CMTime(seconds: duration, preferredTimescale: 600)
+    media.hasVideo = true
+    model.project.mediaItems.append(media)
+
+    let clip = Clip(
+        mediaID: media.id,
+        sourceStart: .zero,
+        duration: CMTime(seconds: duration, preferredTimescale: 600),
+        timelineStart: CMTime(seconds: timelineStart, preferredTimescale: 600))
+    model.project.videoTracks.first!.clips.append(clip)
+    return (model, clip.id)
+}
+
 // MARK: - SRT importer (feature-caption-tracks R5.1)
 
 @Test("SRT: parses a single well-formed cue")

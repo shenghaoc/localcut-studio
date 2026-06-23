@@ -153,6 +153,20 @@ caption lane, so timing edits were not reachable.
   fields, and the timeline draws one caption lane per track with draggable caption blocks. Caption
   line times stay in effective/rendered timeline space, matching how the compositor schedules them.
 
+### U8 — Skin-smooth strength keyframes had no authoring surface
+
+feature-keyframes shipped the generic `Keyframed<Float>` model and skin-smooth strength already
+evaluates through it in the compositor, but the inspector exposed only the static default strength.
+Users could open a project with keyframes and see the animated render, but could not create or edit a
+skin-smooth keyframe.
+
+- **Fix:** `EditorModel` now exposes selected-clip skin-smooth strength keyframe commands at the
+  clip-local playhead: add/update using the current default strength, remove at the playhead, and
+  previous/next keyframe seek. The Beauty inspector shows the local playhead time, current evaluated
+  value, count, and compact controls. The generic timeline-lane/keyframe-curve editor remains a
+  deferred feature; this lands the minimal reachable authoring path for the existing animated
+  parameter.
+
 ---
 
 ## Correctness
@@ -220,7 +234,8 @@ playhead legitimately maps to both sides of the cut, so a single global authored
   navigation (3), `RenderQueue.retry` requeues cancelled + failed jobs and no-ops for non-terminal
   rows (3), `renameCaptionTrack` undo (1), `TransitionLayout.authoredTimes` and transition-aware
   snap-to-playhead conversion (2), directional wipe angle planning + persistence/bundle migration
-  + shared video-composition propagation (5), caption-line retiming (1).
+  + shared video-composition propagation (5), caption-line retiming (1), skin-smooth keyframe
+  authoring/navigation (2).
 - **V3** — Manual smoke (recommended pre-release): Diagnostics shows capability tiers with reasons in
   `.help`; LUT import shows the filename and replacing it doesn't stack; ⌘⇧[ / ⌘⇧] jump markers;
   Reveal/Retry behave; scopes show the graticule; the master fader feels log-mapped; cancelling an
@@ -239,8 +254,6 @@ change to a tuned look), or large enough to deserve its own spec.
   existing projects; needs a design decision, not a silent change.
 
 **Deferred feature surfaces:**
-- **Keyframe authoring UI** (feature-keyframes non-goal) — the evaluator ships and skin-smooth
-  strength is keyframable in the model, but nothing in the UI creates a keyframe.
 - **Keyframable caption style params** (phase-30 R2.3) — `CaptionStyle` stores plain values, no
   `Keyframed<T>` fields; the requirement is silently unmet.
 - **Live + offline audio metering** (audio-master-bus R3.3/R5.1) — `prepareLive()` is never called

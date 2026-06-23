@@ -642,6 +642,121 @@ final class EditorModel {
         }
     }
 
+    /// Clip-local playhead time used by the skin-smooth compositor. Returns
+    /// nil when the effective playhead is outside the selected clip's authored
+    /// range, because authoring a clip-local keyframe there would be ambiguous.
+    var selectedClipSkinSmoothLocalPlayheadTime: CMTime? {
+        guard let clip = selectedClip else { return nil }
+        let playhead = CMTime(seconds: currentTime, preferredTimescale: 600)
+        guard playhead >= clip.timelineStart, playhead <= clip.timelineEnd else { return nil }
+        return CMTimeMaximum(.zero, CMTimeMinimum(playhead - clip.timelineStart, clip.duration))
+    }
+
+    var selectedClipSkinSmoothStrengthAtPlayhead: Float {
+        guard let time = selectedClipSkinSmoothLocalPlayheadTime else {
+            return selectedClipSkinSmooth.strength.defaultValue
+        }
+        return selectedClipSkinSmooth.strength.value(at: time)
+    }
+
+    var selectedClipSkinSmoothStrengthKeyframeAtPlayhead: Keyframe<Float>? {
+        guard let time = selectedClipSkinSmoothLocalPlayheadTime else { return nil }
+        return nearestSkinSmoothStrengthKeyframe(to: time)
+    }
+
+    func addOrUpdateSelectedClipSkinSmoothStrengthKeyframe() {
+        guard let id = selectedClipID,
+              let localTime = selectedClipSkinSmoothLocalPlayheadTime else {
+            statusMessage = "Move the playhead over the selected clip to add a keyframe."
+            return
+        }
+
+        let existingID = selectedClipSkinSmoothStrengthKeyframeAtPlayhead?.id
+        let value = selectedClipSkinSmooth.strength.defaultValue
+        performUndoable(existingID == nil ? "Add Skin Smooth Keyframe" : "Update Skin Smooth Keyframe") {
+            mutateSelectedSkinSmooth(clipID: id) { smooth in
+                if let existingID {
+                    smooth.strength.updateKeyframe(id: existingID, time: localTime, value: value)
+                } else {
+                    smooth.strength.addKeyframe(at: localTime, value: value)
+                }
+            }
+            statusMessage = "Skin-smooth keyframe set at \(TimeFormatting.timecode(localTime.seconds))."
+        }
+    }
+
+    func removeSelectedClipSkinSmoothStrengthKeyframe() {
+        guard let id = selectedClipID,
+              let keyframe = selectedClipSkinSmoothStrengthKeyframeAtPlayhead else {
+            statusMessage = "No skin-smooth keyframe at the playhead."
+            return
+        }
+
+        performUndoable("Remove Skin Smooth Keyframe") {
+            mutateSelectedSkinSmooth(clipID: id) { smooth in
+                smooth.strength.removeKeyframe(id: keyframe.id)
+            }
+            statusMessage = "Removed skin-smooth keyframe."
+        }
+    }
+
+    func seekToPreviousSelectedClipSkinSmoothStrengthKeyframe() {
+        guard let clip = selectedClip,
+              let localTime = selectedClipSkinSmoothLocalPlayheadTime else { return }
+        let tolerance = skinSmoothKeyframeHitToleranceSeconds
+        guard let previous = selectedClipSkinSmooth.strength.keyframes.last(where: {
+            $0.time.seconds < localTime.seconds - tolerance
+        }) else { return }
+        seek(toSeconds: (clip.timelineStart + previous.time).seconds)
+    }
+
+    func seekToNextSelectedClipSkinSmoothStrengthKeyframe() {
+        guard let clip = selectedClip,
+              let localTime = selectedClipSkinSmoothLocalPlayheadTime else { return }
+        let tolerance = skinSmoothKeyframeHitToleranceSeconds
+        guard let next = selectedClipSkinSmooth.strength.keyframes.first(where: {
+            $0.time.seconds > localTime.seconds + tolerance
+        }) else { return }
+        seek(toSeconds: (clip.timelineStart + next.time).seconds)
+    }
+
+    private var skinSmoothKeyframeHitToleranceSeconds: Double {
+        0.5 / max(1, project.frameRate)
+    }
+
+    private func nearestSkinSmoothStrengthKeyframe(to time: CMTime) -> Keyframe<Float>? {
+        let tolerance = skinSmoothKeyframeHitToleranceSeconds
+        return selectedClipSkinSmooth.strength.keyframes
+            .map { keyframe in (keyframe, abs((keyframe.time - time).seconds)) }
+            .filter { $0.1 <= tolerance }
+            .min { $0.1 < $1.1 }?
+            .0
+    }
+
+    private func mutateSelectedSkinSmooth(clipID: Clip.ID,
+                                          _ transform: (inout SkinSmoothEffect) -> Void) {
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == clipID }) else { continue }
+            if let effectIndex = track.clips[index].effects.firstIndex(where: {
+                if case .skinSmooth = $0 { return true }; return false
+            }) {
+                if case .skinSmooth(var smooth) = track.clips[index].effects[effectIndex] {
+                    transform(&smooth)
+                    smooth.clamp()
+                    track.clips[index].effects[effectIndex] = .skinSmooth(smooth)
+                }
+            } else {
+                var smooth = SkinSmoothEffect()
+                transform(&smooth)
+                smooth.clamp()
+                track.clips[index].effects.append(.skinSmooth(smooth))
+            }
+            RenderCache.shared.invalidate(clipID: clipID)
+            scheduleRebuild()
+            return
+        }
+    }
+
     /// Removes the skin smooth effect from the selected clip.
     func resetClipSkinSmooth() {
         guard let id = selectedClipID else { return }

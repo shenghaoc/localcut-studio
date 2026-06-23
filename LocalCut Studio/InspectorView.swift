@@ -266,6 +266,61 @@ struct InspectorView: View {
                 range: 0...1
             )
 
+            DisclosureGroup("Strength Keyframes") {
+                LabeledContent("Clip Time") {
+                    Text(skinSmoothKeyframePlayheadLabel)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                LabeledContent("Value") {
+                    Text("\(Int(model.selectedClipSkinSmoothStrengthAtPlayhead * 100))%")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                LabeledContent("Count") {
+                    Text("\(model.selectedClipSkinSmooth.strength.keyframes.count)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        model.seekToPreviousSelectedClipSkinSmoothStrengthKeyframe()
+                    } label: {
+                        Image(systemName: "backward.end.fill")
+                    }
+                    .help("Previous keyframe")
+                    .accessibilityLabel("Previous skin-smooth keyframe")
+                    .disabled(!hasPreviousSkinSmoothKeyframe)
+
+                    Button {
+                        model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe()
+                    } label: {
+                        Label(skinSmoothKeyframeActionTitle, systemImage: skinSmoothKeyframeActionIcon)
+                    }
+                    .disabled(model.selectedClipSkinSmoothLocalPlayheadTime == nil)
+
+                    Button(role: .destructive) {
+                        model.removeSelectedClipSkinSmoothStrengthKeyframe()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .help("Remove keyframe")
+                    .accessibilityLabel("Remove skin-smooth keyframe")
+                    .disabled(model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead == nil)
+
+                    Button {
+                        model.seekToNextSelectedClipSkinSmoothStrengthKeyframe()
+                    } label: {
+                        Image(systemName: "forward.end.fill")
+                    }
+                    .help("Next keyframe")
+                    .accessibilityLabel("Next skin-smooth keyframe")
+                    .disabled(!hasNextSkinSmoothKeyframe)
+                }
+                .controlSize(.small)
+            }
+
             DisclosureGroup("Advanced") {
                 LabeledSliderRow(
                     label: "Mask Warmth",
@@ -306,6 +361,33 @@ struct InspectorView: View {
                     .controlSize(.small)
                 Spacer()
             }
+        }
+    }
+
+    private var skinSmoothKeyframePlayheadLabel: String {
+        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return "Outside clip" }
+        return TimeFormatting.timecode(localTime.seconds)
+    }
+
+    private var skinSmoothKeyframeActionTitle: String {
+        model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead == nil ? "Add" : "Update"
+    }
+
+    private var skinSmoothKeyframeActionIcon: String {
+        model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead == nil ? "plus.diamond.fill" : "diamond.fill"
+    }
+
+    private var hasPreviousSkinSmoothKeyframe: Bool {
+        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return false }
+        return model.selectedClipSkinSmooth.strength.keyframes.contains {
+            $0.time.seconds < localTime.seconds
+        }
+    }
+
+    private var hasNextSkinSmoothKeyframe: Bool {
+        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return false }
+        return model.selectedClipSkinSmooth.strength.keyframes.contains {
+            $0.time.seconds > localTime.seconds
         }
     }
 
