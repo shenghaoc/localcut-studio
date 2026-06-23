@@ -139,9 +139,13 @@ existed.
 lists "cancelling an export leaves no partial file at the user's path" as a gate, and
 feature-export-queue R2.4 requires it.
 
-- **Fix:** `runJob` deletes the output file in every **post-encode** cancel arm (cancel-after-write,
-  `CancellationError`, and the generic-error-treated-as-cancel path). The pre-encode cancel arm is
-  deliberately untouched — nothing was written there, so the user's pre-existing file must survive.
+- **Fix:** `runJob` deletes the output on cancel via `removePartialOutput()`, **guarded by a
+  `didBeginEncoding` flag** set only after the deliberate overwrite. The three post-encode cancel
+  arms (cancel-after-write, `CancellationError`, generic-error-as-cancel) clean up the partial write;
+  a cancel that lands *before* encoding — e.g. while `CompositionBuilder.build` is still awaiting and
+  throws `CancellationError` — leaves the user's **pre-existing** file intact. (The flag guard was
+  added in review: without it the `CancellationError` arm could delete a pre-existing file when
+  nothing had been written.)
 
 ### C2 — Karaoke word highlight drops to base fill in inter-word gaps
 

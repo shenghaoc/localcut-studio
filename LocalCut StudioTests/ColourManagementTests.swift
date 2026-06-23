@@ -52,6 +52,42 @@ struct ColourManagementSerialTests {
         #expect(EffectCompositor.captionRasterCacheCount == beforeCount)
         #expect(model.canUndo == false)
     }
+
+    private func seedRaster() {
+        let line = CaptionLine(
+            range: CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600)),
+            text: "Hello", words: nil, style: nil)
+        EffectCompositor._testPopulateCaptionRasterCache(
+            line: line, style: .identity, renderSize: CGSize(width: 320, height: 180))
+    }
+
+    @Test("setRenderSize purges the shared caption raster cache")
+    func renderSizeChangePurgesRasterCache() {
+        EffectCompositor.purgeCaptionRasterCache()
+        seedRaster()
+        #expect(EffectCompositor.captionRasterCacheCount > 0)
+
+        let model = EditorModel()
+        model.setRenderSize(CGSize(width: 1280, height: 720))
+        #expect(EffectCompositor.captionRasterCacheCount == 0)
+    }
+
+    @Test("Undo of a resolution change purges the caption raster cache (applyState path)")
+    func resolutionUndoPurgesRasterCache() {
+        let model = EditorModel()
+        let original = model.project.renderSize
+        model.setRenderSize(CGSize(width: 1280, height: 720))
+
+        // Repopulate after the change, then undo back to the original size —
+        // applyState must purge even though it bypasses setRenderSize.
+        EffectCompositor.purgeCaptionRasterCache()
+        seedRaster()
+        #expect(EffectCompositor.captionRasterCacheCount > 0)
+
+        model.undo()
+        #expect(model.project.renderSize == original)
+        #expect(EffectCompositor.captionRasterCacheCount == 0)
+    }
 }
 
 // MARK: - R6.2 — pixel buffer carries colour-space attachments

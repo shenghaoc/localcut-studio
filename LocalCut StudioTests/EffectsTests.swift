@@ -71,6 +71,21 @@ func lutReplaceInPlace() {
     }
 }
 
+@Test("replacingLUT collapses pre-existing stacked LUTs to a single slot")
+func lutReplaceCollapsesDuplicates() {
+    // A project authored under the old append-stacking behaviour with two LUTs.
+    let effects: [Effect] = [.lut(bookmark: Data([0x01])), .colourGrade(.neutral), .lut(bookmark: Data([0x02]))]
+    let result = effects.replacingLUT(bookmark: Data([0x09]))
+    let lutCount = result.filter { if case .lut = $0 { return true }; return false }.count
+    #expect(lutCount == 1, "replacing must leave exactly one LUT")
+    #expect(result.count == 2, "the grade is preserved, the duplicate LUT dropped")
+    if case .lut(let bookmark) = result[0] {
+        #expect(bookmark == Data([0x09]))
+    } else {
+        Issue.record("first effect should be the replaced LUT")
+    }
+}
+
 @Test("removingLUT drops only the LUT, preserving grade + skin-smooth")
 func lutRemovePreservesOthers() {
     let effects: [Effect] = [.colourGrade(.neutral), .lut(bookmark: Data([0x01])), .skinSmooth(.neutral)]

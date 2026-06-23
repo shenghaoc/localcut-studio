@@ -30,6 +30,13 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 ## Docs
 - [x] `docs/keyboard-shortcuts.md` — add marker navigation (⌘⇧[ / ⌘⇧]) and refresh the table
 
+## Review follow-ups (addressed in this PR)
+- [x] Gemini — waveform IRE labels sit above their reference lines (no bisecting), top label clamped
+- [x] Codex P1 — guard `removePartialOutput()` behind `didBeginEncoding` so a pre-encode cancel can't delete a pre-existing file
+- [x] Codex P2 — `replacingLUT` collapses pre-existing stacked LUTs to one slot (+ test)
+- [x] Codex P2 — `applyState` purges the caption raster cache on undo/redo of a resolution change (+ tests)
+- [x] Codex P2 — LUT display name read from a session cache; no main-actor bookmark resolve in the inspector
+
 ## Deferred follow-ups (catalogued, not in this PR)
 - [ ] Snap-to-playhead authored-time conversion when transitions exist (trim/drag R3.1) — P1
 - [ ] Directional wipe: stored angle + inspector control + Codable migration (transitions R1.2)

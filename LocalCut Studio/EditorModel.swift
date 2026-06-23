@@ -52,6 +52,12 @@ final class EditorModel {
     // Skin smoothing debug
     var showSkinMask = false
 
+    /// Session cache of imported LUT filenames keyed by their bookmark, so the
+    /// inspector can show a LUT's name without resolving the security-scoped
+    /// bookmark on the main actor on every render (codex P2). Not persisted; a
+    /// LUT from a reopened project shows a generic label until re-imported.
+    @ObservationIgnored private var lutDisplayNames: [Data: String] = [:]
+
     // Diagnostics
     /// Drives whether the diagnostics overlay is on screen and whether the
     /// `DiagnosticsAgent`'s 1 Hz timer is sampling. Hidden by default so a
@@ -497,6 +503,10 @@ final class EditorModel {
             return
         }
 
+        // Remember the filename now (we already hold the URL) so the inspector
+        // never resolves the bookmark on the main actor just to display it.
+        lutDisplayNames[bookmark] = url.lastPathComponent
+
         performUndoable("Import LUT") {
             for track in allTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
@@ -517,22 +527,17 @@ final class EditorModel {
         selectedClip?.effects.hasLUT ?? false
     }
 
-    /// Best-effort filename of the selected clip's LUT, resolved from its
-    /// security-scoped bookmark for display only. Returns nil when no LUT is
-    /// applied or the bookmark no longer resolves (the inspector then falls back
-    /// to a generic "Applied" label). Resolving a bookmark to a URL does not
-    /// require starting security-scoped access, so this is cheap enough for an
-    /// inspector that only re-reads on selection change.
+    /// Display filename of the selected clip's LUT, read from the session cache
+    /// populated at import. Returns nil when no LUT is applied or the LUT came
+    /// from a reopened project (no cached name) — the inspector then shows a
+    /// generic "Applied" label. Deliberately does **not** resolve the bookmark
+    /// here: that can block the main actor for LUTs on slow / network volumes
+    /// (codex P2).
     var selectedClipLUTName: String? {
         guard let clip = selectedClip else { return nil }
         for effect in clip.effects {
             guard case .lut(let bookmark) = effect else { continue }
-            var stale = false
-            let url = try? URL(resolvingBookmarkData: bookmark,
-                               options: [.withSecurityScope],
-                               relativeTo: nil,
-                               bookmarkDataIsStale: &stale)
-            return url?.lastPathComponent
+            return lutDisplayNames[bookmark]
         }
         return nil
     }

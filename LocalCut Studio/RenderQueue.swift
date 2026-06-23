@@ -406,7 +406,17 @@ final class RenderQueue {
         // up after itself; the session path does not). Delete it on cancel so a
         // cancel never leaves a corrupt artefact behind — an explicit
         // release-readiness gate. `try?` no-ops when the writer already removed it.
-        let removePartialOutput = { _ = try? FileManager.default.removeItem(at: outputURL) }
+        //
+        // Guarded by `didBeginEncoding`: until the deliberate overwrite below
+        // runs, the file at `outputURL` is the user's *pre-existing* file, so a
+        // pre-encode cancel (e.g. cancelled while `CompositionBuilder.build` is
+        // still awaiting and throwing `CancellationError`) must not delete it
+        // (codex P1).
+        var didBeginEncoding = false
+        let removePartialOutput = {
+            guard didBeginEncoding else { return }
+            _ = try? FileManager.default.removeItem(at: outputURL)
+        }
 
         // Build the composition from the snapshot. The runner reconstructs a
         // throwaway `Project` from the document so it can reuse
@@ -460,8 +470,11 @@ final class RenderQueue {
             }
 
             // Replace any existing file so the writer/session doesn't trip
-            // over a stale artefact from a previous run.
+            // over a stale artefact from a previous run. Past this point the
+            // user's pre-existing file is gone, so a cancel may safely delete
+            // whatever the encode wrote.
             try? FileManager.default.removeItem(at: outputURL)
+            didBeginEncoding = true
 
             if let presetName = preset.assetExportSessionPresetName {
                 try await exportWithSession(

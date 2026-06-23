@@ -285,17 +285,27 @@ extension Array where Element == Effect {
     }
 
     /// Returns the chain with its single LUT slot set to `bookmark` — replacing
-    /// an existing LUT in place (a clip holds one LUT, per feature-colour-grading
-    /// R1.2) or appending one when none is present. Importing a second LUT used
-    /// to silently stack, applying two cubes in sequence with no UI feedback.
+    /// the first existing LUT in place (a clip holds one LUT, per
+    /// feature-colour-grading R1.2) or appending one when none is present.
+    /// Any *additional* stale LUTs (from projects authored under the old
+    /// append-stacking behaviour) are dropped so the result holds exactly one
+    /// LUT — otherwise "Replace LUT…" would still apply multiple cubes.
     nonisolated func replacingLUT(bookmark: Data) -> [Effect] {
-        var copy = self
-        if let index = copy.firstIndex(where: { if case .lut = $0 { return true }; return false }) {
-            copy[index] = .lut(bookmark: bookmark)
-        } else {
-            copy.append(.lut(bookmark: bookmark))
+        var result: [Effect] = []
+        var inserted = false
+        for effect in self {
+            if case .lut = effect {
+                if !inserted {
+                    result.append(.lut(bookmark: bookmark))
+                    inserted = true
+                }
+                // Drop any further LUTs — the chain keeps exactly one slot.
+            } else {
+                result.append(effect)
+            }
         }
-        return copy
+        if !inserted { result.append(.lut(bookmark: bookmark)) }
+        return result
     }
 
     /// Returns the chain with any LUT effect removed, leaving grade / skin-smooth

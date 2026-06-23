@@ -105,12 +105,16 @@ extension EditorModel {
         project.name = state.name
         project.mediaItems = state.media
         unresolvedMedia = state.unresolvedMedia
+        let renderSizeChanged = project.renderSize != state.renderSize
         project.renderSize = state.renderSize
         project.frameRate = state.frameRate
-        if project.workingColourSpace != state.workingColourSpace {
-            project.workingColourSpace = state.workingColourSpace
-            // Cached rasters were rendered in the previous space; drop them so
-            // an undo across a Change Working Space step re-rasterises correctly.
+        let colourSpaceChanged = project.workingColourSpace != state.workingColourSpace
+        project.workingColourSpace = state.workingColourSpace
+        if renderSizeChanged || colourSpaceChanged {
+            // Caption rasters are keyed on render size + working colour space, so
+            // an undo/redo across a Change Resolution or Change Working Space step
+            // must drop the now-stale entries — applyState bypasses the setters
+            // that would otherwise purge (codex P2).
             EffectCompositor.purgeCaptionRasterCache()
         }
         for snapshot in state.videoTracks {
