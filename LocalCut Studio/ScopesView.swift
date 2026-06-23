@@ -110,10 +110,14 @@ struct ScopesView: View {
             line.move(to: CGPoint(x: frameRect.minX, y: y))
             line.addLine(to: CGPoint(x: frameRect.maxX, y: y))
             context.stroke(line, with: .color(.white.opacity(0.12)), lineWidth: 0.5)
+            // Sit the label just above its line (bottom-leading) so the line
+            // never bisects the digits; nudge the top "100" down a touch so it
+            // isn't clipped at the frame's top edge.
             let label = Text("\(Int(fraction * 100))")
                 .font(.system(size: 8))
                 .foregroundStyle(.white.opacity(0.35))
-            context.draw(label, at: CGPoint(x: frameRect.minX + 10, y: y), anchor: .center)
+            let labelY = max(y, frameRect.minY + 9)
+            context.draw(label, at: CGPoint(x: frameRect.minX + 4, y: labelY), anchor: .bottomLeading)
         }
     }
 
