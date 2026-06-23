@@ -4,11 +4,15 @@
 
 ## Deprecations
 
-- [x] **D1** Ported `skinMask` + `skinBlend` to `SkinSmoothKernels.ci.metal` (Metal
-  Shading Language); load via `CIColorKernel(functionName:fromMetalLibraryData:)` from the
-  app's default `metallib`; load failure logs via `os_log` and degrades to a no-op. The
-  `.ci.metal` suffix + synchronized file-system group apply the Core Image kernel build flags
-  automatically (objectVersion 90 / Xcode 26). Verified by `KeyframesAndSkinSmoothTests`.
+- [x] **D1** Ported `skinMask` + `skinBlend` off the deprecated CIKL `CIColorKernel(source:)`
+  to **`[[ stitchable ]]` Metal Shading Language**, compiled once at runtime via
+  `CIKernel.kernels(withMetalString:)`; load failure logs via `os_log` and degrades to a
+  no-op. (A precompiled `.ci.metal` → `metallib` was tried first but the synchronized
+  file-system group never threaded the `-cikernel` link flag, so the kernels weren't in
+  `default.metallib` and `applySkinSmooth` silently no-op'd — caught by the render-path test.)
+- [x] **D1-test** `skinSmoothRenderPathAltersPixels()` renders a skin-tone fixture through the
+  compiled kernels and asserts pixels change — fails loudly if a kernel can't load (Codex
+  review). `applySkinSmooth` exposed `internal` for the test.
 
 ## Swift 6 concurrency warnings
 
@@ -50,26 +54,24 @@
 - [~] **T2** *(Not done.)* `guard case … Issue.record(…)` is already the idiomatic Swift
   Testing form for enum-case assertions; converting to `#require` needs awkward closures and
   reads worse. Left as-is.
-- [x] **T-extra** Fixed two pre-existing test-target warnings in `CaptionsAndKeyframesTests`
-  surfaced by the zero-warning sweep: a redundant `#require` on a non-optional path
-  (replaced with `guard let`) and an `#expect` whose `??`/`.contains` mix tripped the macro
-  (bound both sides into locals first).
+- [x] **T-extra** Cleared the remaining test-target warnings in `CaptionsAndKeyframesTests`
+  (Swift 6.3 `#expect`/`#require` macro false-positives): `presetSnapshotShape` uses
+  `guard let` + `Issue.record` instead of `#require`, and the decode test computes every
+  `??`/`.contains` into a plain `Bool` local before `#expect` so the macro can't decompose
+  those operators.
 
 ## Verification
 
 - [x] **V1** Build (Debug/macOS, app + tests via `buildForTesting`) — **zero warnings**, zero
   errors.
-- [x] **V2** Suite green: **315 / 315** (up from 311; parameterized cases register
-  individually — no count regression).
-- [x] **V3** Skin-smoothing output unchanged after the MSL kernel port — `KeyframesAndSkinSmoothTests`
-  green.
+- [x] **V2** Suite green: **320 / 320** (up from 311; parameterized cases register
+  individually + the render-path test — no count regression).
+- [x] **V3** Skin-smoothing render path verified end-to-end by `skinSmoothRenderPathAltersPixels`
+  (compiled kernels load and alter pixels).
 - [ ] **V4** Manual VoiceOver pass on audio/colour/beauty sliders after R1 (recommended
   before release; not blocking the diff).
 
 ## Notes / out of scope
 
-- **Pre-existing flaky test** observed: `ProjectBundleTests.fingerprintIndexCodableRoundTrip`
-  intermittently fails (two equal-length but byte-differing Codable blobs — non-deterministic
-  dictionary key ordering, despite the test's "stable sort order" name). **Not touched by
-  this spec** and passes in isolation; flagged for a separate fix (likely `JSONEncoder`
-  `.sortedKeys` in the fingerprint-index encode path).
+- The `ProjectBundleTests.fingerprintIndexCodableRoundTrip` flake (non-deterministic Codable
+  key ordering) was fixed independently on `main` (#30) and is included here via rebase.
