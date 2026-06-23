@@ -43,7 +43,7 @@ struct VectorPoint: Sendable, Equatable {
 /// the sampler holds no SwiftUI / Observation state because the compositor
 /// reaches it from a nonisolated context, and a `@MainActor`-isolated
 /// singleton would force the entire sampling path through the main actor.
-final class ScopeSampler: @unchecked Sendable {
+final class ScopeSampler: Sendable {
 
     /// `nonisolated` opts the static out of the project's default `MainActor`
     /// isolation — the type is `@unchecked Sendable` with explicitly

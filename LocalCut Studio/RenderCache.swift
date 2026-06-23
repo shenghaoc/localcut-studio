@@ -88,7 +88,7 @@ extension Array where Element == Effect {
 /// Same shape as `TitleRasterer` in `TitleRaster.swift`: an
 /// `OSAllocatedUnfairLock`-guarded ordered dictionary, LRU-touched on lookup,
 /// evicted from the front on insert past the cap.
-final class RenderCache: @unchecked Sendable {
+final class RenderCache: Sendable {
 
     /// Default in-memory budget in bytes (256 MiB). At 1080p (8 MiB/frame) the
     /// cache holds ~32 frames before LRU starts evicting; at 4K (33 MiB/frame)

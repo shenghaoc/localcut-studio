@@ -29,6 +29,13 @@
   the `@MainActor`→`@Sendable` reabstraction thunk for `Binding.set` — see the CI-crash note.)
 - [x] **C3** `RenderQueue.pump` — `input`/`output` confined via `nonisolated(unsafe)` locals
   with a comment documenting the serial-`pumpQueue` ownership invariant.
+- [x] **C4** *(post-rebase Swift-6 sweep)* Dropped `@unchecked` from four lock-guarded caches —
+  `RenderCache`, `ScopeSampler`, `TitleRasterer`, `CaptionRasterer` are now plain `Sendable`
+  (their only stored state is an `OSAllocatedUnfairLock` / immutable `let`), so the compiler
+  *verifies* thread-safety instead of trusting the escape hatch. The remaining
+  `nonisolated(unsafe)` deinit-observer fields (`EditorModel`, `DiagnosticsAgent`,
+  `TimelineView`) are **required** (nonisolated `deinit` touching main-actor state) — confirmed
+  by the build not flagging them, left in place.
 
 ## Dead-code warning
 
@@ -38,10 +45,12 @@
 ## Consolidation
 
 - [x] **R1** New `LabeledSliderRow` view (generic over `BinaryFloatingPoint`, two caption
-  styles). Adopted in colour grade (×5), beauty (×3), transition duration, track gain, and
-  clip fades; removed `colourSlider`/`beautySlider`/the bespoke `fadeRow` layout. Labels,
-  value formats, and accessibility pairing preserved. Master-gain row left as-is (its caption
-  is intentionally voiced, unlike the others).
+  styles). Adopted in colour grade (×5), beauty (×3), transition duration, track gain,
+  clip fades, and **clip opacity** (the last added in the post-rebase dedup sweep); removed
+  `colourSlider`/`beautySlider`/the bespoke `fadeRow`/opacity layouts. Labels, value formats,
+  and accessibility pairing preserved; `.inline` caption carries `.monospacedDigit()` (Claude
+  review P2). Master-gain row left as-is (its caption is intentionally voiced) and the
+  timeline-zoom slider is a bare icon-flanked control with no caption — neither fits the row.
 - [x] **R2** `EffectCompositor` colour grade — new `CIImage.applying(when:_:)` helper
   collapses the three repeated `CIFilter` plumbing blocks into a chain.
 - [~] **R3** *(Deferred.)* Security-scoped `start` / `defer`-`stop` is a 2-line idiom around

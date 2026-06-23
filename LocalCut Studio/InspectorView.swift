@@ -67,20 +67,13 @@ struct InspectorView: View {
             LabeledContent("Start", value: TimeFormatting.timecode(clip.timelineStart.seconds))
             LabeledContent("Duration", value: TimeFormatting.timecode(clip.duration.seconds))
 
-            VStack(alignment: .leading) {
-                // Visual label only; the slider below carries the same
-                // information for VoiceOver, so hide this to avoid a doubled
-                // announcement.
-                Text("Opacity \(Int(clip.opacity * 100))%")
-                    .accessibilityHidden(true)
-                Slider(
-                    value: Binding(
-                        get: { Double(clip.opacity) },
-                        set: { newValue in model.updateSelectedClipCoalesced("Adjust Opacity") { $0.opacity = Float(newValue) } }),
-                    in: 0...1)
-                .accessibilityLabel("Opacity")
-                .accessibilityValue("\(Int(clip.opacity * 100))%")
-            }
+            LabeledSliderRow(
+                label: "Opacity",
+                display: "\(Int(clip.opacity * 100))%",
+                value: Binding(
+                    get: { Double(clip.opacity) },
+                    set: { newValue in model.updateSelectedClipCoalesced("Adjust Opacity") { $0.opacity = Float(newValue) } }),
+                range: 0...1)
         }
     }
 
