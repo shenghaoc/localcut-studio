@@ -7,7 +7,7 @@ import AppKit
 
 /// Renders a `CaptionLine` for a given `CaptionStyle` and render canvas into a
 /// `CIImage`. Idle and word-highlight rasters are cached by `TitleRasterer`.
-final class CaptionRasterer: @unchecked Sendable {
+final class CaptionRasterer: Sendable {
     private let rasterer: TitleRasterer
 
     nonisolated init(rasterer: TitleRasterer = TitleRasterer()) {

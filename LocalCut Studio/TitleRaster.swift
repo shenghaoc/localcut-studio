@@ -55,7 +55,7 @@ struct TitleRaster {
 /// text, wordHighlightIndex, renderSize)` request and caches the bitmap behind
 /// an LRU. The caller owns the Core Text drawing decisions inside the supplied
 /// closure; the rasteriser owns the bitmap, the colour space, and the cache.
-final class TitleRasterer: @unchecked Sendable {
+final class TitleRasterer: Sendable {
     /// Caller-supplied draw closure. Receives a flipped CG context whose origin
     /// is the bottom-left of the render canvas, plus the canvas size. The closure
     /// returns the bounding rect of the pixels it drew, in canvas coordinates.

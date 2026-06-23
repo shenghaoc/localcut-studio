@@ -69,26 +69,15 @@ struct AudioInspectorView: View {
     @ViewBuilder
     private func trackGainRow(_ track: Track) -> some View {
         let input = model.project.trackInput(for: track.id)
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(track.name)
-                    .font(.caption.bold())
-                Spacer()
-                Text(formattedGain(input.gain))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            Slider(
-                value: trackGainBinding(track: track),
-                in: 0...2,
-                step: 0.01,
-                onEditingChanged: { editing in
-                    if !editing { model.commitCoalescedUndo() }
-                })
-                .accessibilityLabel("\(track.name) gain")
-                .accessibilityValue(formattedGain(input.gain))
-        }
+        LabeledSliderRow(
+            label: track.name,
+            spokenLabel: "\(track.name) gain",
+            display: formattedGain(input.gain),
+            value: trackGainBinding(track: track),
+            range: 0...2,
+            step: 0.01,
+            captionStyle: .leadingTrailing,
+            onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
     }
 
     private var masterGainBinding: Binding<Double> {
@@ -164,47 +153,39 @@ struct AudioClipFadesInspectorView: View {
 
     var body: some View {
         Section("Audio Fades") {
-            fadeRow(label: "Fade In",
-                    seconds: Double(clip.volumeEnvelope.fadeIn.seconds),
-                    set: { newValue in
-                        var envelope = clip.volumeEnvelope
-                        envelope.fadeIn = CMTime(seconds: newValue, preferredTimescale: 600)
-                        model.setClipVolumeEnvelope(envelope, clipID: clip.id, coalesced: true)
-                    })
-            fadeRow(label: "Fade Out",
-                    seconds: Double(clip.volumeEnvelope.fadeOut.seconds),
-                    set: { newValue in
-                        var envelope = clip.volumeEnvelope
-                        envelope.fadeOut = CMTime(seconds: newValue, preferredTimescale: 600)
-                        model.setClipVolumeEnvelope(envelope, clipID: clip.id, coalesced: true)
-                    })
+            fadeRow(label: "Fade In", value: fadeBinding(\.fadeIn))
+            fadeRow(label: "Fade Out", value: fadeBinding(\.fadeOut))
         }
     }
 
     @ViewBuilder
-    private func fadeRow(label: String,
-                         seconds: Double,
-                         set: @escaping (Double) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label).font(.caption.bold())
-                Spacer()
-                Text(String(format: "%.2f s", seconds))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            Slider(
-                value: Binding(
-                    get: { seconds.isFinite ? min(seconds, maxFadeSeconds) : 0 },
-                    set: set),
-                in: 0...maxFadeSeconds,
-                step: 0.01,
-                onEditingChanged: { editing in
-                    if !editing { model.commitCoalescedUndo() }
-                })
-                .accessibilityLabel("\(label) seconds")
-                .accessibilityValue(String(format: "%.2f s", seconds))
-        }
+    private func fadeRow(label: String, value: Binding<Double>) -> some View {
+        LabeledSliderRow(
+            label: label,
+            spokenLabel: "\(label) seconds",
+            display: String(format: "%.2f s", value.wrappedValue),
+            value: value,
+            range: 0...maxFadeSeconds,
+            step: 0.01,
+            captionStyle: .leadingTrailing,
+            onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+    }
+
+    /// Binding for one fade edge in seconds, built inline (the same shape as
+    /// `masterGainBinding`) so the setter's main-actor isolation is inferred
+    /// rather than forwarded through an annotated parameter — the latter makes
+    /// the Swift 6.3 compiler crash emitting the `@MainActor`→`@Sendable`
+    /// reabstraction thunk for `Binding.set`.
+    private func fadeBinding(_ keyPath: WritableKeyPath<VolumeEnvelope, CMTime>) -> Binding<Double> {
+        Binding(
+            get: {
+                let seconds = clip.volumeEnvelope[keyPath: keyPath].seconds
+                return seconds.isFinite ? min(seconds, maxFadeSeconds) : 0
+            },
+            set: { newValue in
+                var envelope = clip.volumeEnvelope
+                envelope[keyPath: keyPath] = CMTime(seconds: newValue, preferredTimescale: 600)
+                model.setClipVolumeEnvelope(envelope, clipID: clip.id, coalesced: true)
+            })
     }
 }

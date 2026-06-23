@@ -704,6 +704,13 @@ final class RenderQueue {
     ) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let resume = ResumeBox()
+            // `requestMediaDataWhenReady`'s block is `@Sendable`, but the writer
+            // input and reader output it touches aren't `Sendable`. They're safe
+            // here because the block only ever runs on the single serial
+            // `pumpQueue` and this pump has sole ownership of both for its
+            // lifetime — `nonisolated(unsafe)` states exactly that confinement.
+            nonisolated(unsafe) let input = input
+            nonisolated(unsafe) let output = output
             input.requestMediaDataWhenReady(on: pumpQueue) {
                 while input.isReadyForMoreMediaData {
                     if let sample = output.copyNextSampleBuffer() {

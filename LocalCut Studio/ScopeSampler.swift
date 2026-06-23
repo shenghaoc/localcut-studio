@@ -43,13 +43,13 @@ struct VectorPoint: Sendable, Equatable {
 /// the sampler holds no SwiftUI / Observation state because the compositor
 /// reaches it from a nonisolated context, and a `@MainActor`-isolated
 /// singleton would force the entire sampling path through the main actor.
-final class ScopeSampler: @unchecked Sendable {
+final class ScopeSampler: Sendable {
 
-    /// `nonisolated(unsafe)` opts the static out of the project's default
-    /// `MainActor` isolation — the type itself is `@unchecked Sendable` and
-    /// all of its accessors are explicitly nonisolated, so a non-isolated
-    /// singleton is safe.
-    nonisolated(unsafe) static let shared = ScopeSampler()
+    /// `nonisolated` opts the static out of the project's default `MainActor`
+    /// isolation — the type is `@unchecked Sendable` with explicitly
+    /// nonisolated accessors, so the compiler proves the singleton safe
+    /// without the `(unsafe)` escape hatch.
+    nonisolated static let shared = ScopeSampler()
 
     /// 1 / 30 s — the floor between two samples. A 60 fps preview pays the
     /// sampling cost on roughly every other frame and the user can't see the

@@ -504,7 +504,7 @@ nonisolated struct Keyframed<T: Interpolatable>: Hashable, Codable, Sendable {
     }
 
     mutating func updateKeyframe(id: UUID, time: CMTime? = nil, value: T? = nil) {
-        guard let i = keyframes.firstIndex(where: { $0.id == id }) else { return }
+        guard keyframes.contains(where: { $0.id == id }) else { return }
         // If a new time is set and another keyframe already sits exactly there,
         // drop the collider so the array preserves the single-keyframe-per-time
         // invariant `addKeyframe` enforces. Without this, `value(at:)`'s binary

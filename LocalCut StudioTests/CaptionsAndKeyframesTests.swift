@@ -631,11 +631,18 @@ func presetDecodeSurfacesUnderlyingError() {
         Issue.record("expected IOError.decodeFailed, got \(String(describing: caught))")
         return
     }
-    #expect(detail != nil)
-    #expect(!(detail ?? "").isEmpty)
+    // Compute every assertion into a plain Bool *outside* `#expect`: the macro
+    // emits spurious warnings when it decomposes `??` / `.contains` on Swift 6.3,
+    // so keep those operators out of the macro argument.
+    let detailText = detail ?? ""
+    let hasDetail = detail != nil
+    let detailIsNonEmpty = !detailText.isEmpty
     // The user-facing description should embed that detail rather than the
     // generic fallback message.
-    #expect((caught?.errorDescription ?? "").contains(detail ?? "💥"))
+    let describesDetail = (caught?.errorDescription ?? "").contains(detail ?? "💥")
+    #expect(hasDetail)
+    #expect(detailIsNonEmpty)
+    #expect(describesDetail)
 }
 
 @Test("CaptionPresetV1: rejects unknown version")
@@ -742,9 +749,12 @@ func presetSnapshotShape() {
         let line = CaptionLine(
             range: CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600)),
             text: "Sample caption")
-        let raster = rasterer.idleRaster(line: line, style: preset.style, renderSize: canvas)
-        let unwrapped = try? #require(raster)
-        guard let raster = unwrapped else { continue }
+        // A nil raster means the preset stopped rasterizing (font/layout failure) —
+        // that's the regression this test guards, so record a failure rather than skip.
+        guard let raster = rasterer.idleRaster(line: line, style: preset.style, renderSize: canvas) else {
+            Issue.record("Preset \(preset.name) failed to rasterize")
+            continue
+        }
         #expect(raster.boundingBox.width > 0, "Preset \(preset.name) produced an empty bounding box")
         #expect(raster.boundingBox.height > 0, "Preset \(preset.name) produced an empty bounding box")
         // Bounding box must sit inside the canvas (with padding for stroke / pill).
