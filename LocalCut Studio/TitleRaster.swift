@@ -66,10 +66,72 @@ final class TitleRasterer: Sendable {
         CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
     }()
 
-    /// `order` is least-recent at index 0; back-of-array is most-recently-used.
-    private struct CacheState {
+    nonisolated private final class CacheNode: @unchecked Sendable {
+        let key: TitleRasterRequest
+        var previous: CacheNode?
+        var next: CacheNode?
+
+        init(key: TitleRasterRequest) {
+            self.key = key
+        }
+    }
+
+    /// `head` is least-recent; `tail` is most-recently-used.
+    nonisolated private struct CacheState {
         var entries: [TitleRasterRequest: TitleRaster] = [:]
-        var order: [TitleRasterRequest] = []
+        var nodes: [TitleRasterRequest: CacheNode] = [:]
+        var head: CacheNode?
+        var tail: CacheNode?
+
+        mutating func touch(_ request: TitleRasterRequest) {
+            guard let node = nodes[request], tail !== node else { return }
+            unlink(node)
+            appendNode(node)
+        }
+
+        mutating func insert(_ raster: TitleRaster, for request: TitleRasterRequest) {
+            if entries[request] != nil {
+                entries[request] = raster
+                touch(request)
+                return
+            }
+            entries[request] = raster
+            let node = CacheNode(key: request)
+            nodes[request] = node
+            appendNode(node)
+        }
+
+        mutating func popLeastRecent() {
+            guard let oldest = head else { return }
+            let key = oldest.key
+            unlink(oldest)
+            nodes.removeValue(forKey: key)
+            entries.removeValue(forKey: key)
+        }
+
+        mutating func removeAll() {
+            entries.removeAll()
+            nodes.removeAll()
+            head = nil
+            tail = nil
+        }
+
+        private mutating func appendNode(_ node: CacheNode) {
+            node.previous = tail
+            node.next = nil
+            tail?.next = node
+            tail = node
+            if head == nil { head = node }
+        }
+
+        private mutating func unlink(_ node: CacheNode) {
+            if head === node { head = node.next }
+            if tail === node { tail = node.previous }
+            node.previous?.next = node.next
+            node.next?.previous = node.previous
+            node.previous = nil
+            node.next = nil
+        }
     }
     private let lock = OSAllocatedUnfairLock(initialState: CacheState())
 
@@ -93,8 +155,7 @@ final class TitleRasterer: Sendable {
     /// implicitly by the cache key.
     nonisolated func purge() {
         lock.withLock { state in
-            state.entries.removeAll()
-            state.order.removeAll()
+            state.removeAll()
         }
     }
 
@@ -107,24 +168,16 @@ final class TitleRasterer: Sendable {
     nonisolated private func lookup(_ request: TitleRasterRequest) -> TitleRaster? {
         lock.withLock { state -> TitleRaster? in
             guard let cached = state.entries[request] else { return nil }
-            // Mark most-recently-used.
-            if let i = state.order.firstIndex(of: request) {
-                state.order.remove(at: i)
-            }
-            state.order.append(request)
+            state.touch(request)
             return cached
         }
     }
 
     nonisolated private func insert(_ raster: TitleRaster, for request: TitleRasterRequest) {
         lock.withLock { state in
-            if state.entries[request] == nil {
-                state.entries[request] = raster
-                state.order.append(request)
-                while state.order.count > cap, let oldest = state.order.first {
-                    state.order.removeFirst()
-                    state.entries.removeValue(forKey: oldest)
-                }
+            state.insert(raster, for: request)
+            while state.entries.count > cap {
+                state.popLeastRecent()
             }
         }
     }

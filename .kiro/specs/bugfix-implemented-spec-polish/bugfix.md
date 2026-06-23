@@ -180,6 +180,18 @@ normal use even though the bus lifecycle was implemented.
   blocks to feed the offline bus tap. Driving the meter during export belongs with Phase 36's
   `AVAssetReader`/`AVAssetWriter` audio path.
 
+### U10 — Cache LRU bookkeeping was O(n), and render-cache disk spill was empty
+
+feature-render-cache described an ordered LRU and wired a Caches-directory accessor, but each cache
+touch/evict still used array scans (`firstIndex`, `removeFirst`) and evicted render frames were lost
+instead of spilling to disk. feature-title-raster had the same array-backed LRU shape.
+
+- **Fix:** `RenderCache` and `TitleRasterer` now use lock-confined doubly-linked LRU nodes, making
+  hit touches and overflow eviction O(1). `RenderCache` also writes evicted frames to a bounded PNG
+  disk tier under the app Caches directory, rehydrates them on memory miss, and removes spill files on
+  invalidate/purge. The disk tier is in-session only because the effect-chain hash remains
+  process-seeded.
+
 ---
 
 ## Correctness
@@ -248,7 +260,7 @@ playhead legitimately maps to both sides of the cut, so a single global authored
   rows (3), `renameCaptionTrack` undo (1), `TransitionLayout.authoredTimes` and transition-aware
   snap-to-playhead conversion (2), directional wipe angle planning + persistence/bundle migration
   + shared video-composition propagation (5), caption-line retiming (1), skin-smooth keyframe
-  authoring/navigation (2).
+  authoring/navigation (2), render-cache disk spill and title-raster LRU touch ordering (2).
 - **V3** — Manual smoke (recommended pre-release): Diagnostics shows capability tiers with reasons in
   `.help`; LUT import shows the filename and replacing it doesn't stack; ⌘⇧[ / ⌘⇧] jump markers;
   Reveal/Retry behave; scopes show the graticule; the master fader feels log-mapped; cancelling an
@@ -274,8 +286,6 @@ change to a tuned look), or large enough to deserve its own spec.
   reader/writer audio pipeline owns the point where rendered blocks can update the meter.
 
 **Performance / toolchain:**
-- **Render-cache + title-raster LRU** are O(n) per access (`firstIndex`+`remove`); the design names
-  `OrderedDictionary` / a doubly-linked list. Render-cache disk spill is wired but unimplemented.
 - **Scopes:** revision-gated redraw (the sampler exposes `revision`, the view ignores it and repaints
   at 30 Hz when paused); single-pass histogram; per-pixel vectorscope scatter + colour-target boxes.
 - **Document model:** evaluate `ReferenceFileDocument`/`DocumentGroup` (Open Recent, async save);

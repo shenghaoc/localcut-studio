@@ -818,6 +818,31 @@ func titleRastererLRU() {
     #expect(r.count == 2)
 }
 
+@Test("TitleRasterer: cache hit refreshes LRU order")
+func titleRastererHitRefreshesLRU() {
+    final class Counter: @unchecked Sendable { nonisolated(unsafe) var draws = 0 }
+    let counter = Counter()
+    let r = TitleRasterer(capacity: 2)
+    let canvas = CGSize(width: 64, height: 32)
+    let id = UUID()
+    func request(_ hash: Int, _ text: String) -> TitleRasterRequest {
+        TitleRasterRequest(lineID: id, styleHash: hash, text: text, renderSize: canvas)
+    }
+    let a = request(1, "a")
+    let b = request(2, "b")
+    let c = request(3, "c")
+
+    _ = r.raster(for: a) { _, _ in counter.draws += 1; return .zero }
+    _ = r.raster(for: b) { _, _ in counter.draws += 1; return .zero }
+    _ = r.raster(for: a) { _, _ in counter.draws += 1; return .zero }
+    _ = r.raster(for: c) { _, _ in counter.draws += 1; return .zero }
+    _ = r.raster(for: a) { _, _ in counter.draws += 1; return .zero }
+    _ = r.raster(for: b) { _, _ in counter.draws += 1; return .zero }
+
+    #expect(counter.draws == 4, "A was touched before C inserted, so B should be the evicted entry")
+    #expect(r.count == 2)
+}
+
 @Test("TitleRasterer: purge empties the cache")
 func titleRastererPurge() {
     let r = TitleRasterer(capacity: 4)

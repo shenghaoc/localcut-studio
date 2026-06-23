@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 import AVFoundation
 import CoreGraphics
 import CoreImage
@@ -20,6 +21,14 @@ private func key(clipID: UUID = UUID(),
                  renderSize: CGSize = CGSize(width: 1920, height: 1080)) -> RenderCacheKey {
     RenderCacheKey(clipID: clipID, effectChainHash: effectChainHash,
                    time: time, renderSize: renderSize)
+}
+
+private func temporaryRenderCacheDirectory() throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("LocalCutStudioTests-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.removeItem(at: url)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
 }
 
 // MARK: - R1: Composite key
@@ -203,7 +212,7 @@ func cacheReinsertReplaces() {
 func cacheEvictsLRU() {
     // 100x100 entries → 40,000 bytes each. Budget = 2 entries' worth.
     let perEntry = RenderCache.estimatedBytes(width: 100, height: 100)
-    let cache = RenderCache(byteBudget: perEntry * 2)
+    let cache = RenderCache(byteBudget: perEntry * 2, diskByteBudget: 0)
     let size = CGSize(width: 100, height: 100)
     let k1 = key(clipID: UUID(), renderSize: size)
     let k2 = key(clipID: UUID(), renderSize: size)
@@ -219,6 +228,38 @@ func cacheEvictsLRU() {
     #expect(cache.image(for: k1) != nil)
     #expect(cache.image(for: k2) == nil, "k2 was least-recently-used and should be evicted")
     #expect(cache.image(for: k3) != nil)
+}
+
+@Test("RenderCache: evicted frames spill to disk and rehydrate on lookup")
+func cacheDiskSpillRehydrates() throws {
+    let directory = try temporaryRenderCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let perEntry = RenderCache.estimatedBytes(width: 16, height: 16)
+    let cache = RenderCache(byteBudget: perEntry,
+                            diskByteBudget: 1_000_000,
+                            cacheDirectory: directory)
+    let size = CGSize(width: 16, height: 16)
+    let k1 = key(clipID: UUID(), renderSize: size)
+    let k2 = key(clipID: UUID(), renderSize: size)
+
+    cache.setImage(tinyImage(width: 16, height: 16), for: k1)
+    cache.setImage(tinyImage(width: 16, height: 16), for: k2)
+
+    #expect(cache.count == 1)
+    #expect(cache.diskCount == 1)
+    #expect(cache.currentDiskBytes > 0)
+
+    let rehydrated = cache.image(for: k1)
+    #expect(rehydrated != nil)
+    #expect(cache.count == 1)
+    #expect(cache.diskCount >= 1)
+
+    cache.purge()
+    #expect(cache.count == 0)
+    #expect(cache.diskCount == 0)
+    let remaining = (try? FileManager.default.contentsOfDirectory(atPath: directory.path())) ?? []
+    #expect(remaining.isEmpty)
 }
 
 @Test("RenderCache: byte cost reflects the stored image's extent, not the key's renderSize (Claude review)")

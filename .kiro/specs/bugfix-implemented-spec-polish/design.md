@@ -65,6 +65,13 @@ failure into `statusMessage`; `teardownAudioMetering()` stops the live graph. Ex
 not wired here because the current `AVAssetExportSession` path does not expose rendered PCM blocks
 for the offline bus tap.
 
+### Cache LRU + disk spill — `RenderCache.swift` / `TitleRaster.swift`
+Both caches replace array-backed LRU order with lock-confined doubly-linked nodes and dictionaries,
+so lookup touch and overflow eviction are O(1). `RenderCache` adds a bounded disk tier: memory
+evictions are PNG-encoded outside the lock, recorded in a disk LRU, rehydrated on memory miss, and
+deleted on invalidate/purge. `TitleRasterer` stays memory-only because text rasters are cheap to
+rebuild and the feature-title-raster spec keeps disk backing out of scope.
+
 ### Word-highlight hold — `EffectCompositor.swift`
 `activeWordIndex` becomes a thin instance wrapper over a new `static nonisolated
 activeWordIndex(words:at:)`: containment match first, else hold the most-recently-started word, else
@@ -155,7 +162,8 @@ New tests extend existing suites (no new files): `EffectsTests` (LUT helpers + f
 `TransitionsIntegrationTests` (angle reaches the shared video composition), `PersistenceTests`/
 `ProjectBundleTests` (transition-angle document and bundle round trips), `CaptionsAndKeyframesTests`
 (caption-line retiming sort/undo/word shift; skin-smooth keyframe authoring + navigation). Pure
-helpers are tested directly; MainActor commands via `EditorModel`.
+helpers are tested directly; MainActor commands via `EditorModel`. Cache tests cover render-cache
+disk spill/rehydration/purge and title-raster LRU touch ordering.
 
 ## Risks
 - **Build gate** — verified with local `xcodebuild test` on macOS using the macOS 26.5 SDK; CI remains
