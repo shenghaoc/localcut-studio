@@ -207,6 +207,7 @@ struct ProjectBundleTests {
                         timelineStart: .zero, opacity: 0.75,
                         effects: [.colourGrade(.neutral)])
         clip.transition = Transition(type: .wipe, duration: time(1))
+        clip.transition?.wipeAngle = Transition.radians(fromDegrees: 180)
         model.project.videoTracks.first!.clips.append(clip)
 
         let captionTrack = CaptionTrack(name: "Captions")
@@ -261,6 +262,7 @@ struct ProjectBundleTests {
         #expect(restoredClip.duration == time(4))
         #expect(restoredClip.opacity == 0.75)
         #expect(restoredClip.transition?.type == .wipe)
+        #expect(restoredClip.transition?.wipeAngle == Transition.radians(fromDegrees: 180))
         #expect(restoredClip.effects == [.colourGrade(.neutral)])
         #expect(reopener.project.captionTracks.first?.id == originalCaptionID)
         #expect(reopener.project.captionTracks.first?.lines.first?.text == "captioned")

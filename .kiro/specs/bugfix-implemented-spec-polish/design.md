@@ -33,6 +33,12 @@ sides inside a transition overlap. `EditorModel.snapTargets` feeds the effective
 that inverse before appending it to the authored clip-edge targets, so trim/drag candidates remain in
 one coordinate space.
 
+### Directional wipe — `Transition` / `CompositionBuilder` / `EffectCompositor`
+`Transition.wipeAngle` stores the bars-swipe angle in radians. `TransitionDoc` decodes missing
+angles to `Transition.defaultWipeAngle`, so pre-direction documents open unchanged. `CompositionBuilder`
+threads the angle through `VisibleSegment` / `PlannedUnit` / `RenderUnit`, and `EffectCompositor`
+sets `CIFilter.barsSwipeTransition().angle`; no preview/export fork is introduced.
+
 ### Caption rename — `EditorModel+Captions.swift`
 `renameCaptionTrack(_:in:)` mirrors `updateMarkerCoalesced`: `performCoalescedUndoable(target:
 trackID, rebuild: .skip)` so per-keystroke edits fold into one undo step and the name (which doesn't
@@ -73,6 +79,8 @@ if/else is `_ConditionalContent`.
 - LUT indicator: a conditional `LabeledContent("LUT")` showing the filename + a destructive ✕
   (`removeLUT`); the import button label flips to "Replace LUT…".
 - Working-space `.help` + a caption shown when `workingColourSpace != .sRGB`.
+- Transition section: wipe-only Direction slider in degrees, with right-click reset to the legacy
+  default angle.
 
 ### `ScopesView.swift`
 - `drawWaveformGraticule` — five horizontal lines + IRE labels, drawn after the frame outline and
@@ -101,8 +109,10 @@ New tests extend existing suites (no new files): `EffectsTests` (LUT helpers + f
 `AudioMasterBusTests` (gain mapping + reachable silence floor), `CaptionsAndKeyframesTests`
 (word-highlight + rename), `MarkersTests` (nav, including exact-on-marker movement),
 `ExportQueueTests` (retry for cancelled + failed jobs), `TransitionsTests`/`TrimAndDragTests`
-(transition-window authored inverse + snap-through-ripple). Pure helpers are tested directly;
-MainActor commands via `EditorModel`.
+(transition-window authored inverse + snap-through-ripple; directional wipe angle render planning),
+`TransitionsIntegrationTests` (angle reaches the shared video composition), `PersistenceTests`/
+`ProjectBundleTests` (transition-angle document and bundle round trips). Pure helpers are tested
+directly; MainActor commands via `EditorModel`.
 
 ## Risks
 - **Build gate** — verified with local `xcodebuild test` on macOS using the macOS 26.5 SDK; CI remains

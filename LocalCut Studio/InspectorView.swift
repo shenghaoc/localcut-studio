@@ -100,7 +100,26 @@ struct InspectorView: View {
                 display: String(format: "%.2f s", min(transition.duration.seconds, maxTransitionSeconds)),
                 spokenValue: String(format: "%.2f seconds", min(transition.duration.seconds, maxTransitionSeconds)),
                 value: transitionDurationBinding,
-                range: minTransitionSeconds...maxTransitionSeconds)
+                range: minTransitionSeconds...maxTransitionSeconds,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+
+            if transition.type == .wipe {
+                LabeledSliderRow(
+                    label: "Direction",
+                    spokenLabel: "Wipe Direction",
+                    display: String(format: "%.0f deg", transitionWipeAngleDegrees),
+                    spokenValue: String(format: "%.0f degrees", transitionWipeAngleDegrees),
+                    value: transitionWipeAngleBinding,
+                    range: 0...360,
+                    step: 1,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: {
+                        model.updateSelectedTransition(coalesced: true) {
+                            $0.wipeAngle = Transition.defaultWipeAngle
+                        }
+                        model.commitCoalescedUndo()
+                    })
+            }
 
             Button(role: .destructive) {
                 model.removeSelectedTransition()
@@ -131,6 +150,20 @@ struct InspectorView: View {
             set: { newValue in
                 model.updateSelectedTransition(coalesced: true) {
                     $0.duration = CMTime(seconds: newValue, preferredTimescale: 600)
+                }
+            })
+    }
+
+    private var transitionWipeAngleDegrees: Double {
+        Transition.degrees(fromRadians: model.selectedTransition?.wipeAngle ?? Transition.defaultWipeAngle)
+    }
+
+    private var transitionWipeAngleBinding: Binding<Double> {
+        Binding(
+            get: { transitionWipeAngleDegrees },
+            set: { newValue in
+                model.updateSelectedTransition(coalesced: true) {
+                    $0.wipeAngle = Transition.radians(fromDegrees: newValue)
                 }
             })
     }

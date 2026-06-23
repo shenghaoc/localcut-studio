@@ -69,7 +69,9 @@ struct PersistenceTests {
             timelineStart: CMTimeCode(.zero),
             opacity: 0.5,
             effects: [.colourGrade(grade), .lut(bookmark: Data([0xAA, 0xBB]))],
-            transition: TransitionDoc(type: TransitionType.wipe.rawValue, duration: CMTimeCode(time(1))))
+            transition: TransitionDoc(type: TransitionType.wipe.rawValue,
+                                      duration: CMTimeCode(time(1)),
+                                      wipeAngle: Transition.radians(fromDegrees: 90)))
 
         return ProjectDocument(
             name: "My Project",
@@ -158,6 +160,7 @@ struct PersistenceTests {
         var clip = Clip(mediaID: media.id, sourceStart: .zero, duration: time(4),
                         timelineStart: .zero, opacity: 0.5, effects: [.colourGrade(.neutral)])
         clip.transition = Transition(type: .wipe, duration: time(1))
+        clip.transition?.wipeAngle = Transition.radians(fromDegrees: 135)
         project.videoTracks.first!.clips.append(clip)
 
         let doc = ProjectDocument(project: project)
@@ -176,6 +179,7 @@ struct PersistenceTests {
         #expect(captured.effects == [.colourGrade(.neutral)])
         #expect(captured.transition?.type == TransitionType.wipe.rawValue)
         #expect(captured.transition?.duration.cmTime == time(1))
+        #expect(captured.transition?.wipeAngle == Transition.radians(fromDegrees: 135))
     }
 
     // MARK: - Reconstruction (Document → runtime) (T1.2)
@@ -191,7 +195,8 @@ struct PersistenceTests {
             opacity: 0.75,
             effects: [.lut(bookmark: Data([0x01]))],
             transition: TransitionDoc(type: TransitionType.crossDissolve.rawValue,
-                                      duration: CMTimeCode(time(1))))
+                                      duration: CMTimeCode(time(1)),
+                                      wipeAngle: Transition.radians(fromDegrees: 270)))
         let clip = doc.makeClip()
         #expect(clip.mediaID == mediaID)
         #expect(clip.sourceStart == time(2))
@@ -201,6 +206,21 @@ struct PersistenceTests {
         #expect(clip.effects == [.lut(bookmark: Data([0x01]))])
         #expect(clip.transition?.type == .crossDissolve)
         #expect(clip.transition?.duration == time(1))
+        #expect(clip.transition?.wipeAngle == Transition.radians(fromDegrees: 270))
+    }
+
+    @Test("Legacy transition documents default the wipe angle")
+    func legacyTransitionDefaultsWipeAngle() throws {
+        let json = """
+        {
+          "type": "wipe",
+          "duration": { "value": 600, "timescale": 600 }
+        }
+        """
+        let transition = try JSONDecoder().decode(TransitionDoc.self, from: Data(json.utf8))
+        #expect(transition.makeTransition().type == .wipe)
+        #expect(transition.makeTransition().duration == time(1))
+        #expect(transition.makeTransition().wipeAngle == Transition.defaultWipeAngle)
     }
 
     @Test("Saving carries unresolved media refs so a save-before-relink keeps them")

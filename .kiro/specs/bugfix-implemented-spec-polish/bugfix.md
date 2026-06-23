@@ -131,6 +131,17 @@ existed.
   `TextField`; a one-line caption stating caption styling is preview/burn-in only while SRT/VTT
   sidecars stay plain text.
 
+### U6 — Wipe transitions had no direction control
+
+feature-transitions R1.2 calls the wipe transition directional, but `TransitionType.wipe` used the
+Core Image bars-swipe default angle and the inspector exposed only type/duration. Users could choose
+"Wipe" but not its direction.
+
+- **Fix:** `Transition` now stores a `wipeAngle` in radians, persisted through `TransitionDoc` with
+  a legacy default for older projects. The transition inspector shows a wipe-only Direction slider
+  in degrees, and the shared compositor maps the stored radians to
+  `CIFilter.barsSwipeTransition().angle`, so preview and export stay identical.
+
 ---
 
 ## Correctness
@@ -197,7 +208,8 @@ playhead legitimately maps to both sides of the cut, so a single global authored
   `EffectCompositor.activeWordIndex` gap-hold + empty (2), marker next/prev nav + exact-on-marker
   navigation (3), `RenderQueue.retry` requeues cancelled + failed jobs and no-ops for non-terminal
   rows (3), `renameCaptionTrack` undo (1), `TransitionLayout.authoredTimes` and transition-aware
-  snap-to-playhead conversion (2).
+  snap-to-playhead conversion (2), directional wipe angle planning + persistence/bundle migration
+  + shared video-composition propagation (5).
 - **V3** — Manual smoke (recommended pre-release): Diagnostics shows capability tiers with reasons in
   `.help`; LUT import shows the filename and replacing it doesn't stack; ⌘⇧[ / ⌘⇧] jump markers;
   Reveal/Retry behave; scopes show the graticule; the master fader feels log-mapped; cancelling an
@@ -211,9 +223,6 @@ Catalogued so the audit's value isn't lost. Each is either higher-risk (composit
 change to a tuned look), or large enough to deserve its own spec.
 
 **Correctness / behaviour (own spec recommended):**
-- **Directional wipe** — `TransitionType.wipe` is hardcoded to the bars-swipe default angle;
-  feature-transitions R1.2 says "directional". Needs a stored direction/angle + Codable migration +
-  inspector control.
 - **Skin-smooth resolution independence** — blur radius is `strength * 10` in source pixels, so the
   same clip smooths differently at 1080p vs 4K source. Scaling by image height changes the look of
   existing projects; needs a design decision, not a silent change.

@@ -318,7 +318,7 @@ extension Array where Element == Effect {
 // MARK: - Transitions
 
 /// The kinds of transition supported in v1.
-enum TransitionType: String, Hashable, Codable, CaseIterable, Identifiable {
+enum TransitionType: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
     /// A linear opacity cross-fade between the outgoing and incoming clips.
     case crossDissolve
     /// A directional bars-swipe handled by the custom compositor.
@@ -353,15 +353,33 @@ struct Transition: Identifiable, Hashable {
     let id: UUID
     var type: TransitionType
     var duration: CMTime
+    /// Direction for `.wipe`, stored in radians for Core Image's `inputAngle`.
+    var wipeAngle: Double
 
-    init(id: UUID = UUID(), type: TransitionType = .crossDissolve, duration: CMTime) {
+    init(id: UUID = UUID(),
+         type: TransitionType = .crossDissolve,
+         duration: CMTime,
+         wipeAngle: Double = Transition.defaultWipeAngle) {
         self.id = id
         self.type = type
         self.duration = duration
+        self.wipeAngle = wipeAngle
     }
 
     /// Sensible default transition length (0.5s, R4.2), clamped to overlap when applied.
     static let defaultDuration = CMTime(value: 1, timescale: 2)
+    /// Core Image bars-swipe angle default used for legacy projects.
+    static let defaultWipeAngle: Double = 0
+
+    nonisolated static func radians(fromDegrees degrees: Double) -> Double {
+        degrees * .pi / 180
+    }
+
+    nonisolated static func degrees(fromRadians radians: Double) -> Double {
+        let degrees = radians * 180 / .pi
+        let normalized = degrees.truncatingRemainder(dividingBy: 360)
+        return normalized >= 0 ? normalized : normalized + 360
+    }
 }
 
 /// A single placement of (part of) a media item on a track's timeline.

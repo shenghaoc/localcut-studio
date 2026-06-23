@@ -43,13 +43,13 @@ struct CaptionRenderItem: Sendable {
 enum RenderUnit {
     case layer(CompositorLayer)
     case transition(outgoing: CompositorLayer, incoming: CompositorLayer,
-                    type: TransitionType, overlap: CMTimeRange)
+                    type: TransitionType, wipeAngle: Double, overlap: CMTimeRange)
 
     /// Every source track this unit reads from.
     nonisolated var trackIDs: [CMPersistentTrackID] {
         switch self {
         case .layer(let layer): [layer.trackID]
-        case .transition(let outgoing, let incoming, _, _): [outgoing.trackID, incoming.trackID]
+        case .transition(let outgoing, let incoming, _, _, _): [outgoing.trackID, incoming.trackID]
         }
     }
 }
@@ -239,7 +239,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         case .layer(let layer):
             return renderedImage(for: layer, request: request)
 
-        case .transition(let outgoing, let incoming, let type, let overlap):
+        case .transition(let outgoing, let incoming, let type, let wipeAngle, let overlap):
             let out = renderedImage(for: outgoing, request: request)
             let into = renderedImage(for: incoming, request: request)
             // If a source frame is missing, fall back to whichever is available.
@@ -250,7 +250,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             case .crossDissolve:
                 return crossDissolve(outgoing: out, incoming: into, progress: progress)
             case .wipe:
-                return wipe(outgoing: out, incoming: into, progress: progress)
+                return wipe(outgoing: out, incoming: into, progress: progress, angle: wipeAngle)
             }
         }
     }
@@ -456,13 +456,14 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         return filter.outputImage ?? fadedIn.composited(over: fadedOut)
     }
 
-    /// A directional bars-swipe transition via Core Image. The type-safe builtin
-    /// is created with the filter's default angle/width/bar-offset already set.
-    nonisolated private func wipe(outgoing: CIImage, incoming: CIImage, progress: Float) -> CIImage {
+    /// A directional bars-swipe transition via Core Image.
+    nonisolated private func wipe(outgoing: CIImage, incoming: CIImage,
+                                  progress: Float, angle: Double) -> CIImage {
         let filter = CIFilter.barsSwipeTransition()
         filter.inputImage = outgoing
         filter.targetImage = incoming
         filter.time = progress
+        filter.angle = Float(angle)
         return filter.outputImage ?? crossDissolve(outgoing: outgoing, incoming: incoming, progress: progress)
     }
 

@@ -14,6 +14,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] U3 — Scopes graticule: waveform IRE lines + labels, vectorscope 75% saturation ring
 - [x] U4 — `AudioGainMapping`: master + track faders log-mapped in dB (audio-master-bus design)
 - [x] U5 — Caption track rename + "styling is burn-in only" notice (caption-tracks R2.6 / R6.2)
+- [x] U6 — Directional wipe angle stored, persisted, shown in inspector, and passed to compositor (transitions R1.2)
 
 ## Correctness
 - [x] C1 — Cancelling a running export deletes the partial file (export-queue R2.4 / release gate)
@@ -28,6 +29,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] `MarkersTests` — next/prev nav + clamp-at-ends + exact-on-marker movement
 - [x] `ExportQueueTests` — `retry` requeues cancelled and failed; no-op for non-terminal
 - [x] `TransitionsTests` / `TrimAndDragTests` — transition-window authored inverse + snap-through-ripple
+- [x] `TransitionsTests` / `TransitionsIntegrationTests` / `PersistenceTests` / `ProjectBundleTests` — directional wipe angle planning + shared video-composition propagation + document/bundle round trips
 
 ## Docs
 - [x] `docs/keyboard-shortcuts.md` — add marker navigation (⌘⇧[ / ⌘⇧]) and refresh the table
@@ -46,7 +48,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 
 ## Follow-up backlog
 - [x] Snap-to-playhead authored-time conversion when transitions exist (trim/drag R3.1) — P1
-- [ ] Directional wipe: stored angle + inspector control + Codable migration (transitions R1.2)
+- [x] Directional wipe: stored angle + inspector control + Codable migration (transitions R1.2)
 - [ ] Skin-smooth resolution-independent blur radius (needs look decision)
 - [ ] Keyframe authoring UI (feature-keyframes non-goal)
 - [ ] Keyframable caption style params (phase-30 R2.3)
