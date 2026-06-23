@@ -54,8 +54,8 @@ final class EditorModel {
 
     /// Session cache of imported LUT filenames keyed by their bookmark, so the
     /// inspector can show a LUT's name without resolving the security-scoped
-    /// bookmark on the main actor on every render (codex P2). Not persisted; a
-    /// LUT from a reopened project shows a generic label until re-imported.
+    /// bookmark on the main actor on every render. Not persisted; a LUT from a
+    /// reopened project shows a generic label until re-imported.
     @ObservationIgnored private var lutDisplayNames: [Data: String] = [:]
 
     // Diagnostics
@@ -531,8 +531,7 @@ final class EditorModel {
     /// populated at import. Returns nil when no LUT is applied or the LUT came
     /// from a reopened project (no cached name) — the inspector then shows a
     /// generic "Applied" label. Deliberately does **not** resolve the bookmark
-    /// here: that can block the main actor for LUTs on slow / network volumes
-    /// (codex P2).
+    /// here: that can block the main actor for LUTs on slow / network volumes.
     var selectedClipLUTName: String? {
         guard let clip = selectedClip else { return nil }
         for effect in clip.effects {

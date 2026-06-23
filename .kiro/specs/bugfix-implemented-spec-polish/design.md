@@ -16,8 +16,8 @@ it must be callable from both the MainActor UI and nonisolated engine/tests (mir
 - `removingLUT()` — filters out `.lut`, preserving grade / skin-smooth.
 
 Pure value transforms, so they're tested directly (no security-scoped bookmark needed). `importLUT`
-and the new `removeLUT` call them; `selectedClipHasLUT` / `selectedClipLUTName` (resolves the
-bookmark best-effort for display) drive the inspector indicator.
+and the new `removeLUT` call them; `selectedClipHasLUT` plus an import-time filename cache drive the
+inspector indicator without resolving security-scoped bookmarks from `selectedClipLUTName`.
 
 ### Marker navigation — `EditorModel+Markers.swift`
 `selectNextMarker()` / `selectPreviousMarker()` use `project.markers.first(where: $0.time > now)` /
@@ -93,8 +93,8 @@ New tests extend existing suites (no new files): `EffectsTests` (LUT helpers), `
 `ExportQueueTests` (retry). Pure helpers are tested directly; MainActor commands via `EditorModel`.
 
 ## Risks
-- **No local build** — every change is additive/idiomatic and matched to surrounding code; CI is the
-  build gate. The biggest behaviour change (U4 dB fader) is isolated to two bindings + a tested pure
-  mapping and is trivially revertible.
-- **Bookmark resolve in `selectedClipLUTName`** runs on inspector re-render when a LUT is applied;
-  bookmark→URL resolution does no file IO and only happens for a selected video clip, so it's cheap.
+- **Build gate** — verified with local `xcodebuild test` on macOS using the macOS 26.5 SDK; CI remains
+  the authoritative zero-warning gate. The biggest behaviour change (U4 dB fader) is isolated to two
+  bindings + a tested pure mapping and is trivially revertible.
+- **Reopened-project LUT names** fall back to a generic "Applied" label because the inspector avoids
+  resolving security-scoped bookmarks on the main actor; a new import refreshes the session cache.

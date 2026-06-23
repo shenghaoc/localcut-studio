@@ -19,7 +19,8 @@ turned up are catalogued under **Deferred follow-ups** with enough detail to spe
 
 **Platform:** target & CI are macOS 26 (`MACOSX_DEPLOYMENT_TARGET = 26.0`); dev host is macOS 27.
 Every API used below is available on macOS 26. Per PR #31's lesson, the **CI build log is the
-authoritative zero-warning gate** — a clean local build is not sufficient.
+authoritative zero-warning gate**; this branch has also been locally verified with `xcodebuild test`
+on macOS using the macOS 26.5 SDK.
 
 **Scope discipline:** changes are additive SwiftUI + small, unit-tested pure helpers + view-layer
 data plumbing. No composition time-range math (P0-sensitive) is touched. New logic ships with tests
@@ -51,9 +52,10 @@ filename, no "a LUT is active" indicator, and no way to remove just the LUT (onl
 "Reset", which also wipes the grade). feature-colour-grading R1.2 specifies **one** LUT slot.
 
 - **Fix:** A clip holds one LUT. `importLUT` now **replaces** the slot (`[Effect].replacingLUT`);
-  the Colour section shows the loaded LUT's filename (resolved best-effort from its bookmark) with a
-  remove (✕) control (`removeLUT` / `[Effect].removingLUT`), and the import button reads
-  "Replace LUT…" when one is present.
+  the Colour section shows the import-time filename from a session cache with a remove (✕) control
+  (`removeLUT` / `[Effect].removingLUT`), and the import button reads "Replace LUT…" when one is
+  present. Reopened projects avoid main-actor bookmark resolution and show a generic applied label
+  until the LUT is re-imported in the session.
 
 ### S3 — Markers can be added but not traversed
 
@@ -173,7 +175,8 @@ contradicts the documented call site and wastes memory.)
 ## Verification
 
 - **V1** — Debug/macOS build (app + tests): zero warnings, zero errors on the macOS 26 / Xcode 26.5
-  CI toolchain (authoritative gate per PR #31).
+  CI toolchain (authoritative gate per PR #31) and on a local macOS `xcodebuild test` run with
+  `-derivedDataPath /private/tmp/LocalCutStudio-DerivedData`.
 - **V2** — Full test suite green with **no count regression**. New tests:
   `[Effect].replacingLUT/removingLUT/hasLUT` (3), `AudioGainMapping` round-trip + floor (3),
   `EffectCompositor.activeWordIndex` gap-hold + empty (2), marker next/prev nav (2),

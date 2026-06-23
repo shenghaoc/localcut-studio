@@ -114,7 +114,7 @@ extension EditorModel {
             // Caption rasters are keyed on render size + working colour space, so
             // an undo/redo across a Change Resolution or Change Working Space step
             // must drop the now-stale entries — applyState bypasses the setters
-            // that would otherwise purge (codex P2).
+            // that would otherwise purge.
             EffectCompositor.purgeCaptionRasterCache()
         }
         for snapshot in state.videoTracks {

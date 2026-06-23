@@ -410,8 +410,7 @@ final class RenderQueue {
         // Guarded by `didBeginEncoding`: until the deliberate overwrite below
         // runs, the file at `outputURL` is the user's *pre-existing* file, so a
         // pre-encode cancel (e.g. cancelled while `CompositionBuilder.build` is
-        // still awaiting and throwing `CancellationError`) must not delete it
-        // (codex P1).
+        // still awaiting and throwing `CancellationError`) must not delete it.
         var didBeginEncoding = false
         let removePartialOutput = {
             guard didBeginEncoding else { return }
