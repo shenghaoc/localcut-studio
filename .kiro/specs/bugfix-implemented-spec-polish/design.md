@@ -126,7 +126,16 @@ The meter strip renders whenever the live bus is running. If startup fails, the 
 ### `ScopesView.swift`
 - `drawWaveformGraticule` — five horizontal lines + IRE labels, drawn after the frame outline and
   behind the trace.
-- Vectorscope — an inner ellipse at 75% radius (`plot.insetBy` 12.5% per side).
+- Vectorscope — an inner ellipse at 75% radius (`plot.insetBy` 12.5% per side) plus 75%-saturation
+  colour target boxes for yellow/red/magenta/blue/cyan/green.
+- Redraws are revision-gated: the view runs an async refresh task, polls `ScopeSampler.snapshot`, and
+  mutates `@State` only when the sampler revision changes instead of repainting the Canvas at 30 Hz
+  while paused.
+
+### `ScopeSampler.swift`
+The sampler does one bounded `.RGBAf` readback per sampled frame (max 160×90), then builds the
+32×64 waveform histogram and per-pixel vectorscope scatter from that same buffer. This replaces the
+old 32 histogram filter readbacks plus 8×8 vectorscope proxy.
 
 ### `DiagnosticsView.swift`
 `capabilitiesSection` reads `Capabilities.current` and renders a `capabilityRow` per feature with

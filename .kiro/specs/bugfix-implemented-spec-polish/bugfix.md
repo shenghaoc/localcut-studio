@@ -107,8 +107,7 @@ pro-tool bar ui-standards sets.
 
 - **Fix:** Horizontal IRE reference lines (0/25/50/75/100) with labels on the waveform; a
   75%-saturation reference ring on the vectorscope. Static overlays drawn behind the live trace — no
-  per-frame sampling cost. (Per-pixel vectorscope scatter + colour-target boxes remain a Phase-38
-  item — see D-list.)
+  per-frame sampling cost.
 
 ### U4 — Audio fader is linear, not the specified log/dB mapping
 
@@ -191,6 +190,18 @@ instead of spilling to disk. feature-title-raster had the same array-backed LRU 
   disk tier under the app Caches directory, rehydrates them on memory miss, and removes spill files on
   invalidate/purge. The disk tier is in-session only because the effect-chain hash remains
   process-seeded.
+
+### U11 — Scopes redrew while idle and sampled in multiple passes
+
+feature-colour-management already exposed a sampler `revision`, but `ScopesView` ignored it and
+invalidated the Canvas at 30 Hz even when a paused frame had not changed. The sampler also used 32
+histogram filter passes plus a coarse 8×8 vectorscope proxy, leaving the richer Phase-38 targets
+unimplemented.
+
+- **Fix:** `ScopeSampler` now performs one bounded `.RGBAf` readback and derives both waveform bins
+  and per-readback-pixel vectorscope scatter from that buffer. `ScopesView` runs a lightweight
+  refresh task that only updates SwiftUI state when `revision` changes, and the vectorscope draws
+  75%-saturation colour target boxes behind the live trace.
 
 ---
 
@@ -286,8 +297,6 @@ change to a tuned look), or large enough to deserve its own spec.
   reader/writer audio pipeline owns the point where rendered blocks can update the meter.
 
 **Performance / toolchain:**
-- **Scopes:** revision-gated redraw (the sampler exposes `revision`, the view ignores it and repaints
-  at 30 Hz when paused); single-pass histogram; per-pixel vectorscope scatter + colour-target boxes.
 - **Document model:** evaluate `ReferenceFileDocument`/`DocumentGroup` (Open Recent, async save);
   async window-close save (multi-GB bundle IO currently blocks the close prompt); staged
   `fingerprints.json`+`project.json` swap; bundle-open verify progress.
