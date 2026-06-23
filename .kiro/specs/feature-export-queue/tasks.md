@@ -26,6 +26,9 @@
   `QueueJob.progress`; recompute `totalProgress` on every job update.
 - [x] **T2.5** Emit one `os_log` line per status transition under category
   `render-queue`.
+- [x] **T2.6** Tokenize runner cleanup so a drained runner restarts for jobs
+  enqueued during cleanup and cannot clobber a newer runner's `isRunning`
+  state.
 
 ## Persistence
 
@@ -38,6 +41,8 @@
 - [x] **T3.3** Document the security-scoped bookmark requirement for output
   URLs in `design.md` and in code comments where the bookmark is captured /
   resolved.
+- [x] **T3.4** Refresh stale-but-resolvable output and source-media bookmarks
+  back into the queued job before persisting.
 
 ## UI
 
@@ -62,5 +67,9 @@
 - [x] **T5.4** Unit test: cancellation transitions (R5.4).
 - [x] **T5.5** Unit test: `RenderQueueDoc` round-trip; stale-bookmark
   fallback marks job `failed` (R5.5).
-- [x] **T5.6** `xcodebuild` (Debug, macOS) green; no test count regression
-  (R5.6).
+- [x] **T5.6** Unit test: stale-but-resolvable output bookmark reconciliation
+  replaces the stored bookmark (R5.6).
+- [x] **T5.7** Unit test: a job enqueued during runner drain is processed after
+  cleanup (R5.7).
+- [x] **T5.8** `xcodebuild` (Debug, macOS) green; no test count regression
+  (R5.8).

@@ -83,6 +83,10 @@ nil before the first word. `static` + pure so it's unit-tested without a composi
 - `retry(jobID:autoStart:)` — flips a `.failed`/`.cancelled` job to `.queued`, clears
   error/progress/runtime, persists, and (by default) `start()`s. No-op for non-terminal/completed.
 - `outputURL(forJobID:)` — public resolve of the job's bookmark for Reveal-in-Finder.
+- `BookmarkResolution` — central output/source bookmark resolver; stale-but-resolvable bookmarks are
+  replaced in the queued job and persisted instead of being used once and left stale.
+- Runner cleanup uses a private token, not `isRunning`, to avoid clearing a newer runner and to
+  restart automatically when a job is enqueued while the previous runner is draining.
 
 ### Audio gain mapping — `AudioInspectorView.swift`
 `nonisolated enum AudioGainMapping` with `decibels(fromLinear:)` / `linear(fromDecibels:)` over a

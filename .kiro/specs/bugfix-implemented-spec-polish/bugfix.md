@@ -234,6 +234,18 @@ had no "don't copy" control.
   passed into `EditorModel.importMedia(urls:wantsBundling:)` and stored on each imported
   `MediaItem`; bundle JSON tests cover the external-only path.
 
+### U15 — Render queue stale bookmarks and runner-drain race
+
+The render queue already failed unresolvable output bookmarks on load, but stale-but-resolvable
+bookmarks were used once and left stale in `queue.json`. The runner also used `isRunning` as both
+UI state and task ownership; a job enqueued while the prior runner had drained but before cleanup
+could be left queued because `start()` saw `isRunning == true` and returned.
+
+- **Fix:** `RenderQueue` now refreshes stale output bookmarks during reconcile/reveal/job start and
+  stale source bookmarks during project reconstruction, then persists the refreshed job. Runner
+  cleanup is keyed by a private token and restarts if new queued work arrived during cleanup, while
+  `stop()` still suppresses auto-restart.
+
 ---
 
 ## Correctness
@@ -328,6 +340,5 @@ change to a tuned look), or large enough to deserve its own spec.
   progress.
 
 **Smaller hygiene:**
-- Stale-bookmark refresh on the queue path; `RenderQueue.isRunning` reset TOCTOU; typewriter mask
-  excludes the pill; word-range by token index instead of substring scan; golden snapshot tests
-  (skin-smooth T3.1, caption presets T5.1).
+- Typewriter mask excludes the pill; word-range by token index instead of substring scan; golden
+  snapshot tests (skin-smooth T3.1, caption presets T5.1).
