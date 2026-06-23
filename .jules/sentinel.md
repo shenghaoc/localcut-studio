@@ -19,3 +19,9 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Vulnerability:** Untrusted external media file metadata like `duration`, `naturalSize`, and `preferredTransform` were being loaded directly into internal properties without sanitization. Maliciously crafted or corrupted video files could inject NaN, infinite, or negative values.
 **Learning:** This could lead to infinite loops, division by zero, layout crashes, or DoS when rendering the UI or calculating timeline mathematics, due to invalid geometric and timing values.
 **Prevention:** All metadata parameters must be validated and clamped before assignment. A set of `.sanitized` computed properties for `CMTime`, `CGSize`, and `CGAffineTransform` ensures values fall back to safe zero or identity states.
+
+## 2026-06-23 — Remove Force Unwraps
+
+**Vulnerability:** Found a force unwrap (`!`) when accessing values from a dictionary using its sorted keys in `ProjectBundle.swift`.
+**Learning:** While iterating over `.keys` usually guarantees presence, force unwraps violate the "never force-unwrap" project security philosophy and pose a crash (Denial of Service) risk in Swift.
+**Prevention:** Iterate dictionary entries directly with `entries.sorted(by:)` instead of subscripting by sorted keys, eliminating both the force-unwrap and any possibility of a silent skip.
