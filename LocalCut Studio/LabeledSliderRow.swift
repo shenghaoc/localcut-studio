@@ -63,6 +63,9 @@ struct LabeledSliderRow<Value: BinaryFloatingPoint>: View where Value.Stride: Bi
             Text("\(label)  \(display)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                // Stabilise digit widths so the caption doesn't shift while
+                // scrubbing the slider (matches the `.leadingTrailing` value).
+                .monospacedDigit()
                 .accessibilityHidden(true)
         case .leadingTrailing:
             HStack {
