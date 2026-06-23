@@ -68,4 +68,5 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [ ] Document model: `ReferenceFileDocument`/Open Recent; async window-close save
 - [x] Bundle "Don't copy" import toggle (`wantsBundling` UI)
 - [x] Queue stale-bookmark refresh; `RenderQueue.isRunning` TOCTOU
-- [ ] Typewriter mask excludes pill; word-range by token index; golden snapshot tests (T3.1 / T5.1)
+- [x] Typewriter mask excludes pill; word-range by token index
+- [ ] Golden snapshot tests (skin-smooth T3.1 / caption presets T5.1)

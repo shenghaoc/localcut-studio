@@ -47,6 +47,25 @@ struct TitleRaster {
     /// Bounding rect of the drawn pixels in render-canvas coordinates. Zero when
     /// the draw closure produced nothing.
     let boundingBox: CGRect
+    /// Bounds of the glyph/text pixels, excluding any wider background pill.
+    /// Defaults to `boundingBox` for non-caption callers.
+    let textBox: CGRect
+
+    nonisolated init(image: CIImage, boundingBox: CGRect, textBox: CGRect? = nil) {
+        self.image = image
+        self.boundingBox = boundingBox
+        self.textBox = textBox ?? boundingBox
+    }
+}
+
+nonisolated struct TitleRasterBounds: Sendable, Equatable {
+    let boundingBox: CGRect
+    let textBox: CGRect
+
+    init(boundingBox: CGRect, textBox: CGRect? = nil) {
+        self.boundingBox = boundingBox
+        self.textBox = textBox ?? boundingBox
+    }
 }
 
 // MARK: - Rasteriser
@@ -60,6 +79,7 @@ final class TitleRasterer: Sendable {
     /// is the bottom-left of the render canvas, plus the canvas size. The closure
     /// returns the bounding rect of the pixels it drew, in canvas coordinates.
     typealias DrawClosure = @Sendable (CGContext, CGSize) -> CGRect
+    typealias BoundsDrawClosure = @Sendable (CGContext, CGSize) -> TitleRasterBounds
 
     private let cap: Int
     nonisolated private static let sRGB: CGColorSpace = {
@@ -144,6 +164,15 @@ final class TitleRasterer: Sendable {
     /// The closure is invoked at most once per (request, cache-miss) — it must be
     /// pure with respect to its inputs.
     nonisolated func raster(for request: TitleRasterRequest, draw: DrawClosure) -> TitleRaster {
+        rasterWithBounds(for: request) { context, size in
+            TitleRasterBounds(boundingBox: draw(context, size))
+        }
+    }
+
+    /// Variant for callers that need text bounds separate from the full drawn
+    /// bounds, for example captions with a background pill and typewriter text.
+    nonisolated func rasterWithBounds(for request: TitleRasterRequest,
+                                      draw: BoundsDrawClosure) -> TitleRaster {
         if let cached = lookup(request) { return cached }
         let raster = render(request: request, draw: draw)
         insert(raster, for: request)
@@ -190,7 +219,7 @@ final class TitleRasterer: Sendable {
     /// ~8/33 MiB each; caching 128 of them would blow up to ~1 GiB / ~4 GiB.
     /// Cropping shrinks each cached entry to roughly the text area while leaving
     /// the canvas position intact via a translation on the resulting CIImage.
-    nonisolated private func render(request: TitleRasterRequest, draw: DrawClosure) -> TitleRaster {
+    nonisolated private func render(request: TitleRasterRequest, draw: BoundsDrawClosure) -> TitleRaster {
         let size = request.renderSize
         let width = max(1, Int(size.width.rounded()))
         let height = max(1, Int(size.height.rounded()))
@@ -218,7 +247,7 @@ final class TitleRasterer: Sendable {
         context.saveGState()
         context.translateBy(x: 0, y: CGFloat(height))
         context.scaleBy(x: 1, y: -1)
-        let boundingBox = draw(context, size)
+        let bounds = draw(context, size)
         context.restoreGState()
 
         guard let fullImage = context.makeImage() else {
@@ -226,17 +255,19 @@ final class TitleRasterer: Sendable {
         }
 
         // Degenerate draw → return a clear, canvas-extent CIImage.
-        guard boundingBox.width > 0, boundingBox.height > 0 else {
+        guard bounds.boundingBox.width > 0, bounds.boundingBox.height > 0 else {
             return TitleRaster(image: fallback, boundingBox: .zero)
         }
 
         // Convert the CIImage-coord (y-up) bounding box into a CGImage-coord
         // (y-down) crop rect, clamped to the canvas so a partly-off-canvas box
         // still yields a valid CGImage.
-        let clampedBox = boundingBox.intersection(canvasRect)
+        let clampedBox = bounds.boundingBox.intersection(canvasRect)
         guard !clampedBox.isEmpty else {
             return TitleRaster(image: fallback, boundingBox: .zero)
         }
+        let clampedTextBox = bounds.textBox.intersection(canvasRect)
+        let textBox = clampedTextBox.isEmpty ? clampedBox : clampedTextBox
         let cropRect = CGRect(
             x: clampedBox.minX,
             y: CGFloat(height) - clampedBox.maxY,
@@ -245,7 +276,9 @@ final class TitleRasterer: Sendable {
         guard let cropped = fullImage.cropping(to: cropRect) else {
             // Cropping can fail for degenerate rects; surface the uncropped
             // image rather than dropping the frame entirely.
-            return TitleRaster(image: CIImage(cgImage: fullImage), boundingBox: boundingBox)
+            return TitleRaster(image: CIImage(cgImage: fullImage),
+                               boundingBox: bounds.boundingBox,
+                               textBox: textBox)
         }
 
         // The cropped CIImage has extent (0, 0, w, h); translate so its
@@ -254,6 +287,6 @@ final class TitleRasterer: Sendable {
         let ciImage = CIImage(cgImage: cropped)
             .transformed(by: CGAffineTransform(translationX: clampedBox.minX,
                                                y: clampedBox.minY))
-        return TitleRaster(image: ciImage, boundingBox: boundingBox)
+        return TitleRaster(image: ciImage, boundingBox: bounds.boundingBox, textBox: textBox)
     }
 }

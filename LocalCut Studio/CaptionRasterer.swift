@@ -24,7 +24,7 @@ final class CaptionRasterer: Sendable {
             text: line.text,
             wordHighlightIndex: nil,
             renderSize: renderSize)
-        return rasterer.raster(for: request) { context, size in
+        return rasterer.rasterWithBounds(for: request) { context, size in
             CaptionDrawing.draw(text: line.text, style: style,
                                 size: size, activeWordIndex: nil, words: line.words,
                                 into: context)
@@ -46,7 +46,7 @@ final class CaptionRasterer: Sendable {
             wordHighlightIndex: wordIndex,
             wordsDigest: Self.wordsDigest(line.words),
             renderSize: renderSize)
-        return rasterer.raster(for: request) { context, size in
+        return rasterer.rasterWithBounds(for: request) { context, size in
             CaptionDrawing.draw(text: line.text, style: style,
                                 size: size, activeWordIndex: wordIndex, words: line.words,
                                 into: context)
@@ -82,14 +82,17 @@ nonisolated enum CaptionDrawing {
 
     /// Lays out `text` into a single line using Core Text and draws shadow → pill
     /// → stroke → fill, applying the active-word recolour if `activeWordIndex`
-    /// is non-nil. Returns the bounding rect in canvas (bottom-left origin)
-    /// coordinates. The closure's context has already been y-flipped.
+    /// is non-nil. Returns the full drawn bounds and the glyph/text bounds in
+    /// canvas (bottom-left origin) coordinates. The closure's context has
+    /// already been y-flipped.
     @discardableResult
     static func draw(text: String, style: CaptionStyle, size: CGSize,
                      activeWordIndex: Int?, words: [WordTiming]?,
-                     into context: CGContext) -> CGRect {
+                     into context: CGContext) -> TitleRasterBounds {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return .zero }
+        guard !trimmed.isEmpty else {
+            return TitleRasterBounds(boundingBox: .zero)
+        }
 
         let attributed = attributedString(for: trimmed, style: style,
                                           activeWordIndex: activeWordIndex,
@@ -103,7 +106,9 @@ nonisolated enum CaptionDrawing {
 
         let textWidth = frameSize.width
         let textHeight = frameSize.height
-        guard textWidth > 0, textHeight > 0 else { return .zero }
+        guard textWidth > 0, textHeight > 0 else {
+            return TitleRasterBounds(boundingBox: .zero)
+        }
 
         let originX = (size.width - textWidth) / 2
         let originY = textOriginY(canvasHeight: size.height,
@@ -167,7 +172,10 @@ nonisolated enum CaptionDrawing {
 
         let inset = CGSize(width: CGFloat(-style.pill.paddingX),
                            height: CGFloat(-style.pill.paddingY))
-        return textRect.insetBy(dx: inset.width, dy: inset.height)
+        let fullBounds = textRect.insetBy(dx: inset.width, dy: inset.height)
+        let textEffectsOutset = textOutset(style: style)
+        let textBounds = textRect.insetBy(dx: -textEffectsOutset, dy: -textEffectsOutset)
+        return TitleRasterBounds(boundingBox: fullBounds, textBox: textBounds)
     }
 
     /// Y origin of the text rect inside the canvas, given the line's anchor.
@@ -182,6 +190,14 @@ nonisolated enum CaptionDrawing {
         case .bottom:
             return CGFloat(style.verticalInset)
         }
+    }
+
+    private static func textOutset(style: CaptionStyle) -> CGFloat {
+        let stroke = CGFloat(style.stroke.width)
+        let shadowX = abs(CGFloat(style.shadow.offsetX)) + CGFloat(style.shadow.blur)
+        let shadowY = abs(CGFloat(style.shadow.offsetY)) + CGFloat(style.shadow.blur)
+        let glow = CGFloat(style.glow.radius)
+        return max(stroke, shadowX, shadowY, glow, 0)
     }
 
     /// Builds the `NSAttributedString` for one line. Active-word recolour swaps
@@ -222,24 +238,32 @@ nonisolated enum CaptionDrawing {
         return result
     }
 
-    /// Maps `WordTiming.word` instances onto `NSRange`s in `text`. Naive linear
-    /// scan: starts at 0 and walks forward word-by-word so duplicates resolve to
-    /// the next occurrence after the previous match.
-    private static func wordRange(for words: [WordTiming], index: Int,
-                                  in text: String) -> NSRange? {
+    /// Maps a word timing's active index onto the same-index rendered token in
+    /// `text`, avoiding substring matches inside neighbouring tokens.
+    nonisolated static func wordRange(for words: [WordTiming], index: Int,
+                                      in text: String) -> NSRange? {
         guard index >= 0, index < words.count else { return nil }
-        let ns = text as NSString
-        var cursor = 0
-        for i in 0...index {
-            let word = words[i].word
-            guard !word.isEmpty else { return nil }
-            let searchRange = NSRange(location: cursor, length: ns.length - cursor)
-            let found = ns.range(of: word, options: [], range: searchRange)
-            guard found.location != NSNotFound else { return nil }
-            if i == index { return found }
-            cursor = found.location + found.length
+        let ranges = tokenRanges(in: text)
+        guard index < ranges.count else { return nil }
+        return ranges[index]
+    }
+
+    private static func tokenRanges(in text: String) -> [NSRange] {
+        var ranges: [NSRange] = []
+        var cursor = text.startIndex
+        while cursor < text.endIndex {
+            while cursor < text.endIndex, text[cursor].isWhitespace {
+                text.formIndex(after: &cursor)
+            }
+            let tokenStart = cursor
+            while cursor < text.endIndex, !text[cursor].isWhitespace {
+                text.formIndex(after: &cursor)
+            }
+            if tokenStart < cursor {
+                ranges.append(NSRange(tokenStart..<cursor, in: text))
+            }
         }
-        return nil
+        return ranges
     }
 
     /// Resolves the requested PostScript-named font. `CTFontCreateWithName`

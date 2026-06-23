@@ -76,6 +76,10 @@ rebuild and the feature-title-raster spec keeps disk backing out of scope.
 `activeWordIndex` becomes a thin instance wrapper over a new `static nonisolated
 activeWordIndex(words:at:)`: containment match first, else hold the most-recently-started word, else
 nil before the first word. `static` + pure so it's unit-tested without a compositor instance.
+`CaptionDrawing.wordRange(for:index:in:)` maps the active word index to the same-index rendered token
+instead of substring-searching the text. `TitleRaster` carries a `textBox` alongside the full
+background-inclusive `boundingBox`; typewriter masking hides only unrevealed text pixels so caption
+pills stay visible.
 
 ### Export-queue — `RenderQueue.swift`
 - `removePartialOutput` closure (captures the resolved `outputURL`) called in the three post-encode

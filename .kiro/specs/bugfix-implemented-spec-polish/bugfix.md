@@ -246,6 +246,18 @@ could be left queued because `start()` saw `isRunning == true` and returned.
   cleanup is keyed by a private token and restarts if new queued work arrived during cleanup, while
   `stop()` still suppresses auto-restart.
 
+### U16 — Typewriter pill mask and word-token mapping
+
+The typewriter animation used the full caption raster bounds as its reveal mask, so a background
+pill wiped in with the text instead of remaining visible. Word highlighting also mapped the active
+word index back to text by repeated substring search, which could select a substring inside the next
+token when ASR words and rendered punctuation differed.
+
+- **Fix:** `TitleRaster` now carries both full drawn bounds and text bounds; `EffectCompositor`
+  masks only the unrevealed text box while keeping the rest of the raster visible. `CaptionDrawing`
+  maps active word indices to rendered whitespace-delimited token ranges, with tests for both
+  token mapping and mask geometry.
+
 ---
 
 ## Correctness
@@ -340,5 +352,4 @@ change to a tuned look), or large enough to deserve its own spec.
   progress.
 
 **Smaller hygiene:**
-- Typewriter mask excludes the pill; word-range by token index instead of substring scan; golden
-  snapshot tests (skin-smooth T3.1, caption presets T5.1).
+- Golden snapshot tests (skin-smooth T3.1, caption presets T5.1).

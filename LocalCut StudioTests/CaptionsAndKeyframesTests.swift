@@ -1,6 +1,7 @@
 import Testing
 import AVFoundation
 import CoreGraphics
+import CoreImage
 @testable import LocalCut_Studio
 
 // MARK: - Keyframes (feature-keyframes V1–V4)
@@ -924,10 +925,53 @@ func activeWordIndexHolds() {
     #expect(idx(9.0) == 1)     // tail after last word → hold last
 }
 
+@Test("CaptionDrawing word range maps by token index, not substring scan")
+func captionWordRangeUsesTokenIndex() throws {
+    let text = "go going gone"
+    let words = [
+        wordTiming(0, 1, "go"),
+        wordTiming(1, 2, "go"),
+        wordTiming(2, 3, "go"),
+    ]
+    let ns = text as NSString
+
+    let range = try #require(CaptionDrawing.wordRange(for: words, index: 1, in: text))
+    #expect(ns.substring(with: range) == "going")
+}
+
+@Test("Typewriter mask hides unrevealed text without hiding the pill area")
+func typewriterMaskExcludesPillArea() {
+    let imageExtent = CGRect(x: 0, y: 0, width: 100, height: 40)
+    let textBox = CGRect(x: 20, y: 10, width: 60, height: 20)
+    let mask = EffectCompositor.typewriterMask(imageExtent: imageExtent,
+                                               textBox: textBox,
+                                               progress: 0.5)
+
+    #expect(redByte(mask, at: CGPoint(x: 10, y: 20)) > 240, "pill area before text should stay visible")
+    #expect(redByte(mask, at: CGPoint(x: 30, y: 20)) > 240, "revealed text should stay visible")
+    #expect(redByte(mask, at: CGPoint(x: 70, y: 20)) < 16, "unrevealed text should be hidden")
+    #expect(redByte(mask, at: CGPoint(x: 90, y: 20)) > 240, "pill area after text should stay visible")
+}
+
 @Test("activeWordIndex returns nil when there are no word timings")
 func activeWordIndexNoWords() {
     #expect(EffectCompositor.activeWordIndex(words: nil, at: .zero) == nil)
     #expect(EffectCompositor.activeWordIndex(words: [], at: .zero) == nil)
+}
+
+private func redByte(_ image: CIImage, at point: CGPoint) -> UInt8 {
+    let context = CIContext(options: [.useSoftwareRenderer: true])
+    let colourSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+    var pixel = [UInt8](repeating: 0, count: 4)
+    pixel.withUnsafeMutableBytes { bytes in
+        context.render(image,
+                       toBitmap: bytes.baseAddress!,
+                       rowBytes: 4,
+                       bounds: CGRect(x: point.x, y: point.y, width: 1, height: 1),
+                       format: .RGBA8,
+                       colorSpace: colourSpace)
+    }
+    return pixel[0]
 }
 
 // MARK: - Caption track rename (feature-caption-tracks R2.6)

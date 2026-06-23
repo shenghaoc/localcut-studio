@@ -353,7 +353,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         if item.style.enterAnimation == .typewriter && animation.typewriterProgress < 1 {
             image = typewriterMasked(image: image,
-                                     box: raster.boundingBox,
+                                     textBox: raster.textBox,
                                      progress: animation.typewriterProgress)
         }
 
@@ -382,25 +382,33 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         return image.cropped(to: CGRect(origin: .zero, size: renderSize))
     }
 
-    /// CIImage gradient mask that reveals progressively from the left edge of the
-    /// text bounding box across to the right, giving the typewriter effect
-    /// without re-rasterising for each visible-length prefix. The mask is WHITE
-    /// (not black) over the reveal area — `CIBlendWithMask` reads the mask as
-    /// grayscale, so white = use input (visible) and clear = use background
-    /// (hidden); an opaque-black mask would leave the caption invisible across
-    /// the entire enter window.
-    nonisolated private func typewriterMasked(image: CIImage, box: CGRect, progress: Float) -> CIImage {
-        let progress = max(0, min(1, CGFloat(progress)))
-        let mask = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
-            .cropped(to: CGRect(x: box.minX,
-                                y: box.minY,
-                                width: box.width * progress,
-                                height: box.height))
+    /// CIImage mask that reveals progressively from the left edge of the text
+    /// box while keeping the surrounding raster (notably the caption pill)
+    /// visible. `CIBlendWithMask` reads white as input-visible and black as
+    /// background-visible.
+    nonisolated private func typewriterMasked(image: CIImage, textBox: CGRect, progress: Float) -> CIImage {
+        let mask = Self.typewriterMask(imageExtent: image.extent, textBox: textBox, progress: progress)
         let filter = CIFilter.blendWithMask()
         filter.inputImage = image
         filter.backgroundImage = CIImage(color: .clear).cropped(to: image.extent)
         filter.maskImage = mask
         return filter.outputImage ?? image
+    }
+
+    nonisolated static func typewriterMask(imageExtent: CGRect, textBox: CGRect, progress: Float) -> CIImage {
+        let progress = max(0, min(1, CGFloat(progress)))
+        let visibleWidth = textBox.width * progress
+        let hiddenText = CGRect(x: textBox.minX + visibleWidth,
+                                y: textBox.minY,
+                                width: textBox.width - visibleWidth,
+                                height: textBox.height)
+            .intersection(imageExtent)
+        let visible = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
+            .cropped(to: imageExtent)
+        guard !hiddenText.isEmpty else { return visible }
+        let hidden = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1))
+            .cropped(to: hiddenText)
+        return hidden.composited(over: visible)
     }
 
     /// Reconstructs a minimal `CaptionLine` proxy for the rasterer cache key. The
