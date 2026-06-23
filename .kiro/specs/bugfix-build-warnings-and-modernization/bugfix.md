@@ -28,10 +28,10 @@ with `CIColorKernel(source:)`, which warns:
 
 > `'init(source:)' was deprecated in macOS 10.14: Core Image Kernel Language API deprecated.`
 
-The CIKL (GLSL-dialect) path is the deprecated one. The supported replacement is a
-Metal Shading Language kernel loaded with `CIColorKernel(functionName:fromMetalLibraryData:)`
-— precompiled, so it initialises faster and gets compile-time diagnostics instead of
-runtime `nil`.
+The CIKL (GLSL-dialect) path is the deprecated one. The shipped replacement is Metal
+Shading Language source compiled once at runtime with `CIKernel.kernels(withMetalString:)`.
+That keeps the algorithm on the supported MSL path while avoiding the precompiled
+`.ci.metal` build-flag problem described below.
 
 - **Fix (as shipped)**: Port both kernels verbatim from CIKL to **`[[ stitchable ]]` Metal
   Shading Language**, compiled once at runtime via `CIKernel.kernels(withMetalString:)`,
@@ -141,18 +141,18 @@ re-derived as `j` after the dedup `removeAll`, so `i` is dead.
 
 ### R1 — Unify inspector "labeled slider row" helpers
 
-Three near-identical slider-row builders exist with the same VStack/caption/monospaced/
-accessibility shape:
+Several inspector slider layouts had converged on the same VStack/caption/monospaced/
+accessibility shape, but implemented it independently:
 
-- `AudioInspectorView.swift:185` — `fadeRow(label:seconds:set:)`
-- `InspectorView.swift:174` — `colourSlider(label:accessibilityLabel:value:range:step:display:)`
-- `InspectorView.swift:267` — `beautySlider(label:value:range:step:display:)`
+- `InspectorView.swift` — clip opacity, transition duration, colour grade, and beauty sliders
+- `AudioInspectorView.swift` — track gain and clip fade sliders
 
-- **Fix**: Extract one shared `LabeledSliderRow` view (or shared modifier) covering the
-  common structure — caption row, `monospacedDigit`, `.accessibilityLabel`/`.accessibilityValue`,
-  the `.accessibilityHidden(true)` on the redundant visual label (the pattern Palette's
-  journal mandates). Adopt it at all three sites with their existing labels/formats intact.
-  (The fade rows feed it a `Binding<Double>` built inline per C2.)
+- **Fix (as shipped)**: Extract one shared `LabeledSliderRow` view covering the common
+  structure — caption row, `monospacedDigit`, `.accessibilityLabel`/`.accessibilityValue`,
+  and `.accessibilityHidden(true)` on redundant inline visual labels. Adopt it across the
+  inspector with the existing labels/formats intact. The `.inline` caption applies
+  `.monospacedDigit()` directly to the caption text, addressing Claude's P2 jitter comment;
+  the fade rows feed it a `Binding<Double>` built inline per C2.
 
 ### R2 — Collapse colour-grade `CIFilter` boilerplate
 

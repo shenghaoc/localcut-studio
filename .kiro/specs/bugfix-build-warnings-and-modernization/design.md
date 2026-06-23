@@ -50,18 +50,21 @@ annotations on already-safe code.
 
 - **C1**: drop the now-redundant `(unsafe)`; the type's `@unchecked Sendable` conformance
   carries the proof.
-- **C2**: propagate `@Sendable` onto the `set` parameter — it flows straight into a
-  `@Sendable` setter.
+- **C2**: build the fade `Binding<Double>` inline in a `fadeBinding(_:)` helper (matching the
+  `masterGainBinding` shape) so the setter's main-actor isolation is inferred. Do not forward
+  an annotated closure; the interim `@MainActor` closure form crashed Swift 6.3.2 on CI.
 - **C3**: the request block runs only on the serial `pumpQueue` with sole ownership of the
   input/output, so a documented `@unchecked Sendable` confinement (sibling to the file's
   existing `ResumeBox`) is the correct, minimal expression of that invariant.
 
 ### Consolidation safety (R1–R3)
 
-Extractions only. R1 unifies three slider helpers behind one view, preserving each call
-site's labels, value formats, and the `.accessibilityHidden(true)` / `.accessibilityValue`
-pairing the accessibility journal requires — and absorbs C2 in one place. R2 and R3 remove
-plumbing while leaving the per-call parameters and lifetimes identical. R4 is **not** done.
+Extractions only. R1 unifies the repeated inspector slider layouts behind one view: clip
+opacity, transition duration, colour grade, beauty, track gain, and clip fades. It preserves
+each call site's labels, value formats, and `.accessibilityHidden(true)` /
+`.accessibilityValue` pairing; `.inline` captions carry `.monospacedDigit()` so numeric
+values do not jitter while scrubbing. R2 removes colour-grade filter plumbing while leaving
+the per-call parameters identical. R3 and R4 are **not** done.
 
 ### Test idioms (T1–T3)
 

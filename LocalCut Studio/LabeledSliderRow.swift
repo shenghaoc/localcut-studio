@@ -12,11 +12,10 @@ enum SliderCaptionStyle {
 
 /// A labelled slider row shared across the inspector sections.
 ///
-/// Consolidates the five copy-pasted slider builders (colour grade, beauty,
-/// transition duration, track gain, clip fades) behind one view, so the caption
-/// formatting, `monospacedDigit`, and the accessibility-label/value pairing live
-/// in exactly one place — the pattern Palette's accessibility journal requires
-/// for custom-layout sliders (hide the redundant visual label, voice the slider).
+/// Consolidates the repeated inspector slider layouts (clip opacity, transition
+/// duration, colour grade, beauty, track gain, clip fades) behind one view, so
+/// the caption formatting, `monospacedDigit`, and the accessibility-label/value
+/// pairing live in exactly one place.
 ///
 /// Generic over the slider's floating-point value so both `Float` (colour /
 /// beauty) and `Double` (audio / transition) bindings adopt it unchanged.

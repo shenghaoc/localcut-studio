@@ -46,11 +46,12 @@
 
 - [x] **R1** New `LabeledSliderRow` view (generic over `BinaryFloatingPoint`, two caption
   styles). Adopted in colour grade (×5), beauty (×3), transition duration, track gain,
-  clip fades, and **clip opacity** (the last added in the post-rebase dedup sweep); removed
-  `colourSlider`/`beautySlider`/the bespoke `fadeRow`/opacity layouts. Labels, value formats,
-  and accessibility pairing preserved; `.inline` caption carries `.monospacedDigit()` (Claude
-  review P2). Master-gain row left as-is (its caption is intentionally voiced) and the
-  timeline-zoom slider is a bare icon-flanked control with no caption — neither fits the row.
+  clip fades, and **clip opacity** (the last added in the post-rebase dedup sweep); replaced
+  `colourSlider`/`beautySlider` and the bespoke opacity/fade slider layouts with shared row
+  calls. Labels, value formats, and accessibility pairing preserved; `.inline` caption carries
+  `.monospacedDigit()` (Claude review P2). Master-gain row left as-is (its caption is
+  intentionally voiced) and the timeline-zoom slider is a bare icon-flanked control with no
+  caption — neither fits the row.
 - [x] **R2** `EffectCompositor` colour grade — new `CIImage.applying(when:_:)` helper
   collapses the three repeated `CIFilter` plumbing blocks into a chain.
 - [~] **R3** *(Deferred.)* Security-scoped `start` / `defer`-`stop` is a 2-line idiom around
@@ -84,5 +85,5 @@
   individually + the render-path test — no count regression).
 - [x] **V3** Skin-smoothing render path verified end-to-end by `skinSmoothRenderPathAltersPixels`
   (compiled kernels load and alter pixels).
-- [ ] **V4** Manual VoiceOver pass on audio/colour/beauty sliders after R1 (recommended
-  before release; not blocking the diff).
+- [~] **V4** Manual VoiceOver pass on audio/colour/beauty sliders after R1 remains
+  release-QA follow-up; not performed in this warning-cleanup PR and not blocking this diff.
