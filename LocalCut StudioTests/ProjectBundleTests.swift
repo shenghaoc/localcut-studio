@@ -102,6 +102,25 @@ struct ProjectBundleTests {
         #expect(again.document.captionTracks[0].id == captionTrackID)
     }
 
+    @Test("ProjectBundle.write stages metadata and leaves no staged files behind")
+    func bundleMetadataStagingCleansUp() throws {
+        let tmp = try makeTempDirectory("staged-metadata")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Sample.lcbundle")
+        let document = sampleDocument(mediaID: UUID(),
+                                      bundleRelativePath: nil,
+                                      captionTrackID: UUID())
+
+        _ = try ProjectBundle.write(
+            projectJSON: document.encoded(), to: bundleURL,
+            bundledMedia: [], previousFingerprints: FingerprintIndex())
+
+        let names = try FileManager.default.contentsOfDirectory(atPath: bundleURL.path)
+        #expect(names.contains(ProjectBundleLayout.projectJSON))
+        #expect(names.contains(ProjectBundleLayout.fingerprintsJSON))
+        #expect(!names.contains { $0.contains(".staged-") })
+    }
+
     // MARK: - T6.2 — fingerprint detects an external edit
 
     @Test("Fingerprint detects an external edit on a tracked asset")

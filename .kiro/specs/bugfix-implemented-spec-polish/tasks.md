@@ -64,6 +64,7 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [ ] Export-time offline meter animation through the Phase 36 reader/writer PCM path (audio-master-bus R3.3)
 - [x] Render-cache + title-raster O(1) LRU; render-cache disk spill (render-cache R2.3)
 - [x] Scopes: revision-gated redraw; single-pass histogram; per-pixel vectorscope + colour targets
-- [ ] Document model: `ReferenceFileDocument`/Open Recent; async window-close save; staged bundle swap
+- [x] Project bundle metadata staging (`fingerprints.json` + `project.json`)
+- [ ] Document model: `ReferenceFileDocument`/Open Recent; async window-close save
 - [ ] Bundle "Don't copy" import toggle; queue stale-bookmark refresh; `isRunning` TOCTOU
 - [ ] Typewriter mask excludes pill; word-range by token index; golden snapshot tests (T3.1 / T5.1)

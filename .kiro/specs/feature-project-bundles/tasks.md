@@ -16,7 +16,7 @@
 ## Bundle I/O
 
 - [x] **T3.1** Add `ProjectBundle.read(url:)`: opens the bundle, decodes `project.json`, reads `fingerprints.json` (missing OK), returns the document + the parsed index for the caller to verify on-disk asset state.
-- [x] **T3.2** Add `ProjectBundle.write(_:to:bundledMedia:previousFingerprints:)`: creates the bundle directory, copies bundled media into `assets/<id>.<ext>` skipping copies that already match the stored fingerprint, writes `fingerprints.json`, writes `project.json` atomically. Returns the updated fingerprint index.
+- [x] **T3.2** Add `ProjectBundle.write(_:to:bundledMedia:previousFingerprints:)`: creates the bundle directory, copies bundled media into `assets/<id>.<ext>` skipping copies that already match the stored fingerprint, stages `fingerprints.json` + `project.json`, then promotes them after both staged writes succeed. Returns the updated fingerprint index.
 
 ## Document lifecycle
 
@@ -37,6 +37,7 @@
 - [x] **T6.2** `fingerprintDetectsExternalEdit` — fingerprint a file, modify it on disk, re-fingerprint, and assert the digest changed.
 - [x] **T6.3** `lcstudioConvertsToBundlePreservingEverything` — build a project with clips, captions, presets, effects, and a transition; convert to bundle; reopen the bundle; assert every field matches; assert the original `.lcstudio` content is byte-identical to before; assert undo-stack depth is unchanged by Convert.
 - [x] **T6.4** `bundleMixedCopiedAndBookmarkedMedia` — round-trip a project whose media set is part bundled (with `bundleRelativePath`) and part external-only (with `bookmark`); assert each MediaRef takes the correct path on load.
+- [x] **T6.5** `bundleMetadataStagingCleansUp` — bundle save writes both metadata files and leaves no `.staged-*` metadata files behind.
 
 ## Documentation
 

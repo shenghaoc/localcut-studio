@@ -54,8 +54,8 @@ Full Finder double-click integration on a fresh install still needs an Info.plis
       - **Source unreachable, destination intact**: if the source can't be read but the destination still matches its stored fingerprint, keep the bundled copy. Covers the "user unplugged the source drive" case without losing the project.
       - Otherwise copy through a sibling **temp file** (`<dest>.tmp-<uuid>`) and atomically replace the destination via `FileManager.replaceItemAt(_:withItemAt:)`. A mid-flight failure leaves the previous destination intact rather than partially-written or empty.
       Same-volume copies still go through APFS clonefile via `FileManager.copyItem`.
-   4. Re-compute fingerprints over every bundled asset and rewrite `fingerprints.json`.
-   5. Write `project.json` atomically. The `bundleFormat` field is set to `"1"`; `schemaVersion` is bumped to 3 on first bundle save. `MediaRef.bundleRelativePath` is filled in for every bundled asset.
+   4. Re-compute fingerprints over every bundled asset.
+   5. Stage both metadata files as hidden sibling files (`.fingerprints.json.staged-<uuid>` and `.project.json.staged-<uuid>`), then promote `fingerprints.json` followed by `project.json` only after both staged writes have succeeded. The `bundleFormat` field is set to `"1"`; `schemaVersion` is bumped to 3 on first bundle save. `MediaRef.bundleRelativePath` is filled in for every bundled asset.
 3. After a successful bundle write, the runtime **re-points** every bundled `MediaItem` at its bundled copy (`MediaItem.repoint(to: bundleURL/<bundleRelativePath>)`) and clears its bookmark, so subsequent preview, export, or save operations read from the self-contained bundle rather than the original external file.
 4. **Single-file save** stays the existing path (atomic JSON write); `schemaVersion` stays at 2 for backwards-readability.
 
@@ -158,7 +158,7 @@ Lenient decoding is the existing pattern (`decodeIfPresent` everywhere); no beha
 
 - **Window-close synchronous save can block on bundle media IO.** `EditorModel.writeSynchronously(to:)` is called from `windowShouldClose` and runs on the main actor. For a `.lcstudio` it is small JSON; for a `.lcbundle` it goes through `ProjectBundle.write`, which hashes and may copy every bundled asset. A multi-GB bundle therefore blocks the UI during the close prompt. The fast path skips re-copies when source matches destination (the common case for a reopen-edit-close cycle), so this is only painful on first save / save-as / convert that happen to coincide with a close prompt. The proper fix — an async close flow — is tracked as a follow-up; replacing the synchronous prompt with an async sheet is outside this spec's scope. The bundle branch does capture and restore `bundleRelativePath` on failure (matching the transactional-safety pattern in `writeBundle` and `convertToBundle`), so a failed close-save leaves the in-memory model consistent.
 - **Fingerprint verification on open is performed on every open.** A large project with many assets pays a full SHA-256 pass on open; the verification IS off the main actor but the open progress isn't surfaced in the UI yet.
-- **`fingerprints.json` is not staged before swap.** The fingerprints file and `project.json` are written atomically individually but not as a unit; a power loss between the two writes could leave fingerprints ahead of the project metadata. The bundle structure is still openable (lenient decode), but a follow-up could stage all writes in a temp neighbour directory and swap.
+- **Metadata promotion is not a cross-file transaction.** `fingerprints.json` and `project.json` are both staged before promotion, so encode/write failures leave previous metadata untouched. A power loss between the final two renames could still leave old project metadata with newer fingerprints; the bundle remains openable because fingerprint decode is lenient and the next save regenerates the index.
 
 ## Non-goals
 

@@ -142,6 +142,12 @@ old 32 histogram filter readbacks plus 8×8 vectorscope proxy.
 radius: 10 source pixels at strength 1.0 on a 1080p source frame, scaled linearly by source height.
 Preview and export share this helper through the existing skin-smooth compositor path.
 
+### `ProjectBundle.swift`
+Bundle metadata writes stage both `fingerprints.json` and `project.json` to hidden sibling files
+before promoting either destination. This prevents encode/write failures from updating one metadata
+file while leaving the other untouched; the project-bundles spec still documents the remaining
+power-loss window between final file promotions.
+
 ### `DiagnosticsView.swift`
 `capabilitiesSection` reads `Capabilities.current` and renders a `capabilityRow` per feature with
 `tierLabel`/`tierTint` (view-local, keeping `Capabilities.swift` SwiftUI-free) and the verdict

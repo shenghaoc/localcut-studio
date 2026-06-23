@@ -213,6 +213,17 @@ as much image detail.
   height as the reference (`strength == 1` → 10 px) and scales linearly by source-frame height.
   Preview and export stay aligned because both call the same compositor helper.
 
+### U13 — Bundle metadata was not staged as a pair
+
+feature-project-bundles wrote `fingerprints.json` and `project.json` directly with separate atomic
+writes. If the second metadata write failed after the first succeeded, the bundle could be left with
+new fingerprints and old project metadata.
+
+- **Fix:** `ProjectBundle.write` now stages both metadata payloads into hidden sibling files first
+  and promotes them only after both staged writes have succeeded. A regression test asserts
+  successful saves leave no `.staged-*` metadata files behind. This is still not a cross-file
+  filesystem transaction under power loss, so the project-bundles spec keeps that edge documented.
+
 ---
 
 ## Correctness
@@ -303,8 +314,8 @@ change to a tuned look), or large enough to deserve its own spec.
 
 **Performance / toolchain:**
 - **Document model:** evaluate `ReferenceFileDocument`/`DocumentGroup` (Open Recent, async save);
-  async window-close save (multi-GB bundle IO currently blocks the close prompt); staged
-  `fingerprints.json`+`project.json` swap; bundle-open verify progress.
+  async window-close save (multi-GB bundle IO currently blocks the close prompt); bundle-open verify
+  progress.
 
 **Smaller hygiene:**
 - Bundle "Don't copy" import toggle (`wantsBundling` is dead in the UI); stale-bookmark refresh on
