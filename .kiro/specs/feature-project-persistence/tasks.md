@@ -11,8 +11,8 @@
 
 ## Lifecycle
 
-- [x] **T2.1** Choose `DocumentGroup` vs. custom controller; wire New/Open/Save/Save As + shortcuts.
-- [x] **T2.2** Dirty tracking, save-on-close prompt, window title reflects name + edited state.
+- [x] **T2.1** Choose custom controller over `DocumentGroup`/`ReferenceFileDocument`; wire New/Open/Open Recent/Save/Save As + shortcuts.
+- [x] **T2.2** Dirty tracking, async save-on-close prompt, window title reflects name + edited state.
 - [x] **T2.3** Atomic save.
 
 ## Undo/redo

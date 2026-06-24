@@ -558,6 +558,10 @@ nonisolated struct Keyframed<T: Interpolatable>: Hashable, Codable, Sendable {
         keyframes.removeAll { $0.id == id }
     }
 
+    mutating func removeKeyframe(at time: CMTime) {
+        keyframes.removeAll { $0.time == time }
+    }
+
     mutating func updateKeyframe(id: UUID, time: CMTime? = nil, value: T? = nil) {
         guard keyframes.contains(where: { $0.id == id }) else { return }
         // If a new time is set and another keyframe already sits exactly there,
@@ -788,6 +792,154 @@ nonisolated struct CaptionStyle: Hashable, Codable, Sendable {
     }
 }
 
+/// The line-local animated caption-style parameters from Phase 30 R2.3.
+/// The base `CaptionStyle` still carries static preset/default values; this
+/// bundle layers keyframed overrides on top for the subset that needs per-line
+/// animation.
+nonisolated struct CaptionStyleKeyframeValues: Hashable, Sendable {
+    var fill: RGBAColour
+    var scale: Float
+    var offsetX: Float
+    var offsetY: Float
+    var opacity: Float
+    var letterSpacing: Float
+
+    init(fill: RGBAColour = .white,
+         scale: Float = 1,
+         offsetX: Float = 0,
+         offsetY: Float = 0,
+         opacity: Float = 1,
+         letterSpacing: Float = 0) {
+        self.fill = fill
+        self.scale = scale
+        self.offsetX = offsetX
+        self.offsetY = offsetY
+        self.opacity = opacity
+        self.letterSpacing = letterSpacing
+        clamp()
+    }
+
+    init(baseStyle: CaptionStyle) {
+        self.init(fill: baseStyle.fill,
+                  scale: 1,
+                  offsetX: 0,
+                  offsetY: 0,
+                  opacity: 1,
+                  letterSpacing: baseStyle.letterSpacing)
+    }
+
+    mutating func clamp() {
+        fill.red = max(0, min(1, fill.red))
+        fill.green = max(0, min(1, fill.green))
+        fill.blue = max(0, min(1, fill.blue))
+        fill.alpha = max(0, min(1, fill.alpha))
+        scale = max(0.1, min(4, scale))
+        offsetX = max(-4096, min(4096, offsetX))
+        offsetY = max(-4096, min(4096, offsetY))
+        opacity = max(0, min(1, opacity))
+        letterSpacing = max(-32, min(64, letterSpacing))
+    }
+
+    var clamped: CaptionStyleKeyframeValues {
+        var copy = self
+        copy.clamp()
+        return copy
+    }
+}
+
+nonisolated struct CaptionStyleKeyframes: Hashable, Codable, Sendable {
+    var fill: Keyframed<RGBAColour>
+    var scale: Keyframed<Float>
+    var offsetX: Keyframed<Float>
+    var offsetY: Keyframed<Float>
+    var opacity: Keyframed<Float>
+    var letterSpacing: Keyframed<Float>
+
+    init(baseStyle: CaptionStyle = .identity) {
+        let values = CaptionStyleKeyframeValues(baseStyle: baseStyle)
+        self.init(defaultValues: values)
+    }
+
+    init(defaultValues: CaptionStyleKeyframeValues) {
+        let values = defaultValues.clamped
+        fill = Keyframed(defaultValue: values.fill)
+        scale = Keyframed(defaultValue: values.scale)
+        offsetX = Keyframed(defaultValue: values.offsetX)
+        offsetY = Keyframed(defaultValue: values.offsetY)
+        opacity = Keyframed(defaultValue: values.opacity)
+        letterSpacing = Keyframed(defaultValue: values.letterSpacing)
+    }
+
+    var isEmpty: Bool {
+        fill.keyframes.isEmpty
+            && scale.keyframes.isEmpty
+            && offsetX.keyframes.isEmpty
+            && offsetY.keyframes.isEmpty
+            && opacity.keyframes.isEmpty
+            && letterSpacing.keyframes.isEmpty
+    }
+
+    var keyframeCount: Int { allKeyframeTimes.count }
+
+    var allKeyframeTimes: [CMTime] {
+        var times = Set<CMTime>()
+        for time in fill.keyframes.map(\.time)
+            + scale.keyframes.map(\.time)
+            + offsetX.keyframes.map(\.time)
+            + offsetY.keyframes.map(\.time)
+            + opacity.keyframes.map(\.time)
+            + letterSpacing.keyframes.map(\.time) {
+            times.insert(time)
+        }
+        return Array(times).sorted()
+    }
+
+    func hasKeyframe(at time: CMTime) -> Bool {
+        allKeyframeTimes.contains(time)
+    }
+
+    func values(at time: CMTime) -> CaptionStyleKeyframeValues {
+        CaptionStyleKeyframeValues(
+            fill: fill.value(at: time),
+            scale: scale.value(at: time),
+            offsetX: offsetX.value(at: time),
+            offsetY: offsetY.value(at: time),
+            opacity: opacity.value(at: time),
+            letterSpacing: letterSpacing.value(at: time))
+    }
+
+    /// Returns the keyframed properties consumed by text rasterization. Scale,
+    /// offsets, and opacity stay outside the style because the compositor applies
+    /// them as post-raster image transforms.
+    func rasterStyle(base: CaptionStyle, at time: CMTime) -> CaptionStyle {
+        let values = values(at: time)
+        var style = base
+        style.fill = values.fill
+        style.letterSpacing = values.letterSpacing
+        return style
+    }
+
+    mutating func addOrUpdateKeyframes(at time: CMTime,
+                                       values rawValues: CaptionStyleKeyframeValues) {
+        let values = rawValues.clamped
+        fill.addKeyframe(at: time, value: values.fill)
+        scale.addKeyframe(at: time, value: values.scale)
+        offsetX.addKeyframe(at: time, value: values.offsetX)
+        offsetY.addKeyframe(at: time, value: values.offsetY)
+        opacity.addKeyframe(at: time, value: values.opacity)
+        letterSpacing.addKeyframe(at: time, value: values.letterSpacing)
+    }
+
+    mutating func removeKeyframes(at time: CMTime) {
+        fill.removeKeyframe(at: time)
+        scale.removeKeyframe(at: time)
+        offsetX.removeKeyframe(at: time)
+        offsetY.removeKeyframe(at: time)
+        opacity.removeKeyframe(at: time)
+        letterSpacing.removeKeyframe(at: time)
+    }
+}
+
 // MARK: - Caption Tracks
 
 /// A single word inside a caption line, with its own time range for karaoke-style
@@ -842,21 +994,25 @@ nonisolated struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
     var text: String
     var words: [WordTiming]?
     var style: CaptionStyle?
+    var styleKeyframes: CaptionStyleKeyframes?
 
     init(id: UUID = UUID(),
          range: CMTimeRange,
          text: String,
          words: [WordTiming]? = nil,
-         style: CaptionStyle? = nil) {
+         style: CaptionStyle? = nil,
+         styleKeyframes: CaptionStyleKeyframes? = nil) {
         self.id = id
         self.range = range
         self.text = text
         self.words = words
         self.style = style
+        self.styleKeyframes = styleKeyframes
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, startValue, startScale, durationValue, durationScale, text, words, style
+        case id, startValue, startScale, durationValue, durationScale, text,
+             words, style, styleKeyframes
     }
 
     init(from decoder: any Decoder) throws {
@@ -874,6 +1030,7 @@ nonisolated struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
         text = try c.decode(String.self, forKey: .text)
         words = try c.decodeIfPresent([WordTiming].self, forKey: .words)
         style = try c.decodeIfPresent(CaptionStyle.self, forKey: .style)
+        styleKeyframes = try c.decodeIfPresent(CaptionStyleKeyframes.self, forKey: .styleKeyframes)
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -888,6 +1045,7 @@ nonisolated struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
         try c.encode(text, forKey: .text)
         try c.encodeIfPresent(words, forKey: .words)
         try c.encodeIfPresent(style, forKey: .style)
+        try c.encodeIfPresent(styleKeyframes, forKey: .styleKeyframes)
     }
 
     /// Latest end-time of either the line or any of its words. Used to extend

@@ -141,8 +141,128 @@ struct CaptionsInspectorView: View {
                     model.updateCaptionLine(updated, in: track.id)
                 }), axis: .vertical)
                 .lineLimit(1...3)
+
+            styleKeyframeEditor(line, in: track)
         }
         .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func styleKeyframeEditor(_ line: CaptionLine, in track: CaptionTrack) -> some View {
+        let localTime = model.captionStyleLocalPlayheadTime(line.id, in: track.id)
+        let styleValues = model.captionStyleKeyframeValues(line.id, in: track.id)
+        DisclosureGroup {
+            HStack {
+                Text(localTime.map { "At \(TimeFormatting.timecode($0.seconds))" } ?? "Move playhead over this line")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(model.captionStyleKeyframeCount(line.id, in: track.id)) keyframe(s)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ColorPicker("Fill", selection: captionStyleFillBinding(for: line, in: track),
+                        supportsOpacity: true)
+                .disabled(localTime == nil)
+                .accessibilityLabel("Animated caption fill colour")
+
+            LabeledSliderRow(
+                label: "Scale",
+                display: String(format: "%.2fx", styleValues.scale),
+                value: captionStyleFloatBinding(\.scale, for: line, in: track),
+                range: 0.1...4,
+                step: 0.05,
+                onEditingChanged: { editing in if !editing { model.commitCoalescedUndo() } })
+                .disabled(localTime == nil)
+
+            LabeledSliderRow(
+                label: "X Offset",
+                display: String(format: "%+.0f px", styleValues.offsetX),
+                value: captionStyleFloatBinding(\.offsetX, for: line, in: track),
+                range: -960...960,
+                step: 1,
+                onEditingChanged: { editing in if !editing { model.commitCoalescedUndo() } })
+                .disabled(localTime == nil)
+
+            LabeledSliderRow(
+                label: "Y Offset",
+                display: String(format: "%+.0f px", styleValues.offsetY),
+                value: captionStyleFloatBinding(\.offsetY, for: line, in: track),
+                range: -540...540,
+                step: 1,
+                onEditingChanged: { editing in if !editing { model.commitCoalescedUndo() } })
+                .disabled(localTime == nil)
+
+            LabeledSliderRow(
+                label: "Opacity",
+                display: "\(Int(styleValues.opacity * 100))%",
+                value: captionStyleFloatBinding(\.opacity, for: line, in: track),
+                range: 0...1,
+                step: 0.01,
+                onEditingChanged: { editing in if !editing { model.commitCoalescedUndo() } })
+                .disabled(localTime == nil)
+
+            LabeledSliderRow(
+                label: "Letter Spacing",
+                display: String(format: "%+.1f px", styleValues.letterSpacing),
+                value: captionStyleFloatBinding(\.letterSpacing, for: line, in: track),
+                range: -32...64,
+                step: 0.5,
+                onEditingChanged: { editing in if !editing { model.commitCoalescedUndo() } })
+                .disabled(localTime == nil)
+
+            HStack {
+                Button {
+                    model.seekToPreviousCaptionStyleKeyframe(line.id, in: track.id)
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Previous caption style keyframe")
+                .accessibilityLabel("Previous caption style keyframe")
+                .disabled(localTime == nil)
+
+                Button {
+                    model.setCaptionStyleKeyframeValues(
+                        styleValues,
+                        lineID: line.id, in: track.id, coalesced: false)
+                } label: {
+                    Label(model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id) ? "Update" : "Add",
+                          systemImage: "diamond.fill")
+                }
+                .disabled(localTime == nil)
+
+                Button {
+                    model.removeCaptionStyleKeyframeAtPlayhead(line.id, in: track.id)
+                } label: {
+                    Image(systemName: "minus.diamond")
+                }
+                .help("Remove caption style keyframe")
+                .accessibilityLabel("Remove caption style keyframe")
+                .disabled(!model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id))
+
+                Button {
+                    model.seekToNextCaptionStyleKeyframe(line.id, in: track.id)
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .help("Next caption style keyframe")
+                .accessibilityLabel("Next caption style keyframe")
+                .disabled(localTime == nil)
+
+                Spacer()
+
+                Button("Clear") {
+                    model.clearCaptionStyleKeyframes(line.id, in: track.id)
+                }
+                .disabled(model.captionStyleKeyframeCount(line.id, in: track.id) == 0)
+            }
+            .buttonStyle(.borderless)
+        } label: {
+            Text("Animated Style")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func compactSecondsField(_ label: String,
@@ -187,6 +307,45 @@ struct CaptionsInspectorView: View {
     private func captionTime(_ seconds: Double) -> CMTime {
         let finite = seconds.isFinite ? seconds : 0
         return CMTime(seconds: finite, preferredTimescale: 600)
+    }
+
+    private func captionStyleFloatBinding(
+        _ keyPath: WritableKeyPath<CaptionStyleKeyframeValues, Float>,
+        for line: CaptionLine,
+        in track: CaptionTrack
+    ) -> Binding<Float> {
+        Binding(
+            get: { model.captionStyleKeyframeValues(line.id, in: track.id)[keyPath: keyPath] },
+            set: { value in
+                var values = model.captionStyleKeyframeValues(line.id, in: track.id)
+                values[keyPath: keyPath] = value
+                model.setCaptionStyleKeyframeValues(values, lineID: line.id, in: track.id)
+            })
+    }
+
+    private func captionStyleFillBinding(for line: CaptionLine,
+                                         in track: CaptionTrack) -> Binding<Color> {
+        Binding(
+            get: {
+                Color(cgColor: model.captionStyleKeyframeValues(line.id, in: track.id).fill.cgColor)
+            },
+            set: { color in
+                var values = model.captionStyleKeyframeValues(line.id, in: track.id)
+                values.fill = rgbaColour(from: color)
+                model.setCaptionStyleKeyframeValues(values, lineID: line.id, in: track.id)
+            })
+    }
+
+    private func rgbaColour(from color: Color) -> RGBAColour {
+        let ns = NSColor(color)
+        guard let converted = ns.usingColorSpace(.sRGB) else {
+            return .white
+        }
+        return RGBAColour(
+            red: Float(converted.redComponent),
+            green: Float(converted.greenComponent),
+            blue: Float(converted.blueComponent),
+            alpha: Float(converted.alphaComponent))
     }
 
     // MARK: - Preset binding

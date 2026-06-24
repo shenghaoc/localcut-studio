@@ -79,6 +79,8 @@ final class EditorModel {
     var documentURL: URL?
     /// Whether the project has unsaved changes (drives the window's edited dot).
     var isDirty = false
+    /// True while a window-close Save choice is already writing asynchronously.
+    @ObservationIgnored var closeSaveInProgress = false
     /// Media references whose files couldn't be resolved on open; awaiting relink.
     var unresolvedMedia: [MediaRef] = []
     /// SHA-256 of every bundled asset as of the last successful bundle read or
@@ -127,6 +129,12 @@ final class EditorModel {
         // Initialise the render queue first — it's the one `let` without an
         // inline default, so it must be set before any other access on self.
         self.renderQueue = RenderQueue()
+        let audioBus = self.audioBus
+        renderQueue.setOfflineMeterSink(
+            audioBus.offlineMeterSnapshotPublisher,
+            activity: { active in
+                audioBus.setOfflineMeteringActive(active)
+            })
 
         // Each editor action manages its own undo group explicitly, so disable
         // run-loop-based coalescing (see registerUndo).

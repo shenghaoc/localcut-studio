@@ -141,4 +141,146 @@ extension EditorModel {
             scheduleRebuild()
         }
     }
+
+    // MARK: - Caption style keyframes
+
+    func captionStyleLocalPlayheadTime(_ lineID: CaptionLine.ID,
+                                       in trackID: CaptionTrack.ID) -> CMTime? {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              let line = track.lines.first(where: { $0.id == lineID }) else { return nil }
+        let absolute = CMTime(seconds: currentTime, preferredTimescale: 600)
+        guard line.range.containsTime(absolute) else { return nil }
+        return CMTimeMaximum(absolute - line.range.start, .zero)
+    }
+
+    func captionStyleKeyframeValues(_ lineID: CaptionLine.ID,
+                                    in trackID: CaptionTrack.ID) -> CaptionStyleKeyframeValues {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              let line = track.lines.first(where: { $0.id == lineID }) else {
+            return CaptionStyleKeyframeValues(baseStyle: .identity)
+        }
+        let baseStyle = line.style ?? track.defaultStyle
+        guard let keyframes = line.styleKeyframes else {
+            return CaptionStyleKeyframeValues(baseStyle: baseStyle)
+        }
+        let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID) ?? .zero
+        let resolvedTime = nearestCaptionStyleKeyframeTime(to: localTime, in: keyframes) ?? localTime
+        return keyframes.values(at: resolvedTime)
+    }
+
+    func captionStyleKeyframeCount(_ lineID: CaptionLine.ID,
+                                   in trackID: CaptionTrack.ID) -> Int {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              let line = track.lines.first(where: { $0.id == lineID }) else { return 0 }
+        return line.styleKeyframes?.keyframeCount ?? 0
+    }
+
+    func hasCaptionStyleKeyframeAtPlayhead(_ lineID: CaptionLine.ID,
+                                           in trackID: CaptionTrack.ID) -> Bool {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              let line = track.lines.first(where: { $0.id == lineID }),
+              let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID) else { return false }
+        guard let keyframes = line.styleKeyframes else { return false }
+        return nearestCaptionStyleKeyframeTime(to: localTime, in: keyframes) != nil
+    }
+
+    func setCaptionStyleKeyframeValues(_ values: CaptionStyleKeyframeValues,
+                                       lineID: CaptionLine.ID,
+                                       in trackID: CaptionTrack.ID,
+                                       coalesced: Bool = true) {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              let line = track.lines.first(where: { $0.id == lineID }),
+              let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID) else {
+            statusMessage = "Move the playhead over the caption line to edit animated style."
+            return
+        }
+        let mutation = {
+            var updated = line
+            var keyframes = updated.styleKeyframes
+                ?? CaptionStyleKeyframes(baseStyle: updated.style ?? track.defaultStyle)
+            let resolvedTime = self.nearestCaptionStyleKeyframeTime(to: localTime, in: keyframes) ?? localTime
+            keyframes.addOrUpdateKeyframes(at: resolvedTime, values: values)
+            updated.styleKeyframes = keyframes
+            track.updateLine(updated)
+        }
+        if coalesced {
+            performCoalescedUndoable("Animate Caption Style", target: lineID,
+                                     rebuild: .debounced, mutate: mutation)
+        } else {
+            performUndoable("Animate Caption Style") {
+                mutation()
+                scheduleRebuild()
+            }
+        }
+    }
+
+    func removeCaptionStyleKeyframeAtPlayhead(_ lineID: CaptionLine.ID,
+                                              in trackID: CaptionTrack.ID) {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              let line = track.lines.first(where: { $0.id == lineID }),
+              let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID),
+              var keyframes = line.styleKeyframes,
+              let resolvedTime = nearestCaptionStyleKeyframeTime(to: localTime, in: keyframes) else {
+            statusMessage = "No caption style keyframe at the playhead."
+            return
+        }
+        performUndoable("Remove Caption Style Keyframe") {
+            var updated = line
+            keyframes.removeKeyframes(at: resolvedTime)
+            updated.styleKeyframes = keyframes.isEmpty ? nil : keyframes
+            track.updateLine(updated)
+            scheduleRebuild()
+        }
+    }
+
+    func clearCaptionStyleKeyframes(_ lineID: CaptionLine.ID,
+                                    in trackID: CaptionTrack.ID) {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              let line = track.lines.first(where: { $0.id == lineID }),
+              line.styleKeyframes != nil else { return }
+        performUndoable("Clear Caption Style Keyframes") {
+            var updated = line
+            updated.styleKeyframes = nil
+            track.updateLine(updated)
+            scheduleRebuild()
+        }
+    }
+
+    func seekToPreviousCaptionStyleKeyframe(_ lineID: CaptionLine.ID,
+                                            in trackID: CaptionTrack.ID) {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              let line = track.lines.first(where: { $0.id == lineID }),
+              let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID) else { return }
+        let tolerance = captionStyleKeyframeHitToleranceSeconds
+        guard let previous = line.styleKeyframes?.allKeyframeTimes.last(where: {
+            $0.seconds < localTime.seconds - tolerance
+        }) else { return }
+        seek(toSeconds: (line.range.start + previous).seconds)
+    }
+
+    func seekToNextCaptionStyleKeyframe(_ lineID: CaptionLine.ID,
+                                        in trackID: CaptionTrack.ID) {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              let line = track.lines.first(where: { $0.id == lineID }),
+              let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID) else { return }
+        let tolerance = captionStyleKeyframeHitToleranceSeconds
+        guard let next = line.styleKeyframes?.allKeyframeTimes.first(where: {
+            $0.seconds > localTime.seconds + tolerance
+        }) else { return }
+        seek(toSeconds: (line.range.start + next).seconds)
+    }
+
+    private var captionStyleKeyframeHitToleranceSeconds: Double {
+        0.5 / max(1, project.frameRate)
+    }
+
+    private func nearestCaptionStyleKeyframeTime(to time: CMTime,
+                                                 in keyframes: CaptionStyleKeyframes) -> CMTime? {
+        let tolerance = captionStyleKeyframeHitToleranceSeconds
+        return keyframes.allKeyframeTimes
+            .map { candidate in (candidate, abs((candidate - time).seconds)) }
+            .filter { $0.1 <= tolerance }
+            .min { $0.1 < $1.1 }?
+            .0
+    }
 }

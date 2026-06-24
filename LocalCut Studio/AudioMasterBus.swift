@@ -48,6 +48,21 @@ final class AudioMasterBus {
         meterLock.withLock { $0 }
     }
 
+    func setOfflineMeteringActive(_ active: Bool) {
+        offlineMeterActiveLock.withLock { $0 = active }
+    }
+
+    nonisolated func publishOfflineMeterSnapshot(_ snapshot: AudioMeterSnapshot) {
+        meterLock.withLock { $0 = snapshot }
+    }
+
+    nonisolated var offlineMeterSnapshotPublisher: @Sendable (AudioMeterSnapshot) -> Void {
+        let meterLock = meterLock
+        return { snapshot in
+            meterLock.withLock { $0 = snapshot }
+        }
+    }
+
     /// Surfaces a user-visible error message (e.g. live engine start failure)
     /// without making engine startup itself throw at the call site — bus
     /// existence must not be conditional on a working audio device.
@@ -70,6 +85,10 @@ final class AudioMasterBus {
     @ObservationIgnored
     nonisolated private let meterLock = OSAllocatedUnfairLock<AudioMeterSnapshot>(
         initialState: .silent)
+
+    @ObservationIgnored
+    nonisolated private let offlineMeterActiveLock = OSAllocatedUnfairLock<Bool>(
+        initialState: false)
 
     /// Player nodes attached to the offline graph and indexed by id. Phase 36 /
     /// 46 grow these for live capture; for this spec they exist so tests can
@@ -132,7 +151,8 @@ final class AudioMasterBus {
         let format = liveEngine.mainMixerNode.outputFormat(forBus: 0)
         // Bail rather than crash if the format is unavailable (no audio device).
         guard format.channelCount > 0, format.sampleRate > 0 else { return }
-        installMeterTap(on: liveEngine.mainMixerNode, format: format)
+        installMeterTap(on: liveEngine.mainMixerNode, format: format,
+                        suspendsForOfflineMeter: true)
         liveTapInstalled = true
     }
 
@@ -216,7 +236,8 @@ final class AudioMasterBus {
 
     private func installOfflineTapIfNeeded(format: AVAudioFormat) {
         guard !offlineTapInstalled else { return }
-        installMeterTap(on: offlineEngine.mainMixerNode, format: format)
+        installMeterTap(on: offlineEngine.mainMixerNode, format: format,
+                        suspendsForOfflineMeter: false)
         offlineTapInstalled = true
     }
 
@@ -229,9 +250,15 @@ final class AudioMasterBus {
     /// Captures only the `Sendable` lock in the closure's capture list so the
     /// tap callback is safely `@Sendable` and non-isolated, running on the
     /// audio thread without any MainActor mismatch.
-    private func installMeterTap(on node: AVAudioMixerNode, format: AVAudioFormat) {
+    private func installMeterTap(on node: AVAudioMixerNode,
+                                 format: AVAudioFormat,
+                                 suspendsForOfflineMeter: Bool) {
         let lock = meterLock
-        node.installTap(onBus: 0, bufferSize: 1024, format: format) { [lock] buffer, _ in
+        let offlineActive = offlineMeterActiveLock
+        node.installTap(onBus: 0, bufferSize: 1024, format: format) { [lock, offlineActive] buffer, _ in
+            if suspendsForOfflineMeter && offlineActive.withLock({ $0 }) {
+                return
+            }
             let snapshot = AudioMasterBus.computeMeter(buffer: buffer)
             lock.withLock { $0 = snapshot }
         }
