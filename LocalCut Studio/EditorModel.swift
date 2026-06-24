@@ -131,9 +131,7 @@ final class EditorModel {
         self.renderQueue = RenderQueue()
         let audioBus = self.audioBus
         renderQueue.setOfflineMeterSink(
-            { snapshot in
-                audioBus.publishOfflineMeterSnapshot(snapshot)
-            },
+            audioBus.offlineMeterSnapshotPublisher,
             activity: { active in
                 audioBus.setOfflineMeteringActive(active)
             })

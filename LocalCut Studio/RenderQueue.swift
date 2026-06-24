@@ -234,7 +234,7 @@ final class RenderQueue {
     @ObservationIgnored private let persistsToDisk: Bool
 
     @ObservationIgnored
-    private var offlineMeterSink: (@MainActor (AudioMeterSnapshot) -> Void)?
+    private var offlineMeterSink: (@Sendable (AudioMeterSnapshot) -> Void)?
 
     @ObservationIgnored
     private var offlineMeterActivitySink: (@MainActor (Bool) -> Void)?
@@ -254,7 +254,7 @@ final class RenderQueue {
         self.persistsToDisk = persistsToDisk
     }
 
-    func setOfflineMeterSink(_ sink: (@MainActor (AudioMeterSnapshot) -> Void)?,
+    func setOfflineMeterSink(_ sink: (@Sendable (AudioMeterSnapshot) -> Void)?,
                              activity: (@MainActor (Bool) -> Void)? = nil) {
         offlineMeterSink = sink
         offlineMeterActivitySink = activity
@@ -783,13 +783,10 @@ final class RenderQueue {
             videoInput.markAsFinished()
         }
 
+        let sink = offlineMeterSink
         if let audioOutput = readerAudioOutput {
             await Self.pump(input: audioInput, from: audioOutput,
-                            totalDuration: totalDuration, progress: nil) { [weak self] snapshot in
-                Task { @MainActor in
-                    self?.offlineMeterSink?(snapshot)
-                }
-            }
+                            totalDuration: totalDuration, progress: nil, meter: sink)
         } else if canAddAudio {
             audioInput.markAsFinished()
         }

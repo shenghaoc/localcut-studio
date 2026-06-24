@@ -52,8 +52,15 @@ final class AudioMasterBus {
         offlineMeterActiveLock.withLock { $0 = active }
     }
 
-    func publishOfflineMeterSnapshot(_ snapshot: AudioMeterSnapshot) {
+    nonisolated func publishOfflineMeterSnapshot(_ snapshot: AudioMeterSnapshot) {
         meterLock.withLock { $0 = snapshot }
+    }
+
+    nonisolated var offlineMeterSnapshotPublisher: @Sendable (AudioMeterSnapshot) -> Void {
+        let meterLock = meterLock
+        return { snapshot in
+            meterLock.withLock { $0 = snapshot }
+        }
     }
 
     /// Surfaces a user-visible error message (e.g. live engine start failure)

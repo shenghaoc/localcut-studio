@@ -150,6 +150,7 @@ struct CaptionsInspectorView: View {
     @ViewBuilder
     private func styleKeyframeEditor(_ line: CaptionLine, in track: CaptionTrack) -> some View {
         let localTime = model.captionStyleLocalPlayheadTime(line.id, in: track.id)
+        let styleValues = model.captionStyleKeyframeValues(line.id, in: track.id)
         DisclosureGroup {
             HStack {
                 Text(localTime.map { "At \(TimeFormatting.timecode($0.seconds))" } ?? "Move playhead over this line")
@@ -168,7 +169,7 @@ struct CaptionsInspectorView: View {
 
             LabeledSliderRow(
                 label: "Scale",
-                display: String(format: "%.2fx", model.captionStyleKeyframeValues(line.id, in: track.id).scale),
+                display: String(format: "%.2fx", styleValues.scale),
                 value: captionStyleFloatBinding(\.scale, for: line, in: track),
                 range: 0.1...4,
                 step: 0.05,
@@ -177,7 +178,7 @@ struct CaptionsInspectorView: View {
 
             LabeledSliderRow(
                 label: "X Offset",
-                display: String(format: "%+.0f px", model.captionStyleKeyframeValues(line.id, in: track.id).offsetX),
+                display: String(format: "%+.0f px", styleValues.offsetX),
                 value: captionStyleFloatBinding(\.offsetX, for: line, in: track),
                 range: -960...960,
                 step: 1,
@@ -186,7 +187,7 @@ struct CaptionsInspectorView: View {
 
             LabeledSliderRow(
                 label: "Y Offset",
-                display: String(format: "%+.0f px", model.captionStyleKeyframeValues(line.id, in: track.id).offsetY),
+                display: String(format: "%+.0f px", styleValues.offsetY),
                 value: captionStyleFloatBinding(\.offsetY, for: line, in: track),
                 range: -540...540,
                 step: 1,
@@ -195,7 +196,7 @@ struct CaptionsInspectorView: View {
 
             LabeledSliderRow(
                 label: "Opacity",
-                display: "\(Int(model.captionStyleKeyframeValues(line.id, in: track.id).opacity * 100))%",
+                display: "\(Int(styleValues.opacity * 100))%",
                 value: captionStyleFloatBinding(\.opacity, for: line, in: track),
                 range: 0...1,
                 step: 0.01,
@@ -204,7 +205,7 @@ struct CaptionsInspectorView: View {
 
             LabeledSliderRow(
                 label: "Letter Spacing",
-                display: String(format: "%+.1f px", model.captionStyleKeyframeValues(line.id, in: track.id).letterSpacing),
+                display: String(format: "%+.1f px", styleValues.letterSpacing),
                 value: captionStyleFloatBinding(\.letterSpacing, for: line, in: track),
                 range: -32...64,
                 step: 0.5,
@@ -223,7 +224,7 @@ struct CaptionsInspectorView: View {
 
                 Button {
                     model.setCaptionStyleKeyframeValues(
-                        model.captionStyleKeyframeValues(line.id, in: track.id),
+                        styleValues,
                         lineID: line.id, in: track.id, coalesced: false)
                 } label: {
                     Label(model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id) ? "Update" : "Add",
