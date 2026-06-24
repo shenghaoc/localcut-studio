@@ -47,6 +47,7 @@ struct MediaBinView: View {
                     Button("Import Media") {
                         showImporter = true
                     }
+                    .buttonStyle(.borderedProminent)
                 }
             } else {
                 ScrollView {
