@@ -97,6 +97,15 @@
       (Claude + Gemini review).
 - [x] **T12.5** Remove dead `CaptionImporterCompat` from app `CaptionImporter.swift`
       (Codex review).
+- [x] **T12.6** Add explicit `import CoreGraphics` to `RenderPlanning.swift`
+      (Claude review).
+- [x] **T12.7** Fix bookmark nil vs empty Data comparison in `DocumentController.swift`
+      (Gemini review).
+- [x] **T12.8** Add bounds checking on `CaptionImporter.parseTimestamp` to prevent
+      Int64 overflow from malicious SRT/VTT files (Gemini review).
+- [x] **T12.9** Fix `TimeFormatting.timecode` floating-point precision and carry-over
+      edge case (59.999 → 1:00.00) using `totalHundredths` decomposition
+      (Gemini + Claude review).
 
 ## Verification
 
