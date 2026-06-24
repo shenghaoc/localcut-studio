@@ -17,7 +17,7 @@
 
 ## Verification
 
-- [x] **T3.1** Snapshot tests at three strengths on a skin + foliage + text fixture; the skin band's high-frequency energy drops monotonically with strength while the foliage and text bands stay within tolerance (software-renderer "golden-less" form — deterministic on headless CI, no committed PNGs).
+- [x] **T3.1** Snapshot tests at three strengths on a skin + foliage + graphics fixture; the skin band's high-frequency energy drops monotonically with strength while the foliage and graphics bands stay within tolerance (software-renderer "golden-less" form — deterministic on headless CI, no committed PNGs).
 - [x] **T3.2** Unit tests for parameter clamping, identity at strength 0, codable round-trip.
 - [x] **T3.3** Unit test for the 1080p reference blur-radius mapping and 4K/half-height scaling.
 - [x] **T3.4** `xcodebuild` (Debug, macOS) green; no test count regression.
