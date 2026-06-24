@@ -306,11 +306,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         image = image.transformed(by: layer.transform)
 
         if layer.opacity < 1 {
-            let opacityFilter = CIFilter.colorMatrix()
-            opacityFilter.inputImage = image
-            let opacity = CGFloat(layer.opacity)
-            opacityFilter.aVector = CIVector(x: 0, y: 0, z: 0, w: opacity)
-            image = opacityFilter.outputImage ?? image
+            image = scaled(image, by: layer.opacity)
         }
 
         // Normalise to the render canvas (transparent letterbox) so transition
@@ -384,11 +380,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         let combinedOpacity = CGFloat(animation.opacity) * CGFloat(styleValues?.opacity ?? 1)
         if combinedOpacity < 1 {
-            let filter = CIFilter.colorMatrix()
-            filter.inputImage = image
-            let opacity = combinedOpacity
-            filter.aVector = CIVector(x: 0, y: 0, z: 0, w: opacity)
-            image = filter.outputImage ?? image
+            image = scaled(image, by: Float(combinedOpacity))
         }
 
         return image.cropped(to: CGRect(origin: .zero, size: renderSize))
