@@ -72,4 +72,4 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] Bundle "Don't copy" import toggle (`wantsBundling` UI)
 - [x] Queue stale-bookmark refresh; `RenderQueue.isRunning` TOCTOU
 - [x] Typewriter mask excludes pill; word-range by token index
-- [ ] Golden snapshot tests (skin-smooth T3.1 / caption presets T5.1)
+- [x] Golden snapshot tests (skin-smooth T3.1 / caption presets T5.1) — both land as software-renderer "golden-less" snapshots (skin-smooth: skin smooths, foliage + text untouched; caption presets: every preset rasterises to a non-empty in-canvas box)

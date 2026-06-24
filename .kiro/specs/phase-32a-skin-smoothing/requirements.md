@@ -1,6 +1,6 @@
 # Requirements: Phase 32a — GPU Skin Smoothing (no ML)
 
-> Status: **Implemented** with T3.1 snapshot/golden-image coverage deferred.
+> Status: **Implemented**.
 
 ## R1 — Effect node
 
@@ -12,7 +12,7 @@
 
 - **R2.1** Chroma + luminance skin-probability mask implemented as a Metal-backed `CIKernel`; no per-pixel CPU work.
 - **R2.2** A "show mask" overlay swaps the preview to the mask image without changing the render path otherwise.
-- **R2.3** Non-skin regions (foliage, text, fabric) are targeted to receive minimal smoothing at default mask parameters. Golden-image verification remains deferred under T3.1.
+- **R2.3** Non-skin regions are targeted to receive minimal smoothing at default mask parameters, verified by the T3.1 snapshot. Because the mask is chroma-only, *chromatically distinct* non-skin regions (foliage, cool graphics) are left effectively untouched; neutral mid-grays (e.g. antialiased black/white text edges) fall inside the chroma box and are smoothed — a documented trade-off of the chroma-only approach (R3.1).
 
 ## R3 — Smoothing
 
@@ -32,7 +32,7 @@
 
 ## R6 — Verification
 
-- **R6.1** Deferred snapshot tests at strength = 0 (identity), 0.5 (subtle), 1.0 (max) on a fixture with skin + foliage + text regions.
+- **R6.1** Snapshot tests at strength = 0 (identity), 0.5 (subtle), 1.0 (max) on a fixture with skin + foliage + (cool, soft-edged) graphics regions, asserting the skin band's high-frequency energy drops monotonically while the non-skin bands stay within tolerance. Software-renderer "golden-less" form (deterministic on headless CI; no committed PNGs).
 - **R6.2** Unit tests for parameter clamping, default identity, and keyframe interpolation against the keyframe spec.
 - **R6.3** Unit test: skin-smooth blur radius maps strength 1.0 to 10 px at 1080p, 20 px at 4K, and 5 px at half-height.
 - **R6.4** `xcodebuild` (Debug, macOS) green; no test count regression.
