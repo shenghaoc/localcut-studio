@@ -34,6 +34,7 @@ struct CaptionRenderItem: Sendable {
     let text: String
     let words: [WordTiming]?
     let style: CaptionStyle
+    let styleKeyframes: CaptionStyleKeyframes?
     let range: CMTimeRange
 }
 
@@ -330,16 +331,20 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     nonisolated private func captionLayer(for item: CaptionRenderItem,
                                           time: CMTime,
                                           renderSize: CGSize) -> CIImage? {
+        let localTime = CMTimeMaximum(time - item.range.start, .zero)
+        let styleValues = item.styleKeyframes?.values(at: localTime)
+        let effectiveStyle = item.styleKeyframes?.effectiveStyle(base: item.style, at: localTime)
+            ?? item.style
         let wordIndex = activeWordIndex(for: item, at: time)
         let raster = wordIndex.map { index in
             Self.sharedCaptionRasterer.highlightRaster(
-                line: makeLineProxy(item: item),
-                style: item.style,
+                line: makeLineProxy(item: item, style: effectiveStyle),
+                style: effectiveStyle,
                 renderSize: renderSize,
                 wordIndex: index)
         } ?? Self.sharedCaptionRasterer.idleRaster(
-            line: makeLineProxy(item: item),
-            style: item.style,
+            line: makeLineProxy(item: item, style: effectiveStyle),
+            style: effectiveStyle,
             renderSize: renderSize)
 
         guard let raster, raster.boundingBox != .zero else { return nil }
@@ -348,34 +353,42 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             currentTime: time,
             lineStart: item.range.start,
             lineEnd: item.range.end,
-            style: item.style)
+            style: effectiveStyle)
         var image = raster.image
 
-        if item.style.enterAnimation == .typewriter && animation.typewriterProgress < 1 {
+        if effectiveStyle.enterAnimation == .typewriter && animation.typewriterProgress < 1 {
             image = typewriterMasked(image: image,
                                      textBox: raster.textBox,
                                      progress: animation.typewriterProgress)
         }
 
-        if animation.scale != 1 {
+        let keyedScale = CGFloat(styleValues?.scale ?? 1)
+        let combinedScale = animation.scale * keyedScale
+        let keyedTranslation = CGSize(width: CGFloat(styleValues?.offsetX ?? 0),
+                                      height: CGFloat(styleValues?.offsetY ?? 0))
+        let combinedTranslation = CGSize(
+            width: animation.translation.width + keyedTranslation.width,
+            height: animation.translation.height + keyedTranslation.height)
+        if combinedScale != 1 {
             let centre = CGPoint(x: raster.boundingBox.midX, y: raster.boundingBox.midY)
             var transform = CGAffineTransform.identity
                 .translatedBy(x: centre.x, y: centre.y)
-                .scaledBy(x: animation.scale, y: animation.scale)
+                .scaledBy(x: combinedScale, y: combinedScale)
                 .translatedBy(x: -centre.x, y: -centre.y)
-            transform = transform.translatedBy(x: animation.translation.width,
-                                               y: animation.translation.height)
+            transform = transform.translatedBy(x: combinedTranslation.width,
+                                               y: combinedTranslation.height)
             image = image.transformed(by: transform)
-        } else if animation.translation != .zero {
+        } else if combinedTranslation != .zero {
             image = image.transformed(by: CGAffineTransform(
-                translationX: animation.translation.width,
-                y: animation.translation.height))
+                translationX: combinedTranslation.width,
+                y: combinedTranslation.height))
         }
 
-        if animation.opacity < 1 {
+        let combinedOpacity = CGFloat(animation.opacity) * CGFloat(styleValues?.opacity ?? 1)
+        if combinedOpacity < 1 {
             let filter = CIFilter.colorMatrix()
             filter.inputImage = image
-            filter.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(animation.opacity))
+            filter.aVector = CIVector(x: 0, y: 0, z: 0, w: combinedOpacity)
             image = filter.outputImage ?? image
         }
 
@@ -414,9 +427,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// Reconstructs a minimal `CaptionLine` proxy for the rasterer cache key. The
     /// rasterer doesn't read the time range — only id, text, words — so the proxy
     /// can omit timing.
-    nonisolated private func makeLineProxy(item: CaptionRenderItem) -> CaptionLine {
+    nonisolated private func makeLineProxy(item: CaptionRenderItem,
+                                           style: CaptionStyle) -> CaptionLine {
         CaptionLine(id: item.lineID, range: item.range, text: item.text,
-                    words: item.words, style: item.style)
+                    words: item.words, style: style,
+                    styleKeyframes: item.styleKeyframes)
     }
 
     nonisolated private func activeWordIndex(for item: CaptionRenderItem, at time: CMTime) -> Int? {

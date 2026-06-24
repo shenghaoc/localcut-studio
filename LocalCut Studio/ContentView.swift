@@ -48,6 +48,22 @@ struct DocumentCommands: Commands {
                 .keyboardShortcut("n", modifiers: .command)
             Button("Open…") { model.requestOpen() }
                 .keyboardShortcut("o", modifiers: .command)
+            Menu("Open Recent") {
+                let urls = recentProjectURLs
+                if urls.isEmpty {
+                    Text("No Recent Documents")
+                } else {
+                    ForEach(urls, id: \.self) { url in
+                        Button(url.lastPathComponent) {
+                            model.requestOpenRecent(url)
+                        }
+                    }
+                    Divider()
+                    Button("Clear Menu") {
+                        NSDocumentController.shared.clearRecentDocuments(nil)
+                    }
+                }
+            }
         }
         CommandGroup(replacing: .saveItem) {
             Button("Save") { model.requestSave() }
@@ -87,6 +103,13 @@ struct DocumentCommands: Commands {
             Button("Next Marker") { model.selectNextMarker() }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
                 .disabled(model.project.markers.isEmpty)
+        }
+    }
+
+    private var recentProjectURLs: [URL] {
+        NSDocumentController.shared.recentDocumentURLs.filter { url in
+            url.pathExtension == ProjectDocument.fileExtension
+                || url.pathExtension == ProjectBundleLayout.fileExtension
         }
     }
 }
@@ -322,7 +345,7 @@ private struct WindowConfigurator: NSViewRepresentable {
         }
 
         func windowShouldClose(_ sender: NSWindow) -> Bool {
-            guard model.confirmCloseSynchronously() else { return false }
+            guard model.confirmClose(window: sender) else { return false }
             // Respect SwiftUI's own close decision if it has one.
             if let previousDelegate, previousDelegate.responds(to: #selector(windowShouldClose(_:))) {
                 return previousDelegate.windowShouldClose?(sender) ?? true

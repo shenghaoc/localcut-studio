@@ -638,6 +638,7 @@ enum CompositionBuilder {
                     text: line.text,
                     words: line.words,
                     style: line.style ?? track.defaultStyle,
+                    styleKeyframes: line.styleKeyframes,
                     range: line.range))
             }
         }

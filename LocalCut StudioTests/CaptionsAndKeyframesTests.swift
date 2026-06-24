@@ -97,6 +97,78 @@ func keyframesRoundTrip() throws {
     #expect(back == k)
 }
 
+@Test("CaptionStyleKeyframes: interpolates R2.3 animated style parameters")
+func captionStyleKeyframesInterpolate() {
+    var keyframes = CaptionStyleKeyframes()
+    keyframes.addOrUpdateKeyframes(
+        at: CMTime(seconds: 0, preferredTimescale: 600),
+        values: CaptionStyleKeyframeValues(
+            fill: RGBAColour(red: 1, green: 0, blue: 0),
+            scale: 1, offsetX: 0, offsetY: 0, opacity: 1, letterSpacing: 0))
+    keyframes.addOrUpdateKeyframes(
+        at: CMTime(seconds: 2, preferredTimescale: 600),
+        values: CaptionStyleKeyframeValues(
+            fill: RGBAColour(red: 0, green: 0, blue: 1),
+            scale: 2, offsetX: 20, offsetY: -10, opacity: 0.5, letterSpacing: 8))
+
+    let mid = keyframes.values(at: CMTime(seconds: 1, preferredTimescale: 600))
+    #expect(abs(mid.fill.red - 0.5) < 1e-6)
+    #expect(abs(mid.fill.blue - 0.5) < 1e-6)
+    #expect(abs(mid.scale - 1.5) < 1e-6)
+    #expect(abs(mid.offsetX - 10) < 1e-6)
+    #expect(abs(mid.offsetY + 5) < 1e-6)
+    #expect(abs(mid.opacity - 0.75) < 1e-6)
+    #expect(abs(mid.letterSpacing - 4) < 1e-6)
+}
+
+@Test("CaptionLine: style keyframes round-trip through Codable")
+func captionLineStyleKeyframesRoundTrip() throws {
+    var keyframes = CaptionStyleKeyframes()
+    keyframes.addOrUpdateKeyframes(
+        at: CMTime(seconds: 0.5, preferredTimescale: 600),
+        values: CaptionStyleKeyframeValues(
+            fill: RGBAColour(red: 0.2, green: 0.4, blue: 0.8),
+            scale: 1.25, offsetX: 12, offsetY: -6, opacity: 0.7, letterSpacing: 3))
+    let line = CaptionLine(
+        range: CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600)),
+        text: "Animated",
+        styleKeyframes: keyframes)
+
+    let data = try JSONEncoder().encode(line)
+    let decoded = try JSONDecoder().decode(CaptionLine.self, from: data)
+    #expect(decoded.styleKeyframes == keyframes)
+}
+
+@MainActor
+@Test("Caption style keyframes author at the caption-local playhead and undo")
+func captionStyleKeyframeAuthoringAtPlayhead() {
+    let model = EditorModel()
+    let track = CaptionTrack(name: "Captions")
+    let line = CaptionLine(
+        range: CMTimeRange(start: CMTime(seconds: 2, preferredTimescale: 600),
+                           duration: CMTime(seconds: 4, preferredTimescale: 600)),
+        text: "Animate me")
+    track.addLine(line)
+    model.project.captionTracks = [track]
+    model.currentTime = 3
+    model.totalDuration = 10
+
+    model.setCaptionStyleKeyframeValues(
+        CaptionStyleKeyframeValues(scale: 1.4, offsetX: 24, opacity: 0.6),
+        lineID: line.id, in: track.id, coalesced: false)
+
+    let updated = track.lines[0]
+    #expect(updated.styleKeyframes?.keyframeCount == 1)
+    #expect(updated.styleKeyframes?.allKeyframeTimes.first?.seconds == 1)
+    #expect(updated.styleKeyframes?.values(at: CMTime(seconds: 1, preferredTimescale: 600)).scale == 1.4)
+
+    model.removeCaptionStyleKeyframeAtPlayhead(line.id, in: track.id)
+    #expect(track.lines[0].styleKeyframes == nil)
+
+    model.undo()
+    #expect(track.lines[0].styleKeyframes?.keyframeCount == 1)
+}
+
 @MainActor
 @Test("Skin-smooth strength keyframes author at the selected clip playhead")
 func skinSmoothStrengthKeyframeAuthoringAtPlayhead() {

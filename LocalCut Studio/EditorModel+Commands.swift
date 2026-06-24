@@ -37,6 +37,13 @@ extension EditorModel {
         }
     }
 
+    func requestOpenRecent(_ url: URL) {
+        Task {
+            guard await confirmSaveIfNeeded() else { return }
+            await open(url: url)
+        }
+    }
+
     /// File ▸ Save — writes to the current URL, or prompts for one if unsaved.
     func requestSave() {
         Task {
@@ -115,7 +122,7 @@ extension EditorModel {
 
     /// Synchronous variant for `windowShouldClose`, which must return a decision
     /// immediately. Returns `true` if the window may close.
-    func confirmCloseSynchronously() -> Bool {
+    func confirmClose(window: NSWindow) -> Bool {
         guard isDirty else { return true }
         let alert = NSAlert()
         alert.messageText = "Do you want to save the changes you made to “\(project.name)”?"
@@ -126,7 +133,18 @@ extension EditorModel {
         switch alert.runModal() {
         case .alertFirstButtonReturn:        // Save
             guard let url = documentURL ?? runSavePanel() else { return false }
-            return writeSynchronously(to: url)
+            statusMessage = "Saving \(url.lastPathComponent) before closing…"
+            Task { @MainActor [weak window] in
+                if documentURL == nil {
+                    await saveAs(url: url)
+                } else {
+                    await save()
+                }
+                if !isDirty {
+                    window?.performClose(nil)
+                }
+            }
+            return false
         case .alertSecondButtonReturn:       // Don't Save
             return true
         default:                             // Cancel

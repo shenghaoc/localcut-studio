@@ -127,6 +127,10 @@ final class EditorModel {
         // Initialise the render queue first — it's the one `let` without an
         // inline default, so it must be set before any other access on self.
         self.renderQueue = RenderQueue()
+        let audioBus = self.audioBus
+        renderQueue.setOfflineMeterSink { snapshot in
+            audioBus.publishOfflineMeterSnapshot(snapshot)
+        }
 
         // Each editor action manages its own undo group explicitly, so disable
         // run-loop-based coalescing (see registerUndo).

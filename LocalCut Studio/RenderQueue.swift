@@ -233,6 +233,9 @@ final class RenderQueue {
     /// `queue.json`.
     @ObservationIgnored private let persistsToDisk: Bool
 
+    @ObservationIgnored
+    private var offlineMeterSink: (@MainActor (AudioMeterSnapshot) -> Void)?
+
     /// Set when `load()` reads a queue file written by a newer build than
     /// this one understands. While true, `persist()` is a no-op so the
     /// newer-version file isn't downconverted by a later enqueue / cancel
@@ -246,6 +249,10 @@ final class RenderQueue {
         self.isRunning = false
         self.statusMessage = nil
         self.persistsToDisk = persistsToDisk
+    }
+
+    func setOfflineMeterSink(_ sink: (@MainActor (AudioMeterSnapshot) -> Void)?) {
+        offlineMeterSink = sink
     }
 
     // MARK: Enqueue / cancel / clear
@@ -520,7 +527,11 @@ final class RenderQueue {
             try? FileManager.default.removeItem(at: outputURL)
             didBeginEncoding = true
 
-            if let presetName = preset.assetExportSessionPresetName {
+            let hasAudio = !built.composition.tracks(withMediaType: .audio).isEmpty
+            let shouldUseWriterForOfflineMeter = offlineMeterSink != nil && hasAudio
+
+            if !shouldUseWriterForOfflineMeter,
+               let presetName = preset.assetExportSessionPresetName {
                 try await exportWithSession(
                     presetName: presetName, preset: preset,
                     built: built, outputURL: outputURL, jobID: id)
@@ -761,7 +772,11 @@ final class RenderQueue {
 
         if let audioOutput = readerAudioOutput {
             await Self.pump(input: audioInput, from: audioOutput,
-                            totalDuration: totalDuration, progress: nil)
+                            totalDuration: totalDuration, progress: nil) { [weak self] snapshot in
+                Task { @MainActor in
+                    self?.offlineMeterSink?(snapshot)
+                }
+            }
         } else if canAddAudio {
             audioInput.markAsFinished()
         }
@@ -797,7 +812,8 @@ final class RenderQueue {
         input: AVAssetWriterInput,
         from output: AVAssetReaderOutput,
         totalDuration: Double,
-        progress: (@Sendable (Double) -> Void)?
+        progress: (@Sendable (Double) -> Void)?,
+        meter: (@Sendable (AudioMeterSnapshot) -> Void)? = nil
     ) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let resume = ResumeBox()
@@ -812,6 +828,9 @@ final class RenderQueue {
                 while input.isReadyForMoreMediaData {
                     if let sample = output.copyNextSampleBuffer() {
                         input.append(sample)
+                        if let meter, let snapshot = audioMeterSnapshot(from: sample) {
+                            meter(snapshot)
+                        }
                         if let progress, totalDuration > 0 {
                             // Guard against non-numeric / invalid PTS so a bad
                             // sample doesn't propagate NaN into the UI
@@ -847,6 +866,68 @@ final class RenderQueue {
                 }
             }
         }
+    }
+
+    nonisolated static func audioMeterSnapshot(from sample: CMSampleBuffer) -> AudioMeterSnapshot? {
+        let frameCount = CMSampleBufferGetNumSamples(sample)
+        guard frameCount > 0,
+              let dataBuffer = CMSampleBufferGetDataBuffer(sample) else { return nil }
+
+        var lengthAtOffset = 0
+        var totalLength = 0
+        var dataPointer: UnsafeMutablePointer<Int8>?
+        let status = CMBlockBufferGetDataPointer(
+            dataBuffer,
+            atOffset: 0,
+            lengthAtOffsetOut: &lengthAtOffset,
+            totalLengthOut: &totalLength,
+            dataPointerOut: &dataPointer)
+        guard status == noErr, let dataPointer, totalLength > 0 else { return nil }
+
+        let channels = max(1, audioChannelCount(for: sample))
+        let sampleCount = min(totalLength / MemoryLayout<Int16>.size, frameCount * channels)
+        guard sampleCount > 0 else { return nil }
+
+        let samples = UnsafeRawPointer(dataPointer).assumingMemoryBound(to: Int16.self)
+        var peak = Array(repeating: Float(0), count: min(2, channels))
+        var sumSquares = Array(repeating: Float(0), count: min(2, channels))
+        var counts = Array(repeating: 0, count: min(2, channels))
+
+        for index in 0..<sampleCount {
+            let channel = index % channels
+            guard channel < 2 else { continue }
+            let value = max(-1, Float(samples[index]) / 32768)
+            let magnitude = abs(value)
+            peak[channel] = max(peak[channel], magnitude)
+            sumSquares[channel] += value * value
+            counts[channel] += 1
+        }
+
+        if channels == 1, peak.count == 1 {
+            return AudioMeterSnapshot(
+                peakLeft: peak[0], peakRight: peak[0],
+                rmsLeft: counts[0] > 0 ? sqrt(sumSquares[0] / Float(counts[0])) : 0,
+                rmsRight: counts[0] > 0 ? sqrt(sumSquares[0] / Float(counts[0])) : 0,
+                sampledAt: ContinuousClock.now)
+        }
+
+        let leftRMS = counts[0] > 0 ? sqrt(sumSquares[0] / Float(counts[0])) : 0
+        let rightRMS = counts.count > 1 && counts[1] > 0
+            ? sqrt(sumSquares[1] / Float(counts[1]))
+            : leftRMS
+        let rightPeak = peak.count > 1 ? peak[1] : peak[0]
+        return AudioMeterSnapshot(
+            peakLeft: peak[0], peakRight: rightPeak,
+            rmsLeft: leftRMS, rmsRight: rightRMS,
+            sampledAt: ContinuousClock.now)
+    }
+
+    private nonisolated static func audioChannelCount(for sample: CMSampleBuffer) -> Int {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sample),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            return 2
+        }
+        return Int(asbd.pointee.mChannelsPerFrame)
     }
 
     // MARK: Progress / status

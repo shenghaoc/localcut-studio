@@ -48,6 +48,10 @@ final class AudioMasterBus {
         meterLock.withLock { $0 }
     }
 
+    func publishOfflineMeterSnapshot(_ snapshot: AudioMeterSnapshot) {
+        meterLock.withLock { $0 = snapshot }
+    }
+
     /// Surfaces a user-visible error message (e.g. live engine start failure)
     /// without making engine startup itself throw at the call site — bus
     /// existence must not be conditional on a working audio device.

@@ -61,15 +61,15 @@ Checked = shipped in this PR. Unchecked = catalogued follow-up (see `bugfix.md` 
 - [x] Directional wipe: stored angle + inspector control + Codable migration (transitions R1.2)
 - [x] Skin-smooth resolution-independent blur radius (1080p source-height reference)
 - [x] Keyframe authoring UI for skin-smooth strength (feature-keyframes R6)
-- [ ] Keyframable caption style params (phase-30 R2.3)
+- [x] Keyframable caption style params (phase-30 R2.3) — line-local fill/scale/offset/opacity/letter-spacing keyframes with inspector authoring
 - [x] Caption line retiming controls + caption timeline lane (caption-tracks R4.1)
 - [x] Live audio meter startup (`prepareLive`) (audio-master-bus R5.1)
-- [ ] Export-time offline meter animation through the Phase 36 reader/writer PCM path (audio-master-bus R3.3)
+- [x] Export-time offline meter animation through the Phase 36 reader/writer PCM path (audio-master-bus R3.3)
 - [x] Render-cache + title-raster O(1) LRU; render-cache disk spill (render-cache R2.3)
 - [x] Scopes: revision-gated redraw; single-pass histogram; per-pixel vectorscope + colour targets
 - [x] Project bundle metadata staging (`fingerprints.json` + `project.json`)
-- [ ] Document model: `ReferenceFileDocument`/Open Recent; async window-close save
+- [x] Document model: evaluated `ReferenceFileDocument`/DocumentGroup trade-off; custom controller now supports Open Recent + async window-close save
 - [x] Bundle "Don't copy" import toggle (`wantsBundling` UI)
 - [x] Queue stale-bookmark refresh; `RenderQueue.isRunning` TOCTOU
 - [x] Typewriter mask excludes pill; word-range by token index
-- [x] Golden snapshot tests (skin-smooth T3.1 / caption presets T5.1) — both land as software-renderer "golden-less" snapshots (skin-smooth: skin smooths, foliage + text untouched; caption presets: every preset rasterises to a non-empty in-canvas box)
+- [x] Golden snapshot tests (skin-smooth T3.1 / caption presets T5.1) — PR #36 covers skin-smooth with software-renderer "golden-less" snapshots (skin smooths, foliage + graphics untouched); caption presets rasterise to non-empty in-canvas boxes

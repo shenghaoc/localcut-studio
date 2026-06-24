@@ -552,6 +552,9 @@ extension EditorModel {
         documentURL = isNewerSchema ? nil : url
         unresolvedMedia = unresolved
         isDirty = isNewerSchema || refreshedBookmark
+        if let url, !isNewerSchema {
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+        }
         undoManager.removeAllActions()
         refreshUndoFlags()
 
@@ -884,6 +887,7 @@ extension EditorModel {
         documentURL = url
         project.name = url.deletingPathExtension().lastPathComponent
         if revision == nil || revision == mutationRevision { isDirty = false }
+        NSDocumentController.shared.noteNewRecentDocumentURL(url)
     }
 
     /// Ensures every media item carries a security-scoped bookmark before saving.

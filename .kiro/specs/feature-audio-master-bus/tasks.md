@@ -62,9 +62,9 @@
   (dB for gain, ±1 for pan) for accessibility.
 - [x] **T4.4** Start the live bus from `EditorView.onAppear` and tear it down
   on disappear so the inspector meter is connected for the window lifetime.
-  Export-time meter animation remains Phase 36 because the current default
-  export path uses `AVAssetExportSession` rather than the offline bus's
-  `AVAssetReader` / `AVAssetWriter` PCM path.
+  Export-time meter animation uses the `AVAssetReader` / `AVAssetWriter` PCM
+  path when the editor installs an offline meter sink, publishing peak/RMS
+  snapshots to `AudioMasterBus` as samples are pumped.
 
 ## Verification
 
@@ -81,7 +81,9 @@
 - [x] **T5.5** Regression unit test: a project with defaults produces the
   same `AVMutableAudioMix.inputParameters` ramp set as before the bus existed,
   guarding the existing Phase 30 transition crossfade behaviour (R6.5).
-- [x] **T5.6** `xcodebuild` (Debug, macOS) green; no test count regression.
+- [x] **T5.6** Unit test: writer-path PCM sample buffers produce offline meter
+  snapshots for the render queue pump (R3.3).
+- [x] **T5.7** `xcodebuild` (Debug, macOS) green; no test count regression.
 
 ## Cross-cutting
 

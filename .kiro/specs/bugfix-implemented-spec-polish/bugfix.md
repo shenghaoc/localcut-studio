@@ -336,26 +336,31 @@ playhead legitimately maps to both sides of the cut, so a single global authored
 
 ---
 
-## Deferred follow-ups (audit findings not in this PR)
+## Follow-ups closed after the initial PR
 
-Catalogued so the audit's value isn't lost. Each is either higher-risk (composition math, behaviour
-change to a tuned look), or large enough to deserve its own spec.
+These were catalogued during the initial audit as non-blocking follow-ups. They are now closed by the
+post-PR loose-end pass.
 
-**Deferred feature surfaces:**
-- **Keyframable caption style params** (phase-30 R2.3) — `CaptionStyle` stores plain values, no
-  `Keyframed<T>` fields; the requirement is silently unmet.
-- **Export-time offline audio meter animation** (audio-master-bus R3.3) — export still runs through
-  `AVAssetExportSession`, which has progress but no PCM callback for the offline bus tap. Phase 36's
-  reader/writer audio pipeline owns the point where rendered blocks can update the meter.
+**Feature surfaces:**
+- **Keyframable caption style params** (phase-30 R2.3) — `CaptionLine` now carries line-local
+  `CaptionStyleKeyframes` for fill colour, scale, X/Y offset, opacity, and letter spacing. The
+  shared compositor evaluates them per requested frame, and the caption inspector exposes compact
+  add/update/remove/previous/next controls at the line-local playhead.
+- **Export-time offline audio meter animation** (audio-master-bus R3.3) — when the editor installs an
+  offline meter sink, render jobs with audio use the existing `AVAssetReader` / `AVAssetWriter` PCM
+  path instead of `AVAssetExportSession`; the audio pump publishes peak/RMS snapshots to
+  `AudioMasterBus` as samples pass through.
 
 **Performance / toolchain:**
-- **Document model:** evaluate `ReferenceFileDocument`/`DocumentGroup` (Open Recent, async save);
-  async window-close save (multi-GB bundle IO currently blocks the close prompt); bundle-open verify
-  progress.
+- **Document model:** the existing custom single-window controller remains in place rather than
+  migrating to `DocumentGroup` / `ReferenceFileDocument`, because it already owns the editor's
+  shared model, queue, and close-save flow. It now records documents with `NSDocumentController`,
+  exposes File -> Open Recent, and performs the close-window Save write asynchronously before
+  re-requesting close.
 
 **Smaller hygiene:**
-- ~~Golden snapshot tests (skin-smooth T3.1, caption presets T5.1).~~ Landed as software-renderer
-  "golden-less" snapshots: skin-smooth renders a skin + foliage + graphics fixture at three strengths and
-  asserts the skin band smooths while the foliage and graphics bands stay untouched; caption presets
-  assert every built-in preset rasterises to a non-empty, in-canvas box. Pixel-PNG goldens stay out
-  of scope (they would need a GPU-determinism + font-availability matrix).
+- ~~Golden snapshot tests (skin-smooth T3.1, caption presets T5.1).~~ PR #36 lands the skin-smooth
+  software-renderer snapshot on a skin + foliage + graphics fixture at three strengths, asserting
+  the skin band smooths while foliage and graphics stay untouched. Caption presets assert every
+  built-in preset rasterises to a non-empty, in-canvas box. Pixel-PNG goldens stay out of scope
+  because they need a GPU-determinism + font-availability matrix.
