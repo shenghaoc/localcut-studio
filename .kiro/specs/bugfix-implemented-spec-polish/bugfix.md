@@ -354,4 +354,8 @@ change to a tuned look), or large enough to deserve its own spec.
   progress.
 
 **Smaller hygiene:**
-- Golden snapshot tests (skin-smooth T3.1, caption presets T5.1).
+- ~~Golden snapshot tests (skin-smooth T3.1, caption presets T5.1).~~ Landed as software-renderer
+  "golden-less" snapshots: skin-smooth renders a skin + foliage + text fixture at three strengths and
+  asserts the skin band smooths while the foliage and text bands stay untouched; caption presets
+  assert every built-in preset rasterises to a non-empty, in-canvas box. Pixel-PNG goldens stay out
+  of scope (they would need a GPU-determinism + font-availability matrix).

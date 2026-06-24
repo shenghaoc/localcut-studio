@@ -1,6 +1,6 @@
 # Design: Phase 32a — GPU Skin Smoothing (no ML)
 
-> Status: **Implemented** (T3.1 snapshot tests deferred). Target tag: **v0.1.2**.
+> Status: **Implemented**. Target tag: **v0.1.2**.
 
 ## Goal
 

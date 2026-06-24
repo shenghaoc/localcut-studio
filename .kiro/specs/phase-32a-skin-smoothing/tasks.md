@@ -1,6 +1,6 @@
 # Tasks: Phase 32a — GPU Skin Smoothing (no ML)
 
-> Status: **Implemented** (T3.1 snapshot tests and keyframe authoring UI deferred). Depends on `feature-colour-grading` and the keyframe system.
+> Status: **Implemented**. Depends on `feature-colour-grading` and the keyframe system. (Keyframe authoring UI landed via `bugfix-implemented-spec-polish` U8; T3.1 snapshot tests now done.)
 
 ## Engine
 
@@ -17,7 +17,7 @@
 
 ## Verification
 
-- [ ] **T3.1** Snapshot tests at three strengths on a skin + foliage + text fixture; goldens diff within tolerance.
+- [x] **T3.1** Snapshot tests at three strengths on a skin + foliage + text fixture; the skin band's high-frequency energy drops monotonically with strength while the foliage and text bands stay within tolerance (software-renderer "golden-less" form — deterministic on headless CI, no committed PNGs).
 - [x] **T3.2** Unit tests for parameter clamping, identity at strength 0, codable round-trip.
 - [x] **T3.3** Unit test for the 1080p reference blur-radius mapping and 4K/half-height scaling.
 - [x] **T3.4** `xcodebuild` (Debug, macOS) green; no test count regression.
