@@ -353,17 +353,18 @@ private func renderSkinFixtureRGBA8(_ image: CIImage) -> [UInt8] {
 /// cross-band Gaussian bleed.
 private func skinFixtureDetailEnergy(_ buffer: [UInt8], xRange: Range<Int>) -> Double {
     let w = skinFixtureWidth
-    func lum(_ x: Int, _ y: Int) -> Double {
-        let i = (y * w + x) * 4
+    let bytesPerPixel = 4
+    func lum(at i: Int) -> Double {
         return (Double(buffer[i]) + Double(buffer[i + 1]) + Double(buffer[i + 2])) / 3.0
     }
     let margin = 24
     var energy = 0.0
     for y in margin..<(skinFixtureHeight - margin) {
         for x in xRange {
-            let current = lum(x, y)
-            energy += abs(current - lum(x + 1, y))
-            energy += abs(current - lum(x, y + 1))
+            let i = (y * w + x) * bytesPerPixel
+            let current = lum(at: i)
+            energy += abs(current - lum(at: i + bytesPerPixel))
+            energy += abs(current - lum(at: i + w * bytesPerPixel))
         }
     }
     return energy
