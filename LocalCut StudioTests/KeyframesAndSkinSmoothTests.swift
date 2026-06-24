@@ -271,7 +271,9 @@ func skinSmoothRenderPathAltersPixels() throws {
 private let skinFixtureWidth = 360
 private let skinFixtureHeight = 540
 private let skinFixtureBand = skinFixtureWidth / 3   // 120
-private let skinFixtureExtent = CGRect(x: 0, y: 0, width: skinFixtureWidth, height: skinFixtureHeight)
+private let skinFixtureExtent = CGRect(x: 0, y: 0,
+                                       width: CGFloat(skinFixtureWidth),
+                                       height: CGFloat(skinFixtureHeight))
 
 /// Builds the skin + foliage + graphics fixture. The bands are chosen so the
 /// chroma / luminance mask classifies only the left band as skin:
@@ -299,7 +301,9 @@ private func makeSkinFoliageGraphicsFixture() throws -> CIImage {
         checker.width = 10                       // pixel-aligned cells → sharp edges
         checker.center = CGPoint(x: 0, y: 0)
         return checker.outputImage?.cropped(
-            to: CGRect(x: x, y: 0, width: skinFixtureBand, height: skinFixtureHeight))
+            to: CGRect(x: CGFloat(x), y: 0,
+                       width: CGFloat(skinFixtureBand),
+                       height: CGFloat(skinFixtureHeight)))
     }
     let skin = try #require(checkerBand(CIColor(red: 0.85, green: 0.65, blue: 0.55),
                                         CIColor(red: 0.55, green: 0.38, blue: 0.32), x: 0))
@@ -315,7 +319,9 @@ private func makeSkinFoliageGraphicsFixture() throws -> CIImage {
     stripes.sharpness = 0.6
     stripes.center = CGPoint(x: 0, y: 0)
     let graphics = try #require(stripes.outputImage?.cropped(
-        to: CGRect(x: skinFixtureBand * 2, y: 0, width: skinFixtureBand, height: skinFixtureHeight)))
+        to: CGRect(x: CGFloat(skinFixtureBand * 2), y: 0,
+                   width: CGFloat(skinFixtureBand),
+                   height: CGFloat(skinFixtureHeight))))
     let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1)).cropped(to: skinFixtureExtent)
     return skin.composited(over: foliage.composited(over: graphics.composited(over: black)))
 }
