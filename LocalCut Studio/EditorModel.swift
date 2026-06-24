@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import CoreGraphics
 import Observation
+import LocalCutCore
 
 /// The single source of truth driving the editor UI: it owns the project, the
 /// preview `AVPlayer`, the current selection, and the timeline view state, and it

@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import LocalCutCore
 
 // MARK: - Caption track editing
 

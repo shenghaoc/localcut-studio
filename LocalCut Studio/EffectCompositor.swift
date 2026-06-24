@@ -5,6 +5,7 @@ import CoreImage.CIFilterBuiltins
 import Metal
 import CoreVideo
 import os
+import LocalCutCore
 
 // MARK: - Layer metadata for the compositor
 

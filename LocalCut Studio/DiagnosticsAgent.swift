@@ -3,6 +3,7 @@ import AVFoundation
 import Observation
 import os
 import Darwin
+import LocalCutCore
 
 /// Probes editor performance at 1 Hz and exposes the rolling samples to the
 /// `DiagnosticsView`. Owned by `EditorModel`; only runs while the panel is

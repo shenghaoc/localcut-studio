@@ -5,6 +5,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreGraphics
 import AVFoundation
+import LocalCutCore
 @testable import LocalCut_Studio
 
 // MARK: - R6.1 — working-space change purges caption raster cache

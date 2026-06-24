@@ -19,17 +19,17 @@ pure math out of AVFoundation-heavy methods and test that directly." Foundation,
 CoreMedia (`CMTime`), CoreGraphics value types, and VideoToolbox capability probes
 are fine; live `AVAsset`/`AVPlayer`/`CIContext` glue stays in the app target.
 
-Target layout (folders added as each module migrates):
+## Module layout
 
 ```
 Sources/LocalCutCore/
-  Capabilities/      ← migrated: capability-tier decisions
-  Models/            ← planned
-  Timeline/          ← planned
-  Keyframes/         ← planned
-  Transitions/       ← planned
-  RenderPlanning/    ← planned
-  TimeFormatting/    ← planned
+  Capabilities/      ← capability-tier decisions (VideoToolbox probe)
+  Models/            ← pure value types: Clip, Track, CaptionTrack, ProjectDocument, etc.
+  Keyframes/         ← Keyframe<T>, Keyframed<T>, Interpolatable
+  Transitions/       ← TransitionLayout geometry (cuts, overlaps, ripple, placements)
+  RenderPlanning/    ← VisibleSegment, PlannedUnit, planUnits(), fitTransform()
+  TimeFormatting/    ← TimeFormatting.timecode()
+  Diagnostics/       ← DiagnosticsBridge (thread-safe ring buffer)
 Tests/LocalCutCoreTests/
 ```
 
@@ -37,25 +37,24 @@ Tests/LocalCutCoreTests/
 
 | Module | Status | Notes |
 | --- | --- | --- |
-| Capabilities | ✅ migrated | Zero project dependencies (Foundation + VideoToolbox only); single app consumer (`DiagnosticsView`). |
-| Models (`Clip`/`Track`/`Project`/keyframes/colour grade/captions…) | ⏳ planned | One tightly-coupled component used by nearly every file; migrating it makes the core value types `public` and adds `import LocalCutCore` across the app. |
-| TransitionLayout | ⏳ planned | Pure geometry, but depends on `Clip`/`Track` — move with (or after) Models. |
-| Render planning / time formatting | ⏳ planned | Factor the pure math out of the AVFoundation builders first. |
+| Capabilities | ✅ migrated | Zero project dependencies (Foundation + VideoToolbox only). |
+| Models (Clip/Track/ColourGrade/captions/keyframes/audio/WorkingColourSpace) | ✅ migrated | Pure value types + `@Observable` Track/CaptionTrack. |
+| TransitionLayout | ✅ migrated | Pure geometry; depends on Clip/Track from Models. |
+| Document types (ProjectDocument/MediaRef/TrackDoc/ClipDoc/CMTimeCode) | ✅ migrated | Codable persistence layer. |
+| CaptionImporter | ✅ migrated | Pure SRT/VTT parse logic. |
+| CaptionPresets | ✅ migrated | Built-in preset library + `.lccaption` I/O. |
+| RenderPlanning | ✅ migrated | VisibleSegment, PlannedUnit, planUnits, fitTransform, subRampVolumes. |
+| TimeFormatting | ✅ migrated | timecode() display formatter. |
+| DiagnosticsBridge | ✅ migrated | Thread-safe ring buffer (OSAllocatedUnfairLock). |
 
-### How to migrate the next module
+### What stays in the app target
 
-1. Pick a dependency *island* — code whose only project dependencies are types
-   already in the package (or none). Move the source file under the matching
-   `Sources/LocalCutCore/<Area>/` folder.
-2. Mark the symbols the app consumes `public` (and any `Comparable`/protocol
-   witnesses that must match a public requirement).
-3. Add `import LocalCutCore` to every app/test file that referenced those symbols.
-4. Move the corresponding test file into `Tests/LocalCutCoreTests/` and switch its
-   `@testable import LocalCut_Studio` to `import LocalCutCore`.
-5. Verify both loops: `swift test --package-path Packages/LocalCutCore` **and**
-   the Xcode build (`xcodebuild … test`), since the app target now links the
-   package product.
-
-Because the app uses `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` but a SwiftPM
-target defaults to non-isolated, keep the explicit `nonisolated` annotations on
-moved types so behaviour matches across both build systems.
+- `MediaItem` — `AVURLAsset` / `AVAssetImageGenerator` (AVFoundation)
+- `Project` — references `MediaItem` (AVFoundation dependency)
+- `EditorModel` — `@Observable @MainActor`, AVPlayer, undo, security-scoped URLs
+- `CompositionBuilder` — `AVMutableComposition` / `AVVideoComposition`
+- `EffectCompositor` — `AVVideoCompositing` (Metal/Core Image)
+- `RenderQueue` — `AVAssetExportSession` / `AVAssetWriter`
+- `AudioMasterBus` — `AVAudioEngine`
+- `DiagnosticsAgent` — `proc_pidinfo`, Timer
+- All SwiftUI views

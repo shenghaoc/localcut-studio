@@ -1,6 +1,7 @@
 import Testing
 import AVFoundation
 import CoreImage
+import LocalCutCore
 @testable import LocalCut_Studio
 
 /// End-to-end transition tests that build a real `AVComposition` from a

@@ -2,6 +2,7 @@ import Testing
 import AVFoundation
 import CoreGraphics
 import CoreImage
+import LocalCutCore
 @testable import LocalCut_Studio
 
 // MARK: - Keyframes (feature-keyframes V1–V4)

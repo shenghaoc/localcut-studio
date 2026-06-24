@@ -4,6 +4,7 @@ import CoreGraphics
 import CoreText
 import CoreImage
 import AppKit
+import LocalCutCore
 
 /// Renders a `CaptionLine` for a given `CaptionStyle` and render canvas into a
 /// `CIImage`. Idle and word-highlight rasters are cached by `TitleRasterer`.

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import AVFoundation
+import LocalCutCore
 @testable import LocalCut_Studio
 
 // Tests for feature-audio-master-bus (P16 infrastructure).

@@ -1,0 +1,742 @@
+import Foundation
+import CoreMedia
+import CoreGraphics
+import CoreVideo
+
+// MARK: - Working colour space
+
+/// The project's working colour space. Tags the compositor's `CIContext`
+/// `workingColorSpace` and every output `CVPixelBuffer` so downstream
+/// `AVAssetExportSession` / `AVAssetWriter` carry it through.
+public nonisolated enum WorkingColourSpace: String, Codable, Hashable, Sendable, CaseIterable, Identifiable {
+    case sRGB
+    case displayP3
+    case rec709
+    case rec2020
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .sRGB: "sRGB"
+        case .displayP3: "Display P3"
+        case .rec709: "Rec. 709"
+        case .rec2020: "Rec. 2020"
+        }
+    }
+
+    /// `CGColorSpace` used as the `CIContext.workingColorSpace` and the
+    /// render-time `colorSpace` argument.
+    public var cgColorSpace: CGColorSpace {
+        let name: CFString
+        switch self {
+        case .sRGB: name = CGColorSpace.sRGB
+        case .displayP3: name = CGColorSpace.displayP3
+        case .rec709: name = CGColorSpace.itur_709
+        case .rec2020: name = CGColorSpace.itur_2020
+        }
+        return CGColorSpace(name: name) ?? CGColorSpaceCreateDeviceRGB()
+    }
+
+    /// Value for the `kCVImageBufferColorPrimariesKey` attachment.
+    public var cvColorPrimaries: CFString {
+        switch self {
+        case .sRGB, .rec709: kCVImageBufferColorPrimaries_ITU_R_709_2
+        case .displayP3: kCVImageBufferColorPrimaries_P3_D65
+        case .rec2020: kCVImageBufferColorPrimaries_ITU_R_2020
+        }
+    }
+
+    /// Value for the `kCVImageBufferTransferFunctionKey` attachment.
+    public var cvTransferFunction: CFString {
+        switch self {
+        case .sRGB, .displayP3: kCVImageBufferTransferFunction_sRGB
+        case .rec709, .rec2020: kCVImageBufferTransferFunction_ITU_R_709_2
+        }
+    }
+
+    /// Value for the `kCVImageBufferYCbCrMatrixKey` attachment.
+    public var cvYCbCrMatrix: CFString {
+        switch self {
+        case .sRGB, .displayP3, .rec709, .rec2020: kCVImageBufferYCbCrMatrix_ITU_R_709_2
+        }
+    }
+}
+
+// MARK: - Timeline
+
+public enum TrackKind: Hashable, Sendable {
+    case video
+    case audio
+}
+
+// MARK: - Colour Grading
+
+/// Perceptual colour-adjustment parameters with neutral defaults and clamping.
+public nonisolated struct ColourGrade: Hashable, Codable, Sendable {
+    public var exposure: Float = 0
+    public var contrast: Float = 1
+    public var saturation: Float = 1
+    public var temperatureOffset: Float = 0
+    public var tintOffset: Float = 0
+
+    public static let neutral = ColourGrade()
+
+    public init() {}
+
+    public init(exposure: Float, contrast: Float, saturation: Float,
+                temperatureOffset: Float, tintOffset: Float) {
+        self.exposure = exposure
+        self.contrast = contrast
+        self.saturation = saturation
+        self.temperatureOffset = temperatureOffset
+        self.tintOffset = tintOffset
+    }
+
+    public mutating func clamp() {
+        exposure = max(-2, min(2, exposure))
+        contrast = max(0.5, min(1.5, contrast))
+        saturation = max(0, min(2, saturation))
+        temperatureOffset = max(-4000, min(4000, temperatureOffset))
+        tintOffset = max(-150, min(150, tintOffset))
+    }
+}
+
+/// Skin smoothing parameters with neutral defaults and clamping.
+public nonisolated struct SkinSmoothEffect: Hashable, Codable, Sendable {
+    public var strength: Keyframed<Float>
+    public var maskWarmthBias: Float = 0
+    public var maskLuminanceGate: Float = 0.1
+    public var bypass: Bool = false
+
+    public init() {
+        self.strength = Keyframed<Float>(defaultValue: 0)
+    }
+
+    public static var neutral: SkinSmoothEffect { SkinSmoothEffect() }
+
+    public mutating func clamp() {
+        maskWarmthBias = max(-1, min(1, maskWarmthBias))
+        maskLuminanceGate = max(0, min(1, maskLuminanceGate))
+        let clampedKeyframes = strength.keyframes.map { kf in
+            Keyframe(id: kf.id, time: kf.time, value: max(0, min(1, kf.value)))
+        }
+        let clampedDefault = max(0, min(1, strength.defaultValue))
+        strength = Keyframed<Float>(keyframes: clampedKeyframes, defaultValue: clampedDefault)
+    }
+}
+
+/// An effect that can be applied to a video clip's source frames.
+public enum Effect: Hashable, Codable, Sendable {
+    case colourGrade(ColourGrade)
+    case lut(bookmark: Data)
+    case skinSmooth(SkinSmoothEffect)
+
+    public static func == (lhs: Effect, rhs: Effect) -> Bool {
+        switch (lhs, rhs) {
+        case (.colourGrade(let a), .colourGrade(let b)): a == b
+        case (.lut(bookmark: let a), .lut(bookmark: let b)): a == b
+        case (.skinSmooth(let a), .skinSmooth(let b)): a == b
+        default: false
+        }
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        switch self {
+        case .colourGrade(let g): hasher.combine(0); hasher.combine(g)
+        case .lut(bookmark: let d): hasher.combine(1); hasher.combine(d)
+        case .skinSmooth(let s): hasher.combine(2); hasher.combine(s)
+        }
+    }
+}
+
+extension Array where Element == Effect {
+    public nonisolated var hasLUT: Bool {
+        contains { if case .lut = $0 { return true }; return false }
+    }
+
+    public nonisolated func replacingLUT(bookmark: Data) -> [Effect] {
+        var result: [Effect] = []
+        var inserted = false
+        for effect in self {
+            if case .lut = effect {
+                if !inserted {
+                    result.append(.lut(bookmark: bookmark))
+                    inserted = true
+                }
+            } else {
+                result.append(effect)
+            }
+        }
+        if !inserted { result.append(.lut(bookmark: bookmark)) }
+        return result
+    }
+
+    public nonisolated func removingLUT() -> [Effect] {
+        filter { if case .lut = $0 { return false }; return true }
+    }
+}
+
+// MARK: - Transitions
+
+/// The kinds of transition supported in v1.
+public enum TransitionType: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+    case crossDissolve
+    case wipe
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .crossDissolve: "Cross Dissolve"
+        case .wipe: "Wipe"
+        }
+    }
+
+    public var symbolName: String {
+        switch self {
+        case .crossDissolve: "circle.lefthalf.filled"
+        case .wipe: "arrow.left.and.right.righttriangle.left.righttriangle.right"
+        }
+    }
+}
+
+/// A transition placed at the cut where its owning (trailing) clip meets the
+/// immediately-preceding adjacent clip on the same video track.
+public struct Transition: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public var type: TransitionType
+    public var duration: CMTime
+    public var wipeAngle: Double
+
+    public init(id: UUID = UUID(),
+                type: TransitionType = .crossDissolve,
+                duration: CMTime,
+                wipeAngle: Double = Transition.defaultWipeAngle) {
+        self.id = id
+        self.type = type
+        self.duration = duration
+        self.wipeAngle = wipeAngle
+    }
+
+    public static let defaultDuration = CMTime(value: 1, timescale: 2)
+    public static let defaultWipeAngle: Double = 0
+
+    public nonisolated static func radians(fromDegrees degrees: Double) -> Double {
+        degrees * .pi / 180
+    }
+
+    public nonisolated static func degrees(fromRadians radians: Double) -> Double {
+        let degrees = radians * 180 / .pi
+        let normalized = degrees.truncatingRemainder(dividingBy: 360)
+        return normalized >= 0 ? normalized : normalized + 360
+    }
+}
+
+/// A single placement of (part of) a media item on a track's timeline.
+public struct Clip: Identifiable, Hashable, Sendable {
+    public let id = UUID()
+    public var mediaID: UUID
+    public var sourceStart: CMTime
+    public var duration: CMTime
+    public var timelineStart: CMTime
+    public var opacity: Float = 1
+    public var effects: [Effect] = []
+    public var transition: Transition?
+    public var volumeEnvelope: VolumeEnvelope = VolumeEnvelope()
+
+    public var timelineEnd: CMTime { timelineStart + duration }
+    public var timeRangeInSource: CMTimeRange { CMTimeRange(start: sourceStart, duration: duration) }
+
+    public init(mediaID: UUID,
+                sourceStart: CMTime,
+                duration: CMTime,
+                timelineStart: CMTime,
+                opacity: Float = 1,
+                effects: [Effect] = [],
+                transition: Transition? = nil,
+                volumeEnvelope: VolumeEnvelope = VolumeEnvelope()) {
+        self.mediaID = mediaID
+        self.sourceStart = sourceStart
+        self.duration = duration
+        self.timelineStart = timelineStart
+        self.opacity = opacity
+        self.effects = effects
+        self.transition = transition
+        self.volumeEnvelope = volumeEnvelope
+    }
+}
+
+// MARK: - Caption Style
+
+public nonisolated struct RGBAColour: Hashable, Codable, Sendable, Interpolatable {
+    public var red: Float
+    public var green: Float
+    public var blue: Float
+    public var alpha: Float
+
+    public init(red: Float, green: Float, blue: Float, alpha: Float = 1) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.alpha = alpha
+    }
+
+    public static let white = RGBAColour(red: 1, green: 1, blue: 1)
+    public static let black = RGBAColour(red: 0, green: 0, blue: 0)
+    public static let clear = RGBAColour(red: 0, green: 0, blue: 0, alpha: 0)
+    public static let yellow = RGBAColour(red: 1, green: 0.85, blue: 0.2)
+
+    public var cgColor: CGColor {
+        CGColor(
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            components: [CGFloat(red), CGFloat(green), CGFloat(blue), CGFloat(alpha)])
+            ?? CGColor(red: CGFloat(red), green: CGFloat(green), blue: CGFloat(blue), alpha: CGFloat(alpha))
+    }
+
+    public nonisolated static func lerp(_ a: RGBAColour, _ b: RGBAColour, t: Float) -> RGBAColour {
+        RGBAColour(
+            red: Float.lerp(a.red, b.red, t: t),
+            green: Float.lerp(a.green, b.green, t: t),
+            blue: Float.lerp(a.blue, b.blue, t: t),
+            alpha: Float.lerp(a.alpha, b.alpha, t: t))
+    }
+}
+
+public nonisolated struct StrokeStyle: Hashable, Codable, Sendable {
+    public var colour: RGBAColour = .black
+    public var width: Float = 0
+    public init() {}
+    public init(colour: RGBAColour, width: Float) {
+        self.colour = colour
+        self.width = width
+    }
+}
+
+public nonisolated struct ShadowStyle: Hashable, Codable, Sendable {
+    public var colour: RGBAColour = RGBAColour(red: 0, green: 0, blue: 0, alpha: 0.5)
+    public var offsetX: Float = 0
+    public var offsetY: Float = -2
+    public var blur: Float = 4
+    public var radius: Float { blur }
+    public init() {}
+    public init(colour: RGBAColour, offsetX: Float, offsetY: Float, blur: Float) {
+        self.colour = colour
+        self.offsetX = offsetX
+        self.offsetY = offsetY
+        self.blur = blur
+    }
+}
+
+public nonisolated struct GlowStyle: Hashable, Codable, Sendable {
+    public var colour: RGBAColour = .clear
+    public var radius: Float = 0
+    public init() {}
+    public init(colour: RGBAColour, radius: Float) {
+        self.colour = colour
+        self.radius = radius
+    }
+}
+
+public nonisolated struct PillStyle: Hashable, Codable, Sendable {
+    public var colour: RGBAColour = .clear
+    public var cornerRadius: Float = 12
+    public var paddingX: Float = 16
+    public var paddingY: Float = 8
+    public init() {}
+    public init(colour: RGBAColour, cornerRadius: Float, paddingX: Float, paddingY: Float) {
+        self.colour = colour
+        self.cornerRadius = cornerRadius
+        self.paddingX = paddingX
+        self.paddingY = paddingY
+    }
+}
+
+public nonisolated enum CaptionEnterAnimation: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+    case none, pop, bounce, slide, typewriter
+    public var id: String { rawValue }
+    public var displayName: String {
+        switch self {
+        case .none: "None"
+        case .pop: "Pop"
+        case .bounce: "Bounce"
+        case .slide: "Slide"
+        case .typewriter: "Typewriter"
+        }
+    }
+}
+
+public nonisolated enum CaptionExitAnimation: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+    case none, pop, slide, fade
+    public var id: String { rawValue }
+    public var displayName: String {
+        switch self {
+        case .none: "None"
+        case .pop: "Pop"
+        case .slide: "Slide"
+        case .fade: "Fade"
+        }
+    }
+}
+
+public nonisolated enum SlideDirection: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+    case fromBottom, fromTop, fromLeft, fromRight
+    public var id: String { rawValue }
+}
+
+public nonisolated enum CaptionAnchor: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+    case top, middle, bottom
+    public var id: String { rawValue }
+}
+
+public nonisolated struct CaptionStyle: Hashable, Codable, Sendable {
+    public var fontName: String = "Helvetica-Bold"
+    public var fontSize: Float = 72
+    public var fill: RGBAColour = .white
+    public var stroke: StrokeStyle = StrokeStyle()
+    public var shadow: ShadowStyle = ShadowStyle()
+    public var glow: GlowStyle = GlowStyle()
+    public var pill: PillStyle = PillStyle()
+    public var anchor: CaptionAnchor = .bottom
+    public var verticalInset: Float = 96
+    public var letterSpacing: Float = 0
+    public var enterAnimation: CaptionEnterAnimation = .none
+    public var exitAnimation: CaptionExitAnimation = .none
+    public var enterDuration: Double = 0.25
+    public var exitDuration: Double = 0.25
+    public var slideDirection: SlideDirection = .fromBottom
+    public var wordHighlightFill: RGBAColour = .yellow
+
+    public static let identity = CaptionStyle()
+
+    public init() {}
+
+    public mutating func clamp() {
+        fontSize = max(8, min(512, fontSize))
+        stroke.width = max(0, min(64, stroke.width))
+        shadow.blur = max(0, min(64, shadow.blur))
+        glow.radius = max(0, min(128, glow.radius))
+        pill.cornerRadius = max(0, min(128, pill.cornerRadius))
+        pill.paddingX = max(0, min(128, pill.paddingX))
+        pill.paddingY = max(0, min(128, pill.paddingY))
+        verticalInset = max(0, min(2160, verticalInset))
+        letterSpacing = max(-32, min(64, letterSpacing))
+        enterDuration = max(0, min(5, enterDuration))
+        exitDuration = max(0, min(5, exitDuration))
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fontName, fontSize, fill, stroke, shadow, glow, pill,
+             anchor, verticalInset, letterSpacing,
+             enterAnimation, exitAnimation, enterDuration, exitDuration,
+             slideDirection, wordHighlightFill
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init()
+        if let v = try c.decodeIfPresent(String.self, forKey: .fontName) { fontName = v }
+        if let v = try c.decodeIfPresent(Float.self, forKey: .fontSize) { fontSize = v }
+        if let v = try c.decodeIfPresent(RGBAColour.self, forKey: .fill) { fill = v }
+        if let v = try c.decodeIfPresent(StrokeStyle.self, forKey: .stroke) { stroke = v }
+        if let v = try c.decodeIfPresent(ShadowStyle.self, forKey: .shadow) { shadow = v }
+        if let v = try c.decodeIfPresent(GlowStyle.self, forKey: .glow) { glow = v }
+        if let v = try c.decodeIfPresent(PillStyle.self, forKey: .pill) { pill = v }
+        if let v = try c.decodeIfPresent(CaptionAnchor.self, forKey: .anchor) { anchor = v }
+        if let v = try c.decodeIfPresent(Float.self, forKey: .verticalInset) { verticalInset = v }
+        if let v = try c.decodeIfPresent(Float.self, forKey: .letterSpacing) { letterSpacing = v }
+        if let v = try c.decodeIfPresent(CaptionEnterAnimation.self, forKey: .enterAnimation) { enterAnimation = v }
+        if let v = try c.decodeIfPresent(CaptionExitAnimation.self, forKey: .exitAnimation) { exitAnimation = v }
+        if let v = try c.decodeIfPresent(Double.self, forKey: .enterDuration) { enterDuration = v }
+        if let v = try c.decodeIfPresent(Double.self, forKey: .exitDuration) { exitDuration = v }
+        if let v = try c.decodeIfPresent(SlideDirection.self, forKey: .slideDirection) { slideDirection = v }
+        if let v = try c.decodeIfPresent(RGBAColour.self, forKey: .wordHighlightFill) { wordHighlightFill = v }
+    }
+
+    public var rasterHash: Int {
+        var hasher = Hasher()
+        hasher.combine(fontName)
+        hasher.combine(fontSize)
+        hasher.combine(fill)
+        hasher.combine(stroke)
+        hasher.combine(shadow)
+        hasher.combine(glow)
+        hasher.combine(pill)
+        hasher.combine(anchor)
+        hasher.combine(verticalInset)
+        hasher.combine(letterSpacing)
+        hasher.combine(wordHighlightFill)
+        return hasher.finalize()
+    }
+}
+
+// MARK: - Caption Tracks
+
+public nonisolated struct WordTiming: Hashable, Codable, Sendable {
+    public var range: CMTimeRange
+    public var word: String
+
+    public init(range: CMTimeRange, word: String) {
+        self.range = range
+        self.word = word
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case startValue, startScale, durationValue, durationScale, word
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let sv = try c.decode(Int64.self, forKey: .startValue)
+        let ss = try c.decode(Int32.self, forKey: .startScale)
+        let dv = try c.decode(Int64.self, forKey: .durationValue)
+        let ds = try c.decode(Int32.self, forKey: .durationScale)
+        range = CMTimeRange(
+            start: CMTime(value: sv, timescale: ss > 0 ? ss : 600),
+            duration: CMTime(value: dv, timescale: ds > 0 ? ds : 600))
+        word = try c.decode(String.self, forKey: .word)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        let start = range.start.isNumeric ? range.start : .zero
+        let dur = range.duration.isNumeric ? range.duration : .zero
+        try c.encode(start.value, forKey: .startValue)
+        try c.encode(start.timescale == 0 ? 600 : start.timescale, forKey: .startScale)
+        try c.encode(dur.value, forKey: .durationValue)
+        try c.encode(dur.timescale == 0 ? 600 : dur.timescale, forKey: .durationScale)
+        try c.encode(word, forKey: .word)
+    }
+}
+
+public nonisolated struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
+    public let id: UUID
+    public var range: CMTimeRange
+    public var text: String
+    public var words: [WordTiming]?
+    public var style: CaptionStyle?
+
+    public init(id: UUID = UUID(),
+                range: CMTimeRange,
+                text: String,
+                words: [WordTiming]? = nil,
+                style: CaptionStyle? = nil) {
+        self.id = id
+        self.range = range
+        self.text = text
+        self.words = words
+        self.style = style
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, startValue, startScale, durationValue, durationScale, text, words, style
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        let sv = try c.decode(Int64.self, forKey: .startValue)
+        let ss = try c.decode(Int32.self, forKey: .startScale)
+        let dv = try c.decode(Int64.self, forKey: .durationValue)
+        let ds = try c.decode(Int32.self, forKey: .durationScale)
+        range = CMTimeRange(
+            start: CMTime(value: sv, timescale: ss > 0 ? ss : 600),
+            duration: CMTime(value: dv, timescale: ds > 0 ? ds : 600))
+        text = try c.decode(String.self, forKey: .text)
+        words = try c.decodeIfPresent([WordTiming].self, forKey: .words)
+        style = try c.decodeIfPresent(CaptionStyle.self, forKey: .style)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        let start = range.start.isNumeric ? range.start : .zero
+        let dur = range.duration.isNumeric ? range.duration : .zero
+        try c.encode(start.value, forKey: .startValue)
+        try c.encode(start.timescale == 0 ? 600 : start.timescale, forKey: .startScale)
+        try c.encode(dur.value, forKey: .durationValue)
+        try c.encode(dur.timescale == 0 ? 600 : dur.timescale, forKey: .durationScale)
+        try c.encode(text, forKey: .text)
+        try c.encodeIfPresent(words, forKey: .words)
+        try c.encodeIfPresent(style, forKey: .style)
+    }
+
+    public var endTime: CMTime {
+        let lineEnd = range.end
+        let wordEnd = words?.reduce(CMTime.zero) { CMTimeMaximum($0, $1.range.end) } ?? .zero
+        return CMTimeMaximum(lineEnd, wordEnd)
+    }
+}
+
+// MARK: - Timeline Markers
+
+public nonisolated struct TimelineMarker: Identifiable, Hashable, Codable, Sendable {
+    public let id: UUID
+    public var time: CMTime
+    public var name: String
+    public var colour: RGBAColour?
+
+    public init(id: UUID = UUID(), time: CMTime, name: String = "Marker", colour: RGBAColour? = nil) {
+        self.id = id
+        self.time = time
+        self.name = name
+        self.colour = colour
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, time, name, colour }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        let timeCode = try c.decode(CMTimeCode.self, forKey: .time)
+        time = timeCode.cmTime
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Marker"
+        colour = try c.decodeIfPresent(RGBAColour.self, forKey: .colour)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(CMTimeCode(time), forKey: .time)
+        try c.encode(name, forKey: .name)
+        try c.encodeIfPresent(colour, forKey: .colour)
+    }
+}
+
+// MARK: - Audio
+
+public nonisolated struct TrackInput: Identifiable, Hashable, Codable, Sendable {
+    public var id: UUID
+    public var pan: Float
+    public var gain: Float
+
+    public init(id: UUID, pan: Float = 0, gain: Float = 1) {
+        self.id = id
+        self.pan = pan
+        self.gain = gain
+    }
+
+    public mutating func clamp() {
+        pan = max(-1, min(1, pan))
+        gain = max(0, min(2, gain))
+    }
+}
+
+public nonisolated struct VolumeEnvelope: Hashable, Codable, Sendable {
+    public nonisolated struct Ramp: Hashable, Codable, Sendable {
+        public var range: CMTimeRange
+        public var fromVolume: Float
+        public var toVolume: Float
+
+        public init(range: CMTimeRange, fromVolume: Float, toVolume: Float) {
+            self.range = range
+            self.fromVolume = fromVolume
+            self.toVolume = toVolume
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case startValue, startScale, durationValue, durationScale, fromVolume, toVolume
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let sv = try c.decode(Int64.self, forKey: .startValue)
+            let ss = try c.decode(Int32.self, forKey: .startScale)
+            let dv = try c.decode(Int64.self, forKey: .durationValue)
+            let ds = try c.decode(Int32.self, forKey: .durationScale)
+            range = CMTimeRange(
+                start: CMTime(value: sv, timescale: ss > 0 ? ss : 600),
+                duration: CMTime(value: max(0, dv), timescale: ds > 0 ? ds : 600))
+            fromVolume = try c.decodeIfPresent(Float.self, forKey: .fromVolume) ?? 1
+            toVolume = try c.decodeIfPresent(Float.self, forKey: .toVolume) ?? 1
+        }
+
+        public func encode(to encoder: any Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            let s = range.start.isNumeric ? range.start : .zero
+            let d = range.duration.isNumeric ? range.duration : .zero
+            try c.encode(s.value, forKey: .startValue)
+            try c.encode(s.timescale == 0 ? 600 : s.timescale, forKey: .startScale)
+            try c.encode(d.value, forKey: .durationValue)
+            try c.encode(d.timescale == 0 ? 600 : d.timescale, forKey: .durationScale)
+            try c.encode(fromVolume, forKey: .fromVolume)
+            try c.encode(toVolume, forKey: .toVolume)
+        }
+    }
+
+    public var fadeIn: CMTime
+    public var fadeOut: CMTime
+    public var ramps: [Ramp]
+
+    public init(fadeIn: CMTime = .zero, fadeOut: CMTime = .zero, ramps: [Ramp] = []) {
+        self.fadeIn = fadeIn
+        self.fadeOut = fadeOut
+        self.ramps = ramps
+    }
+
+    public var isEmpty: Bool {
+        fadeIn == .zero && fadeOut == .zero && ramps.isEmpty
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fadeInValue, fadeInScale, fadeOutValue, fadeOutScale, ramps
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let fiv = try c.decodeIfPresent(Int64.self, forKey: .fadeInValue) ?? 0
+        let fis = try c.decodeIfPresent(Int32.self, forKey: .fadeInScale) ?? 600
+        let fov = try c.decodeIfPresent(Int64.self, forKey: .fadeOutValue) ?? 0
+        let fos = try c.decodeIfPresent(Int32.self, forKey: .fadeOutScale) ?? 600
+        fadeIn = CMTime(value: fiv, timescale: fis > 0 ? fis : 600)
+        fadeOut = CMTime(value: fov, timescale: fos > 0 ? fos : 600)
+        ramps = try c.decodeIfPresent([Ramp].self, forKey: .ramps) ?? []
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        let fi = fadeIn.isNumeric ? fadeIn : .zero
+        let fo = fadeOut.isNumeric ? fadeOut : .zero
+        try c.encode(fi.value, forKey: .fadeInValue)
+        try c.encode(fi.timescale == 0 ? 600 : fi.timescale, forKey: .fadeInScale)
+        try c.encode(fo.value, forKey: .fadeOutValue)
+        try c.encode(fo.timescale == 0 ? 600 : fo.timescale, forKey: .fadeOutScale)
+        if !ramps.isEmpty { try c.encode(ramps, forKey: .ramps) }
+    }
+
+    public func clampedFades(clipDuration: CMTime) -> (fadeIn: CMTime, fadeOut: CMTime) {
+        guard clipDuration > .zero else { return (.zero, .zero) }
+        let fi = CMTimeMaximum(.zero, CMTimeMinimum(fadeIn, clipDuration))
+        let fo = CMTimeMaximum(.zero, CMTimeMinimum(fadeOut, clipDuration))
+        let sum = fi + fo
+        if sum <= clipDuration { return (fi, fo) }
+        let half = CMTimeMultiplyByRatio(clipDuration, multiplier: 1, divisor: 2)
+        return (half, half)
+    }
+
+    public static func clampedRange(_ range: CMTimeRange, to clipRange: CMTimeRange) -> CMTimeRange? {
+        let intersection = range.intersection(clipRange)
+        return intersection.duration > .zero ? intersection : nil
+    }
+}
+
+public nonisolated struct AudioMeterSnapshot: Hashable, Sendable {
+    public var peakLeft: Float
+    public var peakRight: Float
+    public var rmsLeft: Float
+    public var rmsRight: Float
+    public var sampledAt: ContinuousClock.Instant
+
+    public init(peakLeft: Float, peakRight: Float, rmsLeft: Float, rmsRight: Float,
+                sampledAt: ContinuousClock.Instant) {
+        self.peakLeft = peakLeft
+        self.peakRight = peakRight
+        self.rmsLeft = rmsLeft
+        self.rmsRight = rmsRight
+        self.sampledAt = sampledAt
+    }
+
+    public static let silent = AudioMeterSnapshot(
+        peakLeft: 0, peakRight: 0, rmsLeft: 0, rmsRight: 0,
+        sampledAt: ContinuousClock.now)
+}

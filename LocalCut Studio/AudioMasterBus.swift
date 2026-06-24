@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import Accelerate
 import os
+import LocalCutCore
 
 /// The native macOS port's audio master bus (P16). Owns two parallel
 /// `AVAudioEngine` graphs built from one shared description:

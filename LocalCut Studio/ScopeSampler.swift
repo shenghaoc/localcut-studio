@@ -2,6 +2,7 @@ import Foundation
 import CoreImage
 import CoreGraphics
 import os
+import LocalCutCore
 
 /// One frame's worth of scope data, sampled from the compositor's output.
 struct ScopeSample: Sendable, Equatable {

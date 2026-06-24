@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
 import AppKit
+import LocalCutCore
 
 /// Inspector section for the render queue: a list of built-in presets with
 /// one-tap "Add to Queue" buttons, followed by the live queue with status

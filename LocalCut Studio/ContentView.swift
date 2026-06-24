@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import LocalCutCore
 
 @main
 struct LocalCutStudioApp: App {

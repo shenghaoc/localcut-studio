@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import LocalCutCore
 import CoreGraphics
 import CoreMedia
 import AudioToolbox

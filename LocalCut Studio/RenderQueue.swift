@@ -4,6 +4,7 @@ import CoreGraphics
 import CoreMedia
 import Observation
 import os
+import LocalCutCore
 
 // MARK: - Job model
 

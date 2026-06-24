@@ -1,5 +1,6 @@
 import Testing
 import AVFoundation
+import LocalCutCore
 @testable import LocalCut_Studio
 
 @MainActor

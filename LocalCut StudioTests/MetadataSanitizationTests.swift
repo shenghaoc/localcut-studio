@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import AVFoundation
 import CoreGraphics
+import LocalCutCore
 @testable import LocalCut_Studio
 
 /// Validates the `.sanitized` guards applied to untrusted media metadata at the

@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import LocalCutCore
 
 /// The media library: imported source files with poster frames. Selecting an
 /// item shows it in the inspector; the add button (or double-click) appends it

@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreGraphics
+import LocalCutCore
 
 /// The product of building a project: an immutable composition plus the video
 /// composition that describes how its video layers are transformed and stacked.
@@ -65,56 +66,8 @@ enum CompositionBuilder {
     }
 
     // MARK: - Render planning
-
-    /// The minimal description of a clip visible during one instruction interval,
-    /// used to decide how to composite it. Pure value type so the planning logic
-    /// is unit-testable without an `AVComposition`.
-    struct VisibleSegment {
-        let compTrackID: CMPersistentTrackID
-        /// Effective start of the clip.
-        let start: Double
-        /// The clip's incoming-transition interval, if any.
-        let transitionStart: Double?
-        let transitionEnd: Double?
-        let transitionType: TransitionType?
-        let transitionWipeAngle: Double?
-    }
-
-    /// A planned composite step, by composition-track id, bottom-to-top.
-    enum PlannedUnit: Equatable {
-        case layer(CMPersistentTrackID)
-        case transition(outgoing: CMPersistentTrackID, incoming: CMPersistentTrackID,
-                        type: TransitionType, wipeAngle: Double)
-    }
-
-    /// Decides, for one project track, how to composite the clips visible at
-    /// `midpoint`. When transitions overlap (a chain of three or more clips), the
-    /// *topmost* active transition wins, blending the incoming clip with its
-    /// immediate predecessor; any earlier still-visible clips render underneath
-    /// so the newest clip is never dropped (which would "pop" in).
-    static func planUnits(visible: [VisibleSegment], midpoint: Double) -> [PlannedUnit] {
-        func transitionActive(_ seg: VisibleSegment) -> Bool {
-            guard let start = seg.transitionStart, let end = seg.transitionEnd else { return false }
-            return start <= midpoint && midpoint < end
-        }
-
-        if let incoming = visible.last(where: transitionActive),
-           let type = incoming.transitionType,
-           let outgoing = visible.filter({ $0.start < incoming.start }).max(by: { $0.start < $1.start }) {
-            var result: [PlannedUnit] = []
-            // Earlier clips still on screen render beneath the transition.
-            for seg in visible where seg.compTrackID != incoming.compTrackID && seg.compTrackID != outgoing.compTrackID {
-                result.append(.layer(seg.compTrackID))
-            }
-            result.append(.transition(outgoing: outgoing.compTrackID,
-                                      incoming: incoming.compTrackID,
-                                      type: type,
-                                      wipeAngle: incoming.transitionWipeAngle ?? Transition.defaultWipeAngle))
-            return result
-        }
-
-        return visible.map { .layer($0.compTrackID) }
-    }
+    //
+    // VisibleSegment, PlannedUnit, and planUnits() are defined in LocalCutCore.
 
     static func build(project: Project, showSkinMask: Bool = false) async throws -> BuiltComposition? {
         let composition = AVMutableComposition()
@@ -484,23 +437,9 @@ enum CompositionBuilder {
         }
     }
 
-    /// Linearly interpolates `fullFrom` / `fullTo` over `fullRange` and returns
-    /// the endpoint volumes that correspond to `subRange`. Used to emit partial
-    /// ramps when an envelope ramp only intersects part of a piece.
-    private static func subRampVolumes(fullRange: CMTimeRange,
-                                       fullFrom: Float,
-                                       fullTo: Float,
-                                       subRange: CMTimeRange) -> (Float, Float) {
-        let fullDur = fullRange.duration.seconds
-        guard fullDur > 0 else { return (fullFrom, fullTo) }
-        let t0 = (subRange.start - fullRange.start).seconds / fullDur
-        let t1 = (subRange.end - fullRange.start).seconds / fullDur
-        let from = fullFrom + (fullTo - fullFrom) * Float(t0)
-        let to = fullFrom + (fullTo - fullFrom) * Float(t1)
-        return (from, to)
-    }
-
     // MARK: - Video composition
+    //
+    // subRampVolumes() and fitTransform() are defined in LocalCutCore.
 
     /// Builds non-overlapping custom instructions covering the timeline. For
     /// each interval between segment boundaries we emit one instruction whose
@@ -643,35 +582,6 @@ enum CompositionBuilder {
             }
         }
         return items
-    }
-
-    // MARK: - Geometry
-
-    /// Aspect-fit a source frame (after its preferred orientation transform) into
-    /// the render canvas, centered.
-    private static func fitTransform(
-        naturalSize: CGSize,
-        preferredTransform: CGAffineTransform,
-        into renderSize: CGSize) -> CGAffineTransform {
-
-        let orientedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
-        let orientedSize = CGSize(width: abs(orientedRect.width), height: abs(orientedRect.height))
-        guard orientedSize.width > 0, orientedSize.height > 0 else { return preferredTransform }
-
-        // Normalize so the oriented frame's origin sits at (0, 0).
-        var transform = preferredTransform.concatenating(
-            CGAffineTransform(translationX: -orientedRect.minX, y: -orientedRect.minY))
-
-        let scale = min(renderSize.width / orientedSize.width,
-                        renderSize.height / orientedSize.height)
-        transform = transform.concatenating(CGAffineTransform(scaleX: scale, y: scale))
-
-        let scaledSize = CGSize(width: orientedSize.width * scale, height: orientedSize.height * scale)
-        let tx = (renderSize.width - scaledSize.width) / 2
-        let ty = (renderSize.height - scaledSize.height) / 2
-        transform = transform.concatenating(CGAffineTransform(translationX: tx, y: ty))
-
-        return transform
     }
 
     // MARK: - Cross-dissolve layer instructions (T1.2 feature-transitions)

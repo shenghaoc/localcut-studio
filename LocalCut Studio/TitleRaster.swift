@@ -3,6 +3,7 @@ import CoreGraphics
 import CoreText
 import CoreImage
 import os
+import LocalCutCore
 
 // MARK: - Request + result
 

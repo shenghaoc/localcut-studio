@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreVideo
+import LocalCutCore
 
 /// Generates and caches a tiny black-frame `.mov` used to extend an
 /// `AVMutableComposition` when a caption ends past the last AV clip. The

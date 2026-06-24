@@ -1,5 +1,6 @@
 import Testing
 import AVFoundation
+import LocalCutCore
 @testable import LocalCut_Studio
 
 @MainActor
@@ -224,8 +225,8 @@ struct TransitionsTests {
 
     private func segment(track: CMPersistentTrackID, start: Double,
                          transition: (Double, Double, TransitionType)? = nil,
-                         wipeAngle: Double = Transition.defaultWipeAngle) -> CompositionBuilder.VisibleSegment {
-        CompositionBuilder.VisibleSegment(
+                         wipeAngle: Double = Transition.defaultWipeAngle) -> VisibleSegment {
+        VisibleSegment(
             compTrackID: track, start: start,
             transitionStart: transition?.0,
             transitionEnd: transition?.1,
@@ -235,7 +236,7 @@ struct TransitionsTests {
 
     @Test("A single visible clip plans one layer")
     func planSingleLayer() {
-        let plan = CompositionBuilder.planUnits(visible: [segment(track: 1, start: 0)], midpoint: 2)
+        let plan = planUnits(visible: [segment(track: 1, start: 0)], midpoint: 2)
         #expect(plan == [.layer(1)])
     }
 
@@ -245,7 +246,7 @@ struct TransitionsTests {
             segment(track: 1, start: 0),
             segment(track: 2, start: 4, transition: (4, 5, .crossDissolve)),
         ]
-        let plan = CompositionBuilder.planUnits(visible: visible, midpoint: 4.5)
+        let plan = planUnits(visible: visible, midpoint: 4.5)
         #expect(plan == [.transition(outgoing: 1, incoming: 2,
                                      type: .crossDissolve,
                                      wipeAngle: Transition.defaultWipeAngle)])
@@ -259,7 +260,7 @@ struct TransitionsTests {
             segment(track: 2, start: 1, transition: (1, 4, .crossDissolve)),
             segment(track: 3, start: 2, transition: (2, 5, .wipe)),
         ]
-        let plan = CompositionBuilder.planUnits(visible: visible, midpoint: 3)
+        let plan = planUnits(visible: visible, midpoint: 3)
         // Topmost active transition (B→C) wins; A is drawn underneath, C is not dropped.
         #expect(plan == [.layer(1), .transition(outgoing: 2, incoming: 3,
                                                 type: .wipe,
@@ -273,7 +274,7 @@ struct TransitionsTests {
             segment(track: 1, start: 0),
             segment(track: 2, start: 4, transition: (4, 5, .wipe), wipeAngle: angle),
         ]
-        let plan = CompositionBuilder.planUnits(visible: visible, midpoint: 4.5)
+        let plan = planUnits(visible: visible, midpoint: 4.5)
         #expect(plan == [.transition(outgoing: 1, incoming: 2, type: .wipe, wipeAngle: angle)])
     }
 

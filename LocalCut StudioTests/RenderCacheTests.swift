@@ -3,6 +3,7 @@ import Foundation
 import AVFoundation
 import CoreGraphics
 import CoreImage
+import LocalCutCore
 @testable import LocalCut_Studio
 
 // MARK: - Helpers

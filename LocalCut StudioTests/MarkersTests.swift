@@ -1,5 +1,6 @@
 import Testing
 import AVFoundation
+import LocalCutCore
 @testable import LocalCut_Studio
 
 // MARK: - Model (feature-markers R1, R5.1)

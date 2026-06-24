@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import CoreGraphics
 import AppKit
+import LocalCutCore
 
 // MARK: - Undo snapshot
 
