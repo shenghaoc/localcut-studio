@@ -88,8 +88,8 @@ nonisolated struct FingerprintIndex: Codable, Equatable, Sendable {
     /// Encodes the entries map at the JSON root with sorted keys.
     func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: PathKey.self)
-        for (path, value) in entries.sorted(by: { $0.key < $1.key }) {
-            try container.encode(value, forKey: PathKey(path))
+        for path in entries.keys.sorted() {
+            try container.encode(entries[path]!, forKey: PathKey(path))
         }
     }
 

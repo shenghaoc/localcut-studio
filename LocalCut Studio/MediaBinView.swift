@@ -39,16 +39,10 @@ struct MediaBinView: View {
             Divider()
 
             if model.project.mediaItems.isEmpty {
-                ContentUnavailableView {
-                    Label("No Media", systemImage: "tray")
-                } description: {
-                    Text("Import video or audio to start editing.")
-                } actions: {
-                    Button("Import Media") {
-                        showImporter = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
+                ContentUnavailableView(
+                    "No Media",
+                    systemImage: "tray",
+                    description: Text("Import video or audio to start editing."))
             } else {
                 ScrollView {
                     LazyVStack(spacing: 6) {

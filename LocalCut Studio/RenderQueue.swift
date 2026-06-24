@@ -374,12 +374,24 @@ final class RenderQueue {
     /// could cancel the in-flight job and then watch the loop immediately
     /// pull the next queued one (codex P2).
     private func runLoop() async {
-        while !Task.isCancelled, let next = nextQueuedJobID() {
-            await runJob(id: next)
-            await Task.yield()
-        }
-        if !Task.isCancelled {
-            runnerDrainedForTesting?()
+        while !Task.isCancelled {
+            if let next = nextQueuedJobID() {
+                await runJob(id: next)
+                await Task.yield()
+            } else {
+                if !Task.isCancelled {
+                    runnerDrainedForTesting?()
+                    // Yield after calling the test hook so any enqueued jobs
+                    // from the hook have time to be appended.
+                    await Task.yield()
+
+                    // If the hook enqueued something, keep running.
+                    if nextQueuedJobID() != nil {
+                        continue
+                    }
+                }
+                break
+            }
         }
     }
 
