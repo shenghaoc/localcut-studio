@@ -365,7 +365,7 @@ final class EditorModel {
                 // The playhead is in effective (rippled) time; convert to this clip's
                 // authored time using its constant ripple shift so the split lands at
                 // the frame the user sees.
-                let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks)
+                let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks.map(\.clips))
                 let placements = TransitionLayout.placements(for: track.clips, cuts: cuts)
                 let shift = placements.first(where: { $0.id == id })
                     .map { clip.timelineStart - $0.effectiveStart } ?? .zero
@@ -1097,7 +1097,7 @@ final class EditorModel {
     func snapTargets(excluding clipID: Clip.ID? = nil) -> [CMTime] {
         var targets: [CMTime] = [.zero]
         let effectivePlayhead = CMTime(seconds: currentTime, preferredTimescale: 600)
-        let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks)
+        let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks.map(\.clips))
         targets.append(contentsOf: TransitionLayout.authoredTimes(forEffective: effectivePlayhead, cuts: cuts))
         for track in allTracks {
             for clip in track.clips where clip.id != clipID {

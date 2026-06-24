@@ -5,8 +5,13 @@ import Observation
 // MARK: - Track
 
 /// An ordered lane of clips of a single kind.
+///
+/// All mutations must happen on `@MainActor` (enforced by the `EditorModel`
+/// that owns the project). The `@MainActor` isolation replaces the previous
+/// `@unchecked Sendable` conformance, making the threading contract explicit.
 @Observable
-public final class Track: Identifiable, @unchecked Sendable {
+@MainActor
+public final class Track: Identifiable {
     /// `let` so identity stays stable for the runtime lifetime of the track.
     public let id: UUID
     public var name: String
@@ -29,8 +34,12 @@ public final class Track: Identifiable, @unchecked Sendable {
 // MARK: - Caption Track
 
 /// An ordered lane of caption lines.
+///
+/// All mutations must happen on `@MainActor` (enforced by the `EditorModel`
+/// that owns the project). See `Track` for the rationale.
 @Observable
-public final class CaptionTrack: Identifiable, @unchecked Sendable {
+@MainActor
+public final class CaptionTrack: Identifiable {
     public let id: UUID
     public var name: String
     public var isMuted = false

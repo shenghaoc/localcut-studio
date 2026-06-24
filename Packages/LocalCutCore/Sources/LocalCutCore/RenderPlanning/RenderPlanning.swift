@@ -72,15 +72,17 @@ public func subRampVolumes(fullRange: CMTimeRange,
     return (from, to)
 }
 
-/// Lines from each unmuted caption track active at `midpoint`.
-public func activeCaptionItems(in tracks: [CaptionTrack],
+/// Lines from each unmuted caption track active at `midpoint`. Accepts value-
+/// type tuples rather than `@MainActor` `CaptionTrack` classes so the pure
+/// planning logic can run off the main actor.
+public func activeCaptionItems(in tracks: [(defaultStyle: CaptionStyle, lines: [CaptionLine], isMuted: Bool)],
                                 midpoint: Double) -> [(lineID: UUID, text: String,
                                                        words: [WordTiming]?,
                                                        style: CaptionStyle,
                                                        range: CMTimeRange)] {
     var items: [(lineID: UUID, text: String, words: [WordTiming]?,
                  style: CaptionStyle, range: CMTimeRange)] = []
-    for track in tracks {
+    for track in tracks where !track.isMuted {
         for line in track.lines {
             let start = line.range.start.seconds
             let end = line.range.end.seconds

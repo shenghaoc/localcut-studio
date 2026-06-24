@@ -75,7 +75,7 @@ enum CompositionBuilder {
 
         // Project-wide transition cuts ripple every track so linked A/V stays
         // in sync; the rendered timeline shortens by the total overlap.
-        let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks)
+        let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks.map(\.clips))
 
         // Each project video track expands into a pool of composition tracks so a
         // transition's two clips can overlap on screen (A/B-roll). Clips are

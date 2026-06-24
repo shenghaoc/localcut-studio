@@ -135,11 +135,13 @@ public enum TransitionLayout: Sendable {
         return result
     }
 
-    /// The project-wide set of transition cuts, derived from every video track.
-    public static func cuts(videoTracks: [Track]) -> [Cut] {
+    /// The project-wide set of transition cuts, derived from every video track's
+    /// clip array. Accepts `[[Clip]]` (value types) rather than `[Track]`
+    /// (`@MainActor` classes) so the pure geometry can run off the main actor.
+    public static func cuts(videoTracks: [[Clip]]) -> [Cut] {
         var rawCuts: [(time: Double, overlap: CMTime)] = []
-        for track in videoTracks {
-            let ordered = track.clips.sorted { $0.timelineStart < $1.timelineStart }
+        for clips in videoTracks {
+            let ordered = clips.sorted { $0.timelineStart < $1.timelineStart }
             let overlaps = orderedOverlaps(ordered)
             for (index, clip) in ordered.enumerated() where overlaps[index] > .zero {
                 rawCuts.append((clip.timelineStart.seconds, overlaps[index]))

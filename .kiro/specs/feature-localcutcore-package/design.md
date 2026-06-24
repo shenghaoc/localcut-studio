@@ -68,17 +68,19 @@ This is a one-way dependency — the package never references app types.
 
 ## Design decisions
 
-### Why `@unchecked Sendable` on Track/CaptionTrack
+### Why `@MainActor` on Track/CaptionTrack
 
 `Track` and `CaptionTrack` are `@Observable` classes with mutable stored
 properties. In the app, all mutations flow through `EditorModel` on `@MainActor`.
-The package declares them `@unchecked Sendable` because:
-1. The `@Observable` macro generates mutable observation-tracking storage that
-   Swift 6's strict concurrency cannot verify as safe.
-2. The actual safety contract is enforced by the app's `@MainActor` isolation
-   on `EditorModel` — the package cannot express this constraint.
-3. Making them `@MainActor` in the package would force all consumers to be
-   main-actor-isolated, which is too restrictive for a library type.
+The package declares them `@MainActor` to make this threading contract explicit
+and enforceable by the compiler, replacing the previous `@unchecked Sendable`
+conformance which asserted thread safety without enforcement.
+
+Pure functions in the package that only need the *data* from these types (e.g.
+`TransitionLayout.cuts(videoTracks:)`, `activeCaptionItems(in:midpoint:)`) accept
+value-type snapshots (`[[Clip]]`, `[(defaultStyle:lines:isMuted:)]`) instead of
+the `@MainActor` classes, so the geometry and planning logic can run off the main
+actor.
 
 ### Why `Observation` import is explicit
 

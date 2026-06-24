@@ -29,10 +29,8 @@ struct TransitionsTests {
         return (a, b)
     }
 
-    private func videoTrack(_ clips: [Clip]) -> Track {
-        let track = Track(name: "V1", kind: .video)
-        track.clips = clips
-        return track
+    private func videoTrack(_ clips: [Clip]) -> [Clip] {
+        clips
     }
 
     // MARK: - Overlap derivation & clamping (T1.4, R1.3, R4.1)
@@ -163,15 +161,13 @@ struct TransitionsTests {
     @Test("Coincident cuts across tracks merge into one (no double-ripple)")
     func coincidentCutsMerge() {
         let media = UUID()
-        func track(_ name: String, transition seconds: Double) -> Track {
-            let t = Track(name: name, kind: .video)
+        func track(_ name: String, transition seconds: Double) -> [Clip] {
             var b = Clip(mediaID: media, sourceStart: .zero, duration: time(5), timelineStart: time(5))
             b.transition = Transition(duration: time(seconds))
-            t.clips = [
+            return [
                 Clip(mediaID: media, sourceStart: .zero, duration: time(5), timelineStart: .zero),
                 b,
             ]
-            return t
         }
         // Two video tracks both cut at t=5, with different overlaps.
         let cuts = TransitionLayout.cuts(videoTracks: [track("V1", transition: 1), track("V2", transition: 2)])

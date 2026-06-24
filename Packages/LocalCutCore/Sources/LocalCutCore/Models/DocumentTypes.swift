@@ -166,6 +166,7 @@ public struct CaptionTrackDoc: Codable, Equatable, Sendable {
     }
 
     /// Rebuilds a runtime `CaptionTrack` from the stored values.
+    @MainActor
     public func makeTrack() -> CaptionTrack {
         let track = CaptionTrack(id: id, name: name, lines: lines)
         track.isMuted = isMuted
@@ -361,6 +362,7 @@ public struct TransitionDoc: Codable, Equatable, Sendable {
 // MARK: - Snapshot helpers (Project → Document)
 
 extension CaptionTrackDoc {
+    @MainActor
     public init(track: CaptionTrack) {
         self.init(
             id: track.id,
@@ -372,6 +374,7 @@ extension CaptionTrackDoc {
 }
 
 extension TrackDoc {
+    @MainActor
     public init(track: Track) {
         self.init(
             id: track.id,

@@ -61,3 +61,9 @@
 - [x] **R6.2** `import Observation` is explicit in `TrackTypes.swift` for `@Observable`.
 - [x] **R6.3** `AudioMeterSnapshot.silent` is a computed property (`static var`) so
       `sampledAt` is never stale.
+- [x] **R6.4** `Track` and `CaptionTrack` use `@MainActor` isolation (not
+      `@unchecked Sendable`) to make the threading contract explicit and
+      compiler-enforced.
+- [x] **R6.5** Pure functions that only need data from `@MainActor` types accept
+      value-type snapshots (`[[Clip]]`, `[(defaultStyle:lines:isMuted:)]`) so
+      geometry/planning logic can run off the main actor.
