@@ -248,16 +248,15 @@ func skinSmoothRenderPathAltersPixels() throws {
         compositor.applySkinSmooth(fixture, params: params, at: .zero),
         "Skin-smooth Metal kernels failed to load or run")
 
-    // Render both to bitmaps (software renderer for deterministic headless CI) and
-    // assert the blend kernel actually changed pixels.
-    let ctx = CIContext(options: [.useSoftwareRenderer: true])
+    // Render both to bitmaps (shared software renderer for deterministic headless
+    // CI) and assert the blend kernel actually changed pixels.
     let space = CGColorSpaceCreateDeviceRGB()
     func bitmap(_ image: CIImage) -> [UInt8] {
         let rowBytes = 64 * 4
         var buffer = [UInt8](repeating: 0, count: rowBytes * 64)
         buffer.withUnsafeMutableBytes { raw in
-            ctx.render(image, toBitmap: raw.baseAddress!, rowBytes: rowBytes,
-                       bounds: extent, format: .RGBA8, colorSpace: space)
+            skinFixtureSoftwareContext.render(image, toBitmap: raw.baseAddress!, rowBytes: rowBytes,
+                                              bounds: extent, format: .RGBA8, colorSpace: space)
         }
         return buffer
     }
@@ -418,10 +417,14 @@ func skinSmoothSnapshotThreeStrengths() throws {
         ("foliage", skinFixtureDetailEnergy(r0, xRange: foliageX), foliageX),
         ("graphics", skinFixtureDetailEnergy(r0, xRange: graphicsX), graphicsX),
     ]
+    // Each non-skin band must carry detail to compare against; a zero baseline
+    // would make the relative drift undefined (the patterns guarantee it, but
+    // assert it so a future fixture change fails loudly rather than dividing by 0).
     for band in bands {
+        #expect(band.base > 0, "\(band.name) band has no baseline detail to compare")
         for (label, buffer) in [("0.5", r05), ("1.0", r1)] {
             let energy = skinFixtureDetailEnergy(buffer, xRange: band.xRange)
-            let drift = abs(energy - band.base) / band.base
+            let drift = band.base > 0 ? abs(energy - band.base) / band.base : abs(energy - band.base)
             #expect(drift < 0.02,
                     "\(band.name) band drifted \(drift) at strength \(label) — should be untouched")
         }
