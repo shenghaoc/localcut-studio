@@ -287,9 +287,13 @@ public struct RGBAColour: Hashable, Codable, Sendable, Interpolatable {
     public static let clear = RGBAColour(red: 0, green: 0, blue: 0, alpha: 0)
     public static let yellow = RGBAColour(red: 1, green: 0.85, blue: 0.2)
 
+    /// Cached sRGB color space to avoid re-creating on every `cgColor` call
+    /// (called per-frame from the compositor).
+    private static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+
     public var cgColor: CGColor {
         CGColor(
-            colorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+            colorSpace: Self.sRGBColorSpace,
             components: [CGFloat(red), CGFloat(green), CGFloat(blue), CGFloat(alpha)])
             ?? CGColor(red: CGFloat(red), green: CGFloat(green), blue: CGFloat(blue), alpha: CGFloat(alpha))
     }
