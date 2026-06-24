@@ -147,9 +147,10 @@ final class ScopeSampler: Sendable {
         guard let readback = makeReadback(image: image, context: context, colorSpace: colorSpace) else {
             return ScopeSample(waveform: [], vectorscope: [], generatedAt: Date())
         }
+        let (waveform, vectorscope) = extractScopes(from: readback)
         return ScopeSample(
-            waveform: makeWaveform(from: readback),
-            vectorscope: makeVectorscope(from: readback),
+            waveform: waveform,
+            vectorscope: vectorscope,
             generatedAt: Date())
     }
 
@@ -188,64 +189,54 @@ final class ScopeSampler: Sendable {
         return ScopeReadback(width: width, height: height, pixels: pixels)
     }
 
-    // MARK: Waveform
+    // MARK: Combined Extraction
 
-    /// Per-column luma histograms derived from one readback. Each pixel is
-    /// converted to BT.709 luma before binning, so saturated colours land in
-    /// their actual luma bucket rather than three independent RGB histograms.
-    private nonisolated func makeWaveform(from readback: ScopeReadback) -> [WaveformColumn] {
+    /// Per-column luma histograms and vectorscope UV offsets derived from one readback
+    /// in a single pass over the pixel buffer to improve cache locality and avoid
+    /// redundant offset/clamping calculations.
+    private nonisolated func extractScopes(from readback: ScopeReadback) -> (waveform: [WaveformColumn], vectorscope: [VectorPoint]) {
         let columns = Self.waveformColumnCount
         let bins = Self.waveformBinCount
         var counts = [Float](repeating: 0, count: columns * bins)
 
-        for y in 0..<readback.height {
+        var vectorscopePoints: [VectorPoint] = []
+        vectorscopePoints.reserveCapacity(readback.width * readback.height)
+
+        var offset = 0
+        for _ in 0..<readback.height {
             for x in 0..<readback.width {
-                let offset = (y * readback.width + x) * 4
                 let r = Self.displayChannel(readback.pixels[offset + 0])
                 let g = Self.displayChannel(readback.pixels[offset + 1])
                 let b = Self.displayChannel(readback.pixels[offset + 2])
+
+                // Advance to the next pixel
+                offset += 4
+
+                // Waveform binning
                 let luma = Self.clamped01(0.2126 * r + 0.7152 * g + 0.0722 * b)
                 let column = min(columns - 1, x * columns / readback.width)
                 let bin = min(bins - 1, Int(luma * Float(bins - 1)))
                 counts[column * bins + bin] += 1
+
+                // Vectorscope point
+                let (u, v) = Self.rgbToUV((r, g, b))
+                vectorscopePoints.append(VectorPoint(u: u, v: v))
             }
         }
 
-        // Per-column normalisation: each column's tallest bin sits at 1.0.
-        // A global normaliser would let a single specular highlight in one
-        // column flatten every other column to near-zero, defeating the
-        // panel's purpose for typical footage. Cross-column luma magnitude
-        // is therefore *not* preserved by this scope — a per-row average is
-        // a Phase 38 extension.
-        var result: [WaveformColumn] = []
-        result.reserveCapacity(columns)
+        // Per-column normalisation for waveform
+        var waveformResult: [WaveformColumn] = []
+        waveformResult.reserveCapacity(columns)
         for i in 0..<columns {
             let start = i * bins
             let raw = Array(counts[start..<(start + bins)])
             let columnMax = raw.max() ?? 0
             let normalised: [Float] = columnMax > 0 ? raw.map { $0 / columnMax } : raw
             let x = Float((CGFloat(i) + 0.5) / CGFloat(columns))
-            result.append(WaveformColumn(x: x, bins: normalised))
+            waveformResult.append(WaveformColumn(x: x, bins: normalised))
         }
-        return result
-    }
 
-    // MARK: Vectorscope
-
-    private nonisolated func makeVectorscope(from readback: ScopeReadback) -> [VectorPoint] {
-        var result: [VectorPoint] = []
-        result.reserveCapacity(readback.width * readback.height)
-        for y in 0..<readback.height {
-            for x in 0..<readback.width {
-                let offset = (y * readback.width + x) * 4
-                let r = Self.displayChannel(readback.pixels[offset + 0])
-                let g = Self.displayChannel(readback.pixels[offset + 1])
-                let b = Self.displayChannel(readback.pixels[offset + 2])
-                let (u, v) = Self.rgbToUV((r, g, b))
-                result.append(VectorPoint(u: u, v: v))
-            }
-        }
-        return result
+        return (waveformResult, vectorscopePoints)
     }
 
     /// BT.601 RGB → UV chroma. Returns offsets in [-0.5, 0.5]; (0, 0) ≡ neutral
