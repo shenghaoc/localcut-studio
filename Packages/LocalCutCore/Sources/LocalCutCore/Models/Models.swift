@@ -470,6 +470,154 @@ public struct CaptionStyle: Hashable, Codable, Sendable {
     }
 }
 
+/// The line-local animated caption-style parameters from Phase 30 R2.3.
+/// The base `CaptionStyle` still carries static preset/default values; this
+/// bundle layers keyframed overrides on top for the subset that needs per-line
+/// animation.
+public struct CaptionStyleKeyframeValues: Hashable, Sendable {
+    public var fill: RGBAColour
+    public var scale: Float
+    public var offsetX: Float
+    public var offsetY: Float
+    public var opacity: Float
+    public var letterSpacing: Float
+
+    public init(fill: RGBAColour = .white,
+                scale: Float = 1,
+                offsetX: Float = 0,
+                offsetY: Float = 0,
+                opacity: Float = 1,
+                letterSpacing: Float = 0) {
+        self.fill = fill
+        self.scale = scale
+        self.offsetX = offsetX
+        self.offsetY = offsetY
+        self.opacity = opacity
+        self.letterSpacing = letterSpacing
+        clamp()
+    }
+
+    public init(baseStyle: CaptionStyle) {
+        self.init(fill: baseStyle.fill,
+                  scale: 1,
+                  offsetX: 0,
+                  offsetY: 0,
+                  opacity: 1,
+                  letterSpacing: baseStyle.letterSpacing)
+    }
+
+    public mutating func clamp() {
+        fill.red = max(0, min(1, fill.red))
+        fill.green = max(0, min(1, fill.green))
+        fill.blue = max(0, min(1, fill.blue))
+        fill.alpha = max(0, min(1, fill.alpha))
+        scale = max(0.1, min(4, scale))
+        offsetX = max(-4096, min(4096, offsetX))
+        offsetY = max(-4096, min(4096, offsetY))
+        opacity = max(0, min(1, opacity))
+        letterSpacing = max(-32, min(64, letterSpacing))
+    }
+
+    public var clamped: CaptionStyleKeyframeValues {
+        var copy = self
+        copy.clamp()
+        return copy
+    }
+}
+
+public struct CaptionStyleKeyframes: Hashable, Codable, Sendable {
+    public var fill: Keyframed<RGBAColour>
+    public var scale: Keyframed<Float>
+    public var offsetX: Keyframed<Float>
+    public var offsetY: Keyframed<Float>
+    public var opacity: Keyframed<Float>
+    public var letterSpacing: Keyframed<Float>
+
+    public init(baseStyle: CaptionStyle = .identity) {
+        let values = CaptionStyleKeyframeValues(baseStyle: baseStyle)
+        self.init(defaultValues: values)
+    }
+
+    public init(defaultValues: CaptionStyleKeyframeValues) {
+        let values = defaultValues.clamped
+        fill = Keyframed(defaultValue: values.fill)
+        scale = Keyframed(defaultValue: values.scale)
+        offsetX = Keyframed(defaultValue: values.offsetX)
+        offsetY = Keyframed(defaultValue: values.offsetY)
+        opacity = Keyframed(defaultValue: values.opacity)
+        letterSpacing = Keyframed(defaultValue: values.letterSpacing)
+    }
+
+    public var isEmpty: Bool {
+        fill.keyframes.isEmpty
+            && scale.keyframes.isEmpty
+            && offsetX.keyframes.isEmpty
+            && offsetY.keyframes.isEmpty
+            && opacity.keyframes.isEmpty
+            && letterSpacing.keyframes.isEmpty
+    }
+
+    public var keyframeCount: Int { allKeyframeTimes.count }
+
+    public var allKeyframeTimes: [CMTime] {
+        var times = Set<CMTime>()
+        for time in fill.keyframes.map(\.time)
+            + scale.keyframes.map(\.time)
+            + offsetX.keyframes.map(\.time)
+            + offsetY.keyframes.map(\.time)
+            + opacity.keyframes.map(\.time)
+            + letterSpacing.keyframes.map(\.time) {
+            times.insert(time)
+        }
+        return Array(times).sorted()
+    }
+
+    public func hasKeyframe(at time: CMTime) -> Bool {
+        allKeyframeTimes.contains(time)
+    }
+
+    public func values(at time: CMTime) -> CaptionStyleKeyframeValues {
+        CaptionStyleKeyframeValues(
+            fill: fill.value(at: time),
+            scale: scale.value(at: time),
+            offsetX: offsetX.value(at: time),
+            offsetY: offsetY.value(at: time),
+            opacity: opacity.value(at: time),
+            letterSpacing: letterSpacing.value(at: time))
+    }
+
+    /// Returns the keyframed properties consumed by text rasterization. Scale,
+    /// offsets, and opacity stay outside the style because the compositor applies
+    /// them as post-raster image transforms.
+    public func rasterStyle(base: CaptionStyle, at time: CMTime) -> CaptionStyle {
+        let values = values(at: time)
+        var style = base
+        style.fill = values.fill
+        style.letterSpacing = values.letterSpacing
+        return style
+    }
+
+    public mutating func addOrUpdateKeyframes(at time: CMTime,
+                                              values rawValues: CaptionStyleKeyframeValues) {
+        let values = rawValues.clamped
+        fill.addKeyframe(at: time, value: values.fill)
+        scale.addKeyframe(at: time, value: values.scale)
+        offsetX.addKeyframe(at: time, value: values.offsetX)
+        offsetY.addKeyframe(at: time, value: values.offsetY)
+        opacity.addKeyframe(at: time, value: values.opacity)
+        letterSpacing.addKeyframe(at: time, value: values.letterSpacing)
+    }
+
+    public mutating func removeKeyframes(at time: CMTime) {
+        fill.removeKeyframe(at: time)
+        scale.removeKeyframe(at: time)
+        offsetX.removeKeyframe(at: time)
+        offsetY.removeKeyframe(at: time)
+        opacity.removeKeyframe(at: time)
+        letterSpacing.removeKeyframe(at: time)
+    }
+}
+
 // MARK: - Caption Tracks
 
 public struct WordTiming: Hashable, Codable, Sendable {
@@ -515,21 +663,25 @@ public struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
     public var text: String
     public var words: [WordTiming]?
     public var style: CaptionStyle?
+    public var styleKeyframes: CaptionStyleKeyframes?
 
     public init(id: UUID = UUID(),
                 range: CMTimeRange,
                 text: String,
                 words: [WordTiming]? = nil,
-                style: CaptionStyle? = nil) {
+                style: CaptionStyle? = nil,
+                styleKeyframes: CaptionStyleKeyframes? = nil) {
         self.id = id
         self.range = range
         self.text = text
         self.words = words
         self.style = style
+        self.styleKeyframes = styleKeyframes
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, startValue, startScale, durationValue, durationScale, text, words, style
+        case id, startValue, startScale, durationValue, durationScale, text,
+             words, style, styleKeyframes
     }
 
     public init(from decoder: any Decoder) throws {
@@ -545,6 +697,7 @@ public struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
         text = try c.decode(String.self, forKey: .text)
         words = try c.decodeIfPresent([WordTiming].self, forKey: .words)
         style = try c.decodeIfPresent(CaptionStyle.self, forKey: .style)
+        styleKeyframes = try c.decodeIfPresent(CaptionStyleKeyframes.self, forKey: .styleKeyframes)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -559,6 +712,7 @@ public struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
         try c.encode(text, forKey: .text)
         try c.encodeIfPresent(words, forKey: .words)
         try c.encodeIfPresent(style, forKey: .style)
+        try c.encodeIfPresent(styleKeyframes, forKey: .styleKeyframes)
     }
 
     public var endTime: CMTime {

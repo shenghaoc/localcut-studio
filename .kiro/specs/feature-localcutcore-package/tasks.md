@@ -27,7 +27,7 @@
       enums, `CaptionStyle`, `WordTiming`, `CaptionLine`, `TimelineMarker`, `TrackInput`,
       `VolumeEnvelope`, `AudioMeterSnapshot`.
 - [x] **T3.3** Create `TrackTypes.swift`: `Track`, `CaptionTrack` (`@Observable`
-      classes with `@unchecked Sendable`).
+      classes with `@MainActor` isolation).
 - [x] **T3.4** Create `AudioBusMixing.swift`: `AudioBusMixing.baselineVolume()`.
 
 ## Keyframes migration
@@ -78,8 +78,8 @@
       only `UTType` extension and app-specific snapshot helpers).
 - [x] **T11.6** Delete app `TransitionLayout.swift`, `CaptionPresets.swift`,
       `DiagnosticsBridge.swift` (fully moved to package).
-- [x] **T11.7** Slim app `CaptionImporter.swift` (keep deprecated `@MainActor`
-      wrappers only).
+- [x] **T11.7** Slim app `CaptionImporter.swift` (removed dead `CaptionImporterCompat`
+      — production code uses `CaptionImporter.parseLines` from package directly).
 - [x] **T11.8** Remove `TimeFormatting` from app `PreviewView.swift`.
 - [x] **T11.9** Remove extracted helpers from app `CompositionBuilder.swift`
       (`VisibleSegment`, `PlannedUnit`, `planUnits`, `subRampVolumes`, `fitTransform`).
@@ -91,6 +91,12 @@
 - [x] **T12.2** Add `import Observation` to `TrackTypes.swift` (Claude review).
 - [x] **T12.3** Change `AudioMeterSnapshot.silent` from `static let` to
       `static var` (Claude review).
+- [x] **T12.4** Replace `@unchecked Sendable` with `@MainActor` on `Track` and
+      `CaptionTrack`; update `TransitionLayout.cuts(videoTracks:)` to accept
+      `[[Clip]]` and `activeCaptionItems(in:)` to accept value-type tuples
+      (Claude + Gemini review).
+- [x] **T12.5** Remove dead `CaptionImporterCompat` from app `CaptionImporter.swift`
+      (Codex review).
 
 ## Verification
 

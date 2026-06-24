@@ -98,6 +98,10 @@ public struct Keyframed<T: Interpolatable>: Hashable, Codable, Sendable {
         keyframes.removeAll { $0.id == id }
     }
 
+    public mutating func removeKeyframe(at time: CMTime) {
+        keyframes.removeAll { $0.time == time }
+    }
+
     public mutating func updateKeyframe(id: UUID, time: CMTime? = nil, value: T? = nil) {
         guard keyframes.contains(where: { $0.id == id }) else { return }
         if let time {
