@@ -1,5 +1,6 @@
 import Foundation
 import CoreMedia
+import Observation
 
 // MARK: - Track
 

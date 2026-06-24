@@ -736,7 +736,11 @@ public struct AudioMeterSnapshot: Hashable, Sendable {
         self.sampledAt = sampledAt
     }
 
-    public static let silent = AudioMeterSnapshot(
-        peakLeft: 0, peakRight: 0, rmsLeft: 0, rmsRight: 0,
-        sampledAt: ContinuousClock.now)
+    /// A fresh silent snapshot with the current timestamp. Returns a new instance
+    /// on each access so `sampledAt` is never stale.
+    public static var silent: AudioMeterSnapshot {
+        AudioMeterSnapshot(
+            peakLeft: 0, peakRight: 0, rmsLeft: 0, rmsRight: 0,
+            sampledAt: ContinuousClock.now)
+    }
 }
