@@ -6,6 +6,10 @@
 	objectVersion = 90;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		00000000000000000000A030 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A020 /* LocalCutCore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		000000000000000200000010 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -38,6 +42,7 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				00000000000000000000A030 /* LocalCutCore in Frameworks */,
 			);
 		};
 		000000000000000230000000 /* Frameworks */ = {
@@ -83,6 +88,9 @@
 				000000000000000000000010 /* LocalCut Studio */,
 			);
 			name = "LocalCut Studio";
+			packageProductDependencies = (
+				00000000000000000000A020 /* LocalCutCore */,
+			);
 			productName = "LocalCut Studio";
 			productReference = 000000000000000000000120 /* LocalCut Studio.app */;
 			productType = "com.apple.product-type.application";
@@ -136,6 +144,9 @@
 			);
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				00000000000000000000A010 /* XCLocalSwiftPackageReference "Packages/LocalCutCore" */,
+			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
 			projectDirPath = "";
@@ -447,6 +458,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		00000000000000000000A010 /* XCLocalSwiftPackageReference "Packages/LocalCutCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LocalCutCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		00000000000000000000A020 /* LocalCutCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LocalCutCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000000 /* Project object */;
 }

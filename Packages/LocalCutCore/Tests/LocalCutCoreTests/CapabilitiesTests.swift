@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import LocalCut_Studio
+import LocalCutCore
 
 // MARK: - Tier ordering (R1.1)
 
