@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		00000000000000000000A030 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A020 /* LocalCutCore */; };
+		00000000000000000000A031 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A021 /* LocalCutCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -48,6 +49,7 @@
 		000000000000000230000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				00000000000000000000A031 /* LocalCutCore in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -112,6 +114,9 @@
 				000000000000000000000030 /* LocalCut StudioTests */,
 			);
 			name = "LocalCut StudioTests";
+			packageProductDependencies = (
+				00000000000000000000A021 /* LocalCutCore */,
+			);
 			productName = "LocalCut StudioTests";
 			productReference = 000000000000000000000220 /* LocalCut StudioTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -468,6 +473,10 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		00000000000000000000A020 /* LocalCutCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LocalCutCore;
+		};
+		00000000000000000000A021 /* LocalCutCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalCutCore;
 		};
