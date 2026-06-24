@@ -112,6 +112,7 @@ func timeFormattingClampsAndFormats() {
     #expect(TimeFormatting.timecode(.nan) == "0:00.00")
     #expect(TimeFormatting.timecode(-1) == "0:00.00")
     #expect(TimeFormatting.timecode(61.239) == "1:01.24")
+    #expect(TimeFormatting.timecode(59.999) == "1:00.00")
 }
 
 @Test("ProjectDocument: pure snapshot helpers preserve clip, transition, and media data")
