@@ -107,12 +107,16 @@ func renderPlanningFitTransformAspectFits() {
     #expect(approximatelyEqual(rect.minY, 218.75))
 }
 
-@Test("TimeFormatting: clamps invalid values and formats hundredths")
-func timeFormattingClampsAndFormats() {
+@Test("Time utilities: clamp invalid values and reject out-of-range captions")
+func timeUtilitiesClampAndFormat() {
     #expect(TimeFormatting.timecode(.nan) == "0:00.00")
     #expect(TimeFormatting.timecode(-1) == "0:00.00")
     #expect(TimeFormatting.timecode(61.239) == "1:01.24")
     #expect(TimeFormatting.timecode(59.999) == "1:00.00")
+
+    let maxCaptionTime = CMTime(seconds: 360_000, preferredTimescale: 1_000)
+    #expect(CaptionImporter.parseTimestamp("100:00:00,000", separator: ",") == maxCaptionTime)
+    #expect(CaptionImporter.parseTimestamp("100:00:01,000", separator: ",") == nil)
 }
 
 @Test("ProjectDocument: pure snapshot helpers preserve clip, transition, and media data")

@@ -45,7 +45,7 @@
 
 ## R4 — Package tests
 
-- [x] **R4.1** `swift test --package-path Packages/LocalCutCore` passes (23 tests).
+- [x] **R4.1** `swift test --package-path Packages/LocalCutCore` passes (30 tests).
 - [x] **R4.2** Package tests cover `Capabilities` tier ordering, snapshot stability,
       non-empty reasons, and per-feature gating.
 
