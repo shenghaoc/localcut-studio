@@ -3,6 +3,7 @@ import AVFoundation
 import CoreGraphics
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import LocalCutCore
 @testable import LocalCut_Studio
 
 // MARK: - Keyframe Tests

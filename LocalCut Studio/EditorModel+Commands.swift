@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import UniformTypeIdentifiers
+import LocalCutCore
 
 /// AppKit panel/prompt glue for the document menu commands and the close flow.
 /// Kept apart from the pure persistence logic so the model's save/open/undo code

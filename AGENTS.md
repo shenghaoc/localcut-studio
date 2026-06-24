@@ -35,6 +35,7 @@ Each spec has `design.md`, `requirements.md`, and `tasks.md` (bugfix specs use `
 **Completed:**
 
 - [**Phase 1 — Foundation**](.kiro/specs/phase-1-foundation/tasks.md) — multi-track timeline, media bin, live `AVPlayer` preview from `AVMutableComposition`, clip split/delete, per-clip opacity, resolution/fps settings, and `.mov` export with progress.
+- [**LocalCutCore package**](.kiro/specs/feature-localcutcore-package/tasks.md) — extract pure engine logic (models, transitions, render planning, keyframes, captions, diagnostics, time formatting) into a local SwiftPM package for fast `swift test` iteration and CI gating.
 
 **Active / Proposed:**
 

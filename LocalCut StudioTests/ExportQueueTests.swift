@@ -3,6 +3,7 @@ import Foundation
 import AVFoundation
 import CoreGraphics
 import AudioToolbox
+import LocalCutCore
 @testable import LocalCut_Studio
 
 // MARK: - ExportPreset (T5.1, R5.1)

@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
+import LocalCutCore
 
 /// Context-sensitive properties for the current selection plus project-wide
 /// render settings.
@@ -84,7 +85,7 @@ struct InspectorView: View {
     // MARK: - Transition
 
     @ViewBuilder
-    private func transitionSection(_ transition: Transition) -> some View {
+    private func transitionSection(_ transition: LocalCutCore.Transition) -> some View {
         Section("Transition") {
             Picker("Type", selection: transitionTypeBinding) {
                 ForEach(TransitionType.allCases) { type in

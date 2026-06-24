@@ -3,6 +3,7 @@ import AVFoundation
 import CoreGraphics
 import CoreImage
 import os
+import LocalCutCore
 
 // MARK: - Key
 

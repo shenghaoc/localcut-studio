@@ -1,4 +1,5 @@
 import SwiftUI
+import LocalCutCore
 
 /// One of the scope panels the user can switch between.
 enum ScopeKind: String, CaseIterable, Identifiable {

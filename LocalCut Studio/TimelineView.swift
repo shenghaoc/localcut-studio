@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import LocalCutCore
 
 /// The multi-track timeline: a time ruler, one lane per track, clip blocks, and a
 /// draggable playhead. Zoom is controlled by `model.pixelsPerSecond`.
@@ -36,7 +37,7 @@ struct TimelineView: View {
     /// Project-wide transition cuts used to ripple clip positions so the timeline
     /// matches the rendered composition.
     private var transitionCuts: [TransitionLayout.Cut] {
-        TransitionLayout.cuts(videoTracks: model.project.videoTracks)
+        TransitionLayout.cuts(videoTracks: model.project.videoTracks.map(\.clips))
     }
 
     // MARK: - Drag state

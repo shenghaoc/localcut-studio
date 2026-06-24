@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
 import AppKit
+import LocalCutCore
 
 /// Inspector section listing every caption track + line. Per-line editing,
 /// import, default-style preset picking, and `.lccaption` import/export all live

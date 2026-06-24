@@ -5,12 +5,12 @@ import VideoToolbox
 
 /// Three-tier ladder mirroring the browser-editor's P8/P26 model. `Comparable`
 /// so a feature gate is a `>=` check rather than a switch.
-nonisolated enum CapabilityTier: Int, Comparable, Sendable, Codable {
+public enum CapabilityTier: Int, Comparable, Sendable, Codable {
     case baseline = 0
     case accelerated = 1
     case pro = 2
 
-    static func < (lhs: CapabilityTier, rhs: CapabilityTier) -> Bool {
+    public static func < (lhs: CapabilityTier, rhs: CapabilityTier) -> Bool {
         lhs.rawValue < rhs.rawValue
     }
 }
@@ -21,7 +21,7 @@ nonisolated enum CapabilityTier: Int, Comparable, Sendable, Codable {
 /// listed in `ROADMAP.md` open-infra row P26: frame interpolation (Phase 37),
 /// simultaneous capture streams (Phase 41 + 45), and the Metal effect chain
 /// (feature-colour-grading).
-nonisolated enum CapabilityFeature: Sendable, Hashable {
+public enum CapabilityFeature: Sendable, Hashable {
     case frameInterpolation
     case simultaneousCaptureStreams(count: Int)
     case metalEffectChain
@@ -30,29 +30,34 @@ nonisolated enum CapabilityFeature: Sendable, Hashable {
 /// A tier choice with the human-readable reason behind it. Surfaced in the
 /// Diagnostics panel (open-infra row P25) so a creator can tell why a feature
 /// is degraded.
-nonisolated struct CapabilityVerdict: Sendable, Hashable {
-    let tier: CapabilityTier
-    let reason: String
+public struct CapabilityVerdict: Sendable, Hashable {
+    public let tier: CapabilityTier
+    public let reason: String
+
+    public init(tier: CapabilityTier, reason: String) {
+        self.tier = tier
+        self.reason = reason
+    }
 }
 
 // MARK: - Snapshot
 
 /// Frozen view of what this Mac can do, captured once at editor launch. Value
 /// type + `Sendable`, so every actor reads the same numbers without `await`.
-nonisolated struct Capabilities: Sendable, Hashable {
+public struct Capabilities: Sendable, Hashable {
 
-    nonisolated enum ChipFamily: Sendable, Hashable {
+    public enum ChipFamily: Sendable, Hashable {
         case intel
         /// `generation: 0` means Apple Silicon was detected but the board
         /// string didn't match any known M-series generation — the resolver
         /// treats it as baseline rather than guessing high.
         case appleSilicon(generation: Int)
 
-        var isAppleSilicon: Bool {
+        public var isAppleSilicon: Bool {
             if case .appleSilicon = self { return true } else { return false }
         }
 
-        var generation: Int? {
+        public var generation: Int? {
             if case .appleSilicon(let g) = self { return g } else { return nil }
         }
     }
@@ -60,45 +65,45 @@ nonisolated struct Capabilities: Sendable, Hashable {
     /// Major / minor / patch triple, stored directly rather than as
     /// `OperatingSystemVersion` so the snapshot stays trivially `Hashable`
     /// without leaning on a retroactive Foundation conformance.
-    nonisolated struct OSVersion: Sendable, Hashable, Comparable {
-        let major: Int
-        let minor: Int
-        let patch: Int
+    public struct OSVersion: Sendable, Hashable, Comparable {
+        public let major: Int
+        public let minor: Int
+        public let patch: Int
 
-        init(major: Int, minor: Int, patch: Int = 0) {
+        public init(major: Int, minor: Int, patch: Int = 0) {
             self.major = major
             self.minor = minor
             self.patch = patch
         }
 
-        init(_ os: OperatingSystemVersion) {
+        public init(_ os: OperatingSystemVersion) {
             self.major = os.majorVersion
             self.minor = os.minorVersion
             self.patch = os.patchVersion
         }
 
-        static func < (lhs: OSVersion, rhs: OSVersion) -> Bool {
+        public static func < (lhs: OSVersion, rhs: OSVersion) -> Bool {
             (lhs.major, lhs.minor, lhs.patch) < (rhs.major, rhs.minor, rhs.patch)
         }
     }
 
-    let chip: ChipFamily
-    let unifiedMemoryBytes: UInt64
-    let videoEncoderCount: Int
-    let osVersion: OSVersion
+    public let chip: ChipFamily
+    public let unifiedMemoryBytes: UInt64
+    public let videoEncoderCount: Int
+    public let osVersion: OSVersion
 
-    var unifiedMemoryGiB: Double {
+    public var unifiedMemoryGiB: Double {
         Double(unifiedMemoryBytes) / (1024 * 1024 * 1024)
     }
 
     /// Editor-wide snapshot. Eager `static let` runs the probe on first access
     /// and caches the result for the process lifetime.
-    nonisolated static let current: Capabilities = .probe()
+    public static let current: Capabilities = .probe()
 
-    init(chip: ChipFamily,
-         unifiedMemoryBytes: UInt64,
-         videoEncoderCount: Int,
-         osVersion: OSVersion) {
+    public init(chip: ChipFamily,
+                unifiedMemoryBytes: UInt64,
+                videoEncoderCount: Int,
+                osVersion: OSVersion) {
         self.chip = chip
         self.unifiedMemoryBytes = unifiedMemoryBytes
         self.videoEncoderCount = videoEncoderCount
@@ -110,7 +115,7 @@ nonisolated struct Capabilities: Sendable, Hashable {
 
 extension Capabilities {
 
-    nonisolated static func probe() -> Capabilities {
+    public static func probe() -> Capabilities {
         let chip = probeChipFamily()
         let memory = sysctlUInt64("hw.memsize") ?? 0
         let encoders = probeHardwareEncoderCount()
@@ -121,7 +126,7 @@ extension Capabilities {
                             osVersion: os)
     }
 
-    private nonisolated static func probeChipFamily() -> ChipFamily {
+    private static func probeChipFamily() -> ChipFamily {
         let isAppleSilicon = sysctlInt("hw.optional.arm64") == 1
         guard isAppleSilicon else { return .intel }
         let board = sysctlString("hw.model") ?? ""
@@ -132,7 +137,7 @@ extension Capabilities {
     /// a handful of board prefixes per generation; the table covers shipping
     /// Macs through M4. New boards land here on each Mac release. Unknown ⇒ 0,
     /// which the resolver treats as baseline.
-    nonisolated static func appleSiliconGeneration(forBoard board: String) -> Int {
+    public static func appleSiliconGeneration(forBoard board: String) -> Int {
         let lower = board.lowercased()
         // The `Mac` family numbering is stable per generation. `Mac13` = M1,
         // `Mac14` = M2, `Mac15` = M3, `Mac16` = M4 (and Studio variants share
@@ -154,7 +159,7 @@ extension Capabilities {
         return 0
     }
 
-    private nonisolated static func probeHardwareEncoderCount() -> Int {
+    private static func probeHardwareEncoderCount() -> Int {
         // VTCopyVideoEncoderList doesn't expose a "hardware only" options-key
         // — the hardware flag is a per-entry property
         // (`kVTVideoEncoderList_IsHardwareAccelerated`). Pull the whole list
@@ -179,7 +184,7 @@ extension Capabilities {
 
     /// Resolves the tier for a feature plus the reason behind it. Pure: the
     /// resolver inspects the snapshot in memory; no syscalls after launch.
-    nonisolated func tier(for feature: CapabilityFeature) -> CapabilityVerdict {
+    public func tier(for feature: CapabilityFeature) -> CapabilityVerdict {
         switch feature {
         case .frameInterpolation:
             return resolveFrameInterpolation()
@@ -190,7 +195,7 @@ extension Capabilities {
         }
     }
 
-    private nonisolated func resolveFrameInterpolation() -> CapabilityVerdict {
+    private func resolveFrameInterpolation() -> CapabilityVerdict {
         // OS gate first — `VTFrameProcessor` is macOS 15.4+. Apple Silicon on
         // an older OS still resolves to baseline.
         if chip == .intel {
@@ -234,7 +239,7 @@ extension Capabilities {
                 + "Pro/Max/Ultra-class (≥ 24 GiB unified memory)")
     }
 
-    private nonisolated func resolveSimultaneousCaptureStreams(count requested: Int) -> CapabilityVerdict {
+    private func resolveSimultaneousCaptureStreams(count requested: Int) -> CapabilityVerdict {
         guard requested > 0 else {
             return CapabilityVerdict(
                 tier: .baseline,
@@ -266,7 +271,7 @@ extension Capabilities {
             reason: "\(videoEncoderCount) hardware encoder(s); request for \(requested) fits")
     }
 
-    private nonisolated func resolveMetalEffectChain() -> CapabilityVerdict {
+    private func resolveMetalEffectChain() -> CapabilityVerdict {
         if chip == .intel {
             // Intel Macs have a Metal-capable GPU but no unified memory; the
             // effect chain runs but loses zero-copy IOSurface ↔ texture, so we
@@ -291,14 +296,14 @@ extension Capabilities {
             reason: "Apple Silicon M\(generation); ≥ 16 GiB unified memory")
     }
 
-    private nonisolated var osVersionString: String {
+    private var osVersionString: String {
         "\(osVersion.major).\(osVersion.minor).\(osVersion.patch)"
     }
 }
 
 // MARK: - sysctl helpers
 
-private nonisolated func sysctlString(_ name: String) -> String? {
+private func sysctlString(_ name: String) -> String? {
     var size: Int = 0
     if sysctlbyname(name, nil, &size, nil, 0) != 0 { return nil }
     guard size > 0 else { return nil }
@@ -310,14 +315,14 @@ private nonisolated func sysctlString(_ name: String) -> String? {
     return String(decoding: buffer, as: UTF8.self)
 }
 
-private nonisolated func sysctlInt(_ name: String) -> Int? {
+private func sysctlInt(_ name: String) -> Int? {
     var value: Int32 = 0
     var size = MemoryLayout<Int32>.size
     if sysctlbyname(name, &value, &size, nil, 0) != 0 { return nil }
     return Int(value)
 }
 
-private nonisolated func sysctlUInt64(_ name: String) -> UInt64? {
+private func sysctlUInt64(_ name: String) -> UInt64? {
     var value: UInt64 = 0
     var size = MemoryLayout<UInt64>.size
     if sysctlbyname(name, &value, &size, nil, 0) != 0 { return nil }
