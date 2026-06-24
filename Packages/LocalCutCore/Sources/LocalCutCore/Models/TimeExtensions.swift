@@ -8,12 +8,12 @@ extension CMTime {
     /// A generous upper bound (in seconds) for a trusted media duration. Values
     /// beyond this are treated as corrupt: they serve no legitimate editing
     /// purpose and would later trap `Int(seconds)` in timecode formatting.
-    nonisolated private static let maxSaneSeconds: Double = 100 * 60 * 60   // 100 hours
+    private static let maxSaneSeconds: Double = 100 * 60 * 60   // 100 hours
 
     /// Returns a validated time, falling back to `.zero` if the time is invalid,
     /// indefinite, infinite, negative, or implausibly large (any of which could
     /// corrupt geometry/time math or trap downstream timecode conversion).
-    nonisolated public var sanitized: CMTime {
+    public var sanitized: CMTime {
         guard isValid, !isIndefinite, !isPositiveInfinity, !isNegativeInfinity,
               self >= .zero, seconds.isFinite, seconds <= CMTime.maxSaneSeconds else {
             return .zero
@@ -25,11 +25,11 @@ extension CMTime {
 extension CGSize {
     /// Upper bound (in pixels) for a plausible media dimension. Beyond this,
     /// values are treated as corrupt.
-    nonisolated private static let maxSanePixels: CGFloat = 100_000   // well past 8K
+    private static let maxSanePixels: CGFloat = 100_000   // well past 8K
 
     /// Returns a validated size, falling back to `.zero` if non-finite, and
     /// clamping each dimension into `0...maxSanePixels`.
-    nonisolated public var sanitized: CGSize {
+    public var sanitized: CGSize {
         guard width.isFinite, height.isFinite else { return .zero }
         func clamp(_ v: CGFloat) -> CGFloat { min(max(0, v), CGSize.maxSanePixels) }
         return CGSize(width: clamp(width), height: clamp(height))
@@ -38,11 +38,11 @@ extension CGSize {
 
 extension CGAffineTransform {
     /// Upper bound on the magnitude of any transform coefficient.
-    nonisolated private static let maxSaneCoefficient: CGFloat = 1_000_000
+    private static let maxSaneCoefficient: CGFloat = 1_000_000
 
     /// Returns a validated transform, falling back to `.identity` if any
     /// component is non-finite or implausibly large.
-    nonisolated public var sanitized: CGAffineTransform {
+    public var sanitized: CGAffineTransform {
         func ok(_ v: CGFloat) -> Bool { v.isFinite && abs(v) <= CGAffineTransform.maxSaneCoefficient }
         guard ok(a), ok(b), ok(c), ok(d), ok(tx), ok(ty) else { return .identity }
         return self
@@ -53,7 +53,7 @@ extension CGAffineTransform {
 
 /// Lossless `CMTime` representation: a rational `value/timescale` pair so timeline
 /// math round-trips exactly (a `Double` of seconds would not).
-public nonisolated struct CMTimeCode: Codable, Equatable, Sendable {
+public struct CMTimeCode: Codable, Equatable, Sendable {
     public var value: Int64
     public var timescale: Int32
 
@@ -90,12 +90,12 @@ public struct TransformCode: Codable, Equatable, Sendable {
 // MARK: - Interpolation protocol
 
 /// A type that can be linearly interpolated between two values.
-public nonisolated protocol Interpolatable: Hashable, Codable, Sendable {
+public protocol Interpolatable: Hashable, Codable, Sendable {
     static func lerp(_ a: Self, _ b: Self, t: Float) -> Self
 }
 
 extension Float: Interpolatable {
-    public nonisolated static func lerp(_ a: Float, _ b: Float, t: Float) -> Float {
+    public static func lerp(_ a: Float, _ b: Float, t: Float) -> Float {
         a + (b - a) * t
     }
 }

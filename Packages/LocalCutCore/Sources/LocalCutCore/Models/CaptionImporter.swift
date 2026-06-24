@@ -2,7 +2,7 @@ import Foundation
 import CoreMedia
 
 /// Parses SRT and VTT sidecar files into `CaptionLine`s.
-public nonisolated enum CaptionImporter: Sendable {
+public enum CaptionImporter: Sendable {
 
     public enum ImportError: Error, LocalizedError, Sendable {
         case notUTF8

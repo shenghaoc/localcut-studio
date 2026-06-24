@@ -4,7 +4,7 @@ import CoreMedia
 // MARK: - Keyframes
 
 /// A single point in time with an associated value.
-public nonisolated struct Keyframe<T: Interpolatable>: Hashable, Codable, Identifiable, Sendable {
+public struct Keyframe<T: Interpolatable>: Hashable, Codable, Identifiable, Sendable {
     public let id: UUID
     public var time: CMTime
     public var value: T
@@ -34,7 +34,7 @@ public nonisolated struct Keyframe<T: Interpolatable>: Hashable, Codable, Identi
 }
 
 /// A sorted collection of keyframes that interpolates linearly between them.
-public nonisolated struct Keyframed<T: Interpolatable>: Hashable, Codable, Sendable {
+public struct Keyframed<T: Interpolatable>: Hashable, Codable, Sendable {
     public private(set) var keyframes: [Keyframe<T>]
     public var defaultValue: T
 

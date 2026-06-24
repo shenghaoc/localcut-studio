@@ -5,9 +5,9 @@ import os
 /// main-actor `DiagnosticsAgent`. All state is guarded by `OSAllocatedUnfairLock`.
 public final class DiagnosticsBridge: Sendable {
 
-    nonisolated public static let shared = DiagnosticsBridge()
+    public static let shared = DiagnosticsBridge()
 
-    nonisolated public static let renderTimeCapacity = 256
+    public static let renderTimeCapacity = 256
 
     public struct Snapshot: Sendable {
         public let renderTimes: [Double]
@@ -26,15 +26,15 @@ public final class DiagnosticsBridge: Sendable {
     private let state = OSAllocatedUnfairLock(initialState: State())
     private let enabledFlag = OSAllocatedUnfairLock(initialState: false)
 
-    nonisolated public var isEnabled: Bool {
+    public var isEnabled: Bool {
         enabledFlag.withLock { $0 }
     }
 
-    nonisolated public func setEnabled(_ value: Bool) {
+    public func setEnabled(_ value: Bool) {
         enabledFlag.withLock { $0 = value }
     }
 
-    nonisolated public func recordRenderTime(_ seconds: Double) {
+    public func recordRenderTime(_ seconds: Double) {
         state.withLock { s in
             s.renderTimes.append(seconds)
             s.lastRenderTime = seconds
@@ -46,11 +46,11 @@ public final class DiagnosticsBridge: Sendable {
         }
     }
 
-    nonisolated public func setDecoderCount(_ count: Int) {
+    public func setDecoderCount(_ count: Int) {
         state.withLock { $0.decoderCount = count }
     }
 
-    nonisolated public func snapshot() -> Snapshot {
+    public func snapshot() -> Snapshot {
         state.withLock { s in
             Snapshot(renderTimes: s.renderTimes,
                      lastRenderTime: s.lastRenderTime,
@@ -59,7 +59,7 @@ public final class DiagnosticsBridge: Sendable {
         }
     }
 
-    nonisolated public func clearRenderSamples() {
+    public func clearRenderSamples() {
         state.withLock { s in
             s.renderTimes.removeAll()
             s.lastRenderTime = 0
@@ -67,7 +67,7 @@ public final class DiagnosticsBridge: Sendable {
         }
     }
 
-    nonisolated public func reset() {
+    public func reset() {
         state.withLock { s in
             s.renderTimes.removeAll()
             s.lastRenderTime = 0

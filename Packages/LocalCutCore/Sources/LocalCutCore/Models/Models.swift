@@ -8,7 +8,7 @@ import CoreVideo
 /// The project's working colour space. Tags the compositor's `CIContext`
 /// `workingColorSpace` and every output `CVPixelBuffer` so downstream
 /// `AVAssetExportSession` / `AVAssetWriter` carry it through.
-public nonisolated enum WorkingColourSpace: String, Codable, Hashable, Sendable, CaseIterable, Identifiable {
+public enum WorkingColourSpace: String, Codable, Hashable, Sendable, CaseIterable, Identifiable {
     case sRGB
     case displayP3
     case rec709
@@ -73,7 +73,7 @@ public enum TrackKind: Hashable, Sendable {
 // MARK: - Colour Grading
 
 /// Perceptual colour-adjustment parameters with neutral defaults and clamping.
-public nonisolated struct ColourGrade: Hashable, Codable, Sendable {
+public struct ColourGrade: Hashable, Codable, Sendable {
     public var exposure: Float = 0
     public var contrast: Float = 1
     public var saturation: Float = 1
@@ -103,7 +103,7 @@ public nonisolated struct ColourGrade: Hashable, Codable, Sendable {
 }
 
 /// Skin smoothing parameters with neutral defaults and clamping.
-public nonisolated struct SkinSmoothEffect: Hashable, Codable, Sendable {
+public struct SkinSmoothEffect: Hashable, Codable, Sendable {
     public var strength: Keyframed<Float>
     public var maskWarmthBias: Float = 0
     public var maskLuminanceGate: Float = 0.1
@@ -151,11 +151,11 @@ public enum Effect: Hashable, Codable, Sendable {
 }
 
 extension Array where Element == Effect {
-    public nonisolated var hasLUT: Bool {
+    public var hasLUT: Bool {
         contains { if case .lut = $0 { return true }; return false }
     }
 
-    public nonisolated func replacingLUT(bookmark: Data) -> [Effect] {
+    public func replacingLUT(bookmark: Data) -> [Effect] {
         var result: [Effect] = []
         var inserted = false
         for effect in self {
@@ -172,7 +172,7 @@ extension Array where Element == Effect {
         return result
     }
 
-    public nonisolated func removingLUT() -> [Effect] {
+    public func removingLUT() -> [Effect] {
         filter { if case .lut = $0 { return false }; return true }
     }
 }
@@ -222,11 +222,11 @@ public struct Transition: Identifiable, Hashable, Sendable {
     public static let defaultDuration = CMTime(value: 1, timescale: 2)
     public static let defaultWipeAngle: Double = 0
 
-    public nonisolated static func radians(fromDegrees degrees: Double) -> Double {
+    public static func radians(fromDegrees degrees: Double) -> Double {
         degrees * .pi / 180
     }
 
-    public nonisolated static func degrees(fromRadians radians: Double) -> Double {
+    public static func degrees(fromRadians radians: Double) -> Double {
         let degrees = radians * 180 / .pi
         let normalized = degrees.truncatingRemainder(dividingBy: 360)
         return normalized >= 0 ? normalized : normalized + 360
@@ -269,7 +269,7 @@ public struct Clip: Identifiable, Hashable, Sendable {
 
 // MARK: - Caption Style
 
-public nonisolated struct RGBAColour: Hashable, Codable, Sendable, Interpolatable {
+public struct RGBAColour: Hashable, Codable, Sendable, Interpolatable {
     public var red: Float
     public var green: Float
     public var blue: Float
@@ -294,7 +294,7 @@ public nonisolated struct RGBAColour: Hashable, Codable, Sendable, Interpolatabl
             ?? CGColor(red: CGFloat(red), green: CGFloat(green), blue: CGFloat(blue), alpha: CGFloat(alpha))
     }
 
-    public nonisolated static func lerp(_ a: RGBAColour, _ b: RGBAColour, t: Float) -> RGBAColour {
+    public static func lerp(_ a: RGBAColour, _ b: RGBAColour, t: Float) -> RGBAColour {
         RGBAColour(
             red: Float.lerp(a.red, b.red, t: t),
             green: Float.lerp(a.green, b.green, t: t),
@@ -303,7 +303,7 @@ public nonisolated struct RGBAColour: Hashable, Codable, Sendable, Interpolatabl
     }
 }
 
-public nonisolated struct StrokeStyle: Hashable, Codable, Sendable {
+public struct StrokeStyle: Hashable, Codable, Sendable {
     public var colour: RGBAColour = .black
     public var width: Float = 0
     public init() {}
@@ -313,7 +313,7 @@ public nonisolated struct StrokeStyle: Hashable, Codable, Sendable {
     }
 }
 
-public nonisolated struct ShadowStyle: Hashable, Codable, Sendable {
+public struct ShadowStyle: Hashable, Codable, Sendable {
     public var colour: RGBAColour = RGBAColour(red: 0, green: 0, blue: 0, alpha: 0.5)
     public var offsetX: Float = 0
     public var offsetY: Float = -2
@@ -328,7 +328,7 @@ public nonisolated struct ShadowStyle: Hashable, Codable, Sendable {
     }
 }
 
-public nonisolated struct GlowStyle: Hashable, Codable, Sendable {
+public struct GlowStyle: Hashable, Codable, Sendable {
     public var colour: RGBAColour = .clear
     public var radius: Float = 0
     public init() {}
@@ -338,7 +338,7 @@ public nonisolated struct GlowStyle: Hashable, Codable, Sendable {
     }
 }
 
-public nonisolated struct PillStyle: Hashable, Codable, Sendable {
+public struct PillStyle: Hashable, Codable, Sendable {
     public var colour: RGBAColour = .clear
     public var cornerRadius: Float = 12
     public var paddingX: Float = 16
@@ -352,7 +352,7 @@ public nonisolated struct PillStyle: Hashable, Codable, Sendable {
     }
 }
 
-public nonisolated enum CaptionEnterAnimation: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+public enum CaptionEnterAnimation: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
     case none, pop, bounce, slide, typewriter
     public var id: String { rawValue }
     public var displayName: String {
@@ -366,7 +366,7 @@ public nonisolated enum CaptionEnterAnimation: String, Hashable, Codable, CaseIt
     }
 }
 
-public nonisolated enum CaptionExitAnimation: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+public enum CaptionExitAnimation: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
     case none, pop, slide, fade
     public var id: String { rawValue }
     public var displayName: String {
@@ -379,17 +379,17 @@ public nonisolated enum CaptionExitAnimation: String, Hashable, Codable, CaseIte
     }
 }
 
-public nonisolated enum SlideDirection: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+public enum SlideDirection: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
     case fromBottom, fromTop, fromLeft, fromRight
     public var id: String { rawValue }
 }
 
-public nonisolated enum CaptionAnchor: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+public enum CaptionAnchor: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
     case top, middle, bottom
     public var id: String { rawValue }
 }
 
-public nonisolated struct CaptionStyle: Hashable, Codable, Sendable {
+public struct CaptionStyle: Hashable, Codable, Sendable {
     public var fontName: String = "Helvetica-Bold"
     public var fontSize: Float = 72
     public var fill: RGBAColour = .white
@@ -472,7 +472,7 @@ public nonisolated struct CaptionStyle: Hashable, Codable, Sendable {
 
 // MARK: - Caption Tracks
 
-public nonisolated struct WordTiming: Hashable, Codable, Sendable {
+public struct WordTiming: Hashable, Codable, Sendable {
     public var range: CMTimeRange
     public var word: String
 
@@ -509,7 +509,7 @@ public nonisolated struct WordTiming: Hashable, Codable, Sendable {
     }
 }
 
-public nonisolated struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
+public struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
     public let id: UUID
     public var range: CMTimeRange
     public var text: String
@@ -570,7 +570,7 @@ public nonisolated struct CaptionLine: Identifiable, Hashable, Codable, Sendable
 
 // MARK: - Timeline Markers
 
-public nonisolated struct TimelineMarker: Identifiable, Hashable, Codable, Sendable {
+public struct TimelineMarker: Identifiable, Hashable, Codable, Sendable {
     public let id: UUID
     public var time: CMTime
     public var name: String
@@ -605,7 +605,7 @@ public nonisolated struct TimelineMarker: Identifiable, Hashable, Codable, Senda
 
 // MARK: - Audio
 
-public nonisolated struct TrackInput: Identifiable, Hashable, Codable, Sendable {
+public struct TrackInput: Identifiable, Hashable, Codable, Sendable {
     public var id: UUID
     public var pan: Float
     public var gain: Float
@@ -622,8 +622,8 @@ public nonisolated struct TrackInput: Identifiable, Hashable, Codable, Sendable 
     }
 }
 
-public nonisolated struct VolumeEnvelope: Hashable, Codable, Sendable {
-    public nonisolated struct Ramp: Hashable, Codable, Sendable {
+public struct VolumeEnvelope: Hashable, Codable, Sendable {
+    public struct Ramp: Hashable, Codable, Sendable {
         public var range: CMTimeRange
         public var fromVolume: Float
         public var toVolume: Float
@@ -720,7 +720,7 @@ public nonisolated struct VolumeEnvelope: Hashable, Codable, Sendable {
     }
 }
 
-public nonisolated struct AudioMeterSnapshot: Hashable, Sendable {
+public struct AudioMeterSnapshot: Hashable, Sendable {
     public var peakLeft: Float
     public var peakRight: Float
     public var rmsLeft: Float
