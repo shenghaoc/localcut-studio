@@ -33,6 +33,12 @@ Sources/LocalCutCore/
 Tests/LocalCutCoreTests/
 ```
 
+## Fast test coverage
+
+`LocalCutCoreTests` covers the migrated pure-engine seams that should fail fast in
+CI: capability-tier decisions, keyframe interpolation, transition ripple
+geometry, render planning, time formatting, and Codable project snapshots.
+
 ## Migration status
 
 | Module | Status | Notes |

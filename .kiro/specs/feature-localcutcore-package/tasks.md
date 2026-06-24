@@ -100,16 +100,16 @@
 
 ## Verification
 
-- [x] **T13.1** `swift test --package-path Packages/LocalCutCore` passes (23 tests).
+- [x] **T13.1** `swift test --package-path Packages/LocalCutCore` passes (30 tests).
 - [x] **T13.2** `xcodebuild -scheme "LocalCut Studio" -destination 'platform=macOS' build`
       succeeds.
 - [x] **T13.3** `xcodebuild test` passes — no test count regression.
 
-## Follow-up (tracked, not in this PR)
+## Follow-up completion
 
-- [ ] **T14.1** Port representative tests from Xcode test target to package
+- [x] **T14.1** Port representative tests from Xcode test target to package
       `LocalCutCoreTests/` (TransitionLayout, RenderPlanning, Keyframes,
       CMTimeCode round-trips) for better CI gating coverage.
-- [ ] **T14.2** Make `EditorModel` thinner by decomposing into services
+- [x] **T14.2** Make `EditorModel` thinner by decomposing into services
       (`ProjectEditingService`, `PreviewRebuildCoordinator`, `ImportService`,
       `ExportCoordinator`, `DocumentController`).

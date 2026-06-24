@@ -50,6 +50,12 @@ final class EditorModel {
     /// now lives on `renderQueue.totalProgress` and the per-job rows.
     let renderQueue: RenderQueue
 
+    @ObservationIgnored private let importService = ImportService()
+    @ObservationIgnored private let projectEditingService = ProjectEditingService()
+    @ObservationIgnored private let previewRebuildCoordinator = PreviewRebuildCoordinator()
+    @ObservationIgnored private let exportCoordinator = ExportCoordinator()
+    @ObservationIgnored let documentController = DocumentController()
+
     // Skin smoothing debug
     var showSkinMask = false
 
@@ -70,10 +76,6 @@ final class EditorModel {
 
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
-    @ObservationIgnored var pendingRebuildTask: Task<Void, Never>?
-    /// The in-flight preview rebuild. A new rebuild cancels the previous one so
-    /// rapid edits/undo can't land an older composition on the player last.
-    @ObservationIgnored var activeRebuildTask: Task<Void, Never>?
 
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.
@@ -181,8 +183,7 @@ final class EditorModel {
     }
 
     deinit {
-        pendingRebuildTask?.cancel()
-        activeRebuildTask?.cancel()
+        previewRebuildCoordinator.cancelAll()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
@@ -198,63 +199,7 @@ final class EditorModel {
     /// Loads the given files into the media bin, reading metadata and a poster
     /// frame for each. Security-scoped access is retained for the session.
     func importMedia(urls: [URL], wantsBundling: Bool = true) async {
-        let generation = sessionGeneration
-        var loaded: [MediaItem] = []
-        for url in urls {
-            let didAccess = url.startAccessingSecurityScopedResource()
-            let item = MediaItem(url: url)
-            item.wantsBundling = wantsBundling
-            do {
-                item.duration = try await item.asset.load(.duration).sanitized
-
-                if let v = try await item.asset.loadTracks(withMediaType: .video).first {
-                    item.hasVideo = true
-                    item.naturalSize = try await v.load(.naturalSize).sanitized
-                    item.preferredTransform = try await v.load(.preferredTransform).sanitized
-                }
-                item.hasAudio = try await !item.asset.loadTracks(withMediaType: .audio).isEmpty
-
-                // If the document was replaced (New/Open) while this file's metadata
-                // loaded, the import belongs to a session that no longer exists:
-                // release the just-started token and abandon, rather than leaking
-                // access or appending clips onto the new document. Tokens retained
-                // for earlier items were already stopped by releaseSession().
-                guard sessionGeneration == generation else {
-                    if didAccess { url.stopAccessingSecurityScopedResource() }
-                    return
-                }
-
-                // Retain access for the session and capture a persistable bookmark
-                // so the file can be re-resolved after relaunch (R1.2).
-                retainAccess(url, didStart: didAccess)
-                item.bookmark = try? url.bookmarkData(options: .withSecurityScope,
-                                                      includingResourceValuesForKeys: nil,
-                                                      relativeTo: nil)
-                loaded.append(item)
-            } catch {
-                if didAccess { url.stopAccessingSecurityScopedResource() }
-                statusMessage = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
-            }
-        }
-        guard !loaded.isEmpty else { return }
-        // A teardown during a *later* file's load — where that load then threw and
-        // took the catch path, bypassing the per-item guard above — can still reach
-        // here with stale items. releaseSession() already stopped their tokens, so
-        // discard them rather than appending onto the replacement document.
-        guard sessionGeneration == generation else { return }
-
-        // Snapshot and append synchronously (no awaits between) so a concurrent
-        // edit made while metadata loaded can't be folded into the import's
-        // undo step.
-        let before = captureState()
-        project.mediaItems.append(contentsOf: loaded)
-        registerImportUndo(name: "Import Media", before: before)
-        markDirty()
-        statusMessage = loaded.count == 1 ? "Imported \(loaded[0].name)." : "Imported \(loaded.count) items."
-        // Decode poster frames off the editor: the task retains only the MediaItem
-        // (via loadThumbnail), never EditorModel, so tearing down the editor mid-
-        // decode doesn't keep the whole model alive.
-        for item in loaded { Task { await item.loadThumbnail() } }
+        await importService.importMedia(urls: urls, wantsBundling: wantsBundling, model: self)
     }
 
     // MARK: - Timeline editing
@@ -262,140 +207,24 @@ final class EditorModel {
     /// Appends a media item to the end of the timeline (ripple-append) on the
     /// first video and/or audio track, depending on what the media contains.
     func addToTimeline(mediaID: MediaItem.ID) {
-        guard let media = project.media(for: mediaID) else { return }
-        performUndoable("Add Clip") {
-            let insertAt = project.duration
-            let fullRange = CMTimeRange(start: .zero, duration: media.duration)
-
-            if media.hasVideo, let track = project.videoTracks.first {
-                track.clips.append(Clip(mediaID: mediaID,
-                                        sourceStart: fullRange.start,
-                                        duration: fullRange.duration,
-                                        timelineStart: insertAt))
-            }
-            if media.hasAudio, let track = project.audioTracks.first {
-                track.clips.append(Clip(mediaID: mediaID,
-                                        sourceStart: fullRange.start,
-                                        duration: fullRange.duration,
-                                        timelineStart: insertAt))
-            }
-            statusMessage = "Added \(media.name) to timeline."
-            scheduleRebuild()
-        }
+        projectEditingService.addToTimeline(mediaID: mediaID, model: self)
     }
 
     /// All tracks, flattened, for lookups.
     private var allTracks: [Track] { project.videoTracks + project.audioTracks }
 
     func deleteSelectedClip() {
-        guard let id = selectedClipID else { return }
-        performUndoable("Delete Clip") {
-            for track in allTracks {
-                track.clips.removeAll { $0.id == id }
-            }
-            selectedClipID = nil
-            sanitizeTransitions()
-            statusMessage = "Deleted clip."
-            scheduleRebuild()
-        }
+        projectEditingService.deleteSelectedClip(model: self)
     }
 
     /// Removes a media item and its orphaned clips, then stops its security-scoped access.
     func removeMedia(itemID: MediaItem.ID) {
-        guard let media = project.media(for: itemID) else { return }
-        // A running render job opens its own access token from the snapshot's
-        // bookmark (`RenderQueue.reconstructProject`), independent of the
-        // editor's security-scoped access — so removing media live is safe
-        // even mid-render. The legacy single-shot export guarded with
-        // `isExporting`; the queue replaces it.
-        performUndoable("Remove Media") {
-            project.mediaItems.removeAll { $0.id == itemID }
-            releaseAccessIfUnused(for: media.url)
-            for track in allTracks {
-                track.clips.removeAll { $0.mediaID == itemID }
-            }
-            if selectedMediaID == itemID { selectedMediaID = nil }
-            if let selectedClipID, clip(for: selectedClipID) == nil {
-                self.selectedClipID = nil
-            }
-            if let selectedTransitionClipID, clip(for: selectedTransitionClipID) == nil {
-                self.selectedTransitionClipID = nil
-            }
-            sanitizeTransitions()
-            statusMessage = "Removed \(media.name)."
-            scheduleRebuild()
-        }
-    }
-
-    /// Releases retained file access once no media item in the project still uses it.
-    private func releaseAccessIfUnused(for url: URL) {
-        guard !project.mediaItems.contains(where: { $0.url == url }) else { return }
-        if accessedURLs.remove(url) != nil {
-            url.stopAccessingSecurityScopedResource()
-        }
-    }
-
-    /// Clears any clip-owned transition whose cut no longer exists — i.e. the
-    /// clip is no longer immediately adjacent to a preceding clip. Prevents a
-    /// stored transition from silently re-binding to a different neighbour after
-    /// a move/trim/delete changes adjacency.
-    private func sanitizeTransitions() {
-        for track in allTracks {
-            let ordered = track.clips.sorted { $0.timelineStart < $1.timelineStart }
-            for (position, clip) in ordered.enumerated() where clip.transition != nil {
-                let adjacent = position > 0 &&
-                    abs((clip.timelineStart - ordered[position - 1].timelineEnd).seconds) < TransitionLayout.adjacencyTolerance
-                if !adjacent, let index = track.clips.firstIndex(where: { $0.id == clip.id }) {
-                    track.clips[index].transition = nil
-                    if selectedTransitionClipID == clip.id { selectedTransitionClipID = nil }
-                }
-            }
-        }
+        projectEditingService.removeMedia(itemID: itemID, model: self)
     }
 
     /// Splits the selected clip at the current playhead into two adjacent clips.
     func splitSelectedClipAtPlayhead() {
-        guard let id = selectedClipID else { return }
-
-        performUndoable("Split Clip") {
-            for track in allTracks {
-                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-                let clip = track.clips[index]
-
-                // The playhead is in effective (rippled) time; convert to this clip's
-                // authored time using its constant ripple shift so the split lands at
-                // the frame the user sees.
-                let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks.map(\.clips))
-                let placements = TransitionLayout.placements(for: track.clips, cuts: cuts)
-                let shift = placements.first(where: { $0.id == id })
-                    .map { clip.timelineStart - $0.effectiveStart } ?? .zero
-                let playhead = CMTime(seconds: currentTime, preferredTimescale: 600) + shift
-
-                guard playhead > clip.timelineStart, playhead < clip.timelineEnd else { return }
-
-                let offset = playhead - clip.timelineStart
-                var left = clip
-                left.duration = offset
-
-                // Carry the authored envelope to the right half so a split
-                // doesn't silently drop volume automation. The render-time
-                // fade clamp already trims fades that no longer fit either
-                // side's duration.
-                let right = Clip(mediaID: clip.mediaID,
-                                 sourceStart: clip.sourceStart + offset,
-                                 duration: clip.duration - offset,
-                                 timelineStart: playhead,
-                                 opacity: clip.opacity,
-                                 effects: clip.effects,
-                                 volumeEnvelope: clip.volumeEnvelope)
-
-                track.clips.replaceSubrange(index...index, with: [left, right])
-                selectedClipID = left.id
-                statusMessage = "Split clip."
-                scheduleRebuild()
-                return
-            }
-        }
+        projectEditingService.splitSelectedClipAtPlayhead(model: self)
     }
 
     /// Mutates the selected clip via the supplied closure and schedules a
@@ -403,37 +232,21 @@ final class EditorModel {
     /// into a single undo step labelled `actionName`.
     func updateSelectedClipCoalesced(_ actionName: String = "Adjust Clip",
                                      _ transform: @escaping (inout Clip) -> Void) {
-        guard let id = selectedClipID else { return }
-        performCoalescedUndoable(actionName, target: id, rebuild: .debounced) {
-            for track in allTracks {
-                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-                // Snapshot the pre-transform effects so we only drop cached
-                // frames when `effects` actually changed — opacity drags
-                // shouldn't invalidate, even though they flow through here.
-                let effectsBefore = track.clips[index].effects
-                transform(&track.clips[index])
-                if track.clips[index].effects != effectsBefore {
-                    RenderCache.shared.invalidate(clipID: id)
-                }
-                return
-            }
-        }
+        projectEditingService.updateSelectedClipCoalesced(actionName, model: self, transform)
     }
 
     func rebuildDebounced(after delay: Duration = .milliseconds(200)) {
-        pendingRebuildTask?.cancel()
-        pendingRebuildTask = Task { [weak self] in
-            try? await Task.sleep(for: delay)
-            guard let self, !Task.isCancelled else { return }
-            scheduleRebuild()
-        }
+        previewRebuildCoordinator.rebuildDebounced(after: delay, model: self)
     }
 
     /// Starts a preview rebuild, cancelling any rebuild already in flight so the
     /// most recent project state is the one that reaches the player.
     func scheduleRebuild() {
-        activeRebuildTask?.cancel()
-        activeRebuildTask = Task { [weak self] in await self?.rebuild() }
+        previewRebuildCoordinator.scheduleRebuild(model: self)
+    }
+
+    func cancelPreviewRebuilds() {
+        previewRebuildCoordinator.cancelAll()
     }
 
     // MARK: - Colour grading
@@ -951,161 +764,24 @@ final class EditorModel {
 
     enum TrimEdge { case left, right }
 
-    /// One render frame at the project's frame rate — the shortest a clip can be.
-    private var minClipDuration: CMTime {
-        CMTime(value: 1, timescale: CMTimeScale(max(1, project.frameRate)))
-    }
-
     /// Trims a clip edge to the given timeline time, clamping to source bounds,
     /// a one-frame minimum length, and neighbouring clip boundaries on the same
     /// track so trims never create overlaps.
     func trimClip(id: Clip.ID, edge: TrimEdge, to time: CMTime) {
-        performCoalescedUndoable("Trim Clip", target: id, rebuild: .immediate) {
-            for track in allTracks {
-                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-                var clip = track.clips[index]
-                guard let media = project.media(for: clip.mediaID) else { return }
-                let sourceDuration = media.duration
-                let minDur = minClipDuration
-
-                let sorted = track.clips.sorted { $0.timelineStart < $1.timelineStart }
-                guard let sortedIndex = sorted.firstIndex(where: { $0.id == id }) else { return }
-                let prevClip = sortedIndex > 0 ? sorted[sortedIndex - 1] : nil
-                let nextClip = sortedIndex < sorted.count - 1 ? sorted[sortedIndex + 1] : nil
-
-                switch edge {
-                case .left:
-                    let originalEnd = clip.timelineEnd
-                    var newTimelineStart = max(time, .zero)
-                    let minTimelineStart = clip.timelineStart - clip.sourceStart
-                    newTimelineStart = max(newTimelineStart, minTimelineStart)
-                    let maxTimelineStart = originalEnd - minDur
-                    newTimelineStart = min(newTimelineStart, maxTimelineStart)
-                    if let prev = prevClip {
-                        newTimelineStart = max(newTimelineStart, prev.timelineEnd)
-                    }
-
-                    let delta = newTimelineStart - clip.timelineStart
-                    clip.sourceStart = clip.sourceStart + delta
-                    clip.timelineStart = newTimelineStart
-                    clip.duration = originalEnd - newTimelineStart
-
-                case .right:
-                    let maxSourceRemaining = sourceDuration - clip.sourceStart
-                    var newDuration = time - clip.timelineStart
-                    newDuration = max(newDuration, minDur)
-                    newDuration = min(newDuration, maxSourceRemaining)
-                    if let next = nextClip {
-                        let maxDuration = next.timelineStart - clip.timelineStart
-                        newDuration = min(newDuration, maxDuration)
-                    }
-                    clip.duration = newDuration
-                }
-
-                track.clips[index] = clip
-                sanitizeTransitions()
-                return
-            }
-        }
+        projectEditingService.trimClip(id: id, edge: edge, to: time, model: self)
     }
 
     /// Moves a clip to a target track at the given timeline start. The target
     /// track must be the same kind (video↔video, audio↔audio). Overlapping clips
     /// on the target track are resolved by snapping to the nearest gap.
     func moveClip(id: Clip.ID, toTrack targetTrackID: Track.ID, start: CMTime) {
-        var sourceTrack: Track?
-        var sourceIndex: Int?
-        for track in allTracks {
-            if let idx = track.clips.firstIndex(where: { $0.id == id }) {
-                sourceTrack = track
-                sourceIndex = idx
-                break
-            }
-        }
-        guard let sourceTrack, let sourceIndex else { return }
-        guard let targetTrack = allTracks.first(where: { $0.id == targetTrackID }) else { return }
-        guard sourceTrack.kind == targetTrack.kind else { return }
-
-        performCoalescedUndoable("Move Clip", target: id, rebuild: .immediate) {
-            var clip = sourceTrack.clips[sourceIndex]
-            // Moving a clip destroys its incoming-transition cut; drop it so the
-            // transition can't silently re-bind to a new neighbour at the drop site.
-            if clip.transition != nil {
-                clip.transition = nil
-                if selectedTransitionClipID == id { selectedTransitionClipID = nil }
-            }
-            let newStart = max(start, .zero)
-            clip.timelineStart = newStart
-
-            // Remove from source before resolving overlaps on target.
-            sourceTrack.clips.remove(at: sourceIndex)
-
-            // Resolve overlaps: find a non-overlapping position on the target track.
-            clip.timelineStart = resolveOverlap(clip: clip, on: targetTrack)
-            targetTrack.clips.append(clip)
-            targetTrack.clips.sort { $0.timelineStart < $1.timelineStart }
-
-            sanitizeTransitions()
-        }
-    }
-
-    /// Finds the nearest non-overlapping position for a clip on a track.
-    /// Prefers the requested position; shifts to the nearest gap if blocked.
-    private func resolveOverlap(clip: Clip, on track: Track) -> CMTime {
-        let requested = clip.timelineStart
-        let duration = clip.duration
-        let others = track.clips.sorted { $0.timelineStart < $1.timelineStart }
-
-        let requestedEnd = requested + duration
-        let hasOverlap = others.contains { other in
-            requested < other.timelineEnd && requestedEnd > other.timelineStart
-        }
-        if !hasOverlap { return requested }
-
-        // Candidate positions: timeline origin, just after each clip, and
-        // just before each clip (shifted back by duration) to cover gaps
-        // that end at a clip's start.
-        var candidates: [CMTime] = [.zero]
-        for other in others {
-            candidates.append(other.timelineEnd)
-            let beforeClip = other.timelineStart - duration
-            if beforeClip >= .zero {
-                candidates.append(beforeClip)
-            }
-        }
-
-        var bestStart = requested
-        var bestDistance = Double.infinity
-        for candidate in candidates {
-            let candidateEnd = candidate + duration
-            let wouldOverlap = others.contains { other in
-                candidate < other.timelineEnd && candidateEnd > other.timelineStart
-            }
-            if !wouldOverlap {
-                let distance = abs((candidate - requested).seconds)
-                if distance < bestDistance {
-                    bestDistance = distance
-                    bestStart = candidate
-                }
-            }
-        }
-        return bestStart
+        projectEditingService.moveClip(id: id, toTrack: targetTrackID, start: start, model: self)
     }
 
     /// Collects all authored snap targets: playhead position(s), every clip
     /// boundary (excluding the given clip), and the timeline origin (0).
     func snapTargets(excluding clipID: Clip.ID? = nil) -> [CMTime] {
-        var targets: [CMTime] = [.zero]
-        let effectivePlayhead = CMTime(seconds: currentTime, preferredTimescale: 600)
-        let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks.map(\.clips))
-        targets.append(contentsOf: TransitionLayout.authoredTimes(forEffective: effectivePlayhead, cuts: cuts))
-        for track in allTracks {
-            for clip in track.clips where clip.id != clipID {
-                targets.append(clip.timelineStart)
-                targets.append(clip.timelineEnd)
-            }
-        }
-        return targets
+        projectEditingService.snapTargets(excluding: clipID, model: self)
     }
 
     /// Returns the nearest snap target within threshold, or the candidate
@@ -1114,69 +790,31 @@ final class EditorModel {
     /// so the trailing edge lands on the target.
     func resolveSnap(candidate: CMTime, excluding clipID: Clip.ID? = nil,
                      trailingEdgeOffset: CMTime? = nil, threshold: Double? = nil) -> CMTime {
-        let thresholdSeconds = threshold ?? (8.0 / pixelsPerSecond)
-        let targets = snapTargets(excluding: clipID)
-
-        var nearest = candidate
-        var minDist = Double.infinity
-
-        for target in targets {
-            let dist = abs((candidate - target).seconds)
-            if dist < thresholdSeconds, dist < minDist {
-                minDist = dist
-                nearest = target
-            }
-        }
-
-        if let offset = trailingEdgeOffset {
-            let trailing = candidate + offset
-            for target in targets {
-                let dist = abs((trailing - target).seconds)
-                if dist < thresholdSeconds, dist < minDist {
-                    minDist = dist
-                    nearest = target - offset
-                }
-            }
-        }
-
-        return nearest
+        projectEditingService.resolveSnap(
+            candidate: candidate,
+            excluding: clipID,
+            trailingEdgeOffset: trailingEdgeOffset,
+            threshold: threshold,
+            model: self)
     }
 
     // MARK: - Render settings
 
     /// Changes the output canvas size as one undoable step.
     func setRenderSize(_ size: CGSize) {
-        guard size != project.renderSize else { return }
-        performUndoable("Change Resolution") {
-            project.renderSize = size
-            RenderCache.shared.invalidate(notMatchingRenderSize: size)
-            // Caption rasters are keyed on render size, so the old-resolution
-            // bitmaps are now dead weight; drop them instead of waiting for LRU
-            // eviction (feature-title-raster R2.3 / T1.4).
-            EffectCompositor.purgeCaptionRasterCache()
-            scheduleRebuild()
-        }
+        projectEditingService.setRenderSize(size, model: self)
     }
 
     /// Changes the output frame rate as one undoable step.
     func setFrameRate(_ fps: Double) {
-        guard fps != project.frameRate else { return }
-        performUndoable("Change Frame Rate") {
-            project.frameRate = fps
-            scheduleRebuild()
-        }
+        projectEditingService.setFrameRate(fps, model: self)
     }
 
     /// Changes the project's working colour space as one undoable step. Purges
     /// the title-raster cache so cached captions re-render in the new space
     /// (R1.3) and rebuilds the preview so the new buffer tagging takes effect.
     func setWorkingColourSpace(_ space: WorkingColourSpace) {
-        guard space != project.workingColourSpace else { return }
-        performUndoable("Change Working Space") {
-            project.workingColourSpace = space
-            EffectCompositor.purgeCaptionRasterCache()
-            scheduleRebuild()
-        }
+        projectEditingService.setWorkingColourSpace(space, model: self)
     }
 
     // MARK: - Composition / playback
@@ -1184,44 +822,7 @@ final class EditorModel {
     /// Rebuilds the preview composition from the current project state, keeping
     /// the playhead where it was and resuming playback if still active.
     func rebuild() async {
-        let resumeAt = currentTime
-        do {
-            let result = try await CompositionBuilder.build(project: project, showSkinMask: showSkinMask)
-            // A newer rebuild superseded this one; don't clobber the player.
-            guard !Task.isCancelled else { return }
-            guard let built = result else {
-                player.replaceCurrentItem(with: nil)
-                totalDuration = 0
-                // No preview left to play; clear the flag so a later rebuild that
-                // re-creates an item (undo, add clip) doesn't silently auto-resume.
-                isPlaying = false
-                DiagnosticsBridge.shared.setDecoderCount(0)
-                // No compositor will run until the next non-empty rebuild, so
-                // wipe the render-time ring too — otherwise GPU/last/p95 would
-                // keep reporting the previous composition's numbers indefinitely
-                // (Codex P2).
-                DiagnosticsBridge.shared.clearRenderSamples()
-                return
-            }
-            let item = AVPlayerItem(asset: built.composition)
-            item.videoComposition = built.videoComposition
-            item.audioMix = built.audioMix
-            player.replaceCurrentItem(with: item)
-            totalDuration = built.duration
-            // The active VideoToolbox decoder count tracks one-to-one with the
-            // composition's video tracks (each is fed from a distinct source).
-            DiagnosticsBridge.shared.setDecoderCount(
-                built.composition.tracks(withMediaType: .video).count)
-            await player.seek(to: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600),
-                              toleranceBefore: .zero, toleranceAfter: .zero)
-            // Check the live isPlaying rather than a captured flag so a user's
-            // pause during the async build is not overridden.
-            if isPlaying {
-                player.play()
-            }
-        } catch {
-            statusMessage = "Preview build failed: \(error.localizedDescription)"
-        }
+        await previewRebuildCoordinator.rebuild(model: self)
     }
 
     func togglePlayPause() {
@@ -1267,17 +868,6 @@ final class EditorModel {
     /// through `renderQueue.totalProgress` instead of the legacy
     /// `exportProgress` field.
     func export(to url: URL) async {
-        let didStart = url.startAccessingSecurityScopedResource()
-        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-
-        guard let bookmark = try? url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil) else {
-            statusMessage = "Could not access \(url.lastPathComponent)."
-            return
-        }
-        renderQueue.enqueueWithDefaultPreset(outputURL: url, project: project, bookmark: bookmark)
-        statusMessage = "Queued \(url.lastPathComponent) with \(BuiltInExportPresets.defaultPreset.name)."
+        await exportCoordinator.export(to: url, model: self)
     }
 }
