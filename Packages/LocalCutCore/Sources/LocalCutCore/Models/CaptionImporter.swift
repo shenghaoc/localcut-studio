@@ -125,7 +125,7 @@ public enum CaptionImporter: Sendable {
         }
         guard hours >= 0, minutes >= 0, seconds >= 0,
               minutes <= 59, seconds <= 59,
-              hours <= 100 else { return nil }  // 100h matches CMTime.maxSaneSeconds
+              hours < 100 else { return nil }  // <100h matches CMTime.maxSaneSeconds (exactly 100h)
 
         let totalMs = Int64(hours) * 3_600_000 + Int64(minutes) * 60_000 + Int64(seconds) * 1_000 + Int64(ms)
         return CMTime(value: totalMs, timescale: 1_000)

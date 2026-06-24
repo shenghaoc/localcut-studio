@@ -66,37 +66,52 @@ final class ProjectEditingService {
     func splitSelectedClipAtPlayhead(model: EditorModel) {
         guard let id = model.selectedClipID else { return }
 
-        model.performUndoable("Split Clip") {
-            for track in allTracks(in: model) {
-                guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+        // Validate playhead is within clip bounds BEFORE opening undo group,
+        // so a no-op split doesn't register an empty undo step.
+        let playheadTime = CMTime(seconds: model.currentTime, preferredTimescale: 600)
+        var targetTrack: Track?
+        var targetIndex: Int?
+        for track in allTracks(in: model) {
+            if let index = track.clips.firstIndex(where: { $0.id == id }) {
                 let clip = track.clips[index]
-
                 let cuts = TransitionLayout.cuts(videoTracks: model.project.videoTracks.map(\.clips))
                 let placements = TransitionLayout.placements(for: track.clips, cuts: cuts)
                 let shift = placements.first(where: { $0.id == id })
                     .map { clip.timelineStart - $0.effectiveStart } ?? .zero
-                let playhead = CMTime(seconds: model.currentTime, preferredTimescale: 600) + shift
-
-                guard playhead > clip.timelineStart, playhead < clip.timelineEnd else { return }
-
-                let offset = playhead - clip.timelineStart
-                var left = clip
-                left.duration = offset
-
-                let right = Clip(mediaID: clip.mediaID,
-                                 sourceStart: clip.sourceStart + offset,
-                                 duration: clip.duration - offset,
-                                 timelineStart: playhead,
-                                 opacity: clip.opacity,
-                                 effects: clip.effects,
-                                 volumeEnvelope: clip.volumeEnvelope)
-
-                track.clips.replaceSubrange(index...index, with: [left, right])
-                model.selectedClipID = left.id
-                model.statusMessage = "Split clip."
-                model.scheduleRebuild()
-                return
+                let effectivePlayhead = playheadTime + shift
+                if effectivePlayhead > clip.timelineStart, effectivePlayhead < clip.timelineEnd {
+                    targetTrack = track
+                    targetIndex = index
+                }
+                break
             }
+        }
+        guard let track = targetTrack, let index = targetIndex else { return }
+
+        model.performUndoable("Split Clip") {
+            let clip = track.clips[index]
+            let cuts = TransitionLayout.cuts(videoTracks: model.project.videoTracks.map(\.clips))
+            let placements = TransitionLayout.placements(for: track.clips, cuts: cuts)
+            let shift = placements.first(where: { $0.id == id })
+                .map { clip.timelineStart - $0.effectiveStart } ?? .zero
+            let playhead = playheadTime + shift
+
+            let offset = playhead - clip.timelineStart
+            var left = clip
+            left.duration = offset
+
+            let right = Clip(mediaID: clip.mediaID,
+                             sourceStart: clip.sourceStart + offset,
+                             duration: clip.duration - offset,
+                             timelineStart: playhead,
+                             opacity: clip.opacity,
+                             effects: clip.effects,
+                             volumeEnvelope: clip.volumeEnvelope)
+
+            track.clips.replaceSubrange(index...index, with: [left, right])
+            model.selectedClipID = left.id
+            model.statusMessage = "Split clip."
+            model.scheduleRebuild()
         }
     }
 

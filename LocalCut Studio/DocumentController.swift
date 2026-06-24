@@ -129,8 +129,10 @@ final class DocumentController {
         }
 
         model.project.name = url?.deletingPathExtension().lastPathComponent ?? document.name
-        model.project.renderSize = CGSize(width: document.renderWidth, height: document.renderHeight)
-        model.project.frameRate = document.frameRate
+        let width = max(1, document.renderWidth.isFinite ? document.renderWidth : 1920)
+        let height = max(1, document.renderHeight.isFinite ? document.renderHeight : 1080)
+        model.project.renderSize = CGSize(width: width, height: height)
+        model.project.frameRate = max(1, document.frameRate.isFinite ? document.frameRate : 30)
         EffectCompositor.purgeCaptionRasterCache()
         model.project.workingColourSpace = document.workingColourSpace
 
