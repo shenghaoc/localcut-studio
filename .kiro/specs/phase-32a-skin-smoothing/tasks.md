@@ -1,6 +1,6 @@
 # Tasks: Phase 32a — GPU Skin Smoothing (no ML)
 
-> Status: **Implemented**. Depends on `feature-colour-grading` and the keyframe system. (Keyframe authoring UI landed via `bugfix-implemented-spec-polish` U8; T3.1 snapshot tests now done.)
+> Status: **Implemented** (inspector keyframe authoring UI still deferred — see T1.5). Depends on `feature-colour-grading` and the keyframe system.
 
 ## Engine
 
