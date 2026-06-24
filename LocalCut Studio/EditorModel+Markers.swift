@@ -74,6 +74,22 @@ extension EditorModel {
         selectMarker(id: id)
     }
 
+    /// Seeks to (and selects) the first marker strictly after the playhead.
+    /// The marker list is kept sorted by `time`, so the first match is the
+    /// nearest one ahead. No-op when nothing lies ahead.
+    func selectNextMarker() {
+        let now = CMTime(seconds: currentTime, preferredTimescale: 600)
+        guard let next = project.markers.first(where: { $0.time > now }) else { return }
+        seekToMarker(id: next.id)
+    }
+
+    /// Seeks to (and selects) the last marker strictly before the playhead.
+    func selectPreviousMarker() {
+        let now = CMTime(seconds: currentTime, preferredTimescale: 600)
+        guard let previous = project.markers.last(where: { $0.time < now }) else { return }
+        seekToMarker(id: previous.id)
+    }
+
     /// Mutually-exclusive marker selection: clears the clip / transition /
     /// media focus so Delete and the inspector always act on one focused thing
     /// (Gemini review #4-#6, Codex review #2 + post-revision review).

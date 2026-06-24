@@ -81,6 +81,33 @@ extension EditorModel {
         }
     }
 
+    /// Retimes a caption line through the same sorted update path as text edits.
+    /// Captions are authored in the effective/rendered timeline space, not in a
+    /// clip's pre-transition authored space.
+    func retimeCaptionLine(_ lineID: CaptionLine.ID,
+                           in trackID: CaptionTrack.ID,
+                           start: CMTime? = nil,
+                           duration: CMTime? = nil) {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              let line = track.lines.first(where: { $0.id == lineID }) else { return }
+        var updated = line
+        let oldStart = line.range.start
+        let newStart = CMTimeMaximum(start ?? oldStart, .zero)
+        let minDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, project.frameRate)))
+        let newDuration = CMTimeMaximum(duration ?? line.range.duration, minDuration)
+
+        updated.range = CMTimeRange(start: newStart, duration: newDuration)
+        if let words = updated.words, newStart != oldStart {
+            let delta = newStart - oldStart
+            updated.words = words.map { word in
+                WordTiming(range: CMTimeRange(start: CMTimeMaximum(word.range.start + delta, .zero),
+                                              duration: word.range.duration),
+                           word: word.word)
+            }
+        }
+        updateCaptionLine(updated, in: trackID)
+    }
+
     /// Toggles a caption track's mute through the undo system so it groups with
     /// every other caption edit.
     func setCaptionTrackMuted(_ muted: Bool, in trackID: CaptionTrack.ID) {
@@ -89,6 +116,18 @@ extension EditorModel {
         performUndoable(muted ? "Mute Caption Track" : "Unmute Caption Track") {
             track.isMuted = muted
             scheduleRebuild()
+        }
+    }
+
+    /// Renames a caption track. Coalesced + rebuild-skipped so a run of
+    /// keystrokes in the inspector folds into one undo step without rebuilding
+    /// the composition (the name doesn't affect rendering) — satisfies
+    /// feature-caption-tracks R2.6 ("the user can rename it").
+    func renameCaptionTrack(_ name: String, in trackID: CaptionTrack.ID) {
+        guard let track = project.captionTracks.first(where: { $0.id == trackID }),
+              track.name != name else { return }
+        performCoalescedUndoable("Rename Caption Track", target: trackID, rebuild: .skip) {
+            track.name = name
         }
     }
 

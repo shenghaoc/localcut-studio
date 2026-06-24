@@ -17,7 +17,7 @@
 ## R3 — Smoothing
 
 - **R3.1** Gaussian blur proxy with mask blend, justified in `design.md`; true guided filter / frequency separation is deferred.
-- **R3.2** The blur input is clamped to avoid frame-edge bleeding, and the mask gates smoothing so the effect is not applied as a global blur. The current proxy can still soften masked edges at high strength.
+- **R3.2** The blur input is clamped to avoid frame-edge bleeding, the mask gates smoothing so the effect is not applied as a global blur, and the Gaussian radius scales from a 1080p source-height reference so the same strength has comparable appearance on 1080p and 4K footage.
 - **R3.3** Deterministic output given identical inputs and parameters.
 
 ## R4 — Performance
@@ -34,4 +34,5 @@
 
 - **R6.1** Deferred snapshot tests at strength = 0 (identity), 0.5 (subtle), 1.0 (max) on a fixture with skin + foliage + text regions.
 - **R6.2** Unit tests for parameter clamping, default identity, and keyframe interpolation against the keyframe spec.
-- **R6.3** `xcodebuild` (Debug, macOS) green; no test count regression.
+- **R6.3** Unit test: skin-smooth blur radius maps strength 1.0 to 10 px at 1080p, 20 px at 4K, and 5 px at half-height.
+- **R6.4** `xcodebuild` (Debug, macOS) green; no test count regression.

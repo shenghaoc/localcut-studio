@@ -10,7 +10,7 @@
 ## R2 — Cache
 
 - **R2.1** The rasterer holds an LRU cache keyed exactly on `TitleRasterRequest`.
-- **R2.2** Default capacity is 128 entries; new inserts evict the least-recently-used entry on overflow.
+- **R2.2** Default capacity is 128 entries; new inserts evict the least-recently-used entry on overflow, and lookup touches are O(1).
 - **R2.3** A `purge()` method empties the cache; the editor calls it on project render-size change and on track-level resets.
 - **R2.4** Inserts and lookups are thread-safe (`OSAllocatedUnfairLock`).
 

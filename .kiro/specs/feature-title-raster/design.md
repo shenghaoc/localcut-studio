@@ -48,7 +48,11 @@ The rasterer then:
 
 ## Cache
 
-`OSAllocatedUnfairLock`-guarded `OrderedDictionary<TitleRasterRequest, TitleRaster>` — the front of the dictionary is most-recently-used. On insert past the entry cap, the back of the dictionary is dropped. `purge()` empties the cache; the editor calls it when render size or the entire caption track changes (a `lineID` change for any line is already covered by the cache key).
+`OSAllocatedUnfairLock`-guarded dictionary plus lock-confined doubly-linked list. The list head is
+least-recently-used and the tail is most-recently-used, so lookup touch and overflow eviction are
+O(1). On insert past the entry cap, the head is dropped. `purge()` empties the cache; the editor
+calls it when render size or the entire caption track changes (a `lineID` change for any line is
+already covered by the cache key).
 
 ## Drawing context
 

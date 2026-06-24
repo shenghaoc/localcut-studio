@@ -16,7 +16,7 @@
 ## Bundle I/O
 
 - [x] **T3.1** Add `ProjectBundle.read(url:)`: opens the bundle, decodes `project.json`, reads `fingerprints.json` (missing OK), returns the document + the parsed index for the caller to verify on-disk asset state.
-- [x] **T3.2** Add `ProjectBundle.write(_:to:bundledMedia:previousFingerprints:)`: creates the bundle directory, copies bundled media into `assets/<id>.<ext>` skipping copies that already match the stored fingerprint, writes `fingerprints.json`, writes `project.json` atomically. Returns the updated fingerprint index.
+- [x] **T3.2** Add `ProjectBundle.write(_:to:bundledMedia:previousFingerprints:)`: creates the bundle directory, copies bundled media into `assets/<id>.<ext>` skipping copies that already match the stored fingerprint, stages `fingerprints.json` + `project.json`, then promotes them after both staged writes succeed. Returns the updated fingerprint index.
 
 ## Document lifecycle
 
@@ -25,6 +25,7 @@
 - [x] **T4.3** `EditorModel.convertToBundle(url:)` builds a fresh `ProjectDocument` snapshot of the current project, copies every resolved media item into `assets/`, fingerprints them, writes the bundle, adopts the new URL — leaving the original `.lcstudio` untouched (R4.2 / R4.3).
 - [x] **T4.4** Open panel accepts both `lcStudioProject` and `lcStudioProjectBundle`. Save panel defaults to `lcStudioProjectBundle` for new documents; the user can still pick `lcStudioProject` to keep the legacy format.
 - [x] **T4.5** **Convert to Bundle…** command in the File menu, wired to `EditorModel.requestConvertToBundle()`. Disabled when the current document is already a bundle (or is unsaved — Save As goes straight to the bundle in that case).
+- [x] **T4.6** Media-bin import UI exposes a "Copy into Bundle" checkbox; imported items carry the chosen `wantsBundling` value into bundle saves.
 
 ## Sandbox
 
@@ -37,6 +38,8 @@
 - [x] **T6.2** `fingerprintDetectsExternalEdit` — fingerprint a file, modify it on disk, re-fingerprint, and assert the digest changed.
 - [x] **T6.3** `lcstudioConvertsToBundlePreservingEverything` — build a project with clips, captions, presets, effects, and a transition; convert to bundle; reopen the bundle; assert every field matches; assert the original `.lcstudio` content is byte-identical to before; assert undo-stack depth is unchanged by Convert.
 - [x] **T6.4** `bundleMixedCopiedAndBookmarkedMedia` — round-trip a project whose media set is part bundled (with `bundleRelativePath`) and part external-only (with `bookmark`); assert each MediaRef takes the correct path on load.
+- [x] **T6.5** `bundleMetadataStagingCleansUp` — bundle save writes both metadata files and leaves no `.staged-*` metadata files behind.
+- [x] **T6.6** `bundleDocumentRespectsDontCopyImportFlag` — an imported item with `wantsBundling = false` remains bookmark-backed with no `bundleRelativePath` in bundle JSON.
 
 ## Documentation
 

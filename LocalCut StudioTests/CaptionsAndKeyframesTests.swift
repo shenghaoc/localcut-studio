@@ -1,6 +1,7 @@
 import Testing
 import AVFoundation
 import CoreGraphics
+import CoreImage
 @testable import LocalCut_Studio
 
 // MARK: - Keyframes (feature-keyframes V1–V4)
@@ -94,6 +95,84 @@ func keyframesRoundTrip() throws {
     let data = try JSONEncoder().encode(k)
     let back = try JSONDecoder().decode(Keyframed<Float>.self, from: data)
     #expect(back == k)
+}
+
+@MainActor
+@Test("Skin-smooth strength keyframes author at the selected clip playhead")
+func skinSmoothStrengthKeyframeAuthoringAtPlayhead() {
+    let (model, clipID) = makeSkinSmoothKeyframeModel(timelineStart: 2, duration: 8)
+    model.selectedClipID = clipID
+    model.currentTime = 5
+
+    model.updateSelectedClipSkinSmooth { smooth in
+        smooth.strength.defaultValue = 0.4
+    }
+    model.commitCoalescedUndo()
+    model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe()
+
+    #expect(model.selectedClipSkinSmoothLocalPlayheadTime?.seconds == 3)
+    #expect(model.selectedClipSkinSmooth.strength.keyframes.count == 1)
+    #expect(model.selectedClipSkinSmooth.strength.keyframes[0].time.seconds == 3)
+    #expect(model.selectedClipSkinSmooth.strength.keyframes[0].value == 0.4)
+    #expect(model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead != nil)
+
+    model.updateSelectedClipSkinSmooth { smooth in
+        smooth.strength.defaultValue = 0.8
+    }
+    model.commitCoalescedUndo()
+    model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe()
+
+    #expect(model.selectedClipSkinSmooth.strength.keyframes.count == 1)
+    #expect(model.selectedClipSkinSmooth.strength.keyframes[0].value == 0.8)
+
+    model.removeSelectedClipSkinSmoothStrengthKeyframe()
+    #expect(model.selectedClipSkinSmooth.strength.keyframes.isEmpty)
+
+    model.undo()
+    #expect(model.selectedClipSkinSmooth.strength.keyframes.count == 1)
+    #expect(model.selectedClipSkinSmooth.strength.keyframes[0].value == 0.8)
+}
+
+@MainActor
+@Test("Skin-smooth strength keyframe navigation seeks within the selected clip")
+func skinSmoothStrengthKeyframeNavigation() {
+    let (model, clipID) = makeSkinSmoothKeyframeModel(timelineStart: 2, duration: 8)
+    model.selectedClipID = clipID
+    model.totalDuration = 12
+
+    for (globalTime, value) in [(3.0, 0.2 as Float), (5.0, 0.5 as Float), (7.0, 0.9 as Float)] {
+        model.currentTime = globalTime
+        model.updateSelectedClipSkinSmooth { smooth in
+            smooth.strength.defaultValue = value
+        }
+        model.commitCoalescedUndo()
+        model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe()
+    }
+
+    model.currentTime = 6
+    model.seekToPreviousSelectedClipSkinSmoothStrengthKeyframe()
+    #expect(model.currentTime == 5)
+
+    model.currentTime = 6
+    model.seekToNextSelectedClipSkinSmoothStrengthKeyframe()
+    #expect(model.currentTime == 7)
+}
+
+@MainActor
+private func makeSkinSmoothKeyframeModel(timelineStart: Double, duration: Double) -> (EditorModel, Clip.ID) {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    media.duration = CMTime(seconds: duration, preferredTimescale: 600)
+    media.hasVideo = true
+    model.project.mediaItems.append(media)
+
+    let clip = Clip(
+        mediaID: media.id,
+        sourceStart: .zero,
+        duration: CMTime(seconds: duration, preferredTimescale: 600),
+        timelineStart: CMTime(seconds: timelineStart, preferredTimescale: 600))
+    model.project.videoTracks.first!.clips.append(clip)
+    return (model, clip.id)
 }
 
 // MARK: - SRT importer (feature-caption-tracks R5.1)
@@ -332,6 +411,43 @@ func captionTextEditCoalesces() async {
     #expect(track.lines[0].text == "hello")
     model.undo()
     #expect(track.lines[0].text == "")
+}
+
+@MainActor
+@Test("retimeCaptionLine updates start and duration, shifts words, sorts, and is undoable")
+func captionLineRetimingSortsAndUndo() {
+    func time(_ seconds: Double) -> CMTime {
+        CMTime(seconds: seconds, preferredTimescale: 600)
+    }
+
+    let model = EditorModel()
+    let track = CaptionTrack(name: "T")
+    let early = CaptionLine(
+        range: CMTimeRange(start: time(1), duration: time(1)),
+        text: "early")
+    let late = CaptionLine(
+        range: CMTimeRange(start: time(5), duration: time(2)),
+        text: "late",
+        words: [WordTiming(range: CMTimeRange(start: time(5.5), duration: time(0.5)),
+                           word: "late")])
+    track.addLine(early)
+    track.addLine(late)
+    model.project.captionTracks = [track]
+
+    model.retimeCaptionLine(late.id, in: track.id, start: time(0.5), duration: time(3))
+    model.commitCoalescedUndo()
+
+    #expect(track.lines.map(\.id) == [late.id, early.id])
+    let retimed = track.lines[0]
+    #expect(retimed.range.start == time(0.5))
+    #expect(retimed.range.duration == time(3))
+    #expect(retimed.words?.first?.range.start == time(1))
+
+    model.undo()
+    let restoredLate = track.lines.first { $0.id == late.id }
+    #expect(restoredLate?.range.start == time(5))
+    #expect(restoredLate?.range.duration == time(2))
+    #expect(restoredLate?.words?.first?.range.start == time(5.5))
 }
 
 @Test("setCaptionTrackMuted: routes through undo (Claude review #4)")
@@ -703,6 +819,31 @@ func titleRastererLRU() {
     #expect(r.count == 2)
 }
 
+@Test("TitleRasterer: cache hit refreshes LRU order")
+func titleRastererHitRefreshesLRU() {
+    final class Counter: @unchecked Sendable { nonisolated(unsafe) var draws = 0 }
+    let counter = Counter()
+    let r = TitleRasterer(capacity: 2)
+    let canvas = CGSize(width: 64, height: 32)
+    let id = UUID()
+    func request(_ hash: Int, _ text: String) -> TitleRasterRequest {
+        TitleRasterRequest(lineID: id, styleHash: hash, text: text, renderSize: canvas)
+    }
+    let a = request(1, "a")
+    let b = request(2, "b")
+    let c = request(3, "c")
+
+    _ = r.raster(for: a) { _, _ in counter.draws += 1; return .zero }
+    _ = r.raster(for: b) { _, _ in counter.draws += 1; return .zero }
+    _ = r.raster(for: a) { _, _ in counter.draws += 1; return .zero }
+    _ = r.raster(for: c) { _, _ in counter.draws += 1; return .zero }
+    _ = r.raster(for: a) { _, _ in counter.draws += 1; return .zero }
+    _ = r.raster(for: b) { _, _ in counter.draws += 1; return .zero }
+
+    #expect(counter.draws == 4, "A was touched before C inserted, so B should be the evicted entry")
+    #expect(r.count == 2)
+}
+
 @Test("TitleRasterer: purge empties the cache")
 func titleRastererPurge() {
     let r = TitleRasterer(capacity: 4)
@@ -761,6 +902,94 @@ func presetSnapshotShape() {
         #expect(raster.boundingBox.minX >= -64, "Preset \(preset.name) bbox extends well beyond the left edge")
         #expect(raster.boundingBox.maxX <= canvas.width + 64, "Preset \(preset.name) bbox extends well beyond the right edge")
     }
+}
+
+// MARK: - Karaoke word highlight (phase-30 R3.3)
+
+private func wordTiming(_ start: Double, _ end: Double, _ text: String) -> WordTiming {
+    WordTiming(range: CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600),
+                                  duration: CMTime(seconds: end - start, preferredTimescale: 600)),
+               word: text)
+}
+
+@Test("activeWordIndex holds the last word across inter-word gaps and the tail")
+func activeWordIndexHolds() {
+    let words = [wordTiming(1, 2, "a"), wordTiming(3, 4, "b")]
+    func idx(_ t: Double) -> Int? {
+        EffectCompositor.activeWordIndex(words: words, at: CMTime(seconds: t, preferredTimescale: 600))
+    }
+    #expect(idx(0.5) == nil)   // before the first word → idle, no highlight
+    #expect(idx(1.5) == 0)     // inside first word
+    #expect(idx(2.5) == 0)     // gap between words → hold first (no flicker)
+    #expect(idx(3.5) == 1)     // inside second word
+    #expect(idx(9.0) == 1)     // tail after last word → hold last
+}
+
+@Test("CaptionDrawing word range maps by token index, not substring scan")
+func captionWordRangeUsesTokenIndex() throws {
+    let text = "go going gone"
+    let words = [
+        wordTiming(0, 1, "go"),
+        wordTiming(1, 2, "go"),
+        wordTiming(2, 3, "go"),
+    ]
+    let ns = text as NSString
+
+    let range = try #require(CaptionDrawing.wordRange(for: words, index: 1, in: text))
+    #expect(ns.substring(with: range) == "going")
+}
+
+@Test("Typewriter mask hides unrevealed text without hiding the pill area")
+func typewriterMaskExcludesPillArea() {
+    let imageExtent = CGRect(x: 0, y: 0, width: 100, height: 40)
+    let textBox = CGRect(x: 20, y: 10, width: 60, height: 20)
+    let mask = EffectCompositor.typewriterMask(imageExtent: imageExtent,
+                                               textBox: textBox,
+                                               progress: 0.5)
+
+    #expect(redByte(mask, at: CGPoint(x: 10, y: 20)) > 240, "pill area before text should stay visible")
+    #expect(redByte(mask, at: CGPoint(x: 30, y: 20)) > 240, "revealed text should stay visible")
+    #expect(redByte(mask, at: CGPoint(x: 70, y: 20)) < 16, "unrevealed text should be hidden")
+    #expect(redByte(mask, at: CGPoint(x: 90, y: 20)) > 240, "pill area after text should stay visible")
+}
+
+@Test("activeWordIndex returns nil when there are no word timings")
+func activeWordIndexNoWords() {
+    #expect(EffectCompositor.activeWordIndex(words: nil, at: .zero) == nil)
+    #expect(EffectCompositor.activeWordIndex(words: [], at: .zero) == nil)
+}
+
+private func redByte(_ image: CIImage, at point: CGPoint) -> UInt8 {
+    let context = CIContext(options: [.useSoftwareRenderer: true])
+    let colourSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+    var pixel = [UInt8](repeating: 0, count: 4)
+    pixel.withUnsafeMutableBytes { bytes in
+        context.render(image,
+                       toBitmap: bytes.baseAddress!,
+                       rowBytes: 4,
+                       bounds: CGRect(x: point.x, y: point.y, width: 1, height: 1),
+                       format: .RGBA8,
+                       colorSpace: colourSpace)
+    }
+    return pixel[0]
+}
+
+// MARK: - Caption track rename (feature-caption-tracks R2.6)
+
+@MainActor
+@Test("renameCaptionTrack updates the name and is undoable")
+func captionTrackRename() {
+    let model = EditorModel()
+    model.addEmptyCaptionTrack()
+    let trackID = model.project.captionTracks[0].id
+    let original = model.project.captionTracks[0].name
+
+    model.renameCaptionTrack("Lyrics", in: trackID)
+    model.commitCoalescedUndo()
+    #expect(model.project.captionTracks[0].name == "Lyrics")
+
+    model.undo()
+    #expect(model.project.captionTracks[0].name == original)
 }
 
 // MARK: - Smoke test (Phase 30 T5.2)

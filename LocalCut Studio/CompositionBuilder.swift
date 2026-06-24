@@ -40,6 +40,7 @@ enum CompositionBuilder {
         let effects: [Effect]
         let transitionRange: CMTimeRange?
         let transitionType: TransitionType?
+        let transitionWipeAngle: Double?
         let showSkinMask: Bool
         let clipStartTime: CMTime
         let sourceRange: CMTimeRange
@@ -58,7 +59,8 @@ enum CompositionBuilder {
                 start: timeRange.start.seconds,
                 transitionStart: transitionRange?.start.seconds,
                 transitionEnd: transitionRange?.end.seconds,
-                transitionType: transitionType)
+                transitionType: transitionType,
+                transitionWipeAngle: transitionWipeAngle)
         }
     }
 
@@ -75,12 +77,14 @@ enum CompositionBuilder {
         let transitionStart: Double?
         let transitionEnd: Double?
         let transitionType: TransitionType?
+        let transitionWipeAngle: Double?
     }
 
     /// A planned composite step, by composition-track id, bottom-to-top.
     enum PlannedUnit: Equatable {
         case layer(CMPersistentTrackID)
-        case transition(outgoing: CMPersistentTrackID, incoming: CMPersistentTrackID, type: TransitionType)
+        case transition(outgoing: CMPersistentTrackID, incoming: CMPersistentTrackID,
+                        type: TransitionType, wipeAngle: Double)
     }
 
     /// Decides, for one project track, how to composite the clips visible at
@@ -102,7 +106,10 @@ enum CompositionBuilder {
             for seg in visible where seg.compTrackID != incoming.compTrackID && seg.compTrackID != outgoing.compTrackID {
                 result.append(.layer(seg.compTrackID))
             }
-            result.append(.transition(outgoing: outgoing.compTrackID, incoming: incoming.compTrackID, type: type))
+            result.append(.transition(outgoing: outgoing.compTrackID,
+                                      incoming: incoming.compTrackID,
+                                      type: type,
+                                      wipeAngle: incoming.transitionWipeAngle ?? Transition.defaultWipeAngle))
             return result
         }
 
@@ -169,6 +176,7 @@ enum CompositionBuilder {
                         effects: clip.effects,
                         transitionRange: piece.transitionRange,
                         transitionType: piece.overlap > .zero ? clip.transition?.type : nil,
+                        transitionWipeAngle: piece.overlap > .zero ? clip.transition?.wipeAngle : nil,
                         showSkinMask: showSkinMask,
                         clipStartTime: clip.timelineStart,
                         sourceRange: piece.sourceRange))
@@ -563,11 +571,11 @@ enum CompositionBuilder {
                     case .layer(let trackID):
                         guard let seg = byTrack[trackID] else { continue }
                         units.append(.layer(seg.layer))
-                    case .transition(let outID, let inID, let type):
+                    case .transition(let outID, let inID, let type, let wipeAngle):
                         guard let outSeg = byTrack[outID], let inSeg = byTrack[inID],
                               let overlap = inSeg.transitionRange else { continue }
                         units.append(.transition(outgoing: outSeg.layer, incoming: inSeg.layer,
-                                                 type: type, overlap: overlap))
+                                                 type: type, wipeAngle: wipeAngle, overlap: overlap))
                     }
                 }
             }

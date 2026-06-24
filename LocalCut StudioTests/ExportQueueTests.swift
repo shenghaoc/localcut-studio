@@ -195,6 +195,23 @@ struct RenderQueueDocTests {
         #expect(reconciled[0].status == .failed)
     }
 
+    @Test("Reconcile: a stale output bookmark refreshes when it still resolves")
+    func reconcileRefreshesStaleOutputBookmark() {
+        let stale = Data([0x01, 0x02, 0x03])
+        let refreshed = Data([0x09, 0x08, 0x07])
+        let job = sampleJob(status: .queued, outputBookmark: stale)
+
+        let reconciled = RenderQueue.reconcile(loaded: [job]) { bookmark in
+            #expect(bookmark == stale)
+            return BookmarkResolution(
+                url: URL(fileURLWithPath: "/tmp/renderqueue-refresh-test.mov"),
+                refreshedBookmark: refreshed)
+        }
+
+        #expect(reconciled[0].status == .queued)
+        #expect(reconciled[0].outputBookmark == refreshed)
+    }
+
     @Test("Reconcile: terminal entries stay terminal")
     func reconcilePreservesTerminal() {
         let completed = QueueJob(
@@ -266,6 +283,46 @@ struct RenderQueueTests {
         #expect(queue.jobs[0] == snapshot, "second cancel should be a no-op")
     }
 
+    @Test("Retry: a cancelled job is requeued for another run (R3.3)")
+    func retryRequeuesCancelled() {
+        let queue = RenderQueue(persistsToDisk: false)
+        let job = makeJob(name: "X")
+        queue.enqueue(job, autoStart: false)
+        queue.cancel(jobID: job.id)
+        #expect(queue.jobs[0].status == .cancelled)
+
+        queue.retry(jobID: job.id, autoStart: false)
+        #expect(queue.jobs[0].status == .queued)
+        #expect(queue.jobs[0].errorMessage == nil)
+        #expect(queue.jobs[0].progress == 0)
+    }
+
+    @Test("Retry: a failed job is requeued without relying on queued-cancel semantics")
+    func retryRequeuesFailed() {
+        var job = makeJob(name: "X")
+        job.status = .failed
+        job.errorMessage = "Previous export failed"
+        job.progress = 0.4
+        job.runtimeSeconds = 12
+        let queue = RenderQueue(jobs: [job], persistsToDisk: false)
+
+        queue.retry(jobID: job.id, autoStart: false)
+        #expect(queue.jobs[0].status == .queued)
+        #expect(queue.jobs[0].errorMessage == nil)
+        #expect(queue.jobs[0].progress == 0)
+        #expect(queue.jobs[0].runtimeSeconds == nil)
+    }
+
+    @Test("Retry: a non-terminal (queued) job is left untouched")
+    func retryNoOpForNonTerminal() {
+        let queue = RenderQueue(persistsToDisk: false)
+        let job = makeJob(name: "X")
+        queue.enqueue(job, autoStart: false)
+        let before = queue.jobs[0]
+        queue.retry(jobID: job.id, autoStart: false)
+        #expect(queue.jobs[0] == before, "retrying a queued job should be a no-op")
+    }
+
     @Test("clearCompleted drops terminal jobs only")
     func clearCompletedDropsTerminal() {
         let queue = RenderQueue(persistsToDisk: false)
@@ -318,5 +375,43 @@ struct RenderQueueTests {
         queue.cancel(jobID: a.id)
         // 1 terminal + 1 queued (0) ⇒ 0.5
         #expect(abs(queue.totalProgress - 0.5) < 1e-6)
+    }
+
+    @Test("Runner cleanup restarts when a job is enqueued after drain")
+    func runnerCleanupRestartsAfterDrainEnqueue() async throws {
+        let queue = RenderQueue(persistsToDisk: false)
+        let first = makeJob(name: "A")
+        let second = makeJob(name: "B")
+        var didInjectSecondJob = false
+        queue.runnerDrainedForTesting = {
+            guard !didInjectSecondJob else { return }
+            didInjectSecondJob = true
+            queue.enqueue(second)
+        }
+
+        queue.enqueue(first)
+
+        try await waitForQueueToSettle(queue, expectedCount: 2)
+        #expect(didInjectSecondJob)
+        #expect(queue.jobs.map(\.outputDisplayName) == ["A.mp4", "B.mp4"])
+        #expect(queue.jobs.allSatisfy { $0.status == .failed })
+        #expect(!queue.isRunning)
+    }
+
+    private func waitForQueueToSettle(
+        _ queue: RenderQueue,
+        expectedCount: Int,
+        timeout: TimeInterval = 2
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if queue.jobs.count == expectedCount,
+               !queue.isRunning,
+               queue.jobs.allSatisfy(\.isTerminal) {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Render queue did not settle before timeout")
     }
 }

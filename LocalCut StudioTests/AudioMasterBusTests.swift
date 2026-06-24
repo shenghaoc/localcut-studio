@@ -32,6 +32,36 @@ func masterGainIsUndoable() {
     #expect(model.project.masterGain == 1)
 }
 
+// MARK: - Gain slider dB mapping (design: log-mapped fader)
+
+@Test("AudioGainMapping: unity linear ↔ 0 dB round-trips")
+func gainMappingUnity() {
+    #expect(abs(AudioGainMapping.decibels(fromLinear: 1) - 0) < 1e-9)
+    #expect(abs(AudioGainMapping.linear(fromDecibels: 0) - 1) < 1e-9)
+}
+
+@Test("AudioGainMapping: linear → dB → linear round-trips across the range")
+func gainMappingRoundTrip() {
+    for linear in [0.25, 0.5, 0.75, 1.0, 1.5, 1.99] {
+        let back = AudioGainMapping.linear(fromDecibels: AudioGainMapping.decibels(fromLinear: linear))
+        #expect(abs(back - linear) < 1e-6, "round-trip drifted for \(linear)")
+    }
+}
+
+@Test("AudioGainMapping: zero/sub-floor gain pins to −60 dB and back to silence")
+func gainMappingFloor() {
+    #expect(AudioGainMapping.decibels(fromLinear: 0) == AudioGainMapping.minDecibels)
+    #expect(AudioGainMapping.linear(fromDecibels: AudioGainMapping.minDecibels) == 0)
+    #expect(AudioGainMapping.linear(fromDecibels: -120) == 0)
+}
+
+@Test("AudioGainMapping: slider minimum is exactly reachable as silence")
+func gainMappingSliderMinimum() {
+    let stepsFromZero = AudioGainMapping.minDecibels / AudioGainMapping.sliderStepDecibels
+    #expect(stepsFromZero.rounded() == stepsFromZero)
+    #expect(AudioGainMapping.linear(fromDecibels: AudioGainMapping.minDecibels) == 0)
+}
+
 @MainActor
 @Test("AudioMasterBus: coalesced gain drags fold into a single undo step")
 func masterGainCoalescesAcrossDrag() {

@@ -2,6 +2,30 @@ import SwiftUI
 import Foundation
 import AVFoundation
 
+/// Maps the audio gain sliders between linear amplitude (what the model stores)
+/// and decibels (what the slider travels in), so equal travel is equal dB — the
+/// log mapping feature-audio-master-bus's design specified. A linear 0…2 slider
+/// cramped all useful control around unity and spent its lower half on
+/// inaudible levels; a −60…+6 dB fader gives fine control where mixing happens.
+nonisolated enum AudioGainMapping {
+    static let minDecibels: Double = -60
+    static let maxDecibels: Double = 6
+    static let sliderStepDecibels: Double = 0.5
+
+    /// Linear amplitude → clamped slider decibels. Zero / sub-threshold gain
+    /// pins to the −60 dB floor instead of −∞.
+    static func decibels(fromLinear linear: Double) -> Double {
+        guard linear > 0 else { return minDecibels }
+        return min(maxDecibels, max(minDecibels, 20 * log10(linear)))
+    }
+
+    /// Slider decibels → linear amplitude. The −60 dB floor maps to silence.
+    static func linear(fromDecibels decibels: Double) -> Double {
+        guard decibels > minDecibels else { return 0 }
+        return pow(10, decibels / 20)
+    }
+}
+
 /// Inspector section for the audio master bus (P16). Renders the master gain
 /// slider + a two-channel peak/RMS meter, plus per-audio-track gain rows.
 /// Phase 36's insert toggles (denoiser, gate, compressor, limiter) will land
@@ -22,8 +46,8 @@ struct AudioInspectorView: View {
                     .accessibilityLabel("Master gain \(formattedGain(model.project.masterGain))")
                 Slider(
                     value: masterGainBinding,
-                    in: 0...2,
-                    step: 0.01,
+                    in: AudioGainMapping.minDecibels...AudioGainMapping.maxDecibels,
+                    step: AudioGainMapping.sliderStepDecibels,
                     onEditingChanged: { editing in
                         // Drag end commits the coalesced gesture so a quick
                         // click→drag→release maps to exactly one undo step
@@ -32,6 +56,12 @@ struct AudioInspectorView: View {
                     })
                     .accessibilityLabel("Master gain")
                     .accessibilityValue(formattedGain(model.project.masterGain))
+            }
+            .contextMenu {
+                Button("Reset", systemImage: "arrow.uturn.backward") {
+                    model.setMasterGain(1, coalesced: true)
+                    model.commitCoalescedUndo()
+                }
             }
 
             // SwiftUI.TimelineView (fully qualified — the repo also defines
@@ -42,11 +72,6 @@ struct AudioInspectorView: View {
             // forcing the bus to mirror its snapshot onto an `@Observable`
             // property on every audio block.
             //
-            // The live bus isn't wired into the `AVPlayer` preview path until
-            // Phase 36, so until then the snapshot stays silent. Two flat
-            // bars would look like broken audio rather than "not connected"
-            // — surface a clear placeholder while `isLiveRunning == false`
-            // and only render the live meter once the bus is engaged.
             if model.audioBus.isLiveRunning {
                 SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
                     MeterStrip(snapshot: model.audioBus.meterSnapshot)
@@ -54,10 +79,10 @@ struct AudioInspectorView: View {
                         .accessibilityLabel("Master output meter")
                 }
             } else {
-                Text("Live metering available once the bus is connected.")
+                Text(audioMeterStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("Live metering not connected")
+                    .accessibilityLabel(audioMeterStatus)
             }
 
             ForEach(model.project.audioTracks) { track in
@@ -74,24 +99,37 @@ struct AudioInspectorView: View {
             spokenLabel: "\(track.name) gain",
             display: formattedGain(input.gain),
             value: trackGainBinding(track: track),
-            range: 0...2,
-            step: 0.01,
+            range: AudioGainMapping.minDecibels...AudioGainMapping.maxDecibels,
+            step: AudioGainMapping.sliderStepDecibels,
             captionStyle: .leadingTrailing,
-            onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+            onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+            resetAction: {
+                var input = model.project.trackInput(for: track.id)
+                input.gain = 1
+                model.setTrackInput(input, coalesced: true)
+                model.commitCoalescedUndo()
+            })
     }
 
     private var masterGainBinding: Binding<Double> {
         Binding(
-            get: { Double(model.project.masterGain) },
-            set: { model.setMasterGain(Float($0), coalesced: true) })
+            get: { AudioGainMapping.decibels(fromLinear: Double(model.project.masterGain)) },
+            set: { model.setMasterGain(Float(AudioGainMapping.linear(fromDecibels: $0)), coalesced: true) })
+    }
+
+    private var audioMeterStatus: String {
+        if let error = model.audioBus.lastStartError {
+            return "Live metering unavailable: \(error)"
+        }
+        return "Starting live meter…"
     }
 
     private func trackGainBinding(track: Track) -> Binding<Double> {
         Binding(
-            get: { Double(model.project.trackInput(for: track.id).gain) },
+            get: { AudioGainMapping.decibels(fromLinear: Double(model.project.trackInput(for: track.id).gain)) },
             set: { newValue in
                 var input = model.project.trackInput(for: track.id)
-                input.gain = Float(newValue)
+                input.gain = Float(AudioGainMapping.linear(fromDecibels: newValue))
                 model.setTrackInput(input, coalesced: true)
             })
     }

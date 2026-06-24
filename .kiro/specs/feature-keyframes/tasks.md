@@ -10,6 +10,7 @@
 - [x] **T4** Add mutation methods (`addKeyframe`, `removeKeyframe`, `updateKeyframe`); insert keeps the array sorted.
 - [x] **T5** `Codable` support using `CMTimeCode` for `CMTime` so the document representation matches the rest of the project.
 - [x] **T6** `Hashable` conformance so containing structs stay value-equal.
+- [x] **T7** Inspector authoring controls for skin-smooth strength keyframes (add/update/remove at playhead, previous/next seek).
 
 ## Verification
 
@@ -17,4 +18,5 @@
 - [x] **V2** Unit tests for boundary conditions (before first, after last keyframe).
 - [x] **V3** Unit tests for mutation methods (insert order, remove, update).
 - [x] **V4** Unit tests for `Codable` round-trip.
-- [x] **V5** `xcodebuild` (Debug, macOS) green; no test count regression.
+- [x] **V5** Model tests for skin-smooth keyframe authoring at playhead, undo, and previous/next seek.
+- [x] **V6** `xcodebuild` (Debug, macOS) green; no test count regression.

@@ -414,6 +414,24 @@ struct ClipDoc: Codable, Equatable {
 struct TransitionDoc: Codable, Equatable {
     var type: String          // TransitionType raw
     var duration: CMTimeCode
+    /// Wipe direction in radians. Ignored by cross-dissolve and defaulted for
+    /// legacy documents that predate directional wipes.
+    var wipeAngle: Double
+
+    init(type: String, duration: CMTimeCode, wipeAngle: Double = Transition.defaultWipeAngle) {
+        self.type = type
+        self.duration = duration
+        self.wipeAngle = wipeAngle
+    }
+
+    private enum CodingKeys: String, CodingKey { case type, duration, wipeAngle }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decode(String.self, forKey: .type)
+        duration = try c.decode(CMTimeCode.self, forKey: .duration)
+        wipeAngle = try c.decodeIfPresent(Double.self, forKey: .wipeAngle) ?? Transition.defaultWipeAngle
+    }
 }
 
 // MARK: - Snapshot (Project → Document)
@@ -502,7 +520,9 @@ extension ClipDoc {
 
 extension TransitionDoc {
     init(transition: Transition) {
-        self.init(type: transition.type.rawValue, duration: CMTimeCode(transition.duration))
+        self.init(type: transition.type.rawValue,
+                  duration: CMTimeCode(transition.duration),
+                  wipeAngle: transition.wipeAngle)
     }
 }
 
@@ -524,7 +544,9 @@ extension ClipDoc {
 
 extension TransitionDoc {
     func makeTransition() -> Transition {
-        Transition(type: TransitionType(rawValue: type) ?? .crossDissolve, duration: duration.cmTime)
+        Transition(type: TransitionType(rawValue: type) ?? .crossDissolve,
+                   duration: duration.cmTime,
+                   wipeAngle: wipeAngle)
     }
 }
 

@@ -13,7 +13,7 @@
 
 - **R2.1** The cache is an LRU keyed exactly on `RenderCacheKey`.
 - **R2.2** Lookup touches the matched entry to the most-recently-used position.
-- **R2.3** The cache is in-memory in v1; the disk-spill directory is wired but spilling itself is deferred.
+- **R2.3** The primary cache is in memory; evicted entries spill to a bounded disk tier and rehydrate on lookup.
 - **R2.4** Inserts and lookups are thread-safe (`OSAllocatedUnfairLock`).
 
 ## R3 — Byte budget
@@ -46,6 +46,7 @@
 
 - **R6.1** `RenderCache.cacheDirectoryURL` resolves to a sandbox-allowed path under `FileManager.url(for: .cachesDirectory, in: .userDomainMask, ...)` scoped to `com.shenghaoc.LocalCutStudio/RenderCache/`.
 - **R6.2** No security-scoped bookmark is needed (App Sandbox grants the container Caches directly per ROADMAP's "Apple API spot-checks").
+- **R6.3** Disk entries are PNG-encoded, bounded by a disk byte budget, LRU-evicted, and removed on invalidate/purge.
 
 ## R7 — Verification
 
@@ -57,4 +58,5 @@
 - **R7.6** Unit test: `[Effect].renderCacheHash` differs across chains that differ in any way.
 - **R7.7** Unit test: `RenderCacheKey` collapses equivalent CMTimes expressed in different timescales (Gemini review).
 - **R7.8** Unit test: `EditorModel.updateSelectedClipCoalesced` invalidates the cache when `effects` changes (slider path) but leaves it alone for opacity-only edits (codex review P2).
-- **R7.9** `xcodebuild` (Debug, macOS) green; no test count regression.
+- **R7.9** Unit test: evicted entries spill to disk, rehydrate on lookup, and purge removes the files.
+- **R7.10** `xcodebuild` (Debug, macOS) green; no test count regression.

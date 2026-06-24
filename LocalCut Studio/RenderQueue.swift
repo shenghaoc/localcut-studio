@@ -161,6 +161,11 @@ private nonisolated final class ResumeBox: @unchecked Sendable {
     }
 }
 
+nonisolated struct BookmarkResolution: Equatable, Sendable {
+    let url: URL
+    let refreshedBookmark: Data?
+}
+
 // MARK: - RenderQueue
 
 /// The serial render queue. Owns the in-memory job list, the run loop, the
@@ -197,6 +202,15 @@ final class RenderQueue {
 
     @ObservationIgnored
     private var runnerTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var runnerToken: UUID?
+
+    @ObservationIgnored
+    private var suppressAutoRestartAfterRunnerStops = false
+
+    @ObservationIgnored
+    var runnerDrainedForTesting: (() -> Void)?
 
     /// Set when the user cancels the in-flight job; the runner observes this
     /// at every await suspension point and bails out of the current job.
@@ -283,6 +297,41 @@ final class RenderQueue {
         }
     }
 
+    /// Requeues a terminal job that didn't finish (`.failed` / `.cancelled`) so
+    /// the runner picks it up again, reusing the stored snapshot + destination
+    /// bookmark — the user keeps the row to retry instead of rebuilding it from
+    /// scratch (export-queue R3.3). No-op for `.queued` / `.running` / a job
+    /// that already `.completed`.
+    func retry(jobID: UUID, autoStart: Bool = true) {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        switch jobs[index].status {
+        case .failed, .cancelled:
+            jobs[index].status = .queued
+            jobs[index].errorMessage = nil
+            jobs[index].progress = 0
+            jobs[index].runtimeSeconds = nil
+            log("job \(jobID.uuidString.prefix(8)) requeued for retry")
+            persist()
+            recomputeTotalProgress()
+            if autoStart { start() }
+        case .queued, .running, .completed:
+            break
+        }
+    }
+
+    /// Resolves a job's output URL from its security-scoped bookmark so the
+    /// inspector can reveal a finished render in Finder. Returns nil if the
+    /// bookmark no longer resolves.
+    func outputURL(forJobID jobID: UUID) -> URL? {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }),
+              let resolution = resolveBookmark(jobs[index].outputBookmark) else { return nil }
+        if let refreshed = resolution.refreshedBookmark {
+            jobs[index].outputBookmark = refreshed
+            persist()
+        }
+        return resolution.url
+    }
+
     /// Drops every terminal (completed / cancelled / failed) job from the list.
     func clearCompleted() {
         let before = jobs.count
@@ -298,17 +347,22 @@ final class RenderQueue {
     /// Idempotent. Starts the runner Task if there's something to do; a no-op
     /// otherwise.
     func start() {
-        guard !isRunning, jobs.contains(where: { $0.status == .queued }) else { return }
+        guard jobs.contains(where: { $0.status == .queued }) else { return }
+        suppressAutoRestartAfterRunnerStops = false
+        guard runnerTask == nil else { return }
+        let token = UUID()
+        runnerToken = token
         isRunning = true
         runnerTask = Task { [weak self] in
             await self?.runLoop()
-            await MainActor.run { self?.isRunning = false }
+            self?.runnerDidFinish(token: token)
         }
     }
 
     /// Cancels the current job (if any) and lets the runner exit on its next
     /// turn. Queued jobs stay queued.
     func stop() {
+        suppressAutoRestartAfterRunnerStops = true
         if let activeID = currentJobID {
             cancel(jobID: activeID)
         }
@@ -323,6 +377,22 @@ final class RenderQueue {
         while !Task.isCancelled, let next = nextQueuedJobID() {
             await runJob(id: next)
             await Task.yield()
+        }
+        if !Task.isCancelled {
+            runnerDrainedForTesting?()
+        }
+    }
+
+    private func runnerDidFinish(token: UUID) {
+        guard runnerToken == token else { return }
+        runnerTask = nil
+        runnerToken = nil
+        isRunning = false
+        let shouldRestart = !suppressAutoRestartAfterRunnerStops
+            && jobs.contains(where: { $0.status == .queued })
+        suppressAutoRestartAfterRunnerStops = false
+        if shouldRestart {
+            start()
         }
     }
 
@@ -362,14 +432,34 @@ final class RenderQueue {
         // Resolve the output bookmark. A stale / missing target is a clean
         // `.failed` rather than a crash — the user can retry by adding a fresh
         // destination.
-        guard let outputURL = resolveBookmark(outputBookmark) else {
+        guard let outputResolution = resolveBookmark(outputBookmark) else {
             finish(jobID: id, status: .failed,
                    message: RenderQueueError.outputDestinationUnavailable.localizedDescription,
                    startWall: startWall)
             return
         }
+        if let refreshed = outputResolution.refreshedBookmark {
+            refreshOutputBookmark(jobID: id, bookmark: refreshed)
+        }
+        let outputURL = outputResolution.url
         let didStart = outputURL.startAccessingSecurityScopedResource()
         defer { if didStart { outputURL.stopAccessingSecurityScopedResource() } }
+
+        // A mid-encode cancel via `AVAssetExportSession.cancelExport()` leaves
+        // the partially-written file at the user's path (the writer path cleans
+        // up after itself; the session path does not). Delete it on cancel so a
+        // cancel never leaves a corrupt artefact behind — an explicit
+        // release-readiness gate. `try?` no-ops when the writer already removed it.
+        //
+        // Guarded by `didBeginEncoding`: until the deliberate overwrite below
+        // runs, the file at `outputURL` is the user's *pre-existing* file, so a
+        // pre-encode cancel (e.g. cancelled while `CompositionBuilder.build` is
+        // still awaiting and throwing `CancellationError`) must not delete it.
+        var didBeginEncoding = false
+        let removePartialOutput = {
+            guard didBeginEncoding else { return }
+            _ = try? FileManager.default.removeItem(at: outputURL)
+        }
 
         // Build the composition from the snapshot. The runner reconstructs a
         // throwaway `Project` from the document so it can reuse
@@ -391,7 +481,8 @@ final class RenderQueue {
         let resolved = await Task.detached(priority: .userInitiated) {
             Self.resolveSourceBookmarks(from: snapshot.media)
         }.value
-        let reconstructed = reconstructProject(from: snapshot, applying: preset,
+        let refreshedSnapshot = refreshSourceBookmarks(in: snapshot, jobID: id, resolved: resolved)
+        let reconstructed = reconstructProject(from: refreshedSnapshot, applying: preset,
                                                preResolved: resolved)
         let project = reconstructed.project
         let heldSources = reconstructed.accessedSources
@@ -423,8 +514,11 @@ final class RenderQueue {
             }
 
             // Replace any existing file so the writer/session doesn't trip
-            // over a stale artefact from a previous run.
+            // over a stale artefact from a previous run. Past this point the
+            // user's pre-existing file is gone, so a cancel may safely delete
+            // whatever the encode wrote.
             try? FileManager.default.removeItem(at: outputURL)
+            didBeginEncoding = true
 
             if let presetName = preset.assetExportSessionPresetName {
                 try await exportWithSession(
@@ -437,6 +531,7 @@ final class RenderQueue {
 
             if cancelInFlightID == id {
                 cancelInFlightID = nil
+                removePartialOutput()
                 finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
                 return
             }
@@ -444,6 +539,7 @@ final class RenderQueue {
             finish(jobID: id, status: .completed, message: nil, startWall: startWall)
         } catch is CancellationError {
             cancelInFlightID = nil
+            removePartialOutput()
             finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
         } catch {
             // `AVAssetExportSession.cancelExport()` makes the awaited export
@@ -452,6 +548,7 @@ final class RenderQueue {
             // it actually is so the row doesn't persist as `.failed` (codex P2).
             if cancelInFlightID == id {
                 cancelInFlightID = nil
+                removePartialOutput()
                 finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
             } else {
                 finish(jobID: id, status: .failed,
@@ -889,11 +986,13 @@ final class RenderQueue {
     }
 
     /// Implements R3.2 + R3.3: any `running` job rewinds to `queued`; any job
-    /// with a now-unresolvable `outputBookmark` flips to `failed`. Pure
-    /// function so the same reconciliation can be unit-tested. Implicitly
-    /// MainActor so it can touch `QueueJob`'s MainActor-defaulted properties
-    /// without the compiler flagging the access.
-    static func reconcile(loaded: [QueueJob]) -> [QueueJob] {
+    /// with a now-unresolvable `outputBookmark` flips to `failed`. A stale but
+    /// resolvable output bookmark is refreshed in-place so the persisted queue
+    /// does not keep resurrecting stale security-scope data.
+    static func reconcile(
+        loaded: [QueueJob],
+        resolver: (Data) -> BookmarkResolution? = resolveSecurityScopedBookmark
+    ) -> [QueueJob] {
         loaded.map { job in
             var copy = job
             if copy.status == .running {
@@ -901,21 +1000,37 @@ final class RenderQueue {
                 copy.progress = 0
                 copy.errorMessage = nil
             }
-            if copy.status == .queued, !canResolve(bookmark: copy.outputBookmark) {
-                copy.status = .failed
-                copy.errorMessage = RenderQueueError.outputDestinationUnavailable.localizedDescription
+            if copy.status == .queued {
+                if let resolution = resolver(copy.outputBookmark) {
+                    if let refreshed = resolution.refreshedBookmark {
+                        copy.outputBookmark = refreshed
+                    }
+                } else {
+                    copy.status = .failed
+                    copy.errorMessage = RenderQueueError.outputDestinationUnavailable.localizedDescription
+                }
             }
             return copy
         }
     }
 
-    private static func canResolve(bookmark: Data) -> Bool {
-        guard !bookmark.isEmpty else { return false }
+    private nonisolated static func resolveSecurityScopedBookmark(_ bookmark: Data) -> BookmarkResolution? {
+        guard !bookmark.isEmpty else { return nil }
         var stale = false
-        return (try? URL(resolvingBookmarkData: bookmark,
-                         options: [.withSecurityScope],
-                         relativeTo: nil,
-                         bookmarkDataIsStale: &stale)) != nil
+        guard let url = try? URL(resolvingBookmarkData: bookmark,
+                                 options: [.withSecurityScope],
+                                 relativeTo: nil,
+                                 bookmarkDataIsStale: &stale) else { return nil }
+        let refreshed = stale ? refreshBookmark(for: url) : nil
+        return BookmarkResolution(url: url, refreshedBookmark: refreshed)
+    }
+
+    private nonisolated static func refreshBookmark(for url: URL) -> Data? {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        return try? url.bookmarkData(options: .withSecurityScope,
+                                     includingResourceValuesForKeys: nil,
+                                     relativeTo: nil)
     }
 
     // MARK: Helpers
@@ -925,6 +1040,7 @@ final class RenderQueue {
     private struct ResolvedSource: Sendable {
         let refID: UUID
         let url: URL?
+        let refreshedBookmark: Data?
     }
 
     /// Resolves every non-empty source-media bookmark to a URL on a background
@@ -935,24 +1051,57 @@ final class RenderQueue {
     ) -> [ResolvedSource] {
         media.map { ref in
             guard !ref.bookmark.isEmpty else {
-                return ResolvedSource(refID: ref.id, url: nil)
+                return ResolvedSource(refID: ref.id, url: nil, refreshedBookmark: nil)
             }
             var stale = false
             let url = try? URL(resolvingBookmarkData: ref.bookmark,
                                options: [.withSecurityScope],
                                relativeTo: nil,
                                bookmarkDataIsStale: &stale)
-            return ResolvedSource(refID: ref.id, url: url)
+            let refreshed: Data?
+            if stale, let url {
+                refreshed = refreshBookmark(for: url)
+            } else {
+                refreshed = nil
+            }
+            return ResolvedSource(refID: ref.id, url: url, refreshedBookmark: refreshed)
         }
     }
 
-    private func resolveBookmark(_ data: Data) -> URL? {
-        guard !data.isEmpty else { return nil }
-        var stale = false
-        return try? URL(resolvingBookmarkData: data,
-                        options: [.withSecurityScope],
-                        relativeTo: nil,
-                        bookmarkDataIsStale: &stale)
+    private func resolveBookmark(_ data: Data) -> BookmarkResolution? {
+        Self.resolveSecurityScopedBookmark(data)
+    }
+
+    private func refreshOutputBookmark(jobID: UUID, bookmark: Data) {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        jobs[index].outputBookmark = bookmark
+        persist()
+    }
+
+    private func refreshSourceBookmarks(
+        in snapshot: ProjectDocument,
+        jobID: UUID,
+        resolved: [ResolvedSource]
+    ) -> ProjectDocument {
+        var refreshedSnapshot = snapshot
+        var refreshedByID: [UUID: Data] = [:]
+        for source in resolved {
+            if let bookmark = source.refreshedBookmark {
+                refreshedByID[source.refID] = bookmark
+            }
+        }
+        guard !refreshedByID.isEmpty else { return snapshot }
+
+        for index in refreshedSnapshot.media.indices {
+            if let refreshed = refreshedByID[refreshedSnapshot.media[index].id] {
+                refreshedSnapshot.media[index].bookmark = refreshed
+            }
+        }
+        if let jobIndex = jobs.firstIndex(where: { $0.id == jobID }) {
+            jobs[jobIndex].projectSnapshot = refreshedSnapshot
+            persist()
+        }
+        return refreshedSnapshot
     }
 
     /// Builds a throwaway `Project` from a Codable snapshot so the queue can

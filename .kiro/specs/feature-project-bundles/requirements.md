@@ -18,11 +18,11 @@
 
 ## R3 — Save
 
-- **R3.1** Saving as `.lcbundle` writes `project.json` atomically, copies every flagged media item into `assets/`, computes SHA-256 for each copied file, and writes `fingerprints.json`.
+- **R3.1** Saving as `.lcbundle` copies every flagged media item into `assets/`, computes SHA-256 for each copied file, stages both `fingerprints.json` and `project.json`, then promotes the staged metadata after both writes have succeeded.
 - **R3.2** Saving the same project a second time skips the copy step for any asset whose source SHA-256 matches the already-stored fingerprint (fast path).
 - **R3.3** Saving as `.lcstudio` writes the legacy single-file JSON exactly as before — no `bundleFormat`, no `bundleRelativePath`, `schemaVersion = 2`.
 - **R3.4** Save uses APFS clones / hard links where the same-volume source allows (`FileManager.copyItem(at:to:)` already does this).
-- **R3.5** Atomicity: a failed save leaves the previous bundle directory untouched. The new `project.json` is written through a temp file inside the bundle; partial copies under `assets/` are tolerated because every successful copy is also recorded in `fingerprints.json` and re-checked on next save.
+- **R3.5** Atomicity: a failed save leaves previous metadata untouched until both staged metadata files exist. Partial copies under `assets/` are tolerated because every successful copy is also recorded in `fingerprints.json` and re-checked on next save.
 
 ## R4 — Migration
 
@@ -35,7 +35,8 @@
 
 - **R5.1** Reading or writing files inside a `.lcbundle` directory the user just opened does not require a security-scoped bookmark; the user's grant on the bundle is the grant on its contents.
 - **R5.2** External-only `MediaRef`s — media imported with the "Don't copy" option, or items not (yet) copied into the bundle — continue to use security-scoped bookmarks exactly as before.
-- **R5.3** The two paths are documented in `design.md` (`## Sandbox`) and the `EditorModel+Persistence.swift` code references that section.
+- **R5.3** The media import UI exposes the copy/external-only choice and stores it on `MediaItem.wantsBundling` before bundle save.
+- **R5.4** The two paths are documented in `design.md` (`## Sandbox`) and the `EditorModel+Persistence.swift` code references that section.
 
 ## R6 — Verification
 

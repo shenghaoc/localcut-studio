@@ -48,6 +48,138 @@ func noClampingWhenInRange() {
     #expect(grade.tintOffset == -50)
 }
 
+// MARK: - LUT slot helpers (feature-colour-grading R1.2)
+
+@Test("replacingLUT appends a LUT when none is present")
+func lutAppendWhenAbsent() {
+    let effects: [Effect] = [.colourGrade(.neutral)]
+    let result = effects.replacingLUT(bookmark: Data([0x01]))
+    #expect(result.count == 2)
+    #expect(result.hasLUT)
+}
+
+@Test("replacingLUT replaces the existing LUT in place rather than stacking a second cube")
+func lutReplaceInPlace() {
+    let effects: [Effect] = [.lut(bookmark: Data([0x01])), .colourGrade(.neutral)]
+    let result = effects.replacingLUT(bookmark: Data([0x02]))
+    let lutCount = result.filter { if case .lut = $0 { return true }; return false }.count
+    #expect(lutCount == 1)
+    if case .lut(let bookmark) = result[0] {
+        #expect(bookmark == Data([0x02]))
+    } else {
+        Issue.record("first effect should still be the replaced LUT")
+    }
+}
+
+@Test("replacingLUT collapses pre-existing stacked LUTs to a single slot")
+func lutReplaceCollapsesDuplicates() {
+    // A project authored under the old append-stacking behaviour with two LUTs.
+    let effects: [Effect] = [.lut(bookmark: Data([0x01])), .colourGrade(.neutral), .lut(bookmark: Data([0x02]))]
+    let result = effects.replacingLUT(bookmark: Data([0x09]))
+    let lutCount = result.filter { if case .lut = $0 { return true }; return false }.count
+    #expect(lutCount == 1, "replacing must leave exactly one LUT")
+    #expect(result.count == 2, "the grade is preserved, the duplicate LUT dropped")
+    if case .lut(let bookmark) = result[0] {
+        #expect(bookmark == Data([0x09]))
+    } else {
+        Issue.record("first effect should be the replaced LUT")
+    }
+}
+
+@Test("removingLUT drops only the LUT, preserving grade + skin-smooth")
+func lutRemovePreservesOthers() {
+    let effects: [Effect] = [.colourGrade(.neutral), .lut(bookmark: Data([0x01])), .skinSmooth(.neutral)]
+    let result = effects.removingLUT()
+    #expect(!result.hasLUT)
+    #expect(result.count == 2)
+    #expect(result.contains { if case .colourGrade = $0 { return true }; return false })
+    #expect(result.contains { if case .skinSmooth = $0 { return true }; return false })
+}
+
+@MainActor
+@Test("EditorModel prunes stale LUT display names after replace and remove")
+func lutDisplayNameCachePrunesStaleEntries() {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    model.project.mediaItems.append(media)
+    let first = Data([0x01])
+    let second = Data([0x02])
+    let clip = Clip(mediaID: media.id,
+                    sourceStart: .zero,
+                    duration: CMTime(seconds: 5, preferredTimescale: 600),
+                    timelineStart: .zero)
+    var effected = clip
+    effected.effects = [.lut(bookmark: first)]
+    model.project.videoTracks.first!.clips = [effected]
+    model.selectedClipID = clip.id
+    model._testCacheLUTDisplayName("first.cube", for: first)
+    model._testPruneLUTDisplayNames()
+    #expect(model.selectedClipLUTName == "first.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+
+    model._testCacheLUTDisplayName("second.cube", for: second)
+    model.project.videoTracks.first!.clips[0].effects =
+        model.project.videoTracks.first!.clips[0].effects.replacingLUT(bookmark: second)
+    model._testPruneLUTDisplayNames()
+    #expect(model.selectedClipLUTName == "second.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+
+    model.project.videoTracks.first!.clips[0].effects =
+        model.project.videoTracks.first!.clips[0].effects.removingLUT()
+    model._testPruneLUTDisplayNames()
+    #expect(model.selectedClipLUTName == nil)
+    #expect(model._testLUTDisplayNameCacheCount == 0)
+}
+
+@MainActor
+@Test("EditorModel restores LUT display names across undo and redo")
+func lutDisplayNameCacheRestoresWithUndoRedo() {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    model.project.mediaItems.append(media)
+    let first = Data([0x11])
+    let second = Data([0x22])
+    let clip = Clip(mediaID: media.id,
+                    sourceStart: .zero,
+                    duration: CMTime(seconds: 5, preferredTimescale: 600),
+                    timelineStart: .zero)
+    var effected = clip
+    effected.effects = [.lut(bookmark: first)]
+    model.project.videoTracks.first!.clips = [effected]
+    model.selectedClipID = clip.id
+    model._testCacheLUTDisplayName("first.cube", for: first)
+    model._testPruneLUTDisplayNames()
+
+    model.performUndoable("Replace LUT") {
+        model._testCacheLUTDisplayName("second.cube", for: second)
+        model.project.videoTracks.first!.clips[0].effects =
+            model.project.videoTracks.first!.clips[0].effects.replacingLUT(bookmark: second)
+        model._testPruneLUTDisplayNames()
+    }
+    #expect(model.selectedClipLUTName == "second.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+
+    model.undo()
+    #expect(model.selectedClipLUTName == "first.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+
+    model.redo()
+    #expect(model.selectedClipLUTName == "second.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+
+    model.performUndoable("Remove LUT") {
+        model.project.videoTracks.first!.clips[0].effects =
+            model.project.videoTracks.first!.clips[0].effects.removingLUT()
+        model._testPruneLUTDisplayNames()
+    }
+    #expect(model.selectedClipLUTName == nil)
+    #expect(model._testLUTDisplayNameCacheCount == 0)
+
+    model.undo()
+    #expect(model.selectedClipLUTName == "second.cube")
+    #expect(model._testLUTDisplayNameCacheCount == 1)
+}
+
 @Test("Clip has empty effects by default")
 func clipDefaultEffects() {
     let clip = Clip(mediaID: UUID(), sourceStart: .zero, duration: CMTime(seconds: 10, preferredTimescale: 600), timelineStart: .zero)

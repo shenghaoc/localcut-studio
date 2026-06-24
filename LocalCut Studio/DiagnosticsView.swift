@@ -32,6 +32,8 @@ struct DiagnosticsView: View {
             sparkline
                 .frame(height: 36)
                 .accessibilityLabel("Render-time sparkline, milliseconds")
+            Divider()
+            capabilitiesSection
         }
         .padding(12)
         .frame(width: 280, alignment: .leading)
@@ -65,6 +67,54 @@ struct DiagnosticsView: View {
     private func millis(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds > 0 else { return "—" }
         return String(format: "%.1f ms", seconds * 1000)
+    }
+
+    // MARK: - Capabilities
+
+    /// Surfaces the capability resolver's verdicts — computed once at launch but
+    /// previously read by nothing. The Diagnostics panel is the agreed home
+    /// (feature-capability-tiers R3.3): the per-feature reason rides in `.help`
+    /// so a creator can tell *why* a feature is degraded.
+    @ViewBuilder
+    private var capabilitiesSection: some View {
+        let caps = Capabilities.current
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Capabilities")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            capabilityRow("Effect chain", caps.tier(for: .metalEffectChain))
+            capabilityRow("Frame interp.", caps.tier(for: .frameInterpolation))
+            capabilityRow("Capture ×2", caps.tier(for: .simultaneousCaptureStreams(count: 2)))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Hardware capability tiers")
+    }
+
+    private func capabilityRow(_ label: String, _ verdict: CapabilityVerdict) -> some View {
+        LabeledContent {
+            Text(tierLabel(verdict.tier))
+                .foregroundStyle(tierTint(verdict.tier))
+        } label: {
+            Text(label).foregroundStyle(.secondary)
+        }
+        .font(.subheadline)
+        .help(verdict.reason)
+    }
+
+    private func tierLabel(_ tier: CapabilityTier) -> String {
+        switch tier {
+        case .baseline: "Baseline"
+        case .accelerated: "Accelerated"
+        case .pro: "Pro"
+        }
+    }
+
+    private func tierTint(_ tier: CapabilityTier) -> Color {
+        switch tier {
+        case .baseline: .gray
+        case .accelerated: .yellow
+        case .pro: .green
+        }
     }
 
     @ViewBuilder

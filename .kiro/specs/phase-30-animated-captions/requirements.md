@@ -18,6 +18,7 @@
 - **R3.1** Ship at least four enter animations (pop, bounce, slide, typewriter) and a matching exit animation set.
 - **R3.2** Animations evaluate deterministically from `(currentTime - lineStart)`; identical inputs yield identical pixels.
 - **R3.3** Word-level highlight activates only when `words` is non-nil; it must not desync with the underlying transcript by more than one frame at the project's fps.
+- **R3.4** Typewriter reveal masks only glyph/text pixels; background pills remain visible for the whole line duration.
 
 ## R4 — Preset library
 
@@ -38,6 +39,6 @@
 
 ## R7 — Verification
 
-- **R7.1** Unit tests for preset JSON round-trip, style hashing, animation curve evaluation, and word-highlight time-to-index mapping.
+- **R7.1** Unit tests for preset JSON round-trip, style hashing, animation curve evaluation, word-highlight time-to-index mapping, token-index text range mapping, and typewriter mask geometry.
 - **R7.2** Snapshot tests for each built-in preset rendered at a fixed time and project size.
 - **R7.3** Smoke test: import SRT → pick a preset → scrub → export `.mov` → exported frames match preview at sampled times.

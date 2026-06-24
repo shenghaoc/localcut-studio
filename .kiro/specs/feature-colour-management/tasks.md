@@ -18,8 +18,8 @@
 ## Scopes
 
 - [x] **T3.1** Implement `ScopeSampler` (`@unchecked Sendable`, lock-guarded state) with `shouldSample()` 30 Hz gate, `sample(image:context:colorSpace:)`, and `publish(_:)`.
-- [x] **T3.2** Implement waveform sampling with `CIFilter.areaHistogram` (32 column slices, 64 bins each, per-column normalisation) and vectorscope sampling by scaling the frame to 8×8 in a single GPU pass with one `context.render` readback (avoids 64 sequential `areaAverage` round-trips).
-- [x] **T3.3** Implement `ScopesView` (SwiftUI + Canvas) rendering waveform columns and vectorscope points; the view sets `ScopeSampler.shared.enabled` to mirror its visibility.
+- [x] **T3.2** Implement waveform + vectorscope sampling from one bounded `.RGBAf` `context.render` readback; build 32×64 waveform bins from BT.709 luma and emit one vectorscope point per readback pixel.
+- [x] **T3.3** Implement `ScopesView` (SwiftUI + Canvas) rendering waveform columns, per-pixel vectorscope points, 75% colour-target boxes, and revision-gated state updates; the view sets `ScopeSampler.shared.enabled` to mirror its visibility.
 - [x] **T3.4** Hook the sampler into `EffectCompositor.startRequest(_:)` — call it after compositing, only when `shouldSample()` says yes.
 
 ## UI
@@ -31,9 +31,11 @@
 
 - [x] **T5.1** Test: `setWorkingColourSpace(_:)` empties the shared caption-raster cache (R6.1).
 - [x] **T5.2** Test: `applyColourAttachments(_:to:)` writes the documented colour primaries / transfer function / YCbCr matrix onto a `CVPixelBuffer` (R6.2).
-- [x] **T5.3** Test: `ScopeSampler.sample(image:context:colorSpace:)` on a non-black `CIImage` produces a waveform with at least one column with a non-zero bin (R6.3).
+- [x] **T5.3** Test: `ScopeSampler.sample(image:context:colorSpace:)` on a non-black `CIImage` produces a waveform with at least one column with a non-zero bin and a dense per-pixel vectorscope trace (R6.3).
 - [x] **T5.4** Test: a Codable round-trip of a `Project` with a non-default working space restores it; a legacy document without the key decodes as `.sRGB`.
-- [x] **T5.5** `xcodebuild` (Debug, macOS) green; no test count regression.
+- [x] **T5.5** Test: a split black/white frame lands in dark and bright waveform bins from the single readback (R6.4).
+- [x] **T5.6** Test: disabling the sampler clears the sample and bumps `revision` for stale-pixel-free UI clearing (R6.5).
+- [x] **T5.7** `xcodebuild` (Debug, macOS) green; no test count regression.
 
 ## Roadmap
 

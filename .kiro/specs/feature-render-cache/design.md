@@ -11,9 +11,10 @@ The cache sits **inside `EffectCompositor`**, replacing the per-frame `applyEffe
 ## Approach
 
 1. **Composite key.** A frame is uniquely identified by *which clip* produced it, *what effects* the chain applied, *when in the source media* we were, and *what canvas* we were rendering into. Each axis maps to one field of `RenderCacheKey`. The time field is the **source-frame time** (computed from `sourceRange` / `timeRange`), not `compositionTime` — this makes the key stable across repeated source-frame requests (speed ramps, frame interpolation) and unique per source frame (no collisions across pieces of the same clip split by transition cuts).
-2. **In-memory LRU.** An `OSAllocatedUnfairLock`-guarded ordered dictionary, same shape as `TitleRasterer` in `LocalCut Studio/TitleRaster.swift`. Most-recently-used entries live at the back of the order array; the front is dropped first.
+2. **In-memory LRU.** An `OSAllocatedUnfairLock`-guarded dictionary plus lock-confined doubly-linked list. Most-recently-used entries live at the tail; the head is dropped first. Lookup touch and eviction are O(1).
 3. **Byte-budget eviction.** Frames are large (8 MiB at 1080p, 33 MiB at 4K) and *variable* (project resize jumps an entry's footprint by 4×), so the cap is total estimated bytes, not entry count.
-4. **Cache-key invalidation.** Effect-chain edits change `effectChainHash`, so a new request never collides with a stale entry — correctness is automatic. Explicit `invalidate(clipID:)` and `invalidate(notMatchingRenderSize:)` exist only to release dead bytes promptly when the editor knows a clip's effects mutated or the canvas resized.
+4. **Disk spill.** Evicted memory entries are PNG-encoded into the sandbox Caches directory, tracked by a second bounded LRU, and rehydrated into memory on miss.
+5. **Cache-key invalidation.** Effect-chain edits change `effectChainHash`, so a new request never collides with a stale entry — correctness is automatic. Explicit `invalidate(clipID:)` and `invalidate(notMatchingRenderSize:)` release dead memory entries and spill files promptly when the editor knows a clip's effects mutated or the canvas resized.
 
 ## Types
 
@@ -57,8 +58,15 @@ extension Array where Element == Effect {
 ```swift
 private struct CacheState {
     var entries: [RenderCacheKey: RenderCacheEntry]
-    var order: [RenderCacheKey]      // front = least-recent, back = MRU
+    var memoryNodes: [RenderCacheKey: MemoryNode]
+    var memoryHead: MemoryNode?      // least-recent
+    var memoryTail: MemoryNode?      // MRU
     var totalBytes: Int
+    var diskEntries: [RenderCacheKey: DiskEntry]
+    var diskNodes: [RenderCacheKey: DiskNode]
+    var diskHead: DiskNode?
+    var diskTail: DiskNode?
+    var diskBytes: Int
 }
 
 private struct RenderCacheEntry: Sendable {
@@ -72,14 +80,14 @@ private struct RenderCacheEntry: Sendable {
 }
 ```
 
-Lookup touches the matched key to the back of `order` (LRU bump). Insert appends to `order` and pushes the front off until `totalBytes ≤ byteBudget`. `invalidate(clipID:)` walks `order` once, dropping any key whose `clipID` matches. `invalidate(notMatchingRenderSize:)` symmetrically keeps only entries that match the new canvas.
+Lookup touches the matched memory node to the tail. Insert appends a memory node and pops the head until `totalBytes ≤ byteBudget`. Evicted entries are written outside the lock, then recorded in the disk LRU. A memory miss checks the disk index, loads the PNG via `CIImage(contentsOf:)`, and re-inserts into memory. `invalidate(clipID:)`, `invalidate(notMatchingRenderSize:)`, and `purge()` remove both memory entries and spill files.
 
 ### Storage tiers
 
 - **In-memory (this spec)** — primary tier; budget defaults to 256 MiB so a 1080p project can hold ~32 frames before LRU starts evicting. Tunable via `init(byteBudget:)` so the diagnostics panel (P25) can dial it down on lower-RAM Macs.
-- **Disk spill (deferred)** — `RenderCache.cacheDirectoryURL` resolves the sandbox-allowed path
+- **Disk spill** — `RenderCache.cacheDirectoryURL` resolves the sandbox-allowed path
   `~/Library/Caches/com.shenghaoc.LocalCutStudio/RenderCache/`
-  via `FileManager.url(for: .cachesDirectory, in: .userDomainMask, ...)`. App Sandbox grants the container Caches directly per ROADMAP's "Apple API spot-checks", so no security-scoped bookmark is needed. Spilling evicted entries to PNG and rehydrating on miss is a follow-up — it requires a `CIContext` hand-off and an encoder choice that this PR does not need to land for Phase 35's first cut.
+  via `FileManager.url(for: .cachesDirectory, in: .userDomainMask, ...)`. App Sandbox grants the container Caches directly per ROADMAP's "Apple API spot-checks", so no security-scoped bookmark is needed. Evicted entries are written as PNG using a dedicated `CIContext`; the disk tier defaults to 1 GiB, has its own LRU, and is process-local because `effectChainHash` is process-seeded.
 
 ## Compositor integration
 
@@ -154,7 +162,7 @@ The combination of explicit invalidation on the obvious paths *and* automatic ke
 
 ## Non-goals
 
-- **Disk spill** (deferred; the directory accessor lands so a follow-up can hook in).
+- **Cross-launch disk persistence** (`Hasher` is process-seeded, so spill files are only an in-session acceleration tier).
 - **Pre-decode `CVPixelBuffer` caching** (AVFoundation already owns this layer; we would only thrash it).
 - **Cross-process / cross-launch persistence** (`Hasher` is process-seeded; preserving a digest across launches would need a hand-rolled stable hash on every `Effect` case).
 - **Cache-warm prediction** (Phase 35 may add a pre-warm helper; this spec stays reactive).

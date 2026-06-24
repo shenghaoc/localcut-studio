@@ -60,6 +60,11 @@
   R5.2 as the only partially-deferred sub-requirement.
 - [x] **T4.3** All slider labels carry the parameter's current numeric value
   (dB for gain, ±1 for pan) for accessibility.
+- [x] **T4.4** Start the live bus from `EditorView.onAppear` and tear it down
+  on disappear so the inspector meter is connected for the window lifetime.
+  Export-time meter animation remains Phase 36 because the current default
+  export path uses `AVAssetExportSession` rather than the offline bus's
+  `AVAssetReader` / `AVAssetWriter` PCM path.
 
 ## Verification
 

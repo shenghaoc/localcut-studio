@@ -73,7 +73,11 @@ struct InspectorView: View {
                 value: Binding(
                     get: { Double(clip.opacity) },
                     set: { newValue in model.updateSelectedClipCoalesced("Adjust Opacity") { $0.opacity = Float(newValue) } }),
-                range: 0...1)
+                range: 0...1,
+                resetAction: {
+                    model.updateSelectedClipCoalesced("Adjust Opacity") { $0.opacity = 1 }
+                    model.commitCoalescedUndo()
+                })
         }
     }
 
@@ -96,7 +100,26 @@ struct InspectorView: View {
                 display: String(format: "%.2f s", min(transition.duration.seconds, maxTransitionSeconds)),
                 spokenValue: String(format: "%.2f seconds", min(transition.duration.seconds, maxTransitionSeconds)),
                 value: transitionDurationBinding,
-                range: minTransitionSeconds...maxTransitionSeconds)
+                range: minTransitionSeconds...maxTransitionSeconds,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+
+            if transition.type == .wipe {
+                LabeledSliderRow(
+                    label: "Direction",
+                    spokenLabel: "Wipe Direction",
+                    display: String(format: "%.0f deg", transitionWipeAngleDegrees),
+                    spokenValue: String(format: "%.0f degrees", transitionWipeAngleDegrees),
+                    value: transitionWipeAngleBinding,
+                    range: 0...360,
+                    step: 1,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: {
+                        model.updateSelectedTransition(coalesced: true) {
+                            $0.wipeAngle = Transition.defaultWipeAngle
+                        }
+                        model.commitCoalescedUndo()
+                    })
+            }
 
             Button(role: .destructive) {
                 model.removeSelectedTransition()
@@ -131,32 +154,79 @@ struct InspectorView: View {
             })
     }
 
+    private var transitionWipeAngleDegrees: Double {
+        Transition.degrees(fromRadians: model.selectedTransition?.wipeAngle ?? Transition.defaultWipeAngle)
+    }
+
+    private var transitionWipeAngleBinding: Binding<Double> {
+        Binding(
+            get: { transitionWipeAngleDegrees },
+            set: { newValue in
+                model.updateSelectedTransition(coalesced: true) {
+                    $0.wipeAngle = Transition.radians(fromDegrees: newValue)
+                }
+            })
+    }
+
     // MARK: - Colour Grading
 
     @ViewBuilder
     private var colourSection: some View {
         Section("Colour") {
             LabeledSliderRow(label: "Exposure", display: String(format: "%+.2f", model.selectedClipGrade.exposure),
-                             value: colourGradeBinding(\.exposure), range: -2...2, step: 0.05)
+                             value: colourGradeBinding(\.exposure), range: -2...2, step: 0.05,
+                             resetAction: resetColourGrade(\.exposure, to: 0))
             LabeledSliderRow(label: "Contrast", display: String(format: "%.2f", model.selectedClipGrade.contrast),
-                             value: colourGradeBinding(\.contrast), range: 0.5...1.5, step: 0.05)
+                             value: colourGradeBinding(\.contrast), range: 0.5...1.5, step: 0.05,
+                             resetAction: resetColourGrade(\.contrast, to: 1))
             LabeledSliderRow(label: "Saturation", display: String(format: "%.2f", model.selectedClipGrade.saturation),
-                             value: colourGradeBinding(\.saturation), range: 0...2, step: 0.05)
+                             value: colourGradeBinding(\.saturation), range: 0...2, step: 0.05,
+                             resetAction: resetColourGrade(\.saturation, to: 1))
             LabeledSliderRow(label: "Temp offset", spokenLabel: "Temperature Offset",
                              display: "\(String(format: "%+.0f", model.selectedClipGrade.temperatureOffset))K",
-                             value: colourGradeBinding(\.temperatureOffset), range: -4000...4000, step: 100)
+                             value: colourGradeBinding(\.temperatureOffset), range: -4000...4000, step: 100,
+                             resetAction: resetColourGrade(\.temperatureOffset, to: 0))
             LabeledSliderRow(label: "Tint offset", spokenLabel: "Tint Offset",
                              display: String(format: "%+.0f", model.selectedClipGrade.tintOffset),
-                             value: colourGradeBinding(\.tintOffset), range: -150...150, step: 10)
+                             value: colourGradeBinding(\.tintOffset), range: -150...150, step: 10,
+                             resetAction: resetColourGrade(\.tintOffset, to: 0))
+
+            if model.selectedClipHasLUT {
+                LabeledContent("LUT") {
+                    HStack(spacing: 6) {
+                        Text(model.selectedClipLUTName ?? "Applied")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Button(role: .destructive) {
+                            model.removeLUT()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Remove LUT")
+                        .accessibilityLabel("Remove LUT")
+                    }
+                }
+            }
 
             HStack {
-                Button("Import LUT…") { showLUTImporter = true }
+                Button(model.selectedClipHasLUT ? "Replace LUT…" : "Import LUT…") { showLUTImporter = true }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                 Spacer()
                 Button("Reset") { model.resetClipColourEffects() }
                     .controlSize(.small)
             }
+        }
+    }
+
+    /// Builds a reset closure for one colour-grade parameter: restores its
+    /// neutral value through the coalesced setter and commits a single undo step.
+    private func resetColourGrade(_ keyPath: WritableKeyPath<ColourGrade, Float>, to neutral: Float) -> () -> Void {
+        {
+            colourGradeBinding(keyPath).wrappedValue = neutral
+            model.commitCoalescedUndo()
         }
     }
 
@@ -195,6 +265,61 @@ struct InspectorView: View {
                 value: skinSmoothBinding(\.strength.defaultValue),
                 range: 0...1
             )
+
+            DisclosureGroup("Strength Keyframes") {
+                LabeledContent("Clip Time") {
+                    Text(skinSmoothKeyframePlayheadLabel)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                LabeledContent("Value") {
+                    Text("\(Int(model.selectedClipSkinSmoothStrengthAtPlayhead * 100))%")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                LabeledContent("Count") {
+                    Text("\(model.selectedClipSkinSmooth.strength.keyframes.count)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        model.seekToPreviousSelectedClipSkinSmoothStrengthKeyframe()
+                    } label: {
+                        Image(systemName: "backward.end.fill")
+                    }
+                    .help("Previous keyframe")
+                    .accessibilityLabel("Previous skin-smooth keyframe")
+                    .disabled(!hasPreviousSkinSmoothKeyframe)
+
+                    Button {
+                        model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe()
+                    } label: {
+                        Label(skinSmoothKeyframeActionTitle, systemImage: skinSmoothKeyframeActionIcon)
+                    }
+                    .disabled(model.selectedClipSkinSmoothLocalPlayheadTime == nil)
+
+                    Button(role: .destructive) {
+                        model.removeSelectedClipSkinSmoothStrengthKeyframe()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .help("Remove keyframe")
+                    .accessibilityLabel("Remove skin-smooth keyframe")
+                    .disabled(model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead == nil)
+
+                    Button {
+                        model.seekToNextSelectedClipSkinSmoothStrengthKeyframe()
+                    } label: {
+                        Image(systemName: "forward.end.fill")
+                    }
+                    .help("Next keyframe")
+                    .accessibilityLabel("Next skin-smooth keyframe")
+                    .disabled(!hasNextSkinSmoothKeyframe)
+                }
+                .controlSize(.small)
+            }
 
             DisclosureGroup("Advanced") {
                 LabeledSliderRow(
@@ -236,6 +361,33 @@ struct InspectorView: View {
                     .controlSize(.small)
                 Spacer()
             }
+        }
+    }
+
+    private var skinSmoothKeyframePlayheadLabel: String {
+        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return "Outside clip" }
+        return TimeFormatting.timecode(localTime.seconds)
+    }
+
+    private var skinSmoothKeyframeActionTitle: String {
+        model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead == nil ? "Add" : "Update"
+    }
+
+    private var skinSmoothKeyframeActionIcon: String {
+        model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead == nil ? "plus.diamond.fill" : "diamond.fill"
+    }
+
+    private var hasPreviousSkinSmoothKeyframe: Bool {
+        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return false }
+        return model.selectedClipSkinSmooth.strength.keyframes.contains {
+            $0.time.seconds < localTime.seconds
+        }
+    }
+
+    private var hasNextSkinSmoothKeyframe: Bool {
+        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return false }
+        return model.selectedClipSkinSmooth.strength.keyframes.contains {
+            $0.time.seconds > localTime.seconds
         }
     }
 
@@ -286,6 +438,14 @@ struct InspectorView: View {
                     Text(space.displayName).tag(space)
                 }
             }
+            .help("sRGB is the safe default. Display P3 / Rec.2020 are advanced — verify on a calibrated reference monitor.")
+
+            if model.project.workingColourSpace != .sRGB {
+                Text("Wide-gamut working space — verify on a calibrated reference monitor.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Toggle("Show scopes", isOn: $model.showScopes)
         }
     }

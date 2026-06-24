@@ -86,8 +86,8 @@ extension Array where Element == Effect {
 /// times per output frame, which would otherwise re-execute the chain.
 ///
 /// Same shape as `TitleRasterer` in `TitleRaster.swift`: an
-/// `OSAllocatedUnfairLock`-guarded ordered dictionary, LRU-touched on lookup,
-/// evicted from the front on insert past the cap.
+/// `OSAllocatedUnfairLock`-guarded dictionary plus linked list, LRU-touched on
+/// lookup, evicted from the head on insert past the cap.
 final class RenderCache: Sendable {
 
     /// Default in-memory budget in bytes (256 MiB). At 1080p (8 MiB/frame) the
@@ -96,13 +96,18 @@ final class RenderCache: Sendable {
     /// lower-RAM Macs.
     nonisolated static let defaultByteBudget: Int = 256 * 1024 * 1024
 
+    /// Default disk-spill budget (1 GiB). The spill tier is process-local and
+    /// keyed with the same process-seeded effect hash as memory, so it improves
+    /// repeated in-session requests without promising cross-launch reuse.
+    nonisolated static let defaultDiskByteBudget: Int = 1024 * 1024 * 1024
+
     /// Shared singleton used by `EffectCompositor`. The compositor is created
     /// per render pass by AVFoundation, so the cache must outlive any single
     /// compositor instance; matches the existing `sharedCaptionRasterer` shape
     /// and lets preview and export share one warm cache.
     nonisolated static let shared = RenderCache()
 
-    /// Sandbox-allowed on-disk cache directory for future disk-spill use.
+    /// Sandbox-allowed on-disk cache directory for the spill tier.
     /// App Sandbox grants the container Caches directly per ROADMAP's
     /// "Apple API spot-checks", so no security-scoped bookmark is needed.
     /// Returning `nil` is reserved for environments where `.cachesDirectory`
@@ -123,19 +128,187 @@ final class RenderCache: Sendable {
         let byteCost: Int
     }
 
-    /// `order` is least-recent at index 0; back-of-array is most-recently-used.
+    private struct DiskEntry: Sendable {
+        let url: URL
+        let byteCost: Int
+    }
+
+    nonisolated private final class MemoryNode: @unchecked Sendable {
+        let key: RenderCacheKey
+        var previous: MemoryNode?
+        var next: MemoryNode?
+
+        init(key: RenderCacheKey) {
+            self.key = key
+        }
+    }
+
+    nonisolated private final class DiskNode: @unchecked Sendable {
+        let key: RenderCacheKey
+        var previous: DiskNode?
+        var next: DiskNode?
+
+        init(key: RenderCacheKey) {
+            self.key = key
+        }
+    }
+
+    /// `memoryHead` / `diskHead` are least-recent; tails are most-recent.
     /// `totalBytes` tracks the sum of `entries[k].byteCost` so eviction does
     /// not have to re-walk the dictionary on every insert.
-    private struct CacheState {
+    nonisolated private struct CacheState {
         var entries: [RenderCacheKey: Entry] = [:]
-        var order: [RenderCacheKey] = []
+        var memoryNodes: [RenderCacheKey: MemoryNode] = [:]
+        var memoryHead: MemoryNode?
+        var memoryTail: MemoryNode?
         var totalBytes: Int = 0
+
+        var diskEntries: [RenderCacheKey: DiskEntry] = [:]
+        var diskNodes: [RenderCacheKey: DiskNode] = [:]
+        var diskHead: DiskNode?
+        var diskTail: DiskNode?
+        var diskBytes: Int = 0
+
+        mutating func touchMemory(_ key: RenderCacheKey) {
+            guard let node = memoryNodes[key], memoryTail !== node else { return }
+            unlinkMemory(node)
+            appendMemoryNode(node)
+        }
+
+        mutating func insertMemory(_ key: RenderCacheKey, entry: Entry) {
+            if let existing = entries[key] {
+                totalBytes -= existing.byteCost
+                removeMemoryNode(for: key)
+            }
+            entries[key] = entry
+            appendMemory(key)
+            totalBytes += entry.byteCost
+        }
+
+        mutating func removeMemoryEntry(for key: RenderCacheKey) -> Entry? {
+            removeMemoryNode(for: key)
+            guard let removed = entries.removeValue(forKey: key) else { return nil }
+            totalBytes -= removed.byteCost
+            return removed
+        }
+
+        mutating func popLeastRecentMemory() -> (RenderCacheKey, Entry)? {
+            guard let oldest = memoryHead else { return nil }
+            let key = oldest.key
+            guard let entry = removeMemoryEntry(for: key) else { return nil }
+            return (key, entry)
+        }
+
+        mutating func touchDisk(_ key: RenderCacheKey) {
+            guard let node = diskNodes[key], diskTail !== node else { return }
+            unlinkDisk(node)
+            appendDiskNode(node)
+        }
+
+        mutating func insertDisk(_ key: RenderCacheKey, entry: DiskEntry) -> DiskEntry? {
+            let previous = diskEntries[key]
+            if let previous {
+                diskBytes -= previous.byteCost
+                removeDiskNode(for: key)
+            }
+            diskEntries[key] = entry
+            appendDisk(key)
+            diskBytes += entry.byteCost
+            return previous
+        }
+
+        mutating func removeDiskEntry(for key: RenderCacheKey) -> DiskEntry? {
+            removeDiskNode(for: key)
+            guard let removed = diskEntries.removeValue(forKey: key) else { return nil }
+            diskBytes -= removed.byteCost
+            return removed
+        }
+
+        mutating func popLeastRecentDisk() -> (RenderCacheKey, DiskEntry)? {
+            guard let oldest = diskHead else { return nil }
+            let key = oldest.key
+            guard let entry = removeDiskEntry(for: key) else { return nil }
+            return (key, entry)
+        }
+
+        private mutating func appendMemory(_ key: RenderCacheKey) {
+            let node = MemoryNode(key: key)
+            memoryNodes[key] = node
+            appendMemoryNode(node)
+        }
+
+        private mutating func appendMemoryNode(_ node: MemoryNode) {
+            node.previous = memoryTail
+            node.next = nil
+            memoryTail?.next = node
+            memoryTail = node
+            if memoryHead == nil { memoryHead = node }
+        }
+
+        private mutating func removeMemoryNode(for key: RenderCacheKey) {
+            guard let node = memoryNodes.removeValue(forKey: key) else { return }
+            unlinkMemory(node)
+        }
+
+        private mutating func unlinkMemory(_ node: MemoryNode) {
+            if memoryHead === node { memoryHead = node.next }
+            if memoryTail === node { memoryTail = node.previous }
+            node.previous?.next = node.next
+            node.next?.previous = node.previous
+            node.previous = nil
+            node.next = nil
+        }
+
+        private mutating func appendDisk(_ key: RenderCacheKey) {
+            let node = DiskNode(key: key)
+            diskNodes[key] = node
+            appendDiskNode(node)
+        }
+
+        private mutating func appendDiskNode(_ node: DiskNode) {
+            node.previous = diskTail
+            node.next = nil
+            diskTail?.next = node
+            diskTail = node
+            if diskHead == nil { diskHead = node }
+        }
+
+        private mutating func removeDiskNode(for key: RenderCacheKey) {
+            guard let node = diskNodes.removeValue(forKey: key) else { return }
+            unlinkDisk(node)
+        }
+
+        private mutating func unlinkDisk(_ node: DiskNode) {
+            if diskHead === node { diskHead = node.next }
+            if diskTail === node { diskTail = node.previous }
+            node.previous?.next = node.next
+            node.next?.previous = node.previous
+            node.previous = nil
+            node.next = nil
+        }
     }
     private let lock = OSAllocatedUnfairLock(initialState: CacheState())
+    private let diskBudget: Int
+    private let cacheDirectory: URL?
 
-    nonisolated init(byteBudget: Int = RenderCache.defaultByteBudget) {
+    nonisolated private static let diskColorSpace: CGColorSpace = {
+        CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+    }()
+
+    nonisolated private static let diskContext = CIContext(options: [
+        .cacheIntermediates: false,
+        .workingColorSpace: diskColorSpace,
+        .outputColorSpace: diskColorSpace,
+    ])
+
+    nonisolated init(byteBudget: Int = RenderCache.defaultByteBudget,
+                     diskByteBudget: Int = RenderCache.defaultDiskByteBudget,
+                     cacheDirectory: URL? = RenderCache.cacheDirectoryURL) {
         precondition(byteBudget > 0, "byteBudget must be positive")
+        precondition(diskByteBudget >= 0, "diskByteBudget must be non-negative")
         self.budget = byteBudget
+        self.diskBudget = diskByteBudget
+        self.cacheDirectory = cacheDirectory
     }
 
     nonisolated var byteBudget: Int { budget }
@@ -144,21 +317,43 @@ final class RenderCache: Sendable {
         lock.withLock { $0.totalBytes }
     }
 
+    nonisolated var currentDiskBytes: Int {
+        lock.withLock { $0.diskBytes }
+    }
+
     nonisolated var count: Int {
         lock.withLock { $0.entries.count }
+    }
+
+    nonisolated var diskCount: Int {
+        lock.withLock { $0.diskEntries.count }
     }
 
     /// LRU lookup. Touches the matched key to the most-recently-used position
     /// so a hot frame stays warm even when the cache is near its budget.
     nonisolated func image(for key: RenderCacheKey) -> CIImage? {
-        lock.withLock { state -> CIImage? in
+        if let cached = lock.withLock({ state -> CIImage? in
             guard let entry = state.entries[key] else { return nil }
-            if let i = state.order.firstIndex(of: key) {
-                state.order.remove(at: i)
-            }
-            state.order.append(key)
+            state.touchMemory(key)
             return entry.image
+        }) {
+            return cached
         }
+
+        guard let diskURL = lock.withLock({ state -> URL? in
+            guard let entry = state.diskEntries[key] else { return nil }
+            state.touchDisk(key)
+            return entry.url
+        }) else {
+            return nil
+        }
+
+        guard let image = CIImage(contentsOf: diskURL) else {
+            removeDiskEntry(for: key)
+            return nil
+        }
+        setImage(image, for: key)
+        return image
     }
 
     /// Insert (or replace) the image for `key`, evicting least-recently-used
@@ -166,24 +361,115 @@ final class RenderCache: Sendable {
     nonisolated func setImage(_ image: CIImage, for key: RenderCacheKey) {
         let bytes = Self.estimatedBytes(for: image, fallback: key)
         let entry = Entry(image: image, byteCost: bytes)
-        lock.withLock { state in
-            if let existing = state.entries[key] {
-                state.totalBytes -= existing.byteCost
-                // Keep position in `order`; a re-insert is also a touch.
-                if let i = state.order.firstIndex(of: key) {
-                    state.order.remove(at: i)
-                }
+        let evicted = lock.withLock { state -> [(RenderCacheKey, Entry)] in
+            state.insertMemory(key, entry: entry)
+            var evicted: [(RenderCacheKey, Entry)] = []
+            while state.totalBytes > self.budget,
+                  let removed = state.popLeastRecentMemory() {
+                evicted.append(removed)
             }
-            state.entries[key] = entry
-            state.order.append(key)
-            state.totalBytes += bytes
-            while state.totalBytes > self.budget, let oldest = state.order.first {
-                state.order.removeFirst()
-                if let removed = state.entries.removeValue(forKey: oldest) {
-                    state.totalBytes -= removed.byteCost
-                }
-            }
+            return evicted
         }
+        spillEvictedEntries(evicted)
+    }
+
+    private nonisolated func spillEvictedEntries(_ entries: [(RenderCacheKey, Entry)]) {
+        guard diskBudget > 0, cacheDirectory != nil else { return }
+        for (key, entry) in entries {
+            guard let diskEntry = writeDiskEntry(entry, for: key) else { continue }
+            recordDiskEntry(diskEntry, for: key)
+        }
+    }
+
+    private nonisolated func writeDiskEntry(_ entry: Entry, for key: RenderCacheKey) -> DiskEntry? {
+        guard let cacheDirectory else { return nil }
+        do {
+            try FileManager.default.createDirectory(at: cacheDirectory,
+                                                    withIntermediateDirectories: true)
+            let url = cacheDirectory
+                .appendingPathComponent(Self.diskFilename(for: key))
+                .appendingPathExtension("png")
+            try Self.diskContext.writePNGRepresentation(
+                of: entry.image,
+                to: url,
+                format: .RGBA8,
+                colorSpace: Self.diskColorSpace)
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            return DiskEntry(url: url, byteCost: max(0, values.fileSize ?? entry.byteCost))
+        } catch {
+            os_log(.error, "RenderCache: disk spill failed: %{public}@",
+                   error.localizedDescription)
+            return nil
+        }
+    }
+
+    private nonisolated func recordDiskEntry(_ entry: DiskEntry, for key: RenderCacheKey) {
+        let toDelete = lock.withLock { state -> [URL] in
+            var stale: [URL] = []
+            if let previous = state.insertDisk(key, entry: entry),
+               previous.url != entry.url {
+                stale.append(previous.url)
+            }
+            while state.diskBytes > self.diskBudget,
+                  let (_, removed) = state.popLeastRecentDisk() {
+                stale.append(removed.url)
+            }
+            return stale
+        }
+        removeDiskFiles(toDelete)
+    }
+
+    private nonisolated func removeDiskEntry(for key: RenderCacheKey) {
+        let removed = lock.withLock { $0.removeDiskEntry(for: key)?.url }
+        if let removed {
+            removeDiskFiles([removed])
+        }
+    }
+
+    private nonisolated func removeDiskFiles(_ urls: [URL]) {
+        for url in Set(urls) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private nonisolated static func diskFilename(for key: RenderCacheKey) -> String {
+        [
+            key.clipID.uuidString,
+            String(key.effectChainHash),
+            String(key.timeValue),
+            String(key.timeScale),
+            "\(key.renderWidth)x\(key.renderHeight)",
+        ].joined(separator: "-")
+    }
+
+    private nonisolated func removeEntries(matching shouldDrop: @Sendable (RenderCacheKey) -> Bool) {
+        let diskFiles = lock.withLock { state -> [URL] in
+            let memoryKeys = state.entries.keys.filter(shouldDrop)
+            for key in memoryKeys {
+                _ = state.removeMemoryEntry(for: key)
+            }
+            let diskKeys = state.diskEntries.keys.filter(shouldDrop)
+            return diskKeys.compactMap { state.removeDiskEntry(for: $0)?.url }
+        }
+        removeDiskFiles(diskFiles)
+    }
+
+    private nonisolated func removeAllEntries() {
+        let diskFiles = lock.withLock { state -> [URL] in
+            let urls = state.diskEntries.values.map(\.url)
+            state.entries.removeAll()
+            state.memoryNodes.removeAll()
+            state.memoryHead = nil
+            state.memoryTail = nil
+            state.totalBytes = 0
+            state.diskEntries.removeAll()
+            state.diskNodes.removeAll()
+            state.diskHead = nil
+            state.diskTail = nil
+            state.diskBytes = 0
+            return urls
+        }
+        removeDiskFiles(diskFiles)
     }
 
     /// Drop every entry whose key matches the given clip. Called by the editor
@@ -192,20 +478,7 @@ final class RenderCache: Sendable {
     /// key) but it releases bytes the LRU would otherwise hold until natural
     /// eviction.
     nonisolated func invalidate(clipID: UUID) {
-        lock.withLock { state in
-            var dropped: Set<RenderCacheKey> = []
-            for key in state.entries.keys where key.clipID == clipID {
-                dropped.insert(key)
-            }
-            for key in dropped {
-                if let removed = state.entries.removeValue(forKey: key) {
-                    state.totalBytes -= removed.byteCost
-                }
-            }
-            if !dropped.isEmpty {
-                state.order.removeAll { dropped.contains($0) }
-            }
-        }
+        removeEntries { $0.clipID == clipID }
     }
 
     /// Drop every entry whose render size differs from `size`. Called after a
@@ -213,29 +486,12 @@ final class RenderCache: Sendable {
     nonisolated func invalidate(notMatchingRenderSize size: CGSize) {
         let w = max(0, Int(size.width.rounded()))
         let h = max(0, Int(size.height.rounded()))
-        lock.withLock { state in
-            var dropped: Set<RenderCacheKey> = []
-            for key in state.entries.keys where key.renderWidth != w || key.renderHeight != h {
-                dropped.insert(key)
-            }
-            for key in dropped {
-                if let removed = state.entries.removeValue(forKey: key) {
-                    state.totalBytes -= removed.byteCost
-                }
-            }
-            if !dropped.isEmpty {
-                state.order.removeAll { dropped.contains($0) }
-            }
-        }
+        removeEntries { $0.renderWidth != w || $0.renderHeight != h }
     }
 
     /// Empty the cache and reset `totalBytes` to zero.
     nonisolated func purge() {
-        lock.withLock { state in
-            state.entries.removeAll()
-            state.order.removeAll()
-            state.totalBytes = 0
-        }
+        removeAllEntries()
     }
 
     /// Estimated per-entry bytes used to drive byte-budget eviction. The

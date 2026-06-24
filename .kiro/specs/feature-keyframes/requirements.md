@@ -33,3 +33,9 @@
 
 - **R5.1** `Keyframe` and `Keyframed` conform to `Hashable`.
 - **R5.2** Two `Keyframed` values are equal iff their keyframes and default values are equal.
+
+## R6 — Minimal Authoring Surface
+
+- **R6.1** The inspector can add or update a skin-smooth strength keyframe at the selected clip's playhead.
+- **R6.2** The inspector can remove the skin-smooth strength keyframe at the playhead.
+- **R6.3** Previous/next controls seek to adjacent skin-smooth strength keyframes for the selected clip.

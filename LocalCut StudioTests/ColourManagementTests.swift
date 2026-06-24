@@ -52,6 +52,42 @@ struct ColourManagementSerialTests {
         #expect(EffectCompositor.captionRasterCacheCount == beforeCount)
         #expect(model.canUndo == false)
     }
+
+    private func seedRaster() {
+        let line = CaptionLine(
+            range: CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600)),
+            text: "Hello", words: nil, style: nil)
+        EffectCompositor._testPopulateCaptionRasterCache(
+            line: line, style: .identity, renderSize: CGSize(width: 320, height: 180))
+    }
+
+    @Test("setRenderSize purges the shared caption raster cache")
+    func renderSizeChangePurgesRasterCache() {
+        EffectCompositor.purgeCaptionRasterCache()
+        seedRaster()
+        #expect(EffectCompositor.captionRasterCacheCount > 0)
+
+        let model = EditorModel()
+        model.setRenderSize(CGSize(width: 1280, height: 720))
+        #expect(EffectCompositor.captionRasterCacheCount == 0)
+    }
+
+    @Test("Undo of a resolution change purges the caption raster cache (applyState path)")
+    func resolutionUndoPurgesRasterCache() {
+        let model = EditorModel()
+        let original = model.project.renderSize
+        model.setRenderSize(CGSize(width: 1280, height: 720))
+
+        // Repopulate after the change, then undo back to the original size —
+        // applyState must purge even though it bypasses setRenderSize.
+        EffectCompositor.purgeCaptionRasterCache()
+        seedRaster()
+        #expect(EffectCompositor.captionRasterCacheCount > 0)
+
+        model.undo()
+        #expect(model.project.renderSize == original)
+        #expect(EffectCompositor.captionRasterCacheCount == 0)
+    }
 }
 
 // MARK: - R6.2 — pixel buffer carries colour-space attachments
@@ -143,8 +179,27 @@ func waveformSamplesNonBlackFrame() {
     #expect(!sample.waveform.isEmpty)
     let anyColumn = sample.waveform.contains { $0.hasContent }
     #expect(anyColumn)
-    // The vectorscope grid should populate too.
-    #expect(!sample.vectorscope.isEmpty)
+    // The vectorscope now plots one bounded-readback point per pixel, not an
+    // 8×8 cell-average proxy.
+    #expect(sample.vectorscope.count == 64 * 64)
+}
+
+@Test("ScopeSampler waveform separates dark and bright columns from one readback")
+func waveformSingleReadbackSeparatesColumns() {
+    let context = EffectCompositor.context(for: .sRGB)
+    let colorSpace = WorkingColourSpace.sRGB.cgColorSpace
+    let bounds = CGRect(x: 0, y: 0, width: 64, height: 64)
+    let black = CIImage(color: .black).cropped(to: bounds)
+    let whiteRight = CIImage(color: .white)
+        .cropped(to: CGRect(x: 32, y: 0, width: 32, height: 64))
+    let image = whiteRight.composited(over: black)
+
+    let sample = ScopeSampler.shared.sample(image: image, context: context, colorSpace: colorSpace)
+    let firstColumn = sample.waveform.first
+    let lastColumn = sample.waveform.last
+
+    #expect((firstColumn?.bins.first ?? 0) > 0.9)
+    #expect((lastColumn?.bins.last ?? 0) > 0.9)
 }
 
 // MARK: - Persistence round-trip
@@ -248,6 +303,22 @@ struct ScopeSamplerGateTests {
         // bump the revision.
         #expect(snapshot.sample?.generatedAt == newer.generatedAt)
         #expect(snapshot.revision == revisionAfterNewer)
+    }
+
+    @Test("ScopeSampler disabling clears the sample and bumps the revision")
+    func samplerDisablePublishesClearRevision() {
+        ScopeSampler.shared.setEnabled(false)
+        let sample = ScopeSample(waveform: [], vectorscope: [],
+                                 generatedAt: Date(timeIntervalSince1970: 3000))
+        ScopeSampler.shared.publish(sample)
+        let populated = ScopeSampler.shared.snapshot
+
+        ScopeSampler.shared.setEnabled(false)
+        let cleared = ScopeSampler.shared.snapshot
+
+        #expect(populated.sample?.generatedAt == sample.generatedAt)
+        #expect(cleared.sample == nil)
+        #expect(cleared.revision == populated.revision &+ 1)
     }
 }
 

@@ -124,6 +124,35 @@ struct TransitionsIntegrationTests {
         #expect(abs(built.duration - 2.0) < 0.05)
     }
 
+    @Test("Build carries directional wipe angle into the shared video composition")
+    func buildCarriesDirectionalWipeAngle() async throws {
+        let url = try await makeVideoFixture(seconds: 2)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let project = Project()
+        let media = try await loadedMedia(from: url)
+        project.mediaItems.append(media)
+
+        let angle = Transition.radians(fromDegrees: 90)
+        let track = project.videoTracks.first!
+        let a = Clip(mediaID: media.id, sourceStart: .zero, duration: time(1), timelineStart: .zero)
+        var b = Clip(mediaID: media.id, sourceStart: .zero, duration: time(1), timelineStart: time(1))
+        b.transition = Transition(type: .wipe, duration: time(0.5), wipeAngle: angle)
+        track.clips = [a, b]
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+        let videoComposition = try #require(built.videoComposition)
+        let customInstructions = videoComposition.instructions.compactMap { $0 as? EffectCompositionInstruction }
+
+        let found = customInstructions.flatMap(\.units).contains { unit in
+            if case .transition(_, _, let type, let wipeAngle, _) = unit {
+                return type == .wipe && wipeAngle == angle
+            }
+            return false
+        }
+        #expect(found)
+    }
+
     @Test("Split at playhead converts effective time to authored under a transition")
     func splitAtPlayheadUnderTransition() async throws {
         let url = try await makeVideoFixture(seconds: 10)

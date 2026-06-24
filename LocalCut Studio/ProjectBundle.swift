@@ -274,7 +274,8 @@ nonisolated enum ProjectBundle {
     ///    - Otherwise: copy to a temp neighbour file first, then move into
     ///      place — so a mid-flight failure can't leave the destination empty.
     /// 3. Compute fresh fingerprints for every file under `assets/`.
-    /// 4. Write `fingerprints.json` and `project.json` atomically.
+    /// 4. Stage `fingerprints.json` and `project.json`, then promote them
+    ///    after both staged writes have succeeded.
     ///
     /// `projectJSON` is supplied pre-encoded so the caller can produce it on
     /// the main actor (where the document model lives) and hand only Sendable
@@ -364,11 +365,40 @@ nonisolated enum ProjectBundle {
             }
         }
 
-        try index.encoded().write(to: bundleURL.appendingPathComponent(ProjectBundleLayout.fingerprintsJSON),
-                                  options: .atomic)
-        try projectJSON.write(to: bundleURL.appendingPathComponent(ProjectBundleLayout.projectJSON),
-                              options: .atomic)
+        try writeMetadata(projectJSON: projectJSON, fingerprints: index, to: bundleURL)
         return index
+    }
+
+    private static func writeMetadata(projectJSON: Data,
+                                      fingerprints: FingerprintIndex,
+                                      to bundleURL: URL) throws {
+        let fm = FileManager.default
+        let token = UUID().uuidString
+        let stagedFingerprints = bundleURL
+            .appendingPathComponent(".\(ProjectBundleLayout.fingerprintsJSON).staged-\(token)")
+        let stagedProject = bundleURL
+            .appendingPathComponent(".\(ProjectBundleLayout.projectJSON).staged-\(token)")
+        defer {
+            try? fm.removeItem(at: stagedFingerprints)
+            try? fm.removeItem(at: stagedProject)
+        }
+
+        try fingerprints.encoded().write(to: stagedFingerprints, options: .atomic)
+        try projectJSON.write(to: stagedProject, options: .atomic)
+
+        try promoteMetadataFile(stagedFingerprints,
+                                to: bundleURL.appendingPathComponent(ProjectBundleLayout.fingerprintsJSON))
+        try promoteMetadataFile(stagedProject,
+                                to: bundleURL.appendingPathComponent(ProjectBundleLayout.projectJSON))
+    }
+
+    private static func promoteMetadataFile(_ staged: URL, to destination: URL) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: destination.path) {
+            _ = try fm.replaceItemAt(destination, withItemAt: staged)
+        } else {
+            try fm.moveItem(at: staged, to: destination)
+        }
     }
 
     // MARK: - Detection

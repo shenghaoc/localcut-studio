@@ -129,12 +129,20 @@ final class RenderQueue {
 chooses the export path, and awaits completion. On finish (success / failure /
 cancellation) it updates status + persists, then loops.
 
+Runner ownership is keyed by a private token, not only the observable
+`isRunning` flag. Cleanup only clears the token it created; if a new job is
+enqueued while the old runner is draining, cleanup clears the old task and
+immediately restarts the queue. `stop()` suppresses that automatic restart so
+queued jobs remain paused when the user explicitly stops the runner.
+
 **Source-bookmark resolution.** Resolving source-media bookmarks (which may
 touch sleeping drives or network shares) happens off MainActor via
 `Task.detached`; only `startAccessingSecurityScopedResource()` and
 `MediaItem` assembly stay on MainActor. A `false` return from
 `startAccessing` counts as a missing source, failing the job cleanly
-rather than producing a silently partial export.
+rather than producing a silently partial export. If a source bookmark resolves
+with `bookmarkDataIsStale == true`, the queue creates a fresh security-scoped
+bookmark and stores it back into the job snapshot before persisting.
 
 **Writer pump.** The `AVAssetWriter` fallback uses
 `input.markAsFinished()` to signal exhaustion. Note:
@@ -187,7 +195,9 @@ needed for the queue file itself.
 through `NSSavePanel`). Each job's `outputBookmark` is created at enqueue with
 `.withSecurityScope`; the runner re-resolves it at job start with
 `startAccessingSecurityScopedResource()` (balanced by a `stopAccessing…` in
-the per-job `defer`).
+the per-job `defer`). A stale-but-resolvable output bookmark is refreshed in
+place during reveal, load reconciliation, or job start, then persisted with the
+next queue write.
 
 **Resume.** On `RenderQueue.load()`:
 
@@ -200,6 +210,8 @@ the per-job `defer`).
 - A job whose `outputBookmark` no longer resolves transitions to
   `.failed("Output destination unavailable")` rather than silently dropping —
   the user keeps the row to retry against a new destination.
+- A job whose `outputBookmark` resolves as stale receives a replacement
+  security-scoped bookmark and remains queued.
 
 Save is triggered after every transition (atomic write); JSON is small enough
 that this isn't a perf concern.

@@ -44,6 +44,10 @@
   with no matching export-session preset. Combinations not in
   `isSupportedCombination` are rejected at enqueue and never reach either
   path.
+- **R2.8** Runner cleanup is tokenized: an old runner task cannot reset
+  `isRunning` for a newer runner, and a job enqueued while the previous runner
+  is draining is picked up automatically unless the user explicitly stopped the
+  queue.
 
 ## R3 — Persistence
 
@@ -68,6 +72,9 @@
 - **R3.6** The on-disk doc carries a `version` field; a build that reads a
   newer-version file refuses to overwrite it (matching the project-document
   rule).
+- **R3.7** Stale-but-resolvable output and source-media bookmarks are refreshed
+  back into the queued job before the next persist, rather than being used once
+  and left stale on disk.
 
 ## R4 — UI
 
@@ -97,5 +104,9 @@
 - **R5.5** `RenderQueueDoc` Codable round-trips through the same encoder
   pair; a job whose `outputBookmark` is unresolvable on `load()` transitions
   to `failed` with the documented message, not dropped.
-- **R5.6** `xcodebuild` (Debug, macOS) compiles cleanly; the existing test
+- **R5.6** Reconciliation refreshes a stale output bookmark when resolution
+  succeeds and supplies replacement bookmark data.
+- **R5.7** A job enqueued in the runner-drain / cleanup window still runs after
+  cleanup instead of remaining queued behind a false `isRunning` state.
+- **R5.8** `xcodebuild` (Debug, macOS) compiles cleanly; the existing test
   count does not regress.

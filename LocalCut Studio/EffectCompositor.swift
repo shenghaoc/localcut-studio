@@ -43,13 +43,13 @@ struct CaptionRenderItem: Sendable {
 enum RenderUnit {
     case layer(CompositorLayer)
     case transition(outgoing: CompositorLayer, incoming: CompositorLayer,
-                    type: TransitionType, overlap: CMTimeRange)
+                    type: TransitionType, wipeAngle: Double, overlap: CMTimeRange)
 
     /// Every source track this unit reads from.
     nonisolated var trackIDs: [CMPersistentTrackID] {
         switch self {
         case .layer(let layer): [layer.trackID]
-        case .transition(let outgoing, let incoming, _, _): [outgoing.trackID, incoming.trackID]
+        case .transition(let outgoing, let incoming, _, _, _): [outgoing.trackID, incoming.trackID]
         }
     }
 }
@@ -239,7 +239,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         case .layer(let layer):
             return renderedImage(for: layer, request: request)
 
-        case .transition(let outgoing, let incoming, let type, let overlap):
+        case .transition(let outgoing, let incoming, let type, let wipeAngle, let overlap):
             let out = renderedImage(for: outgoing, request: request)
             let into = renderedImage(for: incoming, request: request)
             // If a source frame is missing, fall back to whichever is available.
@@ -250,7 +250,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             case .crossDissolve:
                 return crossDissolve(outgoing: out, incoming: into, progress: progress)
             case .wipe:
-                return wipe(outgoing: out, incoming: into, progress: progress)
+                return wipe(outgoing: out, incoming: into, progress: progress, angle: wipeAngle)
             }
         }
     }
@@ -353,7 +353,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         if item.style.enterAnimation == .typewriter && animation.typewriterProgress < 1 {
             image = typewriterMasked(image: image,
-                                     box: raster.boundingBox,
+                                     textBox: raster.textBox,
                                      progress: animation.typewriterProgress)
         }
 
@@ -382,25 +382,33 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         return image.cropped(to: CGRect(origin: .zero, size: renderSize))
     }
 
-    /// CIImage gradient mask that reveals progressively from the left edge of the
-    /// text bounding box across to the right, giving the typewriter effect
-    /// without re-rasterising for each visible-length prefix. The mask is WHITE
-    /// (not black) over the reveal area — `CIBlendWithMask` reads the mask as
-    /// grayscale, so white = use input (visible) and clear = use background
-    /// (hidden); an opaque-black mask would leave the caption invisible across
-    /// the entire enter window.
-    nonisolated private func typewriterMasked(image: CIImage, box: CGRect, progress: Float) -> CIImage {
-        let progress = max(0, min(1, CGFloat(progress)))
-        let mask = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
-            .cropped(to: CGRect(x: box.minX,
-                                y: box.minY,
-                                width: box.width * progress,
-                                height: box.height))
+    /// CIImage mask that reveals progressively from the left edge of the text
+    /// box while keeping the surrounding raster (notably the caption pill)
+    /// visible. `CIBlendWithMask` reads white as input-visible and black as
+    /// background-visible.
+    nonisolated private func typewriterMasked(image: CIImage, textBox: CGRect, progress: Float) -> CIImage {
+        let mask = Self.typewriterMask(imageExtent: image.extent, textBox: textBox, progress: progress)
         let filter = CIFilter.blendWithMask()
         filter.inputImage = image
         filter.backgroundImage = CIImage(color: .clear).cropped(to: image.extent)
         filter.maskImage = mask
         return filter.outputImage ?? image
+    }
+
+    nonisolated static func typewriterMask(imageExtent: CGRect, textBox: CGRect, progress: Float) -> CIImage {
+        let progress = max(0, min(1, CGFloat(progress)))
+        let visibleWidth = textBox.width * progress
+        let hiddenText = CGRect(x: textBox.minX + visibleWidth,
+                                y: textBox.minY,
+                                width: textBox.width - visibleWidth,
+                                height: textBox.height)
+            .intersection(imageExtent)
+        let visible = CIImage(color: CIColor(red: 1, green: 1, blue: 1, alpha: 1))
+            .cropped(to: imageExtent)
+        guard !hiddenText.isEmpty else { return visible }
+        let hidden = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1))
+            .cropped(to: hiddenText)
+        return hidden.composited(over: visible)
     }
 
     /// Reconstructs a minimal `CaptionLine` proxy for the rasterer cache key. The
@@ -412,11 +420,26 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     }
 
     nonisolated private func activeWordIndex(for item: CaptionRenderItem, at time: CMTime) -> Int? {
-        guard let words = item.words, !words.isEmpty else { return nil }
+        Self.activeWordIndex(words: item.words, at: time)
+    }
+
+    /// Index of the word to highlight at `time`. A word whose range contains
+    /// `time` wins; otherwise the most-recently-started word is *held* so the
+    /// karaoke highlight doesn't snap back to the un-highlighted base fill in
+    /// the gaps ASR leaves between words, or after the final word while the line
+    /// is still on screen (R3.3). Before the first word starts, returns nil so
+    /// the line renders idle. Pure + `static` so it's unit-testable without a
+    /// compositor instance; `words` are assumed sorted ascending by start.
+    nonisolated static func activeWordIndex(words: [WordTiming]?, at time: CMTime) -> Int? {
+        guard let words, !words.isEmpty else { return nil }
         for (i, word) in words.enumerated() where word.range.containsTime(time) {
             return i
         }
-        return nil
+        var held: Int?
+        for (i, word) in words.enumerated() where word.range.start <= time {
+            held = i
+        }
+        return held
     }
 
     // MARK: - Transitions
@@ -441,13 +464,14 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         return filter.outputImage ?? fadedIn.composited(over: fadedOut)
     }
 
-    /// A directional bars-swipe transition via Core Image. The type-safe builtin
-    /// is created with the filter's default angle/width/bar-offset already set.
-    nonisolated private func wipe(outgoing: CIImage, incoming: CIImage, progress: Float) -> CIImage {
+    /// A directional bars-swipe transition via Core Image.
+    nonisolated private func wipe(outgoing: CIImage, incoming: CIImage,
+                                  progress: Float, angle: Double) -> CIImage {
         let filter = CIFilter.barsSwipeTransition()
         filter.inputImage = outgoing
         filter.targetImage = incoming
         filter.time = progress
+        filter.angle = Float(angle)
         return filter.outputImage ?? crossDissolve(outgoing: outgoing, incoming: incoming, progress: progress)
     }
 
@@ -607,6 +631,23 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     // MARK: - Skin smoothing
 
+    nonisolated static let skinSmoothReferenceHeight: CGFloat = 1080
+    nonisolated static let skinSmoothReferenceMaxRadius: Float = 10
+
+    /// Maps user strength to a source-pixel Gaussian radius. Radius is authored
+    /// against a 1080p source frame, then scaled by the actual source height so
+    /// 4K footage does not look half as smooth as 1080p at the same strength.
+    nonisolated static func skinSmoothBlurRadius(strength: Float, imageHeight: CGFloat) -> Float {
+        let clampedStrength = max(0, min(1, strength))
+        let heightScale: Float
+        if imageHeight.isFinite, imageHeight > 0 {
+            heightScale = Float(imageHeight / skinSmoothReferenceHeight)
+        } else {
+            heightScale = 1
+        }
+        return clampedStrength * skinSmoothReferenceMaxRadius * heightScale
+    }
+
     /// Applies skin smoothing using a chroma-based skin-tone mask and masked Gaussian blur proxy.
     /// Internal (not private) so the render-path test can exercise the compiled MSL kernels
     /// directly — a missing `metallib` or renamed kernel makes this return `nil`.
@@ -646,10 +687,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // Clamp to extent before blurring to prevent transparent edge bleeding
         let clamped = image.clampedToExtent()
 
-        // Apply a moderate blur — radius scales with strength
+        // Apply a moderate blur — radius scales with strength and source height.
         let blurFilter = CIFilter.gaussianBlur()
         blurFilter.inputImage = clamped
-        blurFilter.radius = strength * 10.0
+        blurFilter.radius = Self.skinSmoothBlurRadius(strength: strength,
+                                                      imageHeight: image.extent.height)
         guard let blurred = blurFilter.outputImage else { return nil }
 
         // Clip blurred image back to original extent

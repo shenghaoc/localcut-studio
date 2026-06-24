@@ -12,11 +12,11 @@ Give the project an explicit **working colour space** that follows every frame t
 2. **The compositor switches on it**, not the global static. `EffectCompositor.sharedCIContext` becomes a per-space cache (keyed by `WorkingColourSpace`) so a project edit doesn't have to throw away an existing context. The compositor reads the space from the `EffectCompositionInstruction` it's already handed.
 3. **Output buffers carry the tag**. Every `CVPixelBuffer` produced by `startRequest(_:)` gets `kCVImageBufferColorPrimariesKey` / `kCVImageBufferTransferFunctionKey` / `kCVImageBufferYCbCrMatrixKey` attachments matching the working space, so the downstream `AVAssetExportSession` / `AVAssetWriter` writes a colour-tagged movie instead of silently flattening to sRGB.
 4. **Title-raster cache invalidates on space change**. A cached caption raster was rendered against a specific working space; changing the space must purge it. The existing `TitleRasterer.purge()` seam covers this — `setWorkingColourSpace(_:)` calls it.
-5. **Scopes sample the compositor, throttled**. A `ScopeSampler` shared instance receives each rendered `CIImage`; it gates itself to ≤30 Hz so a 60 fps preview only doubles render cost once, and only when the panel is visible (`enabled = false` is a fast no-op). The sampler is **fully nonisolated** (`nonisolated(unsafe) static let shared`, lock-guarded state); the compositor reaches it from off-main, so anchoring it to `MainActor` would force the entire sampling path through the main actor.
-6. **Waveform via a luma-only image**. RGB is folded into the R channel (BT.709 weights) before `CIFilter.areaHistogram` runs, so the histogram reports a true luma distribution rather than three independent R/G/B histograms a downstream weighted-sum can't reassemble.
-7. **Float readback**. Histogram results are read with `.RGBAf` so per-bin pixel counts (routinely > 1.0 for any slice with > 1 px/bin) aren't clamped to 8-bit values.
+5. **Scopes sample the compositor, throttled**. A `ScopeSampler` shared instance receives each rendered `CIImage`; it gates itself to ≤30 Hz so a 60 fps preview only doubles render cost once, and only when the panel is visible (`enabled = false` is a fast no-op). The sampler is fully nonisolated (`nonisolated static let shared`, lock-guarded state); the compositor reaches it from off-main, so anchoring it to `MainActor` would force the entire sampling path through the main actor.
+6. **Single bounded readback**. The sampler scales the composed frame into a capped `.RGBAf` buffer (max 160×90) with one `CIContext.render`, then derives both scopes from those pixels. Waveform bins use BT.709 luma; vectorscope emits one point per readback pixel instead of an 8×8 average grid.
+7. **Float readback**. `.RGBAf` avoids 8-bit clamping before luma/chroma conversion, while the bounded buffer keeps the CPU work predictable.
 8. **Out-of-order publish drop**. `publish(_:)` compares the incoming sample's `generatedAt` to the stored sample and silently drops older arrivals — AVFoundation dispatches frame requests concurrently, so two `publish` calls can race and an older frame must not overwrite a newer one.
-9. **`ScopesView` is a SwiftUI panel** rendered with `Canvas`. The sampler holds no SwiftUI / Observation state (it can't, given it's reached from off-main); the view pulls a `(sample, revision)` snapshot from `ScopeSampler.shared` on a `TimelineView(.animation(minimumInterval: 1/30))` tick.
+9. **`ScopesView` is a SwiftUI panel** rendered with `Canvas`. The sampler holds no SwiftUI / Observation state (it can't, given it's reached from off-main); the view runs a lightweight task that polls `(sample, revision)` and only mutates SwiftUI state when `revision` changes, so an idle paused frame does not redraw at 30 Hz.
 
 ## Working space → CV constants
 
@@ -64,7 +64,7 @@ The CIContext cache is a `OSAllocatedUnfairLock`-guarded dictionary; one Metal c
 
 ```swift
 final class ScopeSampler: @unchecked Sendable {
-    nonisolated(unsafe) static let shared = ScopeSampler()
+    nonisolated static let shared = ScopeSampler()
     nonisolated static let minIntervalSeconds = 1.0 / 30.0
 
     nonisolated func shouldSample(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool  // checks `enabled` + 1/30s gate (monotonic clock)
@@ -74,15 +74,16 @@ final class ScopeSampler: @unchecked Sendable {
 }
 ```
 
-- **Waveform**: First folds RGB into a luma-only R channel via `CIFilter.colorMatrix` (BT.709 weights). Then 32 column slices, each through `CIFilter.areaHistogram(count: 64)`. The result is read back as `.RGBAf` so per-bin pixel counts aren't clamped. Each column normalises independently against its own max bin; cross-column luma magnitude is not preserved (a per-row average is a Phase 38 extension).
-- **Vectorscope**: 8×8 grid. The frame is scaled down to 8×8 in a single GPU pass (two `CGAffineTransform` applications) and the entire grid is read back in one `context.render` call as `.RGBAf`, then each cell's average RGB is converted to (U, V) chroma offsets. The Canvas plots them on a circular UV plane.
+- **Readback**: The frame is translated to origin and scaled into a bounded buffer (max 160×90, no upscaling) in one GPU pass, then read back with `.RGBAf`.
+- **Waveform**: Every readback pixel is folded into BT.709 luma and binned into 32 columns × 64 luma buckets. Each column normalises independently against its own max bin; cross-column luma magnitude is not preserved (a per-row average is a Phase 38 extension).
+- **Vectorscope**: Every readback pixel is converted to (U, V) chroma offsets, so the trace is a dense scatter rather than an 8×8 cell-average proxy. The Canvas plots the scatter on a circular UV plane with 75% colour-bar target boxes.
 
-Per-frame cost is dominated by the 32 small histogram renders plus one 8×8 scale-and-readback for the vectorscope; on Apple Silicon they fit comfortably in the existing per-frame budget. The 30 Hz cap means a 60 fps preview pays this once per two frames, and never when the panel is hidden (the sampler shortcuts on `enabled == false` before any filter work).
+Per-frame cost is dominated by one small readback plus CPU loops over at most 14,400 pixels; on Apple Silicon this is cheaper and more predictable than 32 separate histogram renders. The 30 Hz cap means a 60 fps preview pays this once per two frames, and never when the panel is hidden (the sampler shortcuts on `enabled == false` before any filter work).
 
 ## UI
 
 - **Inspector → Project → Colour** panel: working-space picker (`Picker` of `WorkingColourSpace.allCases`) + `Toggle("Show scopes")`. Both undoable via `setWorkingColourSpace(_:)` and a coalesced `showScopes` model flag.
-- **Preview overlay**: when `model.showScopes` is on, a `ScopesView` panel sits along the preview's trailing edge. The view pulls `ScopeSampler.shared.snapshot` on every `TimelineView(.animation)` tick and sets `enabled = true` on appear / `false` on disappear so a hidden panel doesn't pay sample cost.
+- **Preview overlay**: when `model.showScopes` is on, a `ScopesView` panel sits along the preview's trailing edge. The view starts an async refresh task, sets `enabled = true`, polls `ScopeSampler.shared.snapshot`, and only updates `@State` when the revision changes. On disappearance it clears the sampler (`enabled = false`), which bumps the revision so no stale frame remains on the next appearance.
 
 ## Persistence
 
@@ -97,13 +98,13 @@ Per-frame cost is dominated by the 32 small histogram renders plus one 8×8 scal
 - **Per-space CIContext cache vs. one context** — Apple's `CIContext.workingColorSpace` is constructor-only. We pay a few extra Metal-context bytes for predictable per-space behaviour rather than juggling render-time conversions.
 - **CV attachments per buffer vs. one configuration-level setting** — `AVVideoComposition.Configuration` exposes `colorPrimaries` / `colorTransferFunction` / `colorYCbCrMatrix`, but those describe the *source*; the per-buffer attachments are what AVAssetExportSession writes into the output file. Setting both keeps preview and export in sync.
 - **Throttle the sampler vs. opt in per frame** — A 30 Hz cap is enough for the eye and keeps the compositor's hot path predictable; opting in per frame would expose to the entire pipeline.
-- **Grid-based vectorscope vs. per-pixel scatter** — A per-pixel scatter would need a Metal compute kernel. The 8×8 grid (scaled in one GPU pass, read back in one call) is a reasonable preview proxy; Phase 38 can swap in a richer kernel without changing the view contract.
+- **Bounded readback vs. full-resolution scatter** — A full-resolution vectorscope would make every sampled preview frame read back millions of pixels. The 160×90 cap gives a dense, stable scatter while keeping the compositor path predictable; a future Metal kernel can raise fidelity without changing the view contract.
 - **Calling purge from the model vs. observing the project** — The model already knows when the space changes (its setter) and owns the seam; an observation-driven purge would re-purge across undo replays whether or not the space actually changed.
 
 ## Risks
 
 - **Display P3 / Rec.2020 export** has not been validated against a calibrated reference; the working space is declared correctly but the LUTs in `feature-colour-grading` were tuned for sRGB. We keep sRGB as default and document the others as "advanced — verify on a reference monitor".
-- **`CIFilter.areaHistogram` reads back to CPU each frame** — On Apple Silicon this is unified memory and cheap, but on Intel Macs the readback could stall. We do not target Intel macOS 26+, so this is acceptable but worth noting.
+- **Scope readback hits CPU each sampled frame** — On Apple Silicon this is unified memory and cheap, but the readback is still bounded to 160×90 and gated to 30 Hz. We do not target Intel macOS 26+, so this is acceptable but worth noting.
 - **Sampler state is a global singleton**. Tests that mutate `ScopeSampler.shared.enabled` must reset it; the test target's `init()` for each `@Test` is fine because the tests pass their own `CIContext` and call `sample(...)` directly rather than relying on the shared compositor flow.
 
 ## Non-goals

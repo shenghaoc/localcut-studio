@@ -6,9 +6,10 @@
 
 - [x] **T1.1** Define `RenderCacheKey` (Hashable, Sendable) per the [design](./design.md#types). `CMTime` is normalised to a microsecond timescale so equivalent times in different timescales collapse to one key (Gemini review).
 - [x] **T1.2** Add `[Effect].renderCacheHash` (Hasher digest over the chain, in order).
-- [x] **T1.3** Implement `RenderCache`: `OSAllocatedUnfairLock`-guarded ordered dictionary; LRU touch on lookup; byte-budget eviction (sized off the stored image's `extent`, not the key's `renderSize` — Claude review); default budget 256 MiB.
+- [x] **T1.3** Implement `RenderCache`: `OSAllocatedUnfairLock`-guarded dictionary + linked-list LRU; O(1) touch/evict on lookup/insert; byte-budget eviction (sized off the stored image's `extent`, not the key's `renderSize` — Claude review); default memory budget 256 MiB.
 - [x] **T1.4** `invalidate(clipID:)`, `invalidate(notMatchingRenderSize:)`, and `purge()` methods.
-- [x] **T1.5** `RenderCache.cacheDirectoryURL` resolves the on-disk cache directory (`~/Library/Caches/com.shenghaoc.LocalCutStudio/RenderCache/`) for future disk-spill use.
+- [x] **T1.5** `RenderCache.cacheDirectoryURL` resolves the on-disk cache directory (`~/Library/Caches/com.shenghaoc.LocalCutStudio/RenderCache/`).
+- [x] **T1.6** Disk spill tier: PNG-encode evicted memory entries, track a bounded disk LRU, rehydrate on memory miss, and delete files on invalidate/purge.
 
 ## Compositor
 
@@ -34,7 +35,8 @@
 - [x] **V7** Unit test: `purge()` empties the cache.
 - [x] **V8** Unit test: equivalent CMTimes expressed in different timescales collapse to one key (Gemini review).
 - [x] **V9** Unit test: `updateSelectedClipCoalesced` invalidates the cache when `effects` changes but leaves it alone for opacity-only edits (codex review P2).
-- [x] **V10** `xcodebuild` (Debug, macOS) green; no test count regression.
+- [x] **V10** Unit test: evicted frames spill to disk, rehydrate on lookup, and purge removes disk files.
+- [x] **V11** `xcodebuild` (Debug, macOS) green; no test count regression.
 
 ## ROADMAP
 

@@ -235,6 +235,36 @@ struct TrimAndDragTests {
         #expect(targets.contains(time(5)))
     }
 
+    @Test("Snap targets convert the effective playhead through transition ripples")
+    func snapTargetsConvertPlayheadThroughTransitions() {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        media.duration = time(20)
+        media.hasVideo = true
+        model.project.mediaItems.append(media)
+        let track = model.project.videoTracks.first!
+
+        let clip1 = Clip(mediaID: media.id, sourceStart: .zero,
+                         duration: time(5), timelineStart: .zero)
+        var clip2 = Clip(mediaID: media.id, sourceStart: .zero,
+                         duration: time(5), timelineStart: time(5))
+        clip2.transition = Transition(duration: time(1))
+        track.clips = [clip1, clip2]
+
+        // After the one-second transition ripple, effective 6s is authored 7s.
+        model.currentTime = 6
+        #expect(model.resolveSnap(candidate: time(6.96), excluding: clip2.id, threshold: 0.1) == time(7))
+
+        // Inside the transition window, the same effective playhead exposes
+        // both authored sides so each neighbour can snap to what the user sees.
+        model.currentTime = 4.5
+        let targets = model.snapTargets()
+        #expect(targets.contains(time(4.5)))
+        #expect(targets.contains(time(5.5)))
+        #expect(model.resolveSnap(candidate: time(5.46), excluding: clip2.id, threshold: 0.1) == time(5.5))
+        #expect(model.resolveSnap(candidate: time(4.54), excluding: clip1.id, threshold: 0.1) == time(4.5))
+    }
+
     @Test("Resolve snap returns candidate when nothing is close")
     func resolveSnapNoMatch() {
         let (model, clipID) = makeModel(clipDuration: 10)

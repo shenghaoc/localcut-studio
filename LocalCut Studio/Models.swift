@@ -278,10 +278,47 @@ enum Effect: Hashable, Codable {
     }
 }
 
+extension Array where Element == Effect {
+    /// Whether the chain carries a LUT effect.
+    nonisolated var hasLUT: Bool {
+        contains { if case .lut = $0 { return true }; return false }
+    }
+
+    /// Returns the chain with its single LUT slot set to `bookmark` — replacing
+    /// the first existing LUT in place (a clip holds one LUT, per
+    /// feature-colour-grading R1.2) or appending one when none is present.
+    /// Any *additional* stale LUTs (from projects authored under the old
+    /// append-stacking behaviour) are dropped so the result holds exactly one
+    /// LUT — otherwise "Replace LUT…" would still apply multiple cubes.
+    nonisolated func replacingLUT(bookmark: Data) -> [Effect] {
+        var result: [Effect] = []
+        var inserted = false
+        for effect in self {
+            if case .lut = effect {
+                if !inserted {
+                    result.append(.lut(bookmark: bookmark))
+                    inserted = true
+                }
+                // Drop any further LUTs — the chain keeps exactly one slot.
+            } else {
+                result.append(effect)
+            }
+        }
+        if !inserted { result.append(.lut(bookmark: bookmark)) }
+        return result
+    }
+
+    /// Returns the chain with any LUT effect removed, leaving grade / skin-smooth
+    /// untouched.
+    nonisolated func removingLUT() -> [Effect] {
+        filter { if case .lut = $0 { return false }; return true }
+    }
+}
+
 // MARK: - Transitions
 
 /// The kinds of transition supported in v1.
-enum TransitionType: String, Hashable, Codable, CaseIterable, Identifiable {
+enum TransitionType: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
     /// A linear opacity cross-fade between the outgoing and incoming clips.
     case crossDissolve
     /// A directional bars-swipe handled by the custom compositor.
@@ -316,15 +353,33 @@ struct Transition: Identifiable, Hashable {
     let id: UUID
     var type: TransitionType
     var duration: CMTime
+    /// Direction for `.wipe`, stored in radians for Core Image's `inputAngle`.
+    var wipeAngle: Double
 
-    init(id: UUID = UUID(), type: TransitionType = .crossDissolve, duration: CMTime) {
+    init(id: UUID = UUID(),
+         type: TransitionType = .crossDissolve,
+         duration: CMTime,
+         wipeAngle: Double = Transition.defaultWipeAngle) {
         self.id = id
         self.type = type
         self.duration = duration
+        self.wipeAngle = wipeAngle
     }
 
     /// Sensible default transition length (0.5s, R4.2), clamped to overlap when applied.
     static let defaultDuration = CMTime(value: 1, timescale: 2)
+    /// Core Image bars-swipe angle default used for legacy projects.
+    static let defaultWipeAngle: Double = 0
+
+    nonisolated static func radians(fromDegrees degrees: Double) -> Double {
+        degrees * .pi / 180
+    }
+
+    nonisolated static func degrees(fromRadians radians: Double) -> Double {
+        let degrees = radians * 180 / .pi
+        let normalized = degrees.truncatingRemainder(dividingBy: 360)
+        return normalized >= 0 ? normalized : normalized + 360
+    }
 }
 
 /// A single placement of (part of) a media item on a track's timeline.

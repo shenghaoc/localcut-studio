@@ -34,6 +34,10 @@ struct ProjectState: Equatable {
     var audioTracks: [TrackClips]
     var captionTracks: [CaptionTrackSnapshot]
     var markers: [TimelineMarker]
+    /// Session-only LUT filename cache, keyed by bookmark, so undo/redo of LUT
+    /// replace/remove keeps the inspector label aligned with the restored effect
+    /// chain without resolving security-scoped bookmarks on the main actor.
+    var lutDisplayNames: [Data: String]
     /// Master-bus gain (linear, 0…2). Per-clip volume envelopes ride along
     /// inside `clips`; only bus-level parameters live here directly.
     var masterGain: Float
@@ -54,6 +58,7 @@ struct ProjectState: Equatable {
             && lhs.audioTracks == rhs.audioTracks
             && lhs.captionTracks == rhs.captionTracks
             && lhs.markers == rhs.markers
+            && lhs.lutDisplayNames == rhs.lutDisplayNames
             && lhs.masterGain == rhs.masterGain
             && lhs.trackInputs == rhs.trackInputs
             && lhs.selectedClipID == rhs.selectedClipID
@@ -92,6 +97,7 @@ extension EditorModel {
                     defaultStyle: $0.defaultStyle, lines: $0.lines)
             },
             markers: project.markers,
+            lutDisplayNames: lutDisplayNames,
             masterGain: project.masterGain,
             trackInputs: project.trackInputs,
             selectedClipID: selectedClipID,
@@ -105,12 +111,16 @@ extension EditorModel {
         project.name = state.name
         project.mediaItems = state.media
         unresolvedMedia = state.unresolvedMedia
+        let renderSizeChanged = project.renderSize != state.renderSize
         project.renderSize = state.renderSize
         project.frameRate = state.frameRate
-        if project.workingColourSpace != state.workingColourSpace {
-            project.workingColourSpace = state.workingColourSpace
-            // Cached rasters were rendered in the previous space; drop them so
-            // an undo across a Change Working Space step re-rasterises correctly.
+        let colourSpaceChanged = project.workingColourSpace != state.workingColourSpace
+        project.workingColourSpace = state.workingColourSpace
+        if renderSizeChanged || colourSpaceChanged {
+            // Caption rasters are keyed on render size + working colour space, so
+            // an undo/redo across a Change Resolution or Change Working Space step
+            // must drop the now-stale entries — applyState bypasses the setters
+            // that would otherwise purge.
             EffectCompositor.purgeCaptionRasterCache()
         }
         for snapshot in state.videoTracks {
@@ -165,6 +175,7 @@ extension EditorModel {
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID
+        restoreLUTDisplayNames(state.lutDisplayNames)
         reconcileAccessedURLs()
     }
 
