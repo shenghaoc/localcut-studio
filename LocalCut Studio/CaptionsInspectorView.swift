@@ -337,7 +337,9 @@ struct CaptionsInspectorView: View {
 
     private func rgbaColour(from color: Color) -> RGBAColour {
         let ns = NSColor(color)
-        let converted = ns.usingColorSpace(.sRGB) ?? ns
+        guard let converted = ns.usingColorSpace(.sRGB) else {
+            return .white
+        }
         return RGBAColour(
             red: Float(converted.redComponent),
             green: Float(converted.greenComponent),

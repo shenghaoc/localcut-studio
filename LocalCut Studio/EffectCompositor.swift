@@ -388,7 +388,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         if combinedOpacity < 1 {
             let filter = CIFilter.colorMatrix()
             filter.inputImage = image
-            filter.aVector = CIVector(x: 0, y: 0, z: 0, w: combinedOpacity)
+            let opacity = combinedOpacity
+            filter.rVector = CIVector(x: opacity, y: 0, z: 0, w: 0)
+            filter.gVector = CIVector(x: 0, y: opacity, z: 0, w: 0)
+            filter.bVector = CIVector(x: 0, y: 0, z: opacity, w: 0)
+            filter.aVector = CIVector(x: 0, y: 0, z: 0, w: opacity)
             image = filter.outputImage ?? image
         }
 

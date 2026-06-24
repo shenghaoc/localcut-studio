@@ -256,6 +256,12 @@ func writerPathSampleBufferMeter() throws {
     #expect(snapshot.rmsRight == 0)
 }
 
+@Test("RenderQueue: offline meter ignores non-Int16 PCM sample buffers")
+func writerPathSampleBufferMeterRejectsUnsupportedPCM() throws {
+    let sampleBuffer = try makePCMFloat32SampleBuffer(samples: [1, 0, -1, 0], channels: 2)
+    #expect(RenderQueue.audioMeterSnapshot(from: sampleBuffer) == nil)
+}
+
 // MARK: - R6.5 — regression guard: defaults are bit-identical
 
 @MainActor
@@ -463,6 +469,85 @@ private func makePCMInt16SampleBuffer(samples: [Int16],
     }
 
     let byteCount = samples.count * MemoryLayout<Int16>.size
+    var blockBuffer: CMBlockBuffer?
+    let createStatus = CMBlockBufferCreateWithMemoryBlock(
+        allocator: kCFAllocatorDefault,
+        memoryBlock: nil,
+        blockLength: byteCount,
+        blockAllocator: kCFAllocatorDefault,
+        customBlockSource: nil,
+        offsetToData: 0,
+        dataLength: byteCount,
+        flags: 0,
+        blockBufferOut: &blockBuffer)
+    guard createStatus == noErr, let blockBuffer else {
+        throw NSError(domain: "AudioBusTests", code: Int(createStatus))
+    }
+
+    let replaceStatus = samples.withUnsafeBytes { bytes in
+        CMBlockBufferReplaceDataBytes(
+            with: bytes.baseAddress!,
+            blockBuffer: blockBuffer,
+            offsetIntoDestination: 0,
+            dataLength: byteCount)
+    }
+    guard replaceStatus == noErr else {
+        throw NSError(domain: "AudioBusTests", code: Int(replaceStatus))
+    }
+
+    let frameCount = samples.count / channels
+    var timing = CMSampleTimingInfo(
+        duration: CMTime(value: 1, timescale: 48_000),
+        presentationTimeStamp: .zero,
+        decodeTimeStamp: .invalid)
+    var sampleBuffer: CMSampleBuffer?
+    let sampleStatus = CMSampleBufferCreate(
+        allocator: kCFAllocatorDefault,
+        dataBuffer: blockBuffer,
+        dataReady: true,
+        makeDataReadyCallback: nil,
+        refcon: nil,
+        formatDescription: formatDescription,
+        sampleCount: frameCount,
+        sampleTimingEntryCount: 1,
+        sampleTimingArray: &timing,
+        sampleSizeEntryCount: 0,
+        sampleSizeArray: nil,
+        sampleBufferOut: &sampleBuffer)
+    guard sampleStatus == noErr, let sampleBuffer else {
+        throw NSError(domain: "AudioBusTests", code: Int(sampleStatus))
+    }
+    return sampleBuffer
+}
+
+private func makePCMFloat32SampleBuffer(samples: [Float],
+                                        channels: Int) throws -> CMSampleBuffer {
+    var asbd = AudioStreamBasicDescription(
+        mSampleRate: 48_000,
+        mFormatID: kAudioFormatLinearPCM,
+        mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+        mBytesPerPacket: UInt32(channels * MemoryLayout<Float>.size),
+        mFramesPerPacket: 1,
+        mBytesPerFrame: UInt32(channels * MemoryLayout<Float>.size),
+        mChannelsPerFrame: UInt32(channels),
+        mBitsPerChannel: 32,
+        mReserved: 0)
+
+    var formatDescription: CMAudioFormatDescription?
+    let formatStatus = CMAudioFormatDescriptionCreate(
+        allocator: kCFAllocatorDefault,
+        asbd: &asbd,
+        layoutSize: 0,
+        layout: nil,
+        magicCookieSize: 0,
+        magicCookie: nil,
+        extensions: nil,
+        formatDescriptionOut: &formatDescription)
+    guard formatStatus == noErr, let formatDescription else {
+        throw NSError(domain: "AudioBusTests", code: Int(formatStatus))
+    }
+
+    let byteCount = samples.count * MemoryLayout<Float>.size
     var blockBuffer: CMBlockBuffer?
     let createStatus = CMBlockBufferCreateWithMemoryBlock(
         allocator: kCFAllocatorDefault,

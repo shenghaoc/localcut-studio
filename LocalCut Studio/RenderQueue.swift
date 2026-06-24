@@ -884,7 +884,7 @@ final class RenderQueue {
             dataPointerOut: &dataPointer)
         guard status == noErr, let dataPointer, totalLength > 0 else { return nil }
 
-        let channels = max(1, audioChannelCount(for: sample))
+        guard let channels = int16PCMChannelCount(for: sample) else { return nil }
         let sampleCount = min(totalLength / MemoryLayout<Int16>.size, frameCount * channels)
         guard sampleCount > 0 else { return nil }
 
@@ -922,12 +922,24 @@ final class RenderQueue {
             sampledAt: ContinuousClock.now)
     }
 
-    private nonisolated static func audioChannelCount(for sample: CMSampleBuffer) -> Int {
+    private nonisolated static func int16PCMChannelCount(for sample: CMSampleBuffer) -> Int? {
         guard let formatDescription = CMSampleBufferGetFormatDescription(sample),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
-            return 2
+            return nil
         }
-        return Int(asbd.pointee.mChannelsPerFrame)
+        let description = asbd.pointee
+        let flags = description.mFormatFlags
+        guard description.mFormatID == kAudioFormatLinearPCM,
+              description.mBitsPerChannel == 16,
+              description.mChannelsPerFrame > 0,
+              description.mBytesPerFrame == description.mChannelsPerFrame * UInt32(MemoryLayout<Int16>.size),
+              flags & kAudioFormatFlagIsSignedInteger != 0,
+              flags & kAudioFormatFlagIsFloat == 0,
+              flags & kAudioFormatFlagIsBigEndian == 0,
+              flags & kAudioFormatFlagIsNonInterleaved == 0 else {
+            return nil
+        }
+        return Int(description.mChannelsPerFrame)
     }
 
     // MARK: Progress / status
