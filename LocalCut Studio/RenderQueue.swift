@@ -236,6 +236,9 @@ final class RenderQueue {
     @ObservationIgnored
     private var offlineMeterSink: (@MainActor (AudioMeterSnapshot) -> Void)?
 
+    @ObservationIgnored
+    private var offlineMeterActivitySink: (@MainActor (Bool) -> Void)?
+
     /// Set when `load()` reads a queue file written by a newer build than
     /// this one understands. While true, `persist()` is a no-op so the
     /// newer-version file isn't downconverted by a later enqueue / cancel
@@ -251,8 +254,10 @@ final class RenderQueue {
         self.persistsToDisk = persistsToDisk
     }
 
-    func setOfflineMeterSink(_ sink: (@MainActor (AudioMeterSnapshot) -> Void)?) {
+    func setOfflineMeterSink(_ sink: (@MainActor (AudioMeterSnapshot) -> Void)?,
+                             activity: (@MainActor (Bool) -> Void)? = nil) {
         offlineMeterSink = sink
+        offlineMeterActivitySink = activity
     }
 
     // MARK: Enqueue / cancel / clear
@@ -529,6 +534,14 @@ final class RenderQueue {
 
             let hasAudio = !built.composition.tracks(withMediaType: .audio).isEmpty
             let shouldUseWriterForOfflineMeter = offlineMeterSink != nil && hasAudio
+            if shouldUseWriterForOfflineMeter {
+                offlineMeterActivitySink?(true)
+            }
+            defer {
+                if shouldUseWriterForOfflineMeter {
+                    offlineMeterActivitySink?(false)
+                }
+            }
 
             if !shouldUseWriterForOfflineMeter,
                let presetName = preset.assetExportSessionPresetName {
@@ -873,22 +886,44 @@ final class RenderQueue {
         guard frameCount > 0,
               let dataBuffer = CMSampleBufferGetDataBuffer(sample) else { return nil }
 
+        guard let channels = int16PCMChannelCount(for: sample) else { return nil }
+        let totalLength = CMBlockBufferGetDataLength(dataBuffer)
+        let byteCount = min(totalLength, frameCount * channels * MemoryLayout<Int16>.size)
+        guard byteCount >= MemoryLayout<Int16>.size else { return nil }
+
         var lengthAtOffset = 0
-        var totalLength = 0
+        var contiguousTotalLength = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
         let status = CMBlockBufferGetDataPointer(
             dataBuffer,
             atOffset: 0,
             lengthAtOffsetOut: &lengthAtOffset,
-            totalLengthOut: &totalLength,
+            totalLengthOut: &contiguousTotalLength,
             dataPointerOut: &dataPointer)
-        guard status == noErr, let dataPointer, totalLength > 0 else { return nil }
+        if status == noErr, let dataPointer, lengthAtOffset >= byteCount {
+            let bytes = UnsafeRawBufferPointer(start: dataPointer, count: byteCount)
+            return audioMeterSnapshot(rawPCMBytes: bytes, channels: channels)
+        }
 
-        guard let channels = int16PCMChannelCount(for: sample) else { return nil }
-        let sampleCount = min(totalLength / MemoryLayout<Int16>.size, frameCount * channels)
+        var copied = Data(count: byteCount)
+        let copyStatus = copied.withUnsafeMutableBytes { bytes in
+            guard let destination = bytes.baseAddress else { return OSStatus(-1) }
+            return CMBlockBufferCopyDataBytes(
+                dataBuffer,
+                atOffset: 0,
+                dataLength: byteCount,
+                destination: destination)
+        }
+        guard copyStatus == noErr else { return nil }
+        return copied.withUnsafeBytes { bytes in
+            audioMeterSnapshot(rawPCMBytes: bytes, channels: channels)
+        }
+    }
+
+    private nonisolated static func audioMeterSnapshot(rawPCMBytes bytes: UnsafeRawBufferPointer,
+                                                       channels: Int) -> AudioMeterSnapshot? {
+        let sampleCount = bytes.count / MemoryLayout<Int16>.size
         guard sampleCount > 0 else { return nil }
-
-        let samples = UnsafeRawPointer(dataPointer).assumingMemoryBound(to: Int16.self)
         var peak = Array(repeating: Float(0), count: min(2, channels))
         var sumSquares = Array(repeating: Float(0), count: min(2, channels))
         var counts = Array(repeating: 0, count: min(2, channels))
@@ -896,7 +931,10 @@ final class RenderQueue {
         for index in 0..<sampleCount {
             let channel = index % channels
             guard channel < 2 else { continue }
-            let value = max(-1, Float(samples[index]) / 32768)
+            let byteOffset = index * MemoryLayout<Int16>.size
+            let bits = UInt16(bytes[byteOffset])
+                | (UInt16(bytes[byteOffset + 1]) << 8)
+            let value = max(-1, Float(Int16(bitPattern: bits)) / 32768)
             let magnitude = abs(value)
             peak[channel] = max(peak[channel], magnitude)
             sumSquares[channel] += value * value

@@ -184,6 +184,38 @@ func captionStyleKeyframeAuthoringAtPlayhead() {
 }
 
 @MainActor
+@Test("Caption style keyframes update and remove within half-frame tolerance")
+func captionStyleKeyframeAuthoringUsesTolerance() throws {
+    let model = EditorModel()
+    let track = CaptionTrack(name: "Captions")
+    let line = CaptionLine(
+        range: CMTimeRange(start: CMTime(seconds: 2, preferredTimescale: 600),
+                           duration: CMTime(seconds: 4, preferredTimescale: 600)),
+        text: "Animate me")
+    track.addLine(line)
+    model.project.captionTracks = [track]
+    model.currentTime = 3
+
+    model.setCaptionStyleKeyframeValues(
+        CaptionStyleKeyframeValues(scale: 1.4),
+        lineID: line.id, in: track.id, coalesced: false)
+
+    model.currentTime = 3 + (0.25 / Double(model.project.frameRate))
+    model.setCaptionStyleKeyframeValues(
+        CaptionStyleKeyframeValues(scale: 1.8),
+        lineID: line.id, in: track.id, coalesced: false)
+
+    let keyframes = try #require(track.lines[0].styleKeyframes)
+    #expect(keyframes.keyframeCount == 1)
+    #expect(abs((keyframes.allKeyframeTimes.first?.seconds ?? -1) - 1) < 1e-6)
+    #expect(keyframes.values(at: CMTime(seconds: 1, preferredTimescale: 600)).scale == 1.8)
+    #expect(model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id))
+
+    model.removeCaptionStyleKeyframeAtPlayhead(line.id, in: track.id)
+    #expect(track.lines[0].styleKeyframes == nil)
+}
+
+@MainActor
 @Test("Skin-smooth strength keyframes author at the selected clip playhead")
 func skinSmoothStrengthKeyframeAuthoringAtPlayhead() {
     let (model, clipID) = makeSkinSmoothKeyframeModel(timelineStart: 2, duration: 8)

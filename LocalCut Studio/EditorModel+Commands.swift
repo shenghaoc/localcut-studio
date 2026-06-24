@@ -47,6 +47,7 @@ extension EditorModel {
     /// File ▸ Save — writes to the current URL, or prompts for one if unsaved.
     func requestSave() {
         Task {
+            guard !blockDocumentCommandDuringCloseSave() else { return }
             if documentURL != nil {
                 await save()
             } else if let url = runSavePanel() {
@@ -58,6 +59,7 @@ extension EditorModel {
     /// File ▸ Save As — always prompts for a new location.
     func requestSaveAs() {
         Task {
+            guard !blockDocumentCommandDuringCloseSave() else { return }
             if let url = runSavePanel() { await saveAs(url: url) }
         }
     }
@@ -81,6 +83,7 @@ extension EditorModel {
     func requestConvertToBundle() {
         guard canConvertToBundle else { return }
         Task {
+            guard !blockDocumentCommandDuringCloseSave() else { return }
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.lcStudioProjectBundle]
             panel.nameFieldStringValue = "\(project.name).\(ProjectBundleLayout.fileExtension)"
@@ -97,6 +100,7 @@ extension EditorModel {
     /// If there are unsaved changes, asks whether to save. Returns `true` if the
     /// caller may proceed (saved or discarded) and `false` if the user cancelled.
     func confirmSaveIfNeeded() async -> Bool {
+        guard !blockDocumentCommandDuringCloseSave() else { return false }
         guard isDirty else { return true }
         let alert = NSAlert()
         alert.messageText = "Do you want to save the changes you made to “\(project.name)”?"
@@ -123,6 +127,7 @@ extension EditorModel {
     /// Synchronous variant for `windowShouldClose`, which must return a decision
     /// immediately. Returns `true` if the window may close.
     func confirmClose(window: NSWindow) -> Bool {
+        guard !blockDocumentCommandDuringCloseSave() else { return false }
         guard isDirty else { return true }
         let alert = NSAlert()
         alert.messageText = "Do you want to save the changes you made to “\(project.name)”?"
@@ -133,6 +138,7 @@ extension EditorModel {
         switch alert.runModal() {
         case .alertFirstButtonReturn:        // Save
             guard let url = documentURL ?? runSavePanel() else { return false }
+            closeSaveInProgress = true
             statusMessage = "Saving \(url.lastPathComponent) before closing…"
             Task { @MainActor [weak window] in
                 if documentURL == nil {
@@ -140,7 +146,9 @@ extension EditorModel {
                 } else {
                     await save()
                 }
-                if !isDirty {
+                let shouldClose = !isDirty
+                closeSaveInProgress = false
+                if shouldClose {
                     window?.performClose(nil)
                 }
             }
@@ -150,5 +158,11 @@ extension EditorModel {
         default:                             // Cancel
             return false
         }
+    }
+
+    private func blockDocumentCommandDuringCloseSave() -> Bool {
+        guard closeSaveInProgress else { return false }
+        statusMessage = "Finish saving before closing…"
+        return true
     }
 }

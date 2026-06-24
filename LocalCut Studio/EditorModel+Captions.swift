@@ -164,7 +164,8 @@ extension EditorModel {
             return CaptionStyleKeyframeValues(baseStyle: baseStyle)
         }
         let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID) ?? .zero
-        return keyframes.values(at: localTime)
+        let resolvedTime = nearestCaptionStyleKeyframeTime(to: localTime, in: keyframes) ?? localTime
+        return keyframes.values(at: resolvedTime)
     }
 
     func captionStyleKeyframeCount(_ lineID: CaptionLine.ID,
@@ -179,7 +180,8 @@ extension EditorModel {
         guard let track = project.captionTracks.first(where: { $0.id == trackID }),
               let line = track.lines.first(where: { $0.id == lineID }),
               let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID) else { return false }
-        return line.styleKeyframes?.hasKeyframe(at: localTime) ?? false
+        guard let keyframes = line.styleKeyframes else { return false }
+        return nearestCaptionStyleKeyframeTime(to: localTime, in: keyframes) != nil
     }
 
     func setCaptionStyleKeyframeValues(_ values: CaptionStyleKeyframeValues,
@@ -196,7 +198,8 @@ extension EditorModel {
             var updated = line
             var keyframes = updated.styleKeyframes
                 ?? CaptionStyleKeyframes(baseStyle: updated.style ?? track.defaultStyle)
-            keyframes.addOrUpdateKeyframes(at: localTime, values: values)
+            let resolvedTime = self.nearestCaptionStyleKeyframeTime(to: localTime, in: keyframes) ?? localTime
+            keyframes.addOrUpdateKeyframes(at: resolvedTime, values: values)
             updated.styleKeyframes = keyframes
             track.updateLine(updated)
         }
@@ -217,13 +220,13 @@ extension EditorModel {
               let line = track.lines.first(where: { $0.id == lineID }),
               let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID),
               var keyframes = line.styleKeyframes,
-              keyframes.hasKeyframe(at: localTime) else {
+              let resolvedTime = nearestCaptionStyleKeyframeTime(to: localTime, in: keyframes) else {
             statusMessage = "No caption style keyframe at the playhead."
             return
         }
         performUndoable("Remove Caption Style Keyframe") {
             var updated = line
-            keyframes.removeKeyframes(at: localTime)
+            keyframes.removeKeyframes(at: resolvedTime)
             updated.styleKeyframes = keyframes.isEmpty ? nil : keyframes
             track.updateLine(updated)
             scheduleRebuild()
@@ -247,8 +250,11 @@ extension EditorModel {
                                             in trackID: CaptionTrack.ID) {
         guard let track = project.captionTracks.first(where: { $0.id == trackID }),
               let line = track.lines.first(where: { $0.id == lineID }),
-              let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID),
-              let previous = line.styleKeyframes?.allKeyframeTimes.last(where: { $0 < localTime }) else { return }
+              let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID) else { return }
+        let tolerance = captionStyleKeyframeHitToleranceSeconds
+        guard let previous = line.styleKeyframes?.allKeyframeTimes.last(where: {
+            $0.seconds < localTime.seconds - tolerance
+        }) else { return }
         seek(toSeconds: (line.range.start + previous).seconds)
     }
 
@@ -256,8 +262,25 @@ extension EditorModel {
                                         in trackID: CaptionTrack.ID) {
         guard let track = project.captionTracks.first(where: { $0.id == trackID }),
               let line = track.lines.first(where: { $0.id == lineID }),
-              let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID),
-              let next = line.styleKeyframes?.allKeyframeTimes.first(where: { $0 > localTime }) else { return }
+              let localTime = captionStyleLocalPlayheadTime(lineID, in: trackID) else { return }
+        let tolerance = captionStyleKeyframeHitToleranceSeconds
+        guard let next = line.styleKeyframes?.allKeyframeTimes.first(where: {
+            $0.seconds > localTime.seconds + tolerance
+        }) else { return }
         seek(toSeconds: (line.range.start + next).seconds)
+    }
+
+    private var captionStyleKeyframeHitToleranceSeconds: Double {
+        0.5 / max(1, project.frameRate)
+    }
+
+    private func nearestCaptionStyleKeyframeTime(to time: CMTime,
+                                                 in keyframes: CaptionStyleKeyframes) -> CMTime? {
+        let tolerance = captionStyleKeyframeHitToleranceSeconds
+        return keyframes.allKeyframeTimes
+            .map { candidate in (candidate, abs((candidate - time).seconds)) }
+            .filter { $0.1 <= tolerance }
+            .min { $0.1 < $1.1 }?
+            .0
     }
 }
