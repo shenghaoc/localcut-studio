@@ -306,12 +306,13 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         image = image.transformed(by: layer.transform)
 
         if layer.opacity < 1 {
-            // Scale alpha only (straight, not premultiplied): the later
-            // source-over composite applies this alpha, so dimming RGB here too
-            // would double-darken the clip.
             let opacityFilter = CIFilter.colorMatrix()
             opacityFilter.inputImage = image
-            opacityFilter.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(layer.opacity))
+            let opacity = CGFloat(layer.opacity)
+            opacityFilter.rVector = CIVector(x: opacity, y: 0, z: 0, w: 0)
+            opacityFilter.gVector = CIVector(x: 0, y: opacity, z: 0, w: 0)
+            opacityFilter.bVector = CIVector(x: 0, y: 0, z: opacity, w: 0)
+            opacityFilter.aVector = CIVector(x: 0, y: 0, z: 0, w: opacity)
             image = opacityFilter.outputImage ?? image
         }
 
@@ -333,18 +334,18 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                                           renderSize: CGSize) -> CIImage? {
         let localTime = CMTimeMaximum(time - item.range.start, .zero)
         let styleValues = item.styleKeyframes?.values(at: localTime)
-        let effectiveStyle = item.styleKeyframes?.effectiveStyle(base: item.style, at: localTime)
+        let rasterStyle = item.styleKeyframes?.rasterStyle(base: item.style, at: localTime)
             ?? item.style
         let wordIndex = activeWordIndex(for: item, at: time)
         let raster = wordIndex.map { index in
             Self.sharedCaptionRasterer.highlightRaster(
-                line: makeLineProxy(item: item, style: effectiveStyle),
-                style: effectiveStyle,
+                line: makeLineProxy(item: item, style: rasterStyle),
+                style: rasterStyle,
                 renderSize: renderSize,
                 wordIndex: index)
         } ?? Self.sharedCaptionRasterer.idleRaster(
-            line: makeLineProxy(item: item, style: effectiveStyle),
-            style: effectiveStyle,
+            line: makeLineProxy(item: item, style: rasterStyle),
+            style: rasterStyle,
             renderSize: renderSize)
 
         guard let raster, raster.boundingBox != .zero else { return nil }
@@ -353,10 +354,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             currentTime: time,
             lineStart: item.range.start,
             lineEnd: item.range.end,
-            style: effectiveStyle)
+            style: rasterStyle)
         var image = raster.image
 
-        if effectiveStyle.enterAnimation == .typewriter && animation.typewriterProgress < 1 {
+        if rasterStyle.enterAnimation == .typewriter && animation.typewriterProgress < 1 {
             image = typewriterMasked(image: image,
                                      textBox: raster.textBox,
                                      progress: animation.typewriterProgress)

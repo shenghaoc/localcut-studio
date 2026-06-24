@@ -121,6 +121,20 @@ func captionStyleKeyframesInterpolate() {
     #expect(abs(mid.letterSpacing - 4) < 1e-6)
 }
 
+@Test("CaptionStyleKeyframes: keyframe times deduplicate and sort across properties")
+func captionStyleKeyframeTimesDeduplicateAndSort() {
+    var keyframes = CaptionStyleKeyframes()
+    keyframes.addOrUpdateKeyframes(
+        at: CMTime(seconds: 2, preferredTimescale: 600),
+        values: CaptionStyleKeyframeValues(scale: 1.2))
+    keyframes.addOrUpdateKeyframes(
+        at: CMTime(seconds: 1, preferredTimescale: 600),
+        values: CaptionStyleKeyframeValues(scale: 1.1))
+
+    #expect(keyframes.allKeyframeTimes.map(\.seconds) == [1, 2])
+    #expect(keyframes.keyframeCount == 2)
+}
+
 @Test("CaptionLine: style keyframes round-trip through Codable")
 func captionLineStyleKeyframesRoundTrip() throws {
     var keyframes = CaptionStyleKeyframes()

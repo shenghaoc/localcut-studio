@@ -882,16 +882,16 @@ nonisolated struct CaptionStyleKeyframes: Hashable, Codable, Sendable {
     var keyframeCount: Int { allKeyframeTimes.count }
 
     var allKeyframeTimes: [CMTime] {
-        var times: [CMTime] = []
+        var times = Set<CMTime>()
         for time in fill.keyframes.map(\.time)
             + scale.keyframes.map(\.time)
             + offsetX.keyframes.map(\.time)
             + offsetY.keyframes.map(\.time)
             + opacity.keyframes.map(\.time)
             + letterSpacing.keyframes.map(\.time) {
-            if !times.contains(time) { times.append(time) }
+            times.insert(time)
         }
-        return times.sorted()
+        return Array(times).sorted()
     }
 
     func hasKeyframe(at time: CMTime) -> Bool {
@@ -908,7 +908,10 @@ nonisolated struct CaptionStyleKeyframes: Hashable, Codable, Sendable {
             letterSpacing: letterSpacing.value(at: time))
     }
 
-    func effectiveStyle(base: CaptionStyle, at time: CMTime) -> CaptionStyle {
+    /// Returns the keyframed properties consumed by text rasterization. Scale,
+    /// offsets, and opacity stay outside the style because the compositor applies
+    /// them as post-raster image transforms.
+    func rasterStyle(base: CaptionStyle, at time: CMTime) -> CaptionStyle {
         let values = values(at: time)
         var style = base
         style.fill = values.fill
