@@ -12,7 +12,7 @@ Append a dated entry whenever you learn something about keeping LocalCut Studio 
 **Learning:** Generating bin thumbnails with a fresh `AVAssetImageGenerator` per item, synchronously, would block import and churn memory.
 **Action:** Generate thumbnails asynchronously after metadata load, with a bounded `maximumSize` and `appliesPreferredTrackTransform = true`, in a detached `Task` per item; never hold the generator past the single `image(at:)` call.
 
-## 2024-06-24 - Combine redundant pixel readback loops in ScopeSampler
+## 2026-06-24 - Combine redundant pixel readback loops in ScopeSampler
 
 **Learning:** In video processing pipelines like LocalCut Studio, multi-pass reads over frame readback buffers (like the 160x90 `ScopeReadback.pixels` array) to extract independent metrics (e.g. waveform luma and vectorscope UV offsets) redundantly traverse arrays, compute offsets, and clamp values. This harms cache locality and duplicates work for identical inputs.
 **Action:** Always look for opportunities to combine pixel array traversals. Merge discrete processing loops into a single pass when extracting multiple analytical components from the same readback buffer. This shares the overhead of loop management, memory access (cache hits), array offset indexing, and channel clamping.
