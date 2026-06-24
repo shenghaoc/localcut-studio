@@ -1,6 +1,6 @@
 # Design: Phase 30 — Animated Caption Styles (花字)
 
-> Status: **Proposed**. Target tag: **v0.1.1**.
+> Status: **Implemented**. Target tag: **v0.1.1**.
 
 ## Goal
 

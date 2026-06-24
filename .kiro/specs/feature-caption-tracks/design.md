@@ -1,6 +1,6 @@
 # Design: Caption Tracks (P22 native equivalent)
 
-> Status: **Proposed**. Infrastructure prerequisite for Phase 30 (animated captions) and Phase 44 (tutorial finishing).
+> Status: **Implemented**. Infrastructure prerequisite for Phase 30 (animated captions) and Phase 44 (tutorial finishing).
 
 ## Goal
 
