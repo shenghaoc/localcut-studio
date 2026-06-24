@@ -138,7 +138,11 @@ final class DocumentController {
         var refreshedBookmark = false
         for ref in document.media {
             if let item = resolveMedia(ref, bundleURL: bundleURL, model: model) {
-                if item.bookmark != ref.bookmark { refreshedBookmark = true }
+                // Treat nil and empty Data as equivalent — bundled media has
+                // nil bookmark, while the decoded ref defaults to empty Data.
+                let itemBookmark = item.bookmark ?? Data()
+                let refBookmark = ref.bookmark
+                if itemBookmark != refBookmark { refreshedBookmark = true }
                 model.project.mediaItems.append(item)
             } else {
                 unresolved.append(ref)
