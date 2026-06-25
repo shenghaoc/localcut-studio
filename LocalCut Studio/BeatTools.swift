@@ -316,6 +316,10 @@ nonisolated enum BeatDetectionCore {
         return peaks
     }
 
+    /// Fraction of the winning lag's onset energy a faster sub-harmonic must
+    /// retain before we treat it as the true fundamental tempo.
+    static let octaveEnergyFraction: Float = 0.5
+
     static func estimateTempoBPM(envelope: [Float],
                                  hopDuration: Double,
                                  minBPM: Double = 60,
@@ -325,20 +329,61 @@ nonisolated enum BeatDetectionCore {
         let maxLag = max(minLag, Int((60 / minBPM / hopDuration).rounded()))
         guard envelope.count > maxLag else { return 0 }
 
-        var bestLag = minLag
-        var bestScore: Float = 0
-        for lag in minLag...maxLag {
+        // Raw (unnormalised) autocorrelation of the onset envelope at `lag`.
+        func autocorrelation(at lag: Int) -> Float {
+            guard lag >= 1, lag < envelope.count else { return 0 }
             var score: Float = 0
             for index in lag..<envelope.count {
                 score += envelope[index] * envelope[index - lag]
             }
-            let normalizedScore = score / Float(envelope.count - lag)
+            return score
+        }
+
+        var bestLag = minLag
+        var bestScore: Float = 0
+        for lag in minLag...maxLag {
+            let normalizedScore = autocorrelation(at: lag) / Float(envelope.count - lag)
             if normalizedScore > bestScore {
                 bestScore = normalizedScore
                 bestLag = lag
             }
         }
         guard bestScore > 0 else { return 0 }
+
+        // Tempo-octave (sub-harmonic) correction. Integer-lag autocorrelation on
+        // a non-integer beat period locks onto whichever lag best aligns with an
+        // *integer multiple* of the true period — often a sub-harmonic (half or
+        // third tempo). A 120 BPM click whose beats fall every 21.5 frames, for
+        // example, correlates better at lag 43 (≈2 beats) than at lag 21/22, so
+        // the bare peak reports ~60 BPM. If a lag near bestLag/2 or bestLag/3
+        // still carries at least `octaveEnergyFraction` of the peak's onset
+        // energy, prefer that faster fundamental. A genuine half-tempo track has
+        // little energy at the doubled rate, so the threshold leaves it alone.
+        var improved = true
+        while improved {
+            improved = false
+            let peakEnergy = autocorrelation(at: bestLag)
+            guard peakEnergy > 0 else { break }
+            for divisor in [2, 3] {
+                let target = Double(bestLag) / Double(divisor)
+                guard target >= Double(minLag) else { continue }
+                // The two integer lags straddling the ideal sub-harmonic.
+                let candidates = Set([Int(target.rounded(.down)), Int(target.rounded(.up))])
+                var pick: (lag: Int, energy: Float)?
+                for candidate in candidates where candidate >= minLag && candidate <= maxLag {
+                    let energy = autocorrelation(at: candidate)
+                    if pick == nil || energy > pick!.energy {
+                        pick = (candidate, energy)
+                    }
+                }
+                if let pick, pick.energy >= peakEnergy * octaveEnergyFraction {
+                    bestLag = pick.lag
+                    improved = true
+                    break
+                }
+            }
+        }
+
         return 60 / (Double(bestLag) * hopDuration)
     }
 
