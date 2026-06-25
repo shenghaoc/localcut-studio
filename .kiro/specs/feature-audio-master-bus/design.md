@@ -1,6 +1,6 @@
 # Design: Audio Master Bus (P16 native equivalent)
 
-> Status: **Proposed**. Infrastructure prerequisite for Phase 35 (speed ramps),
+> Status: **Implemented**. Infrastructure prerequisite for Phase 35 (speed ramps),
 > Phase 36 (voice cleanup), and Phase 46 (replay buffer).
 
 ## Goal

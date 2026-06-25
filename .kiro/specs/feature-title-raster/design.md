@@ -1,6 +1,6 @@
 # Design: Title Raster Path (P14 native equivalent)
 
-> Status: **Proposed**. Infrastructure prerequisite for Phase 30 (animated captions) and Phase 38 (look packs).
+> Status: **Implemented**. Infrastructure prerequisite for Phase 30 (animated captions) and Phase 38 (look packs).
 
 ## Goal
 

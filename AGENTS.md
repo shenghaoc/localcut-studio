@@ -32,17 +32,54 @@ Reusable packs in [`.kiro/skills/`](.kiro/skills/):
 
 Each spec has `design.md`, `requirements.md`, and `tasks.md` (bugfix specs use `bugfix.md` instead of `requirements.md`).
 
-**Completed:**
+> **Roadmap order is the target tag in each `design.md`, _not_ the phase number.** Phase
+> numbers track the browser-editor's history; the native port ships them in a different
+> order. The ML-tier phases (on-device ASR, Vision matting / reframe / beauty, frame
+> interpolation, language tools) are **held until macOS 27 leaves beta** so they share one
+> OS baseline — lower-numbered phases can therefore sit _behind_ higher-numbered ones.
 
-- [**Phase 1 — Foundation**](.kiro/specs/phase-1-foundation/tasks.md) — multi-track timeline, media bin, live `AVPlayer` preview from `AVMutableComposition`, clip split/delete, per-clip opacity, resolution/fps settings, and `.mov` export with progress.
-- [**LocalCutCore package**](.kiro/specs/feature-localcutcore-package/tasks.md) — extract pure engine logic (models, transitions, render planning, keyframes, captions, diagnostics, time formatting) into a local SwiftPM package for fast `swift test` iteration and CI gating.
+### Completed
 
-**Active / Proposed:**
+**Editing core** — [Phase 1 Foundation](.kiro/specs/phase-1-foundation/tasks.md) (multi-track timeline, media bin, live `AVPlayer` preview, split/delete/opacity, `.mov` export) · [Timeline trim & drag](.kiro/specs/feature-timeline-trim-and-drag/tasks.md) · [Transitions](.kiro/specs/feature-transitions/tasks.md) · [Keyframe system](.kiro/specs/feature-keyframes/tasks.md)
 
-- [**Colour grading**](.kiro/specs/feature-colour-grading/tasks.md) — Core Image / Metal effect chain (exposure, contrast, saturation, white balance, LUT) applied through a custom `AVVideoCompositing` so preview and export share one render path.
-- [**Timeline trim & drag**](.kiro/specs/feature-timeline-trim-and-drag/tasks.md) — direct-manipulation trimming of clip edges and drag-to-move within and across tracks, with snapping and ripple options.
-- [**Transitions**](.kiro/specs/feature-transitions/tasks.md) — cross-dissolve and wipe transitions between adjacent clips via tween layer instructions / Core Image transition filters.
-- [**Project persistence**](.kiro/specs/feature-project-persistence/tasks.md) — Codable document model with security-scoped bookmarks, save/open, and undo/redo.
+**Effects & grade** — [Colour grading](.kiro/specs/feature-colour-grading/tasks.md) (custom `AVVideoCompositing`, shared preview/export path) · [Colour management + scopes](.kiro/specs/feature-colour-management/tasks.md) · [Title raster path](.kiro/specs/feature-title-raster/tasks.md) · [Skin smoothing (Phase 32a, no ML)](.kiro/specs/phase-32a-skin-smoothing/tasks.md)
+
+**Audio & captions** — [Audio master bus](.kiro/specs/feature-audio-master-bus/tasks.md) · [Caption tracks](.kiro/specs/feature-caption-tracks/tasks.md) · [Animated caption styles (Phase 30, 花字)](.kiro/specs/phase-30-animated-captions/tasks.md)
+
+**Project & infra** — [Project persistence](.kiro/specs/feature-project-persistence/tasks.md) · [Project bundles](.kiro/specs/feature-project-bundles/tasks.md) · [Render cache](.kiro/specs/feature-render-cache/tasks.md) · [Export presets + render queue](.kiro/specs/feature-export-queue/tasks.md) · [Timeline markers](.kiro/specs/feature-markers/tasks.md) · [Capability tiers](.kiro/specs/feature-capability-tiers/tasks.md) · [LocalCutCore package](.kiro/specs/feature-localcutcore-package/tasks.md) · [Diagnostics panel](.kiro/specs/feature-diagnostics/tasks.md)
+
+**Bugfix specs** — [v0.1.0 consolidation](.kiro/specs/bugfix-v0.1.0-consolidation/tasks.md) · [build warnings & Swift 6 modernization](.kiro/specs/bugfix-build-warnings-and-modernization/tasks.md) · [CMTimeCode timescale guard](.kiro/specs/bugfix-cmtimecode-timescale/tasks.md) · [FingerprintIndex JSON determinism](.kiro/specs/bugfix-fingerprint-index-determinism/tasks.md) · [implemented-spec polish](.kiro/specs/bugfix-implemented-spec-polish/tasks.md)
+
+### Proposed (ready — not blocked)
+
+In ship order. **Phase 34 is next.**
+
+| Tag | Spec | Scope |
+| --- | --- | --- |
+| v0.1.3 | [Phase 34 — Beat tools (卡点)](.kiro/specs/phase-34-beat-tools/tasks.md) | Offline beat analysis on a background actor, beat markers, snap-to-beat, auto-cut clips to beats. |
+| v0.1.4 | [Phase 35 — Time remapping](.kiro/specs/phase-35-speed-ramps/tasks.md) | Keyframed speed ramps (0.25×–4×) with pitch-preserving audio time-stretch. |
+| v0.1.5 | [Phase 36 — Voice cleanup](.kiro/specs/phase-36-voice-cleanup/tasks.md) | Master-bus denoise/gate, EBU R128 loudness normalisation, limiter — live and offline. |
+| v0.1.6 | [Phase 38 — Look packs & overlays](.kiro/specs/phase-38-look-packs/tasks.md) | Film-emulation nodes + JSON look presets; animated overlays (WebP/Lottie/alpha video). |
+| v0.1.7 | [Phase 39 — Vertical & platform finishing](.kiro/specs/phase-39-vertical-finishing/tasks.md) | Aspect modes (9:16/1:1/4:5), safe-zone overlays, cover-frame picker, per-platform presets. |
+| v0.1.8 | [Phase 41 — Capture engine](.kiro/specs/phase-41-capture-engine/tasks.md) | ScreenCaptureKit + AVCaptureSession, crash-safe fragmented `.mov` per source as separate tracks. |
+| v0.1.9 | [Phase 42 — Recorder UX](.kiro/specs/phase-42-recorder-ux/tasks.md) | Countdown, pause/resume, source switching, webcam PiP, floating control strip, retake. |
+| v0.1.10 | [Phase 43 — Screencast post pack](.kiro/specs/phase-43-screencast-look/tasks.md) | Zoom & pan keyframe presets, event-log auto-zoom, callout clips, padded-background preset. |
+| v0.1.11 | [Phase 44 — Tutorial finishing](.kiro/specs/phase-44-tutorial-finishing/tasks.md) | Silence detection, keystroke overlay, chapter export, screencast caption preset. |
+| v0.1.12 | [Phase 45 — Program mode](.kiro/specs/phase-45-program-mode/tasks.md) | Live switchable scenes through the Metal compositor; ISO tracks + replayable layout track. |
+| v0.1.13 | [Phase 46 — Replay buffer + live audio chain](.kiro/specs/phase-46-replay-buffer/tasks.md) | Keyframe-aligned ring buffer "save last N seconds"; live monitor inserts. |
+| v0.1.14 | [Phase 47 — WHIP publish](.kiro/specs/phase-47-whip-publish/tasks.md) | Standards-compliant WHIP (RFC 9725) client streaming the program feed to a user endpoint. |
+| v0.2.0 | [Phase 48 — OpenTimelineIO export](.kiro/specs/phase-48-otio-interchange/tasks.md) | Pure-Swift `.otio` serialiser (+ CMX3600 EDL) — final non-ML phase. |
+
+### Proposed (blocked on macOS 27 leaving beta — ML tier)
+
+| Tag | Spec | Scope |
+| --- | --- | --- |
+| v0.2.1 | [Phase 29 — On-device auto captions](.kiro/specs/phase-29-auto-captions/tasks.md) | Apple `Speech` ASR over clip audio → review-before-apply caption proposals. |
+| v0.2.2 | [Phase 31 — Portrait matting](.kiro/specs/phase-31-portrait-matting/tasks.md) | `Vision` person segmentation as a per-clip effect, zero-copy through the compositor. |
+| v0.2.3 | [Phase 33 — Smart reframe](.kiro/specs/phase-33-smart-reframe/tasks.md) | Subject-aware crop-path keyframes for aspect conversion, with shot-boundary resets. |
+| v0.2.4 | [Phase 32b — Landmark beauty](.kiro/specs/phase-32b-landmark-beauty/tasks.md) | `Vision` face-landmark-driven beauty adjustments. |
+| v0.2.5 | [Phase 37 — Frame interpolation](.kiro/specs/phase-37-frame-interpolation/tasks.md) | `VTFrameProcessor` optical-flow interpolation for ultra-smooth slow motion. |
+| v1.0.0 | [Phase 40 — On-device language tools](.kiro/specs/phase-40-language-tools/tasks.md) | Translation / language features — browser-editor v1 parity. |
 
 ## Review guidelines
 
