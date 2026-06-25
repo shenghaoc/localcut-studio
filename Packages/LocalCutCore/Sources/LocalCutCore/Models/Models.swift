@@ -356,6 +356,37 @@ extension Effect {
     public var isLookEffect: Bool {
         lookKind != nil
     }
+
+    /// Fixed render-pipeline precedence so the rendered result does not depend on
+    /// the order in which inspector controls happened to be used. Colour grade and
+    /// LUT come first, then skin smoothing, then the look-pack nodes in their
+    /// documented order (halation → vignette → grain, so grain is laid down last
+    /// and is not blurred or reshaped by the glow/shading passes).
+    public var pipelineOrder: Int {
+        switch self {
+        case .colourGrade: 0
+        case .lut: 1
+        case .skinSmooth: 2
+        case .halation: 3
+        case .vignette: 4
+        case .grain: 5
+        }
+    }
+}
+
+extension Array where Element == Effect {
+    /// Returns the effects in canonical render order (`Effect.pipelineOrder`).
+    /// The sort is stable, so two effects of the same kind keep their relative
+    /// order. This is a render-time view only; the stored chain is left as-is.
+    public func canonicalPipelineOrder() -> [Effect] {
+        enumerated()
+            .sorted {
+                $0.element.pipelineOrder == $1.element.pipelineOrder
+                    ? $0.offset < $1.offset
+                    : $0.element.pipelineOrder < $1.element.pipelineOrder
+            }
+            .map(\.element)
+    }
 }
 
 // MARK: - Transitions

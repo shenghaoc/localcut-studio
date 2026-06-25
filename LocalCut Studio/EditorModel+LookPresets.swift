@@ -109,7 +109,10 @@ extension EditorModel {
     }
 
     func importLookPreset(url: URL) async {
-        guard selectedVideoClipID != nil else {
+        // Capture the target clip now: the detached read below can take a while on
+        // a slow location, and the user may select a different clip meanwhile. We
+        // apply to the clip that was selected when the import started.
+        guard let targetID = selectedVideoClipID else {
             statusMessage = "Select a video clip before importing a look preset."
             return
         }
@@ -131,7 +134,7 @@ extension EditorModel {
                 return (preset, bookmark)
             }.value
 
-            applyLookPreset(preset, lutBookmark: lutBookmark)
+            applyLookPreset(preset, lutBookmark: lutBookmark, clipID: targetID)
         } catch {
             statusMessage = "Could not import \(url.lastPathComponent)."
         }
@@ -189,9 +192,14 @@ extension EditorModel {
         }
     }
 
-    private func applyLookPreset(_ preset: LookPresetV1, lutBookmark: Data?) {
-        guard let id = selectedVideoClipID else {
+    private func applyLookPreset(_ preset: LookPresetV1, lutBookmark: Data?, clipID: Clip.ID? = nil) {
+        guard let id = clipID ?? selectedVideoClipID else {
             statusMessage = "Select a video clip before applying a look preset."
+            return
+        }
+        // The target may have been deleted while an import read off the main actor.
+        guard track(for: id)?.kind == .video else {
+            statusMessage = "The clip is no longer available."
             return
         }
 
@@ -201,7 +209,15 @@ extension EditorModel {
                 var effects = preset.applying(to: track.clips[index].effects)
                 if let lutBookmark {
                     effects = effects.replacingLUT(bookmark: lutBookmark)
+                } else if preset.lut != nil {
+                    // The preset declares a LUT we could not resolve. Drop any LUT
+                    // already on the clip so we render a neutral/relink state rather
+                    // than a stale LUT left over from the previous chain.
+                    effects = effects.removingLUT()
                 }
+                // Derive the grain seed from the target clip so the same preset
+                // applied to two clips does not produce identical procedural noise.
+                effects = Self.seedingGrain(effects, for: id)
                 track.clips[index].effects = effects
                 pruneLUTDisplayNames()
                 RenderCache.shared.invalidate(clipID: id)
@@ -214,6 +230,27 @@ extension EditorModel {
                 return
             }
         }
+    }
+
+    /// Mixes each grain node's preset seed with a per-clip seed so repeated
+    /// presets do not share an identical grain pattern across clips.
+    private static func seedingGrain(_ effects: [Effect], for id: Clip.ID) -> [Effect] {
+        let clipSeed = grainSeed(for: id)
+        return effects.map { effect in
+            guard case .grain(var grain) = effect else { return effect }
+            grain.seed ^= clipSeed
+            return .grain(grain)
+        }
+    }
+
+    /// Stable 64-bit seed derived from a clip's identifier (FNV-1a over the UUID).
+    private static func grainSeed(for id: Clip.ID) -> UInt64 {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in id.uuidString.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return hash
     }
 
     private var selectedVideoClipID: Clip.ID? {

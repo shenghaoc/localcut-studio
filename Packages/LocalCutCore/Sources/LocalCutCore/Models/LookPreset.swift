@@ -35,13 +35,23 @@ public enum LookPresetNode: Hashable, Codable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let effectName = try container.decode(String.self, forKey: .effectName)
+        // The effect payloads use synthesized `Codable`, so their `clamp()` is
+        // bypassed on decode. Clamp here so a shared/edited `.lclook` can never
+        // feed out-of-range values (huge radius/redBoost/grain size) straight
+        // into the Core Image filters during preview/export.
         switch effectName {
         case LookEffectKind.grain.rawValue:
-            self = .grain(try container.decode(GrainEffect.self, forKey: .params))
+            var grain = try container.decode(GrainEffect.self, forKey: .params)
+            grain.clamp()
+            self = .grain(grain)
         case LookEffectKind.halation.rawValue:
-            self = .halation(try container.decode(HalationEffect.self, forKey: .params))
+            var halation = try container.decode(HalationEffect.self, forKey: .params)
+            halation.clamp()
+            self = .halation(halation)
         case LookEffectKind.vignette.rawValue:
-            self = .vignette(try container.decode(VignetteEffect.self, forKey: .params))
+            var vignette = try container.decode(VignetteEffect.self, forKey: .params)
+            vignette.clamp()
+            self = .vignette(vignette)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .effectName,

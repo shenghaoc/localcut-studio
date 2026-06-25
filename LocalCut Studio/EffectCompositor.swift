@@ -516,7 +516,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let sourceExtent = image.extent
         var result = image
         var allEffectsApplied = true
-        for effect in effects {
+        // Render in canonical pipeline order (colour/LUT → skin → looks) so the
+        // output is independent of the order the inspector controls were used.
+        for effect in effects.canonicalPipelineOrder() {
             switch effect {
             case .colourGrade(let grade):
                 result = applyColourGrade(result, grade: grade)
