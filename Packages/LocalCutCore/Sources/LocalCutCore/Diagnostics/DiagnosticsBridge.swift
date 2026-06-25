@@ -68,14 +68,4 @@ public final class DiagnosticsBridge: Sendable {
             s.totalFrameCount = 0
         }
     }
-
-    public func reset() {
-        state.withLock { s in
-            s.renderTimes.removeAll()
-            s.lastRenderTime = 0
-            s.decoderCount = 0
-            s.totalFrameCount = 0
-        }
-        enabledFlag.withLock { $0 = false }
-    }
 }
