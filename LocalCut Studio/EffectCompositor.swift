@@ -658,16 +658,21 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         blur.radius = params.radius
         let glow = (blur.outputImage ?? image).cropped(to: image.extent)
 
+        // Scale every colour-matrix vector by the same strength factor so the
+        // premultiplied-alpha relationship stays valid (RGB never exceeds the
+        // alpha channel). This also folds the previous redundant `scaled()` pass
+        // into a single filter — scaling alpha alone then again afterwards left
+        // an invalid premultiplied state and double-applied the strength.
         let warm = CIFilter.colorMatrix()
         warm.inputImage = glow
         let redGain = CGFloat(1 + params.redBoost * strength)
-        warm.rVector = CIVector(x: redGain, y: 0, z: 0, w: 0)
-        warm.gVector = CIVector(x: 0, y: 0.42, z: 0, w: 0)
-        warm.bVector = CIVector(x: 0, y: 0, z: 0.18, w: 0)
-        warm.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(strength) * 0.65)
+        let factor = CGFloat(strength) * 0.65
+        warm.rVector = CIVector(x: redGain * factor, y: 0, z: 0, w: 0)
+        warm.gVector = CIVector(x: 0, y: 0.42 * factor, z: 0, w: 0)
+        warm.bVector = CIVector(x: 0, y: 0, z: 0.18 * factor, w: 0)
+        warm.aVector = CIVector(x: 0, y: 0, z: 0, w: factor)
 
-        let scaledGlow = scaled((warm.outputImage ?? glow).cropped(to: image.extent),
-                                by: min(1, strength * 0.65))
+        let scaledGlow = (warm.outputImage ?? glow).cropped(to: image.extent)
         let add = CIFilter.additionCompositing()
         add.inputImage = scaledGlow
         add.backgroundImage = image

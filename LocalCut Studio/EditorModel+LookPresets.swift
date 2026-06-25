@@ -108,20 +108,26 @@ extension EditorModel {
         applyLookPreset(preset, sourceURL: nil)
     }
 
-    func importLookPreset(url: URL) {
+    func importLookPreset(url: URL) async {
         guard selectedVideoClipID != nil else {
             statusMessage = "Select a video clip before importing a look preset."
             return
         }
 
-        let didAccess = url.startAccessingSecurityScopedResource()
-        defer {
-            if didAccess { url.stopAccessingSecurityScopedResource() }
-        }
-
         do {
-            let data = try Data(contentsOf: url)
-            let preset = try LookPresetV1(data: data)
+            // Read and decode off the main actor: a preset on a slow network
+            // share or iCloud Drive would otherwise block the UI. Security-scoped
+            // access is thread-bound, so start/stop must bracket the read in the
+            // same background context.
+            let preset = try await Task.detached {
+                let didAccess = url.startAccessingSecurityScopedResource()
+                defer {
+                    if didAccess { url.stopAccessingSecurityScopedResource() }
+                }
+                let data = try Data(contentsOf: url)
+                return try LookPresetV1(data: data)
+            }.value
+
             applyLookPreset(preset, sourceURL: url)
         } catch {
             statusMessage = "Could not import \(url.lastPathComponent)."

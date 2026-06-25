@@ -56,7 +56,9 @@ struct InspectorView: View {
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
-                model.importLookPreset(url: url)
+                Task {
+                    await model.importLookPreset(url: url)
+                }
             }
         }
     }
