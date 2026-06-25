@@ -97,6 +97,7 @@ final class EditorModel {
     @ObservationIgnored private let previewRebuildCoordinator = PreviewRebuildCoordinator()
     @ObservationIgnored private let exportCoordinator = ExportCoordinator()
     @ObservationIgnored let documentController = DocumentController()
+    @ObservationIgnored let captureCoordinator = CaptureCoordinator()
 
     // Skin smoothing debug
     var showSkinMask = false
@@ -126,6 +127,13 @@ final class EditorModel {
         didSet { syncDiagnosticsLifecycle() }
     }
     let diagnostics: DiagnosticsAgent
+
+    // Capture engine (Phase 41)
+    var isRecorderPresented = false
+    var isRecording = false
+    var recordingStartedAt: Date?
+    var recoveredCaptureSessions: [CaptureSessionResult] = []
+    @ObservationIgnored var recordingsFolderAccessURL: URL?
 
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
@@ -258,6 +266,7 @@ final class EditorModel {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
+        recordingsFolderAccessURL?.stopAccessingSecurityScopedResource()
     }
 
     /// Starts or stops the diagnostics agent to match the panel's visibility.
