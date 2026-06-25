@@ -60,21 +60,25 @@ extension EditorModel {
     }
 
     func resolvedRecordingsFolder(promptIfMissing: Bool) -> URL? {
-        if let resolved = try? RecordingFolderStore.resolve() {
-            adoptRecordingsFolderAccess(resolved.url)
+        // Only treat the bookmarked folder as usable if security-scoped access
+        // was actually acquired; a stale bookmark would otherwise return a URL
+        // we cannot write to.
+        if let resolved = try? RecordingFolderStore.resolve(), adoptRecordingsFolderAccess(resolved.url) {
             return resolved.url
         }
         guard promptIfMissing else { return nil }
         return chooseRecordingsFolder()
     }
 
-    private func adoptRecordingsFolderAccess(_ url: URL) {
+    @discardableResult
+    private func adoptRecordingsFolderAccess(_ url: URL) -> Bool {
         if recordingsFolderAccessURL?.standardizedFileURL == url.standardizedFileURL {
-            return
+            return true
         }
         recordingsFolderAccessURL?.stopAccessingSecurityScopedResource()
         let didStart = url.startAccessingSecurityScopedResource()
         recordingsFolderAccessURL = didStart ? url : nil
+        return didStart
     }
 
     func scanRecoveredRecordings() async {
@@ -108,7 +112,15 @@ extension EditorModel {
             fragmentInterval: CMTime(seconds: 2, preferredTimescale: 600),
             capabilities: Capabilities.current)
         do {
-            try await captureCoordinator.start(request)
+            try await captureCoordinator.start(request, onStreamStopped: { [weak self] error in
+                // The screen stream ended unexpectedly mid-recording; stop and
+                // finalize so the toolbar doesn't keep showing an active capture.
+                Task { @MainActor in
+                    guard let self, self.isRecording else { return }
+                    self.statusMessage = "Screen capture stopped: \(error.localizedDescription)"
+                    self.stopRecording()
+                }
+            })
             recordingStartedAt = Date()
             isRecording = true
             isRecorderPresented = false
@@ -158,6 +170,7 @@ extension EditorModel {
         }
 
         var loaded: [LoadedCapturedSource] = []
+        var loadErrors: [String] = []
         for source in recoveredSources {
             let url = result.directoryURL.appendingPathComponent(source.descriptor.relativePath)
             guard FileManager.default.fileExists(atPath: url.path) else { continue }
@@ -185,12 +198,16 @@ extension EditorModel {
                 loaded.append(LoadedCapturedSource(item: item, source: source, didAccess: didAccess))
             } catch {
                 if didAccess { url.stopAccessingSecurityScopedResource() }
-                statusMessage = "Could not load \(url.lastPathComponent): \(error.localizedDescription)"
+                // Accumulate so a later successful source doesn't overwrite and
+                // hide this failure in the status line.
+                loadErrors.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
         }
 
         guard !loaded.isEmpty else {
-            statusMessage = "Recording stopped, but no captured files could be loaded."
+            statusMessage = loadErrors.isEmpty
+                ? "Recording stopped, but no captured files could be loaded."
+                : "Recording stopped. Sources failed: \(loadErrors.joined(separator: "; "))"
             return
         }
 
@@ -221,6 +238,10 @@ extension EditorModel {
                 ? "Added recovered recording."
                 : "Recording added to timeline."
             scheduleRebuild()
+        }
+
+        if !loadErrors.isEmpty {
+            statusMessage += " Some sources failed: \(loadErrors.joined(separator: "; "))"
         }
 
         for entry in loaded where entry.item.hasVideo {

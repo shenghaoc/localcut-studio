@@ -161,7 +161,9 @@ struct RecorderSetupView: View {
         Task {
             await model.startRecording(
                 target: target,
-                includeSystemAudio: includeScreen && includeSystemAudio,
+                // Only capture system audio when a screen target actually
+                // exists; otherwise its writer would never receive data.
+                includeSystemAudio: target != nil && includeSystemAudio,
                 webcamDeviceID: webcam,
                 microphoneDeviceID: mic)
         }

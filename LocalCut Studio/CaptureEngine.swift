@@ -234,6 +234,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private let lock = NSLock()
 
     private var didStartWriting = false
+    private var isFinished = false
     private var firstPresentationTime: CMTime?
     private var lastPresentationTime: CMTime?
     private var sampleCount = 0
@@ -269,6 +270,9 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     }
 
     private func appendLocked(_ sampleBuffer: CMSampleBuffer) {
+        // Once finalized (or a fatal writer failure occurred) discard any
+        // late-arriving buffers; appending to a finished/failed writer crashes.
+        guard !isFinished else { return }
         guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         guard pts.isValid, !pts.isIndefinite else { return }
@@ -276,6 +280,9 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         if !didStartWriting {
             guard writer.startWriting() else {
                 recordBackpressure(reason: writer.error?.localizedDescription ?? "writer.startWriting failed")
+                // A failed AVAssetWriter cannot recover; stop attempting on
+                // every subsequent frame.
+                isFinished = true
                 return
             }
             writer.startSession(atSourceTime: pts)
@@ -313,6 +320,8 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     func finish() async throws -> CaptureSourceEndedRecord {
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()
+            // Block any concurrent late buffers before finalizing the input.
+            isFinished = true
             input.markAsFinished()
 
             guard didStartWriting else {
@@ -367,16 +376,19 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     private let videoWriter: ContinuousCaptureWriter?
     private let audioWriter: ContinuousCaptureWriter?
     private let outputQueue = DispatchQueue(label: "com.localcutstudio.capture.screen.output")
+    private let onStop: (@Sendable (Error) -> Void)?
     private var stream: SCStream?
 
     init(target: CaptureTarget,
          frameRate: Double,
          videoWriter: ContinuousCaptureWriter?,
-         audioWriter: ContinuousCaptureWriter?) {
+         audioWriter: ContinuousCaptureWriter?,
+         onStop: (@Sendable (Error) -> Void)? = nil) {
         self.target = target
         self.frameRate = frameRate
         self.videoWriter = videoWriter
         self.audioWriter = audioWriter
+        self.onStop = onStop
     }
 
     func start() async throws {
@@ -469,7 +481,9 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        _ = error
+        // The stream stopped unexpectedly (window closed, permission revoked,
+        // etc.). Surface it so the UI can stop the recording and inform the user.
+        onStop?(error)
     }
 }
 
@@ -526,10 +540,18 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
         }
 
         session.commitConfiguration()
-        await withCheckedContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
                 self.session.startRunning()
-                continuation.resume()
+                // startRunning() is fire-and-forget; if the device is busy or
+                // access was revoked the session silently fails to start.
+                if self.session.isRunning {
+                    continuation.resume()
+                } else {
+                    let kind = self.mediaType == .video ? "camera" : "microphone"
+                    continuation.resume(throwing: CaptureEngineError.captureSessionFailed(
+                        "The \(kind) session failed to start (device may be in use)."))
+                }
             }
         }
     }
@@ -565,7 +587,8 @@ actor CaptureCoordinator {
 
     private var activeSession: ActiveSession?
 
-    func start(_ request: CaptureStartRequest) async throws {
+    func start(_ request: CaptureStartRequest,
+               onStreamStopped: (@Sendable (Error) -> Void)? = nil) async throws {
         guard activeSession == nil else { throw CaptureEngineError.alreadyRecording }
         let sourceCount = (request.target.map { _ in 1 } ?? 0)
             + (request.includeSystemAudio ? 1 : 0)
@@ -599,7 +622,7 @@ actor CaptureCoordinator {
 
         if let target = request.target {
             let size = target.outputSize
-            var source = CaptureSourceDescriptor(
+            let source = CaptureSourceDescriptor(
                 kind: target.sourceKind,
                 displayName: target.displayName,
                 relativePath: "screen.mov",
@@ -656,32 +679,37 @@ actor CaptureCoordinator {
                 target: target,
                 frameRate: request.frameRate,
                 videoWriter: screenVideoWriter,
-                audioWriter: screenAudioWriter))
+                audioWriter: screenAudioWriter,
+                onStop: onStreamStopped))
         }
 
         if let webcamDeviceID = request.webcamDeviceID {
+            // Match the writer to the camera's native dimensions so frames are
+            // not rescaled by the encoder; fall back to 720p if unavailable.
+            let camSize = Self.webcamDimensions(deviceID: webcamDeviceID)
+            let bitrate = Self.videoBitrate(width: camSize.width, height: camSize.height, frameRate: request.frameRate)
             let source = CaptureSourceDescriptor(
                 kind: .webcam,
                 displayName: "Webcam",
                 relativePath: "webcam.mov",
-                width: 1280,
-                height: 720,
+                width: camSize.width,
+                height: camSize.height,
                 frameRate: request.frameRate)
             let writer = try ContinuousCaptureWriter(
                 source: source,
                 outputURL: directoryURL.appendingPathComponent(source.relativePath),
                 mediaType: .video,
                 outputSettings: Self.videoSettings(
-                    width: 1280,
-                    height: 720,
-                    bitrate: Self.videoBitrate(width: 1280, height: 720, frameRate: request.frameRate)),
+                    width: camSize.width,
+                    height: camSize.height,
+                    bitrate: bitrate),
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
                 manifest: manifest)
             descriptors.append(source)
             encoders[source.id] = CaptureEncoderConfig(
                 codec: "h264",
-                bitrate: Self.videoBitrate(width: 1280, height: 720, frameRate: request.frameRate),
+                bitrate: bitrate,
                 fragmentIntervalUs: CaptureManifest.microseconds(from: fragment))
             writers.append(writer)
             sessions.append(AVCaptureSampleSession(deviceID: webcamDeviceID, mediaType: .video, writer: writer))
@@ -754,17 +782,29 @@ actor CaptureCoordinator {
             await session.stop()
         }
 
+        // Finish every writer even if one fails, so no FileHandle or fragmented
+        // .mov is left open, and always write the finalize record + close the
+        // manifest. Surface the first failure to the caller afterwards.
+        var finishErrors: [Error] = []
         for writer in active.writers {
-            let ended = try await writer.finish()
-            try active.manifest.append(.sourceEnded(ended))
+            do {
+                let ended = try await writer.finish()
+                try active.manifest.append(.sourceEnded(ended))
+            } catch {
+                finishErrors.append(error)
+            }
         }
         let durationUs = max(
             0,
             CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock())) - active.startHostTimeUs)
-        try active.manifest.append(.finalize(CaptureFinalizeRecord(
+        try? active.manifest.append(.finalize(CaptureFinalizeRecord(
             atUs: active.startHostTimeUs + durationUs,
             durationUs: durationUs)))
         active.manifest.close()
+
+        if let firstError = finishErrors.first {
+            throw firstError
+        }
 
         let data = try Data(contentsOf: active.manifestURL)
         let parsed = CaptureManifest.parseNDJSON(data)
@@ -777,6 +817,9 @@ actor CaptureCoordinator {
     }
 
     func scanRecoveredSessions(rootURL: URL) throws -> [CaptureSessionResult] {
+        // A live recording's manifest isn't finalized yet; don't mistake it for
+        // a crashed session.
+        let activeID = activeSession?.id
         let contents = try FileManager.default.contentsOfDirectory(
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -788,6 +831,7 @@ actor CaptureCoordinator {
             guard let data = try? Data(contentsOf: manifestURL) else { return nil }
             let manifest = CaptureManifest.parseNDJSON(data)
             guard !manifest.isFinalized, manifest.header != nil else { return nil }
+            if let activeID, manifest.header?.sessionID == activeID { return nil }
             return CaptureSessionResult(
                 id: manifest.header?.sessionID ?? UUID(),
                 directoryURL: directory,
@@ -795,6 +839,16 @@ actor CaptureCoordinator {
                 manifest: manifest,
                 wasRecovered: true)
         }
+    }
+
+    private static func webcamDimensions(deviceID: String) -> (width: Int, height: Int) {
+        let fallback = (width: 1280, height: 720)
+        guard let device = AVCaptureDevice(uniqueID: deviceID) else { return fallback }
+        let dims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+        let width = Int(dims.width) & ~1
+        let height = Int(dims.height) & ~1
+        guard width >= 16, height >= 16 else { return fallback }
+        return (width, height)
     }
 
     private static func videoBitrate(width: Int, height: Int, frameRate: Double) -> Int {

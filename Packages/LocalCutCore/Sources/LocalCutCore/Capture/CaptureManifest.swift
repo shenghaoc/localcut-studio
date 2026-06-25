@@ -364,16 +364,20 @@ public struct CaptureManifest: Hashable, Sendable {
 }
 
 public enum CaptureManifestJSON {
-    public static var encoder: JSONEncoder {
+    // Configured once and shared: JSONEncoder/JSONDecoder hold no caller-visible
+    // mutable state across encode/decode calls, so a single instance avoids
+    // reallocating on every manifest line. nonisolated(unsafe) because the
+    // Foundation types are not formally Sendable.
+    nonisolated(unsafe) public static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         return encoder
-    }
+    }()
 
-    public static var decoder: JSONDecoder {
+    nonisolated(unsafe) public static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
-    }
+    }()
 }
