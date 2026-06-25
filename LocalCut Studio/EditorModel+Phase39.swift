@@ -39,12 +39,11 @@ extension EditorModel {
     }
 
     func exportCover(to url: URL) async {
-        let didStart = url.startAccessingSecurityScopedResource()
-        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-
         do {
             let data = try await makeCoverImageData()
             try await Task.detached {
+                let didStart = url.startAccessingSecurityScopedResource()
+                defer { if didStart { url.stopAccessingSecurityScopedResource() } }
                 try data.write(to: url, options: .atomic)
             }.value
             statusMessage = "Exported cover \(url.lastPathComponent)."
@@ -69,16 +68,21 @@ extension EditorModel {
         let frameImage = try await Self.generateCoverImage(
             generator: generator,
             time: CMTime(seconds: seconds, preferredTimescale: 600))
-        let image = try Self.imageWithTitleIfNeeded(
-            frameImage,
-            title: cover.title,
-            renderSize: project.renderSize)
-        return try Self.encodeCoverImage(image, format: cover.format)
+        let renderSize = project.renderSize
+        let title = cover.title
+        let format = cover.format
+        return try await Task.detached {
+            let image = try Self.imageWithTitleIfNeeded(
+                frameImage,
+                title: title,
+                renderSize: renderSize)
+            return try Self.encodeCoverImage(image, format: format)
+        }.value
     }
 
-    private static func imageWithTitleIfNeeded(_ image: CGImage,
-                                               title: CoverTitleDoc?,
-                                               renderSize: CGSize) throws -> CGImage {
+    nonisolated private static func imageWithTitleIfNeeded(_ image: CGImage,
+                                                           title: CoverTitleDoc?,
+                                                           renderSize: CGSize) throws -> CGImage {
         guard let title, !title.text.isEmpty else { return image }
         let width = max(1, Int(renderSize.width.rounded()))
         let height = max(1, Int(renderSize.height.rounded()))
@@ -142,7 +146,7 @@ extension EditorModel {
         }
     }
 
-    private static func encodeCoverImage(_ image: CGImage, format: CoverFormat) throws -> Data {
+    nonisolated private static func encodeCoverImage(_ image: CGImage, format: CoverFormat) throws -> Data {
         let type = format.utType
         guard Self.supportsImageDestination(type) else {
             throw CoverExportError.unsupportedFormat(format.displayName)
@@ -165,7 +169,7 @@ extension EditorModel {
         return data as Data
     }
 
-    private static func supportsImageDestination(_ type: UTType) -> Bool {
+    nonisolated private static func supportsImageDestination(_ type: UTType) -> Bool {
         guard let identifiers = CGImageDestinationCopyTypeIdentifiers() as? [String] else {
             return false
         }

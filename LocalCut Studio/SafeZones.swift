@@ -43,7 +43,7 @@ struct SafeZoneProfile: Codable, Equatable, Identifiable, Sendable {
                 errors.append("region \(region.id) needs at least three points")
             }
             for point in region.points {
-                if !(0...1).contains(point.x) || !(0...1).contains(point.y) {
+                if !(0.0...1.0).contains(point.x) || !(0.0...1.0).contains(point.y) {
                     errors.append("region \(region.id) has an out-of-range point")
                 }
             }
