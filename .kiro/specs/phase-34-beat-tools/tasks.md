@@ -86,7 +86,28 @@
   bleed into the cut points and the command is independent of the memo.
 - [x] **T6.3** Detached analysis / cache-load completions only adopt results for
   media still present in the current project (guards a document switch landing
-  stale beats), on top of the existing task cancellation.
+  stale beats), on top of the existing task cancellation. The analysis error path
+  is guarded the same way so a cancelled task can't overwrite the active
+  document's status.
+
+## Review hardening
+
+Resolved from automated review of the implementation:
+
+- [x] **T7.1** Snap-to-beat targets are added in `ProjectEditingService.snapTargets`
+  (the path trim/move gestures call via `resolveSnap`), not only the
+  `EditorModel.snapTargets` wrapper — so the toggle actually snaps during drags.
+- [x] **T7.2** `loadAvailableBeatCaches` balances each file's security-scoped
+  access with a `defer`, so the error/`continue` path can't leak it.
+- [x] **T7.3** The duration-derived sample reservation is capped (≤ 1 h) so a
+  corrupt/hostile asset duration can't trap on `Int` overflow or balloon
+  allocation before any sample is validated.
+- [x] **T7.4** `BeatAnalysisCache.read` treats a corrupt payload as a cache miss
+  (re-analyse + overwrite) instead of a hard failure.
+- [x] **T7.5** `selectedBeatSource` prefers the selected clip over a stale
+  media-bin selection; "Align to Beat" refuses (no move) when the nearest beat
+  slot is occupied and sanitises transitions on neighbours it pulls apart; Align
+  enablement uses the same excluded target set the command does.
 
 ## Verification
 
