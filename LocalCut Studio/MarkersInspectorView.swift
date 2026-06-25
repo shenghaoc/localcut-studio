@@ -15,9 +15,15 @@ struct MarkersInspectorView: View {
             }
 
             if model.project.markers.isEmpty {
-                Text("No markers. Press M while the timeline is focused, or use the button above.")
-                    .foregroundStyle(.secondary)
-                    .font(.callout)
+                ContentUnavailableView {
+                    Label("No Markers", systemImage: "mappin")
+                } description: {
+                    Text("Press M while the timeline is focused, or use the button below.")
+                } actions: {
+                    Button("Add at Playhead") { model.addMarkerAtPlayhead() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                }
             }
 
             ForEach(model.project.markers) { marker in

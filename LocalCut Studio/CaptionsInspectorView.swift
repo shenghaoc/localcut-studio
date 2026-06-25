@@ -23,9 +23,19 @@ struct CaptionsInspectorView: View {
             }
 
             if model.project.captionTracks.isEmpty {
-                Text("No caption tracks. Import an SRT/VTT or add an empty track to begin.")
-                    .foregroundStyle(.secondary)
-                    .font(.callout)
+                ContentUnavailableView {
+                    Label("No Caption Tracks", systemImage: "captions.bubble")
+                } description: {
+                    Text("Import an SRT/VTT or add an empty track to begin.")
+                } actions: {
+                    HStack {
+                        Button("Import SRT/VTT…") { showSRTImporter = true }
+                            .buttonStyle(.borderedProminent)
+                        Button("Add Empty Track") { model.addEmptyCaptionTrack() }
+                            .buttonStyle(.bordered)
+                    }
+                    .controlSize(.small)
+                }
             }
 
             ForEach(model.project.captionTracks) { track in
