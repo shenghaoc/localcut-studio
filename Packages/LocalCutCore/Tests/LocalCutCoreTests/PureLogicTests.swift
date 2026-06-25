@@ -122,6 +122,65 @@ func replacingLookEffectsKeepsCanonicalOrder() {
     #expect(updated.compactMap(\.lookKind) == [.halation, .vignette, .grain])
 }
 
+@Test("canonicalPipelineOrder sorts effects into the fixed render order")
+func canonicalPipelineOrderSorts() {
+    let chain: [Effect] = [
+        .grain(.neutral),
+        .lut(bookmark: Data([0x01])),
+        .vignette(.neutral),
+        .colourGrade(.neutral),
+        .halation(.neutral),
+        .skinSmooth(.neutral),
+    ]
+    #expect(chain.canonicalPipelineOrder().map(\.pipelineOrder) == [0, 1, 2, 3, 4, 5])
+}
+
+@Test("Decoding a look preset clamps out-of-range node params")
+func lookPresetDecodeClampsParams() throws {
+    let json = """
+    {
+      "schemaVersion": 1,
+      "name": "Out Of Range",
+      "nodes": [
+        {
+          "effectName": "halation",
+          "params": {
+            "strength": { "keyframes": [], "defaultValue": 5 },
+            "threshold": 9,
+            "radius": 9999,
+            "redBoost": 8
+          }
+        }
+      ]
+    }
+    """
+    let decoded = try LookPresetV1(data: Data(json.utf8))
+    let halation = decoded.nodes.compactMap { node -> HalationEffect? in
+        if case .halation(let h) = node { return h }
+        return nil
+    }.first
+    #expect(halation?.strength.defaultValue == 1)
+    #expect(halation?.threshold == 1)
+    #expect(halation?.radius == 80)
+    #expect(halation?.redBoost == 2)
+}
+
+@Test("Look strength accessor reads and replaces the keyframed parameter")
+func lookStrengthAccessors() {
+    let grain = Effect.grain(GrainEffect(amount: Keyframed(defaultValue: 0.3)))
+    #expect(grain.lookStrength?.defaultValue == 0.3)
+
+    var track = Keyframed<Float>(defaultValue: 0.1)
+    track.addKeyframe(at: time(1), value: 0.9)
+    let updated = grain.settingLookStrength(track)
+    #expect(updated.lookStrength?.keyframes.count == 1)
+    #expect(updated.lookStrength?.defaultValue == 0.1)
+
+    let lut = Effect.lut(bookmark: Data([0x01]))
+    #expect(lut.lookStrength == nil)
+    #expect(lut.settingLookStrength(track) == lut)
+}
+
 @Test("Built-in look preset library has ten populated presets")
 func builtInLookPresetLibraryPopulated() {
     #expect(LookPresetLibrary.builtInPresets.count >= 10)

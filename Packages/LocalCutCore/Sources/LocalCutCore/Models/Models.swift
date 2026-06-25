@@ -341,6 +341,14 @@ public enum LookEffectKind: String, Codable, Hashable, Sendable, CaseIterable {
         case .grain: 2
         }
     }
+
+    public var displayName: String {
+        switch self {
+        case .grain: "Grain"
+        case .halation: "Halation"
+        case .vignette: "Vignette"
+        }
+    }
 }
 
 extension Effect {
@@ -355,6 +363,29 @@ extension Effect {
 
     public var isLookEffect: Bool {
         lookKind != nil
+    }
+
+    /// The primary keyframed parameter for look-pack effects — grain amount,
+    /// halation strength, or vignette amount. `nil` for non-look effects. Used by
+    /// the inspector's per-look keyframe editor so one code path drives all three.
+    public var lookStrength: Keyframed<Float>? {
+        switch self {
+        case .grain(let g): g.amount
+        case .halation(let h): h.strength
+        case .vignette(let v): v.amount
+        case .colourGrade, .lut, .skinSmooth: nil
+        }
+    }
+
+    /// Returns a copy of a look effect with its primary keyframed parameter
+    /// replaced (re-clamped). No-op for non-look effects.
+    public func settingLookStrength(_ track: Keyframed<Float>) -> Effect {
+        switch self {
+        case .grain(var g): g.amount = track; g.clamp(); return .grain(g)
+        case .halation(var h): h.strength = track; h.clamp(); return .halation(h)
+        case .vignette(var v): v.amount = track; v.clamp(); return .vignette(v)
+        case .colourGrade, .lut, .skinSmooth: return self
+        }
     }
 
     /// Fixed render-pipeline precedence so the rendered result does not depend on

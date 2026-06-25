@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import CoreMedia
 import UniformTypeIdentifiers
 import LocalCutCore
 
@@ -146,19 +147,18 @@ extension EditorModel {
             statusMessage = "Select a video clip before exporting a look preset."
             return
         }
-        let preset = LookPresetV1(name: defaultLookPresetName(for: clip),
-                                  effects: clip.effects)
-        guard !preset.nodes.isEmpty else {
+        guard clip.effects.hasLookEffects else {
             statusMessage = "The selected clip has no look effects to export."
             return
         }
 
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.localCutLookPreset]
-        panel.nameFieldStringValue = "\(preset.name).\(LookPresetV1.fileExtension)"
+        panel.nameFieldStringValue = "\(defaultLookPresetName(for: clip)).\(LookPresetV1.fileExtension)"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        exportLookPreset(preset, to: url)
+        let export = lookExportPreset(for: clip, to: url)
+        exportLookPreset(export.preset, to: url, lutBookmark: export.lutBookmark)
     }
 
     func exportLookPreset(to url: URL) {
@@ -167,25 +167,76 @@ extension EditorModel {
             statusMessage = "Select a video clip before exporting a look preset."
             return
         }
-        exportLookPreset(LookPresetV1(name: defaultLookPresetName(for: clip),
-                                      effects: clip.effects),
-                         to: url)
+        let export = lookExportPreset(for: clip, to: url)
+        exportLookPreset(export.preset, to: url, lutBookmark: export.lutBookmark)
     }
 
-    private func exportLookPreset(_ preset: LookPresetV1, to url: URL) {
+    /// Builds the preset for `clip`, folding in the clip's LUT as a sidecar
+    /// reference (named after the chosen preset file) when one is attached, so a
+    /// re-imported `.lclook` can relink the LUT. Returns the LUT bookmark to copy
+    /// alongside the preset — resolved off the main actor at write time.
+    private func lookExportPreset(for clip: Clip, to url: URL) -> (preset: LookPresetV1, lutBookmark: Data?) {
+        var preset = LookPresetV1(name: defaultLookPresetName(for: clip), effects: clip.effects)
+        guard let lut = selectedClipLUT(clip) else { return (preset, nil) }
+        let presetBase = url.deletingPathExtension().lastPathComponent
+        let ext = (lut.displayName as NSString).pathExtension
+        preset.lut = LookPresetLUTReference(relativePath: "\(presetBase).\(ext.isEmpty ? "cube" : ext)",
+                                            displayName: lut.displayName)
+        return (preset, lut.bookmark)
+    }
+
+    /// The selected clip's LUT bookmark plus a display name. Reads only the cached
+    /// name, so it never resolves the bookmark on the main actor.
+    private func selectedClipLUT(_ clip: Clip) -> (bookmark: Data, displayName: String)? {
+        for effect in clip.effects {
+            guard case .lut(let bookmark) = effect else { continue }
+            return (bookmark, lutDisplayNames[bookmark] ?? "LUT.cube")
+        }
+        return nil
+    }
+
+    private func exportLookPreset(_ preset: LookPresetV1, to url: URL, lutBookmark: Data?) {
         guard !preset.nodes.isEmpty else {
             statusMessage = "The selected clip has no look effects to export."
             return
         }
+        let withLUT = lutBookmark != nil && preset.lut != nil
         Task {
             do {
-                // Encode is cheap, but the disk write can stall on a slow network
-                // share or iCloud Drive, so push it off the main actor.
+                // Encode is cheap, but the disk writes can stall on a slow network
+                // share or iCloud Drive, so push them off the main actor. The .lclook
+                // write is required; the sidecar LUT copy is best-effort so a sandbox
+                // or copy failure still exports the preset (the reference then prompts
+                // a relink on import) rather than failing the whole export.
                 let data = try preset.encoded()
-                try await Task.detached {
+                let copiedLUT = try await Task.detached { () -> Bool in
                     try data.write(to: url, options: [.atomic])
+                    guard let lutBookmark, let reference = preset.lut else { return false }
+                    var isStale = false
+                    guard let source = try? URL(resolvingBookmarkData: lutBookmark,
+                                                options: .withSecurityScope,
+                                                relativeTo: nil,
+                                                bookmarkDataIsStale: &isStale) else { return false }
+                    let didAccess = source.startAccessingSecurityScopedResource()
+                    defer {
+                        if didAccess { source.stopAccessingSecurityScopedResource() }
+                    }
+                    let destination = url.deletingLastPathComponent()
+                        .appendingPathComponent(reference.relativePath)
+                    if destination.standardizedFileURL == source.standardizedFileURL { return true }
+                    try? FileManager.default.removeItem(at: destination)
+                    do {
+                        try FileManager.default.copyItem(at: source, to: destination)
+                        return true
+                    } catch {
+                        return false
+                    }
                 }.value
-                statusMessage = "Exported look preset \(url.lastPathComponent)."
+                statusMessage = !withLUT
+                    ? "Exported look preset \(url.lastPathComponent)."
+                    : (copiedLUT
+                        ? "Exported look preset \(url.lastPathComponent) with LUT."
+                        : "Exported look preset \(url.lastPathComponent); LUT not copied.")
             } catch {
                 statusMessage = "Could not export \(url.lastPathComponent)."
             }
@@ -280,5 +331,135 @@ extension EditorModel {
             return nil
         }
         return bookmark
+    }
+
+    // MARK: - Look strength keyframes
+
+    /// Clip-local playhead time, or nil when the playhead is outside the selected
+    /// clip — mirrors the skin-smoothing keyframe behaviour so authoring a
+    /// clip-local keyframe is never ambiguous.
+    var selectedClipLookLocalPlayheadTime: CMTime? {
+        guard let clip = selectedClip else { return nil }
+        let playhead = CMTime(seconds: currentTime, preferredTimescale: 600)
+        guard playhead >= clip.timelineStart, playhead <= clip.timelineEnd else { return nil }
+        return CMTimeMaximum(.zero, CMTimeMinimum(playhead - clip.timelineStart, clip.duration))
+    }
+
+    private func selectedClipLookStrength(_ kind: LookEffectKind) -> Keyframed<Float> {
+        if let effect = selectedClip?.effects.first(where: { $0.lookKind == kind }),
+           let track = effect.lookStrength {
+            return track
+        }
+        return Keyframed(defaultValue: 0)
+    }
+
+    func lookStrengthKeyframes(_ kind: LookEffectKind) -> [Keyframe<Float>] {
+        selectedClipLookStrength(kind).keyframes
+    }
+
+    func lookStrengthAtPlayhead(_ kind: LookEffectKind) -> Float {
+        let track = selectedClipLookStrength(kind)
+        guard let time = selectedClipLookLocalPlayheadTime else { return track.defaultValue }
+        return track.value(at: time)
+    }
+
+    func lookStrengthKeyframeAtPlayhead(_ kind: LookEffectKind) -> Keyframe<Float>? {
+        guard let time = selectedClipLookLocalPlayheadTime else { return nil }
+        return nearestLookKeyframe(kind, to: time)
+    }
+
+    func addOrUpdateLookStrengthKeyframe(_ kind: LookEffectKind) {
+        guard let id = selectedVideoClipID,
+              let localTime = selectedClipLookLocalPlayheadTime else {
+            statusMessage = "Move the playhead over the selected clip to add a keyframe."
+            return
+        }
+        let existingID = lookStrengthKeyframeAtPlayhead(kind)?.id
+        let value = selectedClipLookStrength(kind).defaultValue
+        performUndoable(existingID == nil ? "Add \(kind.displayName) Keyframe"
+                                          : "Update \(kind.displayName) Keyframe") {
+            mutateLookStrength(kind, clipID: id) { track in
+                if let existingID {
+                    track.updateKeyframe(id: existingID, time: localTime, value: value)
+                } else {
+                    track.addKeyframe(at: localTime, value: value)
+                }
+            }
+            statusMessage = "\(kind.displayName) keyframe set at \(TimeFormatting.timecode(localTime.seconds))."
+        }
+    }
+
+    func removeLookStrengthKeyframe(_ kind: LookEffectKind) {
+        guard let id = selectedVideoClipID,
+              let keyframe = lookStrengthKeyframeAtPlayhead(kind) else {
+            statusMessage = "No \(kind.displayName.lowercased()) keyframe at the playhead."
+            return
+        }
+        performUndoable("Remove \(kind.displayName) Keyframe") {
+            mutateLookStrength(kind, clipID: id) { track in
+                track.removeKeyframe(id: keyframe.id)
+            }
+            statusMessage = "Removed \(kind.displayName.lowercased()) keyframe."
+        }
+    }
+
+    func seekToPreviousLookStrengthKeyframe(_ kind: LookEffectKind) {
+        guard let clip = selectedClip,
+              let localTime = selectedClipLookLocalPlayheadTime else { return }
+        let tolerance = lookKeyframeHitToleranceSeconds
+        guard let previous = selectedClipLookStrength(kind).keyframes.last(where: {
+            $0.time.seconds < localTime.seconds - tolerance
+        }) else { return }
+        seek(toSeconds: (clip.timelineStart + previous.time).seconds)
+    }
+
+    func seekToNextLookStrengthKeyframe(_ kind: LookEffectKind) {
+        guard let clip = selectedClip,
+              let localTime = selectedClipLookLocalPlayheadTime else { return }
+        let tolerance = lookKeyframeHitToleranceSeconds
+        guard let next = selectedClipLookStrength(kind).keyframes.first(where: {
+            $0.time.seconds > localTime.seconds + tolerance
+        }) else { return }
+        seek(toSeconds: (clip.timelineStart + next.time).seconds)
+    }
+
+    private var lookKeyframeHitToleranceSeconds: Double {
+        0.5 / max(1, project.frameRate)
+    }
+
+    private func nearestLookKeyframe(_ kind: LookEffectKind, to time: CMTime) -> Keyframe<Float>? {
+        let tolerance = lookKeyframeHitToleranceSeconds
+        return selectedClipLookStrength(kind).keyframes
+            .map { keyframe in (keyframe, abs((keyframe.time - time).seconds)) }
+            .filter { $0.1 <= tolerance }
+            .min { $0.1 < $1.1 }?
+            .0
+    }
+
+    private func mutateLookStrength(_ kind: LookEffectKind, clipID: Clip.ID,
+                                    _ transform: (inout Keyframed<Float>) -> Void) {
+        for track in project.videoTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == clipID }) else { continue }
+            // Reuse the existing look node if present, otherwise start from a
+            // neutral one so a keyframe can be authored before the slider is touched.
+            var effect = track.clips[index].effects.first { $0.lookKind == kind }
+                ?? Self.neutralLookEffect(kind)
+            guard var strength = effect.lookStrength else { return }
+            transform(&strength)
+            effect = effect.settingLookStrength(strength)
+            // replacingLookEffect keeps the stored chain in canonical look order.
+            track.clips[index].effects = track.clips[index].effects.replacingLookEffect(effect)
+            RenderCache.shared.invalidate(clipID: clipID)
+            scheduleRebuild()
+            return
+        }
+    }
+
+    private static func neutralLookEffect(_ kind: LookEffectKind) -> Effect {
+        switch kind {
+        case .grain: .grain(.neutral)
+        case .halation: .halation(.neutral)
+        case .vignette: .vignette(.neutral)
+        }
     }
 }

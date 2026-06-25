@@ -470,6 +470,7 @@ struct InspectorView: View {
                     step: 0.01,
                     onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetGrain(\.amount.defaultValue, to: 0))
+                lookKeyframeEditor(.grain)
                 LabeledSliderRow(
                     label: "Size",
                     display: String(format: "%.2f", model.selectedClipGrain.size),
@@ -494,6 +495,7 @@ struct InspectorView: View {
                     step: 0.01,
                     onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetHalation(\.strength.defaultValue, to: 0))
+                lookKeyframeEditor(.halation)
                 LabeledSliderRow(
                     label: "Threshold",
                     display: String(format: "%.2f", model.selectedClipHalation.threshold),
@@ -521,6 +523,7 @@ struct InspectorView: View {
                     step: 0.01,
                     onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetVignette(\.amount.defaultValue, to: 0))
+                lookKeyframeEditor(.vignette)
                 LabeledSliderRow(
                     label: "Radius",
                     display: String(format: "%.2f", model.selectedClipVignette.radius),
@@ -596,6 +599,90 @@ struct InspectorView: View {
             set: { newValue in
                 model.updateSelectedClipVignette { $0[keyPath: keyPath] = newValue }
             })
+    }
+
+    /// Playhead-targeted keyframe editor for a look effect's strength parameter
+    /// (grain amount, halation strength, vignette amount). Mirrors the
+    /// skin-smoothing keyframe controls so all animated effects behave alike.
+    @ViewBuilder
+    private func lookKeyframeEditor(_ kind: LookEffectKind) -> some View {
+        DisclosureGroup("Keyframes") {
+            LabeledContent("Clip Time") {
+                Text(lookKeyframePlayheadLabel)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            LabeledContent("Value") {
+                Text("\(Int(model.lookStrengthAtPlayhead(kind) * 100))%")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            LabeledContent("Count") {
+                Text("\(model.lookStrengthKeyframes(kind).count)")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    model.seekToPreviousLookStrengthKeyframe(kind)
+                } label: {
+                    Image(systemName: "backward.end.fill")
+                }
+                .help("Previous keyframe")
+                .accessibilityLabel("Previous \(kind.displayName) keyframe")
+                .disabled(!hasPreviousLookKeyframe(kind))
+
+                Button {
+                    model.addOrUpdateLookStrengthKeyframe(kind)
+                } label: {
+                    Label(lookKeyframeActionTitle(kind), systemImage: lookKeyframeActionIcon(kind))
+                }
+                .disabled(model.selectedClipLookLocalPlayheadTime == nil)
+
+                Button(role: .destructive) {
+                    model.removeLookStrengthKeyframe(kind)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .help("Remove keyframe")
+                .accessibilityLabel("Remove \(kind.displayName) keyframe")
+                .disabled(model.lookStrengthKeyframeAtPlayhead(kind) == nil)
+
+                Button {
+                    model.seekToNextLookStrengthKeyframe(kind)
+                } label: {
+                    Image(systemName: "forward.end.fill")
+                }
+                .help("Next keyframe")
+                .accessibilityLabel("Next \(kind.displayName) keyframe")
+                .disabled(!hasNextLookKeyframe(kind))
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private var lookKeyframePlayheadLabel: String {
+        guard let localTime = model.selectedClipLookLocalPlayheadTime else { return "Outside clip" }
+        return TimeFormatting.timecode(localTime.seconds)
+    }
+
+    private func lookKeyframeActionTitle(_ kind: LookEffectKind) -> String {
+        model.lookStrengthKeyframeAtPlayhead(kind) == nil ? "Add" : "Update"
+    }
+
+    private func lookKeyframeActionIcon(_ kind: LookEffectKind) -> String {
+        model.lookStrengthKeyframeAtPlayhead(kind) == nil ? "plus.diamond.fill" : "diamond.fill"
+    }
+
+    private func hasPreviousLookKeyframe(_ kind: LookEffectKind) -> Bool {
+        guard let localTime = model.selectedClipLookLocalPlayheadTime else { return false }
+        return model.lookStrengthKeyframes(kind).contains { $0.time.seconds < localTime.seconds }
+    }
+
+    private func hasNextLookKeyframe(_ kind: LookEffectKind) -> Bool {
+        guard let localTime = model.selectedClipLookLocalPlayheadTime else { return false }
+        return model.lookStrengthKeyframes(kind).contains { $0.time.seconds > localTime.seconds }
     }
 
     // MARK: - Beauty / Skin Smoothing
