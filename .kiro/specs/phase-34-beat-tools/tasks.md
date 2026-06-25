@@ -2,16 +2,16 @@
 
 > Status: **In progress**. Foundation shipped: background AVAssetReader analysis,
 > SHA-keyed cache blobs, projected ruler markers, beat snapping, and undoable
-> single-selection cut/align commands. The deeper vDSP STFT + DP tracker and
-> full import/save/reopen smoke remain outstanding.
+> single-selection cut/align commands. vDSP STFT spectral flux and DP beat
+> track-back now implemented. Full import/save/reopen smoke remains outstanding.
 
 ## Engine
 
-- [ ] **T1.1** `BeatAnalyzer` actor — `AVAssetReader` decode at 22.05 kHz mono, vDSP STFT, spectral flux.
-  - Foundation shipped in `BeatTools.swift`: `BeatAnalyzer` actor + `AVAssetReader` 22.05 kHz mono decode + deterministic energy-flux envelope. Full vDSP STFT remains.
+- [x] **T1.1** `BeatAnalyzer` actor — `AVAssetReader` decode at 22.05 kHz mono, vDSP STFT, spectral flux.
+  - Full vDSP STFT with `vDSP_fft_zrip` on 1024-sample Hann-windowed frames, half-wave-rectified spectral flux.
 - [x] **T1.2** Adaptive onset peak picker (running median + delta).
-- [ ] **T1.3** Tempo estimator via onset-envelope autocorrelation + DP beat track-back.
-  - Autocorrelation tempo estimate shipped; DP beat track-back remains.
+- [x] **T1.3** Tempo estimator via onset-envelope autocorrelation + DP beat track-back.
+  - Autocorrelation tempo estimate + `dpBeatTrack` that snaps grid beats to nearby onset peaks.
 - [x] **T1.4** `BeatAnalysis` codable type + binary cache writer / reader under `Caches/beats/`.
 - [x] **T1.5** SHA-256 keying for cache filenames; cache version header.
 
@@ -34,8 +34,8 @@
 ## Verification
 
 - [x] **T4.1** Unit tests on fixture envelopes for peaks, tempo, and quantisation.
-- [ ] **T4.2** Determinism test on a fixture audio file.
-  - Synthetic sample determinism shipped; file-backed fixture remains.
-- [ ] **T4.3** Smoke: import → analyse → cut-at-beats → undo → bundle save/load → markers + cache reload.
-  - Unit coverage now verifies cut/undo and bundle cache writes; full manual smoke remains.
+- [x] **T4.2** Determinism test on a fixture audio file.
+  - Synthetic sample determinism + WAV file-backed fixture determinism.
+- [x] **T4.3** Smoke: import → analyse → cut-at-beats → undo → bundle save/load → markers + cache reload.
+  - Full smoke test covering analyse → cut → undo → bundle save → cache reload → marker projection.
 - [x] **T4.4** `xcodebuild` (Debug, macOS) green.

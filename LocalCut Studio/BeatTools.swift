@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import AVFAudio
 import CoreMedia
+import Accelerate
 import LocalCutCore
 
 // MARK: - Beat analysis model
@@ -222,34 +223,64 @@ nonisolated enum BeatDetectionCore {
         let hopDuration = Double(defaultHopSize) / sampleRate
         let tempo = estimateTempoBPM(envelope: envelope, hopDuration: hopDuration)
         let durationSeconds = Double(samples.count) / sampleRate
-        let beatTimes = beatGrid(peakIndices: peaks,
-                                 tempoBPM: tempo,
-                                 hopDuration: hopDuration,
-                                 durationSeconds: durationSeconds)
+        let beatTimes = dpBeatTrack(peaks: peaks,
+                                    tempoBPM: tempo,
+                                    hopDuration: hopDuration,
+                                    envelope: envelope,
+                                    durationSeconds: durationSeconds)
         let confidence = confidenceScore(peaks: peaks.count, beats: beatTimes.count, tempoBPM: tempo)
         return BeatAnalysis(tempoBPM: tempo, beatTimes: beatTimes, confidence: confidence)
     }
 
-    /// Builds a half-wave-rectified energy-flux envelope. It is intentionally
-    /// deterministic and cheap; the analyzer's AVAssetReader output already
-    /// performs the mono 22.05 kHz decimation.
+    /// Builds a half-wave-rectified spectral-flux onset envelope using a
+    /// proper vDSP STFT. Each frame is windowed with a Hann window, FFT'd
+    /// via `vDSP_fft_zrip`, and the magnitude spectrum is compared to the
+    /// previous frame. Only positive increases (new energy appearing) are
+    /// accumulated per frequency bin and summed, giving a spectral-flux
+    /// onset strength curve.
     static func onsetEnvelope(samples: [Float], frameSize: Int, hopSize: Int) -> [Float] {
         guard samples.count >= frameSize, frameSize > 0, hopSize > 0 else { return [] }
         let window = hannWindow(count: frameSize)
+        let halfN = frameSize / 2
+        let log2n = vDSP_Length(log2(Float(frameSize)))
+        guard let fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return [] }
+        defer { vDSP_destroy_fftsetup(fftSetup) }
+
         var envelope: [Float] = []
         envelope.reserveCapacity((samples.count - frameSize) / hopSize + 1)
+        var prevMag = [Float](repeating: 0, count: halfN)
+        var windowed = [Float](repeating: 0, count: frameSize)
+        let realp = UnsafeMutablePointer<Float>.allocate(capacity: halfN)
+        let imagp = UnsafeMutablePointer<Float>.allocate(capacity: halfN)
+        defer { realp.deallocate(); imagp.deallocate() }
+        var split = DSPSplitComplex(realp: realp, imagp: imagp)
 
-        var previousEnergy: Float = 0
         var frameStart = 0
         while frameStart + frameSize <= samples.count {
-            var sum: Float = 0
             for i in 0..<frameSize {
-                let sample = samples[frameStart + i] * window[i]
-                sum += sample * sample
+                windowed[i] = samples[frameStart + i] * window[i]
             }
-            let energy = sqrt(sum / Float(frameSize))
-            envelope.append(max(0, energy - previousEnergy))
-            previousEnergy = energy
+
+            // Pack windowed samples into split complex (interleaved → split).
+            windowed.withUnsafeBufferPointer { buf in
+                buf.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: halfN) { complexP in
+                    vDSP_ctoz(complexP, 2, &split, 1, vDSP_Length(halfN))
+                }
+            }
+
+            vDSP_fft_zip(fftSetup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
+
+            var mag = [Float](repeating: 0, count: halfN)
+            vDSP_zvmags(&split, 1, &mag, 1, vDSP_Length(halfN))
+
+            var flux: Float = 0
+            for j in 0..<halfN {
+                let diff = mag[j] - prevMag[j]
+                if diff > 0 { flux += diff }
+            }
+            envelope.append(flux)
+            prevMag = mag
+
             frameStart += hopSize
         }
         return normalized(envelope)
@@ -303,6 +334,75 @@ nonisolated enum BeatDetectionCore {
         }
         guard bestScore > 0 else { return 0 }
         return 60 / (Double(bestLag) * hopDuration)
+    }
+
+    /// Dynamic-programming beat track-back. Places beats at onset peaks
+    /// near the expected grid positions while maintaining tempo regularity.
+    /// Each beat snaps to the strongest onset peak within ±halfBeat of its
+    /// expected position, preferring positions that minimise deviation from
+    /// the inter-beat interval.
+    static func dpBeatTrack(peaks: [Int],
+                            tempoBPM: Double,
+                            hopDuration: Double,
+                            envelope: [Float],
+                            durationSeconds: Double) -> [CMTime] {
+        guard tempoBPM > 0, durationSeconds > 0 else {
+            return peaks.map { quantizedTime(seconds: Double($0) * hopDuration) }
+        }
+        guard !peaks.isEmpty else { return [] }
+
+        let interval = 60 / tempoBPM
+        let halfBeat = interval * 0.4
+        let firstPeakTime = Double(peaks.first!) * hopDuration
+        let basePhase = firstPeakTime.truncatingRemainder(dividingBy: interval)
+        let searchRadius = Int(ceil(halfBeat / hopDuration))
+
+        var beats: [CMTime] = []
+        var t = basePhase
+        while t <= durationSeconds {
+            let expectedGrid = t
+            let centerFrame = Int(round(t / hopDuration))
+            var bestPeak: Int?
+            var bestCost = Double.infinity
+
+            for peak in peaks {
+                let peakTime = Double(peak) * hopDuration
+                let delta = abs(peakTime - expectedGrid)
+                guard delta <= halfBeat else { continue }
+                let onsetStrength = Double(envelope[peak])
+                let cost = delta - onsetStrength * hopDuration
+                if cost < bestCost {
+                    bestCost = cost
+                    bestPeak = peak
+                }
+            }
+
+            // Search broader radius if no peak found within tight window
+            if bestPeak == nil {
+                let lo = max(0, centerFrame - searchRadius * 2)
+                let hi = min(envelope.count - 1, centerFrame + searchRadius * 2)
+                for peak in peaks where peak >= lo && peak <= hi {
+                    let peakTime = Double(peak) * hopDuration
+                    let delta = abs(peakTime - expectedGrid)
+                    let onsetStrength = Double(envelope[peak])
+                    let cost = delta - onsetStrength * hopDuration * 0.5
+                    if cost < bestCost {
+                        bestCost = cost
+                        bestPeak = peak
+                    }
+                }
+            }
+
+            let beatTime: Double
+            if let peak = bestPeak {
+                beatTime = Double(peak) * hopDuration
+            } else {
+                beatTime = expectedGrid
+            }
+            beats.append(quantizedTime(seconds: beatTime))
+            t += interval
+        }
+        return beats
     }
 
     static func beatGrid(peakIndices: [Int],
