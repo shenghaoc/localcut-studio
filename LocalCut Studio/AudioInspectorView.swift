@@ -73,7 +73,7 @@ struct AudioInspectorView: View {
             // forcing the bus to mirror its snapshot onto an `@Observable`
             // property on every audio block.
             //
-            if model.audioBus.isLiveRunning {
+            if model.audioBus.isLiveRunning || model.audioBus.isOfflineMetering {
                 SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
                     MeterStrip(snapshot: model.audioBus.meterSnapshot)
                         .frame(height: 18)

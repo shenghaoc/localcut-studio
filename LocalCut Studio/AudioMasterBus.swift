@@ -51,6 +51,7 @@ final class AudioMasterBus {
 
     func setOfflineMeteringActive(_ active: Bool) {
         offlineMeterActiveLock.withLock { $0 = active }
+        isOfflineMetering = active
     }
 
     nonisolated func publishOfflineMeterSnapshot(_ snapshot: AudioMeterSnapshot) {
@@ -79,6 +80,12 @@ final class AudioMasterBus {
 
     private(set) var isLiveRunning = false
     private(set) var isOfflineRunning = false
+
+    /// Mirrors `offlineMeterActiveLock` on the main actor so SwiftUI can show
+    /// the meter strip while an export publishes offline snapshots — even when
+    /// the live engine is stopped (the common case now that live metering is
+    /// opt-in). The lock copy stays the source of truth for the audio thread.
+    private(set) var isOfflineMetering = false
 
     /// Audio-thread-published meter snapshot. `nonisolated` because the lock
     /// itself is `Sendable` and is the actual synchronisation primitive — the

@@ -892,6 +892,11 @@ final class EditorModel {
         audioBus.prepareLive()
         if let error = audioBus.lastStartError {
             statusMessage = "Live metering unavailable: \(error)"
+        } else if audioBus.isLiveRunning {
+            // A successful (re)start clears `lastStartError`; drop the stale
+            // failure message so the status bar / VoiceOver live region don't
+            // keep announcing "Live metering unavailable" after recovery.
+            statusMessage = "Live metering started."
         }
     }
 
