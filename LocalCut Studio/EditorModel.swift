@@ -88,6 +88,9 @@ final class EditorModel {
     @ObservationIgnored let beatAnalyzer = BeatAnalyzer()
     @ObservationIgnored var beatAnalysisTask: Task<Void, Never>?
     @ObservationIgnored var beatAnalysisKeys: [MediaItem.ID: String] = [:]
+    @ObservationIgnored var cachedProjectedBeatTimes: [CMTime] = []
+    @ObservationIgnored var projectedBeatTimesRevision: Int = 0
+    @ObservationIgnored var lastProjectedBeatTimesRevision: Int = -1
 
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.

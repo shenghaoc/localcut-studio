@@ -84,7 +84,7 @@ nonisolated enum BeatAnalysisCache {
         guard encodedVersion == version else { return nil }
         let payloadStart = magic.count + MemoryLayout<UInt32>.size
         let payload = data[payloadStart..<data.count]
-        return try JSONDecoder().decode(BeatAnalysis.self, from: Data(payload))
+        return try JSONDecoder().decode(BeatAnalysis.self, from: payload)
     }
 
     private static func appendUInt32(_ value: UInt32, to data: inout Data) {

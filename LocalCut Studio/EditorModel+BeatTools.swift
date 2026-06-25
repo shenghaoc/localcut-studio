@@ -17,7 +17,11 @@ extension EditorModel {
     }
 
     var canCutSelectedClipAtBeats: Bool {
-        selectedClipID != nil && !beatAnalyses.isEmpty
+        guard let clipID = selectedClipID,
+              let context = trackAndClipIndex(for: clipID),
+              let media = project.media(for: context.track.clips[context.index].mediaID)
+        else { return false }
+        return beatAnalyses[media.id] != nil
     }
 
     var canAlignSelectedClipToBeat: Bool {
@@ -42,8 +46,10 @@ extension EditorModel {
         let mediaName = media.name
         let url = media.url
         let cacheDirectory = beatCacheDirectoryURL()
+        let scopeStarted = url.startAccessingSecurityScopedResource()
 
         beatAnalysisTask = Task.detached { [weak self] in
+            defer { if scopeStarted { url.stopAccessingSecurityScopedResource() } }
             do {
                 let key = try Fingerprint.sha256(of: url)
                 let cached = try BeatAnalysisCache.read(key: key, in: cacheDirectory)
@@ -82,7 +88,16 @@ extension EditorModel {
         }
     }
 
+    func invalidateProjectedBeatTimesCache() {
+        projectedBeatTimesRevision &+= 1
+    }
+
     func projectedBeatTimes(excluding clipID: Clip.ID? = nil) -> [CMTime] {
+        if clipID == nil,
+           projectedBeatTimesRevision == lastProjectedBeatTimesRevision {
+            return cachedProjectedBeatTimes
+        }
+
         let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
         var times: [CMTime] = []
 
@@ -95,7 +110,12 @@ extension EditorModel {
             }
         }
 
-        return deduplicatedBeatTimes(times)
+        let result = deduplicatedBeatTimes(times)
+        if clipID == nil {
+            cachedProjectedBeatTimes = result
+            lastProjectedBeatTimesRevision = projectedBeatTimesRevision
+        }
+        return result
     }
 
     func cutSelectedClipAtBeats() {
@@ -182,6 +202,7 @@ extension EditorModel {
 
             for item in media {
                 guard !Task.isCancelled else { return }
+                let scopeStarted = item.url.startAccessingSecurityScopedResource()
                 do {
                     let key = try Fingerprint.sha256(of: item.url)
                     if let analysis = try BeatAnalysisCache.read(key: key, in: cacheDirectory) {
@@ -191,6 +212,7 @@ extension EditorModel {
                 } catch {
                     continue
                 }
+                if scopeStarted { item.url.stopAccessingSecurityScopedResource() }
             }
 
             await MainActor.run {
@@ -271,6 +293,10 @@ extension EditorModel {
         }
     }
 
+    /// Merges beats within ≈1.7 ms of each other. This catches exact or
+    /// near-exact duplicates when the same source appears on multiple tracks;
+    /// it should not be widened to the point where distinct beats from
+    /// different sources at similar tempos collide.
     private func deduplicatedBeatTimes(_ times: [CMTime]) -> [CMTime] {
         let sorted = times.sorted()
         var result: [CMTime] = []
