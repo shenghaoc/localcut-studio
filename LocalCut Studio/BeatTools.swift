@@ -268,7 +268,13 @@ nonisolated enum BeatDetectionCore {
                 }
             }
 
-            vDSP_fft_zip(fftSetup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
+            // Real in-place FFT: `vDSP_ctoz` packed `frameSize` real samples
+            // into `halfN` split-complex elements, so we must use the *real*
+            // transform (`zrip`), which operates on those `halfN` elements.
+            // `vDSP_fft_zip` would treat the buffer as a full 2^log2n-point
+            // complex FFT and read/write `frameSize` (= 2·halfN) elements,
+            // overrunning the `halfN`-capacity `realp`/`imagp` allocations.
+            vDSP_fft_zrip(fftSetup, &split, 1, log2n, FFTDirection(FFT_FORWARD))
 
             var mag = [Float](repeating: 0, count: halfN)
             vDSP_zvmags(&split, 1, &mag, 1, vDSP_Length(halfN))
