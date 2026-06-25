@@ -66,6 +66,10 @@ extension EditorModel {
 
                 await MainActor.run {
                     guard let self, !Task.isCancelled else { return }
+                    // The source may have been removed (e.g. the user opened a
+                    // different document) while this detached analysis ran; don't
+                    // stamp a stale result into the current project.
+                    guard self.project.mediaItems.contains(where: { $0.id == mediaID }) else { return }
                     self.beatAnalyses[mediaID] = analysis
                     self.beatAnalysisKeys[mediaID] = key
                     self.showBeatMarkers = true
@@ -217,9 +221,14 @@ extension EditorModel {
 
             await MainActor.run {
                 guard let self, !Task.isCancelled else { return }
-                self.beatAnalyses.merge(loadedAnalyses) { _, new in new }
-                self.beatAnalysisKeys.merge(loadedKeys) { _, new in new }
-                if !loadedAnalyses.isEmpty {
+                // Only adopt caches for media still present in the current
+                // project — the document may have changed while loading ran.
+                let present = Set(self.project.mediaItems.map(\.id))
+                let analyses = loadedAnalyses.filter { present.contains($0.key) }
+                let keys = loadedKeys.filter { present.contains($0.key) }
+                self.beatAnalyses.merge(analyses) { _, new in new }
+                self.beatAnalysisKeys.merge(keys) { _, new in new }
+                if !analyses.isEmpty {
                     self.showBeatMarkers = true
                 }
             }
@@ -275,20 +284,18 @@ extension EditorModel {
         }
     }
 
+    /// Cut points for one clip, derived from *that clip's own* analysis projected
+    /// through its source-to-timeline mapping with the current offset. Using the
+    /// clip's analysis (rather than the global projected set) keeps cuts musically
+    /// correct when an unrelated clip's beats overlap this clip's timeline range,
+    /// and sidesteps the projected-beat memo entirely.
     private func beatCutTimes(for clip: Clip) -> [CMTime] {
+        guard let media = project.media(for: clip.mediaID),
+              let analysis = beatAnalyses[media.id] else { return [] }
         let oneFrame = CMTime(value: 1, timescale: CMTimeScale(max(1, project.frameRate)))
-        let timelineRange = CMTimeRange(start: clip.timelineStart, end: clip.timelineEnd)
-        var cuts = projectedBeatTimes().filter { timelineRange.containsTime($0) }
-
-        if cuts.isEmpty,
-           let media = project.media(for: clip.mediaID),
-           let analysis = beatAnalyses[media.id] {
-            cuts = projectedBeatTimes(for: clip,
-                                      analysis: analysis,
-                                      offset: CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600))
-        }
-
-        return deduplicatedBeatTimes(cuts).filter { cut in
+        let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
+        let projected = projectedBeatTimes(for: clip, analysis: analysis, offset: offset)
+        return deduplicatedBeatTimes(projected).filter { cut in
             cut - clip.timelineStart >= oneFrame && clip.timelineEnd - cut >= oneFrame
         }
     }

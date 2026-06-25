@@ -42,10 +42,18 @@ final class EditorModel {
     var showBeatMarkers = false
     var snapToBeats = false
     /// Global draw/snap offset in seconds, clamped by the inspector to ±200 ms.
-    var beatOffsetSeconds: Double = 0
+    /// Changing it must drop the projected-beat memo so markers, snap targets,
+    /// and cut/align reflect the new offset on the next read.
+    var beatOffsetSeconds: Double = 0 {
+        didSet { invalidateProjectedBeatTimesCache() }
+    }
     /// Maximum distance for Align to Beat in seconds.
     var beatAlignWindowSeconds: Double = 0.15
-    var beatAnalyses: [MediaItem.ID: BeatAnalysis] = [:]
+    /// Per-source beat analyses. Mutating this set (analysis completes, caches
+    /// load, document reset) invalidates the projected-beat memo.
+    var beatAnalyses: [MediaItem.ID: BeatAnalysis] = [:] {
+        didSet { invalidateProjectedBeatTimesCache() }
+    }
 
     // Scopes panel (colour-management feature) — session-only UI flag, not persisted.
     var showScopes: Bool = false
@@ -257,7 +265,13 @@ final class EditorModel {
 
     /// Starts a preview rebuild, cancelling any rebuild already in flight so the
     /// most recent project state is the one that reaches the player.
+    ///
+    /// Every clip-geometry change (trim, move, split, delete, cut/align, undo,
+    /// redo, persistence reload) funnels through here, so this is also the
+    /// single chokepoint that drops the projected-beat memo when the timeline
+    /// layout the beats project through changes.
     func scheduleRebuild() {
+        invalidateProjectedBeatTimesCache()
         previewRebuildCoordinator.scheduleRebuild(model: self)
     }
 

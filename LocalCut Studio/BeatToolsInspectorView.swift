@@ -1,4 +1,5 @@
 import SwiftUI
+import LocalCutCore
 
 struct BeatToolsInspectorView: View {
     @Bindable var model: EditorModel
