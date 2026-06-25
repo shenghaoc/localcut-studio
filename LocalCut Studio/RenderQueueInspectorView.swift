@@ -48,7 +48,7 @@ struct RenderQueueInspectorView: View {
         }
     }
 
-    /// One-line summary under the preset name: codec • size • aspect.
+    /// One-line summary under the preset name: container • codec • size • aspect • bitrate.
     private func presetSubtitle(_ preset: ExportPreset) -> String {
         let codec: String
         switch preset.videoCodec {
@@ -57,7 +57,7 @@ struct RenderQueueInspectorView: View {
         case AVVideoCodecType.proRes422HQ.rawValue: codec = "ProRes 422 HQ"
         case AVVideoCodecType.proRes422.rawValue: codec = "ProRes 422"
         case AVVideoCodecType.proRes4444.rawValue: codec = "ProRes 4444"
-        default: codec = preset.videoCodec
+        default: codec = preset.videoCodec.uppercased()
         }
         let size = "\(Int(preset.targetSize.width))×\(Int(preset.targetSize.height))"
         let container = preset.defaultFilenameExtension.uppercased()

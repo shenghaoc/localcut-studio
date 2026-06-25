@@ -60,7 +60,7 @@ struct MediaBinView: View {
                                     Divider()
                                     Button("Remove from Project", role: .destructive) { model.removeMedia(itemID: item.id) }
                                 }
-                                .accessibilityElement(children: .combine)
+                                .accessibilityElement(children: .ignore)
                                 .accessibilityLabel("\(item.name), \(TimeFormatting.timecode(item.durationSeconds))")
                                 .accessibilityAddTraits(.isButton)
                                 .accessibilityAddTraits(model.selectedMediaID == item.id ? .isSelected : [])

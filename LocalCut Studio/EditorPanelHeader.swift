@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Shared header treatment for the editor's primary panes.
+/// Shared header treatment for the editor's primary panes. Call sites own the
+/// surrounding separators so headers can compose with adjacent pane controls.
 struct EditorPanelHeader<Trailing: View>: View {
     let title: String
     private let trailing: Trailing
