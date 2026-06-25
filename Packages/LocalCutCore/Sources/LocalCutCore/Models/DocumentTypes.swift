@@ -91,9 +91,16 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         markers = try c.decodeIfPresent([TimelineMarker].self, forKey: .markers) ?? []
         audioBus = try c.decodeIfPresent(AudioBusDoc.self, forKey: .audioBus) ?? AudioBusDoc()
         overlays = try c.decodeIfPresent([OverlayClipDoc].self, forKey: .overlays) ?? []
-        aspect = try c.decodeIfPresent(ProjectAspect.self, forKey: .aspect)
-            ?? ProjectAspect.infer(width: renderWidth, height: renderHeight)
-        coverFrame = try c.decodeIfPresent(CoverFrameDoc.self, forKey: .coverFrame)
+        // Lenient: an unknown future aspect raw value falls back to render-size
+        // inference rather than failing the whole document open.
+        if let rawAspect = try c.decodeIfPresent(String.self, forKey: .aspect) {
+            aspect = ProjectAspect(rawValue: rawAspect)
+                ?? ProjectAspect.infer(width: renderWidth, height: renderHeight)
+        } else {
+            aspect = ProjectAspect.infer(width: renderWidth, height: renderHeight)
+        }
+        // Lenient: malformed cover metadata drops to nil instead of failing the open.
+        coverFrame = (try? c.decodeIfPresent(CoverFrameDoc.self, forKey: .coverFrame)) ?? nil
     }
 
     public func encoded() throws -> Data {

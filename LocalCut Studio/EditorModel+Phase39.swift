@@ -64,7 +64,11 @@ extension EditorModel {
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
 
-        let seconds = min(max(0, cover.time.cmTime.seconds), max(0, built.duration))
+        // Render the cover from a frame strictly inside the timeline: requesting
+        // exactly at `duration` (the exclusive end) can fail to produce an image.
+        let frameStep = project.frameRate > 0 ? 1.0 / project.frameRate : 0
+        let lastFrame = max(0, built.duration - frameStep)
+        let seconds = min(max(0, cover.time.cmTime.seconds), lastFrame)
         let frameImage = try await Self.generateCoverImage(
             generator: generator,
             time: CMTime(seconds: seconds, preferredTimescale: 600))
