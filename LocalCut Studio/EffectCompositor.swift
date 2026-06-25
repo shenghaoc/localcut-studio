@@ -534,6 +534,12 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 // Returning nil here is deterministic (bypass, strength == 0,
                 // kernel unavailable) — safe to cache as-is.
                 result = applySkinSmooth(result, params: params, at: time) ?? result
+            case .halation(let params):
+                result = applyHalation(result, params: params, at: time)
+            case .vignette(let params):
+                result = applyVignette(result, params: params, at: time)
+            case .grain(let params):
+                result = applyGrain(result, params: params, at: time)
             }
         }
         // Materialise into a CGImage-backed CIImage before caching: a lazy
@@ -584,6 +590,101 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 filter.targetNeutral = CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset))
                 return filter.outputImage
             }
+    }
+
+    // MARK: - Film look effects
+
+    /// Applies procedural grain using Core Image's deterministic random source.
+    /// Grain is intentionally last in the built-in presets so halation and
+    /// vignette do not blur or reshape the pattern.
+    nonisolated func applyGrain(_ image: CIImage, params: GrainEffect, at time: CMTime) -> CIImage {
+        let amount = params.amount(at: time)
+        guard amount > 0 else { return image }
+
+        let random = CIFilter.randomGenerator()
+        guard var noise = random.outputImage else { return image }
+
+        let size = max(0.25, CGFloat(params.size))
+        let frame = time.seconds.isFinite ? floor(time.seconds * 24) : 0
+        let seedOffset = CGFloat(params.seed % 997) + CGFloat(frame.truncatingRemainder(dividingBy: 997))
+        noise = noise
+            .transformed(by: CGAffineTransform(translationX: seedOffset, y: -seedOffset * 0.37))
+            .transformed(by: CGAffineTransform(scaleX: size, y: size))
+            .cropped(to: image.extent)
+
+        if params.monochrome {
+            let mono = CIFilter.colorMatrix()
+            mono.inputImage = noise
+            mono.rVector = CIVector(x: 0.299, y: 0.587, z: 0.114, w: 0)
+            mono.gVector = CIVector(x: 0.299, y: 0.587, z: 0.114, w: 0)
+            mono.bVector = CIVector(x: 0.299, y: 0.587, z: 0.114, w: 0)
+            mono.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+            noise = mono.outputImage ?? noise
+        }
+
+        let contrast = CGFloat(amount) * 0.42
+        let tuned = CIFilter.colorMatrix()
+        tuned.inputImage = noise
+        tuned.rVector = CIVector(x: contrast, y: 0, z: 0, w: 0)
+        tuned.gVector = CIVector(x: 0, y: contrast, z: 0, w: 0)
+        tuned.bVector = CIVector(x: 0, y: 0, z: contrast, w: 0)
+        tuned.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        tuned.biasVector = CIVector(x: 0.5 - contrast * 0.5,
+                                    y: 0.5 - contrast * 0.5,
+                                    z: 0.5 - contrast * 0.5,
+                                    w: 0)
+
+        let blend = CIFilter.softLightBlendMode()
+        blend.inputImage = tuned.outputImage?.cropped(to: image.extent) ?? noise
+        blend.backgroundImage = image
+        return (blend.outputImage ?? image).cropped(to: image.extent)
+    }
+
+    /// Adds a warm glow to highlights. `threshold` shapes a bright-pass proxy
+    /// before the blur, giving presets control over how quickly midtones bloom.
+    nonisolated func applyHalation(_ image: CIImage, params: HalationEffect, at time: CMTime) -> CIImage {
+        let strength = params.strength(at: time)
+        guard strength > 0, params.radius > 0 else { return image }
+
+        let threshold = CGFloat(params.threshold)
+        let brightPass = CIFilter.colorControls()
+        brightPass.inputImage = image
+        brightPass.brightness = -Float(threshold * 0.45)
+        brightPass.contrast = Float(2.5 + threshold * 4)
+        brightPass.saturation = 0.85
+
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = (brightPass.outputImage ?? image).clampedToExtent()
+        blur.radius = params.radius
+        let glow = (blur.outputImage ?? image).cropped(to: image.extent)
+
+        let warm = CIFilter.colorMatrix()
+        warm.inputImage = glow
+        let redGain = CGFloat(1 + params.redBoost * strength)
+        warm.rVector = CIVector(x: redGain, y: 0, z: 0, w: 0)
+        warm.gVector = CIVector(x: 0, y: 0.42, z: 0, w: 0)
+        warm.bVector = CIVector(x: 0, y: 0, z: 0.18, w: 0)
+        warm.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(strength) * 0.65)
+
+        let scaledGlow = scaled((warm.outputImage ?? glow).cropped(to: image.extent),
+                                by: min(1, strength * 0.65))
+        let add = CIFilter.additionCompositing()
+        add.inputImage = scaledGlow
+        add.backgroundImage = image
+        return (add.outputImage ?? image).cropped(to: image.extent)
+    }
+
+    /// Applies edge shading with Core Image's radial vignette. Negative amounts
+    /// invert into a subtle edge lift for faded-stock looks.
+    nonisolated func applyVignette(_ image: CIImage, params: VignetteEffect, at time: CMTime) -> CIImage {
+        let amount = params.amount(at: time)
+        guard amount != 0 else { return image }
+
+        let filter = CIFilter.vignette()
+        filter.inputImage = image
+        filter.intensity = amount * (1 + params.softness)
+        filter.radius = Float(max(image.extent.width, image.extent.height)) * params.radius
+        return (filter.outputImage ?? image).cropped(to: image.extent)
     }
 
     // MARK: - Skin smoothing kernels

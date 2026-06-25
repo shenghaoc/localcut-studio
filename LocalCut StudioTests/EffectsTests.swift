@@ -224,6 +224,35 @@ func neutralColourGradeIsIdentity() {
     #expect(samplePixelEquals(result, source, at: CGPoint(x: 8, y: 8), tolerance: 0.005))
 }
 
+@Test("EffectCompositor.applyEffectChain: neutral look effects are identity")
+@MainActor
+func neutralLookEffectsAreIdentity() {
+    let compositor = EffectCompositor()
+    let source = CIImage(color: CIColor(red: 0.4, green: 0.6, blue: 0.8, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 32, height: 32))
+    let result = compositor.applyEffectChain(
+        source,
+        effects: [.halation(.neutral), .vignette(.neutral), .grain(.neutral)],
+        cacheKey: nil)
+    #expect(result.extent == source.extent)
+    #expect(samplePixelEquals(result, source, at: CGPoint(x: 16, y: 16), tolerance: 0.005))
+}
+
+@Test("EffectCompositor.applyEffectChain: active vignette changes edge pixels")
+@MainActor
+func activeVignetteChangesEdgePixels() {
+    let compositor = EffectCompositor()
+    let source = CIImage(color: CIColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+    let result = compositor.applyEffectChain(
+        source,
+        effects: [.vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.8),
+                                           radius: 0.35,
+                                           softness: 0.4))],
+        cacheKey: nil)
+    #expect(!samplePixelEquals(result, source, at: CGPoint(x: 2, y: 2), tolerance: 0.02))
+}
+
 /// Renders `a` and `b` to single-pixel CGImages at `point` and compares the
 /// RGBA bytes. Used by the colour-grading pass-through tests; lives near the
 /// top of the file so multiple tests can share it.
@@ -246,7 +275,7 @@ private func samplePixelEquals(_ a: CIImage, _ b: CIImage, at point: CGPoint,
 
 @Test("EditorModel.resetClipColourEffects preserves non-colour effects (audit fix)")
 @MainActor
-func resetColourPreservesSkinSmooth() {
+func resetColourPreservesNonColourEffects() {
     let model = EditorModel()
     let mediaID = UUID()
     let clip = Clip(
@@ -258,6 +287,9 @@ func resetColourPreservesSkinSmooth() {
     effected.effects = [
         .colourGrade(ColourGrade()),
         .skinSmooth(SkinSmoothEffect()),
+        .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
+        .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
+        .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))),
         .lut(bookmark: Data([0x1])),
     ]
     model.project.videoTracks.first!.clips = [effected]
@@ -266,10 +298,50 @@ func resetColourPreservesSkinSmooth() {
     model.resetClipColourEffects()
 
     let remaining = model.project.videoTracks.first!.clips.first!.effects
-    // SkinSmooth must survive; colour + lut must be gone.
+    // Non-colour effects must survive; colour + lut must be gone.
     #expect(remaining.contains { if case .skinSmooth = $0 { return true }; return false })
+    #expect(remaining.contains { if case .grain = $0 { return true }; return false })
+    #expect(remaining.contains { if case .halation = $0 { return true }; return false })
+    #expect(remaining.contains { if case .vignette = $0 { return true }; return false })
     #expect(!remaining.contains { if case .colourGrade = $0 { return true }; return false })
     #expect(!remaining.contains { if case .lut = $0 { return true }; return false })
+}
+
+@Test("EditorModel.resetClipLooks removes only look effects")
+@MainActor
+func resetLooksPreservesOtherEffects() {
+    let model = EditorModel()
+    let mediaID = UUID()
+    let clip = Clip(
+        mediaID: mediaID,
+        sourceStart: .zero,
+        duration: CMTime(seconds: 5, preferredTimescale: 600),
+        timelineStart: .zero)
+    var effected = clip
+    effected.effects = [
+        .colourGrade(ColourGrade(exposure: 0.2,
+                                 contrast: 1.1,
+                                 saturation: 0.9,
+                                 temperatureOffset: 50,
+                                 tintOffset: 5)),
+        .lut(bookmark: Data([0x1])),
+        .skinSmooth(SkinSmoothEffect()),
+        .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
+        .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
+        .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))),
+    ]
+    model.project.videoTracks.first!.clips = [effected]
+    model.selectedClipID = effected.id
+
+    model.resetClipLooks()
+
+    let remaining = model.project.videoTracks.first!.clips.first!.effects
+    #expect(remaining.contains { if case .colourGrade = $0 { return true }; return false })
+    #expect(remaining.contains { if case .lut = $0 { return true }; return false })
+    #expect(remaining.contains { if case .skinSmooth = $0 { return true }; return false })
+    #expect(!remaining.contains { if case .grain = $0 { return true }; return false })
+    #expect(!remaining.contains { if case .halation = $0 { return true }; return false })
+    #expect(!remaining.contains { if case .vignette = $0 { return true }; return false })
 }
 
 @Test("Effect.lut stores bookmark data")
@@ -281,4 +353,14 @@ func lutEffectStoresData() {
         return
     }
     #expect(stored == data)
+}
+
+@Test("Effect.grain stores effect")
+func grainEffectStores() {
+    let effect = Effect.grain(GrainEffect(amount: Keyframed(defaultValue: 0.25)))
+    guard case .grain(let grain) = effect else {
+        Issue.record("Expected .grain effect")
+        return
+    }
+    #expect(grain.amount.defaultValue == 0.25)
 }

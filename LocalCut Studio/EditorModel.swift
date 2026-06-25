@@ -373,7 +373,7 @@ final class EditorModel {
                 track.clips[index].effects.removeAll { effect in
                     switch effect {
                     case .colourGrade, .lut: true
-                    case .skinSmooth: false
+                    case .skinSmooth, .grain, .halation, .vignette: false
                     }
                 }
                 RenderCache.shared.invalidate(clipID: id)

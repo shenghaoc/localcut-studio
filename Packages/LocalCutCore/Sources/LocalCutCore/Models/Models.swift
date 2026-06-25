@@ -128,17 +128,140 @@ public struct SkinSmoothEffect: Hashable, Codable, Sendable {
     }
 }
 
+// MARK: - Film look effects
+
+private func clamped(_ value: Float, to range: ClosedRange<Float>) -> Float {
+    max(range.lowerBound, min(range.upperBound, value))
+}
+
+private func clampedKeyframed(_ value: Keyframed<Float>, to range: ClosedRange<Float>) -> Keyframed<Float> {
+    let keyframes = value.keyframes.map { keyframe in
+        Keyframe(id: keyframe.id, time: keyframe.time, value: clamped(keyframe.value, to: range))
+    }
+    return Keyframed(keyframes: keyframes, defaultValue: clamped(value.defaultValue, to: range))
+}
+
+/// Procedural film-grain parameters. `amount` is keyframed in clip-local time;
+/// `size` is authored as a source-pixel scale so preview and export match.
+public struct GrainEffect: Hashable, Codable, Sendable {
+    public var amount: Keyframed<Float>
+    public var size: Float
+    public var monochrome: Bool
+    public var seed: UInt64
+
+    public init(amount: Keyframed<Float> = Keyframed(defaultValue: 0),
+                size: Float = 1,
+                monochrome: Bool = true,
+                seed: UInt64 = 0) {
+        self.amount = amount
+        self.size = size
+        self.monochrome = monochrome
+        self.seed = seed
+        clamp()
+    }
+
+    public static var neutral: GrainEffect { GrainEffect() }
+
+    public var isNeutral: Bool {
+        amount.defaultValue == 0 && amount.keyframes.allSatisfy { $0.value == 0 }
+    }
+
+    public mutating func clamp() {
+        amount = clampedKeyframed(amount, to: 0...1)
+        size = clamped(size, to: 0.25...8)
+    }
+
+    public func amount(at time: CMTime) -> Float {
+        clamped(amount.value(at: time), to: 0...1)
+    }
+}
+
+/// Bright-edge red/orange bleed used by film-emulation presets.
+public struct HalationEffect: Hashable, Codable, Sendable {
+    public var strength: Keyframed<Float>
+    public var threshold: Float
+    public var radius: Float
+    public var redBoost: Float
+
+    public init(strength: Keyframed<Float> = Keyframed(defaultValue: 0),
+                threshold: Float = 0.72,
+                radius: Float = 16,
+                redBoost: Float = 0.85) {
+        self.strength = strength
+        self.threshold = threshold
+        self.radius = radius
+        self.redBoost = redBoost
+        clamp()
+    }
+
+    public static var neutral: HalationEffect { HalationEffect() }
+
+    public var isNeutral: Bool {
+        strength.defaultValue == 0 && strength.keyframes.allSatisfy { $0.value == 0 }
+    }
+
+    public mutating func clamp() {
+        strength = clampedKeyframed(strength, to: 0...1)
+        threshold = clamped(threshold, to: 0...1)
+        radius = clamped(radius, to: 0...80)
+        redBoost = clamped(redBoost, to: 0...2)
+    }
+
+    public func strength(at time: CMTime) -> Float {
+        clamped(strength.value(at: time), to: 0...1)
+    }
+}
+
+/// Edge shading for look packs. Positive `amount` darkens edges; negative values
+/// are allowed for light-leak style looks.
+public struct VignetteEffect: Hashable, Codable, Sendable {
+    public var amount: Keyframed<Float>
+    public var radius: Float
+    public var softness: Float
+
+    public init(amount: Keyframed<Float> = Keyframed(defaultValue: 0),
+                radius: Float = 0.65,
+                softness: Float = 0.35) {
+        self.amount = amount
+        self.radius = radius
+        self.softness = softness
+        clamp()
+    }
+
+    public static var neutral: VignetteEffect { VignetteEffect() }
+
+    public var isNeutral: Bool {
+        amount.defaultValue == 0 && amount.keyframes.allSatisfy { $0.value == 0 }
+    }
+
+    public mutating func clamp() {
+        amount = clampedKeyframed(amount, to: -1...1)
+        radius = clamped(radius, to: 0.05...2)
+        softness = clamped(softness, to: 0.01...1)
+    }
+
+    public func amount(at time: CMTime) -> Float {
+        clamped(amount.value(at: time), to: -1...1)
+    }
+}
+
 /// An effect that can be applied to a video clip's source frames.
 public enum Effect: Hashable, Codable, Sendable {
     case colourGrade(ColourGrade)
     case lut(bookmark: Data)
     case skinSmooth(SkinSmoothEffect)
+    case grain(GrainEffect)
+    case halation(HalationEffect)
+    case vignette(VignetteEffect)
 
     public static func == (lhs: Effect, rhs: Effect) -> Bool {
         switch (lhs, rhs) {
         case (.colourGrade(let a), .colourGrade(let b)): a == b
         case (.lut(bookmark: let a), .lut(bookmark: let b)): a == b
         case (.skinSmooth(let a), .skinSmooth(let b)): a == b
+        case (.grain(let a), .grain(let b)): a == b
+        case (.halation(let a), .halation(let b)): a == b
+        case (.vignette(let a), .vignette(let b)): a == b
         default: false
         }
     }
@@ -148,6 +271,9 @@ public enum Effect: Hashable, Codable, Sendable {
         case .colourGrade(let g): hasher.combine(0); hasher.combine(g)
         case .lut(bookmark: let d): hasher.combine(1); hasher.combine(d)
         case .skinSmooth(let s): hasher.combine(2); hasher.combine(s)
+        case .grain(let g): hasher.combine(3); hasher.combine(g)
+        case .halation(let h): hasher.combine(4); hasher.combine(h)
+        case .vignette(let v): hasher.combine(5); hasher.combine(v)
         }
     }
 }
@@ -176,6 +302,59 @@ extension Array where Element == Effect {
 
     public func removingLUT() -> [Effect] {
         filter { if case .lut = $0 { return false }; return true }
+    }
+
+    public var hasLookEffects: Bool {
+        contains { $0.isLookEffect }
+    }
+
+    public var lookEffects: [Effect] {
+        filter(\.isLookEffect)
+    }
+
+    public func replacingLookEffect(_ effect: Effect) -> [Effect] {
+        guard let kind = effect.lookKind else { return self }
+        let nonLooks = filter { !$0.isLookEffect }
+        let looks = (lookEffects.filter { $0.lookKind != kind } + [effect])
+            .sorted { ($0.lookKind?.sortIndex ?? 0) < ($1.lookKind?.sortIndex ?? 0) }
+        return nonLooks + looks
+    }
+
+    public func removingLookEffects() -> [Effect] {
+        filter { !$0.isLookEffect }
+    }
+
+    public func applyingLookEffects(_ lookEffects: [Effect]) -> [Effect] {
+        removingLookEffects() + lookEffects.filter(\.isLookEffect)
+    }
+}
+
+public enum LookEffectKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case grain
+    case halation
+    case vignette
+
+    public var sortIndex: Int {
+        switch self {
+        case .halation: 0
+        case .vignette: 1
+        case .grain: 2
+        }
+    }
+}
+
+extension Effect {
+    public var lookKind: LookEffectKind? {
+        switch self {
+        case .grain: .grain
+        case .halation: .halation
+        case .vignette: .vignette
+        case .colourGrade, .lut, .skinSmooth: nil
+        }
+    }
+
+    public var isLookEffect: Bool {
+        lookKind != nil
     }
 }
 

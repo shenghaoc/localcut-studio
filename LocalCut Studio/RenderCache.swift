@@ -72,6 +72,12 @@ extension Array where Element == Effect {
                 hasher.combine(1); hasher.combine(d)
             case .skinSmooth(let s):
                 hasher.combine(2); hasher.combine(s)
+            case .grain(let g):
+                hasher.combine(3); hasher.combine(g)
+            case .halation(let h):
+                hasher.combine(4); hasher.combine(h)
+            case .vignette(let v):
+                hasher.combine(5); hasher.combine(v)
             }
         }
         return hasher.finalize()

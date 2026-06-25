@@ -9,6 +9,7 @@ import LocalCutCore
 struct InspectorView: View {
     @Bindable var model: EditorModel
     @State private var showLUTImporter = false
+    @State private var showLookImporter = false
 
     var body: some View {
         // The side rail's segmented switcher (EditorSideRailView) is the sole
@@ -23,6 +24,7 @@ struct InspectorView: View {
                 speedSection(clip)
                 if clipIsVideo(clip) {
                     colourSection
+                    looksSection
                     beautySection
                 } else {
                     AudioClipFadesInspectorView(model: model, clip: clip)
@@ -46,6 +48,15 @@ struct InspectorView: View {
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
                 model.importLUT(url: url)
+            }
+        }
+        .fileImporter(
+            isPresented: $showLookImporter,
+            allowedContentTypes: [.localCutLookPreset],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                model.importLookPreset(url: url)
             }
         }
     }
@@ -424,6 +435,157 @@ struct InspectorView: View {
                 }
             }
         )
+    }
+
+    // MARK: - Look Packs
+
+    @ViewBuilder
+    private var looksSection: some View {
+        Section("Looks") {
+            Menu {
+                ForEach(LookPresetLibrary.builtInPresets, id: \.name) { preset in
+                    Button(preset.name) {
+                        model.applyBuiltInLookPreset(preset)
+                    }
+                }
+                Divider()
+                Button("Import…", systemImage: "square.and.arrow.down") {
+                    showLookImporter = true
+                }
+                Button("Export…", systemImage: "square.and.arrow.up") {
+                    model.requestExportLookPreset()
+                }
+            } label: {
+                Label("Preset", systemImage: "wand.and.stars")
+            }
+
+            DisclosureGroup("Grain") {
+                LabeledSliderRow(
+                    label: "Amount",
+                    display: "\(Int(model.selectedClipGrain.amount.defaultValue * 100))%",
+                    value: grainBinding(\.amount.defaultValue),
+                    range: 0...1,
+                    step: 0.01,
+                    resetAction: resetGrain(\.amount.defaultValue, to: 0))
+                LabeledSliderRow(
+                    label: "Size",
+                    display: String(format: "%.2f", model.selectedClipGrain.size),
+                    value: grainBinding(\.size),
+                    range: 0.25...8,
+                    step: 0.05,
+                    resetAction: resetGrain(\.size, to: 1))
+                Toggle("Monochrome", isOn: Binding(
+                    get: { model.selectedClipGrain.monochrome },
+                    set: { newValue in
+                        model.updateSelectedClipGrain { $0.monochrome = newValue }
+                    }))
+            }
+
+            DisclosureGroup("Halation") {
+                LabeledSliderRow(
+                    label: "Strength",
+                    display: "\(Int(model.selectedClipHalation.strength.defaultValue * 100))%",
+                    value: halationBinding(\.strength.defaultValue),
+                    range: 0...1,
+                    step: 0.01,
+                    resetAction: resetHalation(\.strength.defaultValue, to: 0))
+                LabeledSliderRow(
+                    label: "Threshold",
+                    display: String(format: "%.2f", model.selectedClipHalation.threshold),
+                    value: halationBinding(\.threshold),
+                    range: 0...1,
+                    step: 0.01,
+                    resetAction: resetHalation(\.threshold, to: 0.72))
+                LabeledSliderRow(
+                    label: "Radius",
+                    display: String(format: "%.0f px", model.selectedClipHalation.radius),
+                    value: halationBinding(\.radius),
+                    range: 0...80,
+                    step: 1,
+                    resetAction: resetHalation(\.radius, to: 16))
+            }
+
+            DisclosureGroup("Vignette") {
+                LabeledSliderRow(
+                    label: "Amount",
+                    display: "\(Int(model.selectedClipVignette.amount.defaultValue * 100))%",
+                    value: vignetteBinding(\.amount.defaultValue),
+                    range: -1...1,
+                    step: 0.01,
+                    resetAction: resetVignette(\.amount.defaultValue, to: 0))
+                LabeledSliderRow(
+                    label: "Radius",
+                    display: String(format: "%.2f", model.selectedClipVignette.radius),
+                    value: vignetteBinding(\.radius),
+                    range: 0.05...2,
+                    step: 0.01,
+                    resetAction: resetVignette(\.radius, to: 0.65))
+                LabeledSliderRow(
+                    label: "Softness",
+                    display: String(format: "%.2f", model.selectedClipVignette.softness),
+                    value: vignetteBinding(\.softness),
+                    range: 0.01...1,
+                    step: 0.01,
+                    resetAction: resetVignette(\.softness, to: 0.35))
+            }
+
+            HStack {
+                Button("Import…") { showLookImporter = true }
+                    .controlSize(.small)
+                Button("Export…") { model.requestExportLookPreset() }
+                    .controlSize(.small)
+                    .disabled(!model.selectedClipHasLookEffects)
+                Spacer()
+                Button("Reset") { model.resetClipLooks() }
+                    .controlSize(.small)
+                    .disabled(!model.selectedClipHasLookEffects)
+            }
+        }
+    }
+
+    private func resetGrain(_ keyPath: WritableKeyPath<GrainEffect, Float>, to neutral: Float) -> () -> Void {
+        {
+            grainBinding(keyPath).wrappedValue = neutral
+            model.commitCoalescedUndo()
+        }
+    }
+
+    private func resetHalation(_ keyPath: WritableKeyPath<HalationEffect, Float>, to neutral: Float) -> () -> Void {
+        {
+            halationBinding(keyPath).wrappedValue = neutral
+            model.commitCoalescedUndo()
+        }
+    }
+
+    private func resetVignette(_ keyPath: WritableKeyPath<VignetteEffect, Float>, to neutral: Float) -> () -> Void {
+        {
+            vignetteBinding(keyPath).wrappedValue = neutral
+            model.commitCoalescedUndo()
+        }
+    }
+
+    private func grainBinding(_ keyPath: WritableKeyPath<GrainEffect, Float>) -> Binding<Float> {
+        Binding(
+            get: { model.selectedClipGrain[keyPath: keyPath] },
+            set: { newValue in
+                model.updateSelectedClipGrain { $0[keyPath: keyPath] = newValue }
+            })
+    }
+
+    private func halationBinding(_ keyPath: WritableKeyPath<HalationEffect, Float>) -> Binding<Float> {
+        Binding(
+            get: { model.selectedClipHalation[keyPath: keyPath] },
+            set: { newValue in
+                model.updateSelectedClipHalation { $0[keyPath: keyPath] = newValue }
+            })
+    }
+
+    private func vignetteBinding(_ keyPath: WritableKeyPath<VignetteEffect, Float>) -> Binding<Float> {
+        Binding(
+            get: { model.selectedClipVignette[keyPath: keyPath] },
+            set: { newValue in
+                model.updateSelectedClipVignette { $0[keyPath: keyPath] = newValue }
+            })
     }
 
     // MARK: - Beauty / Skin Smoothing

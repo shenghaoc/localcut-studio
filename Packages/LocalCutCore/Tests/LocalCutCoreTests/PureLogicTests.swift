@@ -53,6 +53,81 @@ func keyframedFloatSortedInterpolationAndReplacement() {
     #expect(approximatelyEqual(Double(value.value(at: time(3))), 0.25))
 }
 
+@Test("Look effects clamp authored and keyframed values")
+func lookEffectsClampValues() {
+    var grain = GrainEffect(
+        amount: Keyframed(keyframes: [Keyframe(time: time(1), value: 2)], defaultValue: -1),
+        size: 20)
+    var halation = HalationEffect(
+        strength: Keyframed(keyframes: [Keyframe(time: time(1), value: -1)], defaultValue: 2),
+        threshold: 2,
+        radius: 100,
+        redBoost: 5)
+    var vignette = VignetteEffect(
+        amount: Keyframed(keyframes: [Keyframe(time: time(1), value: 2)], defaultValue: -2),
+        radius: 0,
+        softness: 2)
+
+    grain.clamp()
+    halation.clamp()
+    vignette.clamp()
+
+    #expect(grain.amount.defaultValue == 0)
+    #expect(grain.amount.keyframes[0].value == 1)
+    #expect(grain.size == 8)
+    #expect(halation.strength.defaultValue == 1)
+    #expect(halation.strength.keyframes[0].value == 0)
+    #expect(halation.threshold == 1)
+    #expect(halation.radius == 80)
+    #expect(halation.redBoost == 2)
+    #expect(vignette.amount.defaultValue == -1)
+    #expect(vignette.amount.keyframes[0].value == 1)
+    #expect(vignette.radius == 0.05)
+    #expect(vignette.softness == 1)
+}
+
+@Test("LookPresetV1 round-trips ordered nodes and applies only look effects")
+func lookPresetRoundTripAndApply() throws {
+    let preset = LookPresetV1(
+        name: "Round Trip",
+        nodes: [
+            .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
+            .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.3))),
+            .grain(GrainEffect(amount: Keyframed(defaultValue: 0.4))),
+        ],
+        lut: LookPresetLUTReference(relativePath: "luts/warm.cube", displayName: "warm.cube"))
+
+    let decoded = try LookPresetV1(data: preset.encoded())
+    #expect(decoded == preset)
+
+    let base: [Effect] = [
+        .colourGrade(.neutral),
+        .skinSmooth(.neutral),
+        .grain(.neutral),
+    ]
+    let applied = decoded.applying(to: base)
+    #expect(applied.count == 5)
+    #expect(applied.contains { if case .colourGrade = $0 { return true }; return false })
+    #expect(applied.contains { if case .skinSmooth = $0 { return true }; return false })
+    #expect(applied.filter(\.isLookEffect).count == 3)
+}
+
+@Test("Replacing individual look effects keeps canonical render order")
+func replacingLookEffectsKeepsCanonicalOrder() {
+    let chain: [Effect] = [.grain(GrainEffect(amount: Keyframed(defaultValue: 0.2)))]
+    let updated = chain
+        .replacingLookEffect(.halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))))
+        .replacingLookEffect(.vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))))
+
+    #expect(updated.compactMap(\.lookKind) == [.halation, .vignette, .grain])
+}
+
+@Test("Built-in look preset library has ten populated presets")
+func builtInLookPresetLibraryPopulated() {
+    #expect(LookPresetLibrary.builtInPresets.count >= 10)
+    #expect(LookPresetLibrary.builtInPresets.allSatisfy { !$0.nodes.isEmpty })
+}
+
 @Test("TransitionLayout: project-wide cuts ripple placements across tracks")
 func transitionLayoutRipplesPlacements() {
     let incomingTransition = LocalCutCore.Transition(type: .crossDissolve, duration: time(2))

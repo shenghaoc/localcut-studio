@@ -140,6 +140,17 @@ func chainHashChangesOnLUTBytes() {
     #expect(a.renderCacheHash != b.renderCacheHash)
 }
 
+@Test("[Effect].renderCacheHash: differs when look parameters change")
+func chainHashChangesOnLookParameters() {
+    let a: [Effect] = [.grain(GrainEffect(amount: Keyframed(defaultValue: 0.1)))]
+    let b: [Effect] = [.grain(GrainEffect(amount: Keyframed(defaultValue: 0.2)))]
+    let c: [Effect] = [.halation(HalationEffect(strength: Keyframed(defaultValue: 0.2)))]
+    let d: [Effect] = [.vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2)))]
+    #expect(a.renderCacheHash != b.renderCacheHash)
+    #expect(b.renderCacheHash != c.renderCacheHash)
+    #expect(c.renderCacheHash != d.renderCacheHash)
+}
+
 // MARK: - R2 / R7.1: LRU cache hit / miss
 
 @Test("RenderCache: hit on identical key returns the cached image")
