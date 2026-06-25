@@ -55,8 +55,7 @@ final class DiagnosticsAgent {
         category: "sample")
 
     @ObservationIgnored nonisolated(unsafe) private var timer: Timer?
-    /// The bridge this agent reads from and gates. Injectable so tests can
-    /// supply an isolated instance instead of sharing `DiagnosticsBridge.shared`.
+    /// Injected so tests can avoid shared diagnostic state.
     @ObservationIgnored private let bridge: DiagnosticsBridge
 
     /// CPU calibration baseline. `nil` until the first tick after `start()`.
