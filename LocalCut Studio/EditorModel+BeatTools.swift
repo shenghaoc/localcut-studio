@@ -86,7 +86,7 @@ extension EditorModel {
         let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
         var times: [CMTime] = []
 
-        for track in project.audioTracks {
+        for track in project.videoTracks + project.audioTracks {
             for clip in track.clips where clip.id != clipID {
                 guard let media = project.media(for: clip.mediaID),
                       media.hasAudio,

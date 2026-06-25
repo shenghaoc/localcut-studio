@@ -94,12 +94,7 @@ nonisolated enum BeatAnalysisCache {
 
     private static func readUInt32(from data: Data, offset: Int) -> UInt32 {
         data.withUnsafeBytes { rawBuffer in
-            let bytes = rawBuffer.bindMemory(to: UInt8.self)
-            let b0 = UInt32(bytes[offset])
-            let b1 = UInt32(bytes[offset + 1]) << 8
-            let b2 = UInt32(bytes[offset + 2]) << 16
-            let b3 = UInt32(bytes[offset + 3]) << 24
-            return b0 | b1 | b2 | b3
+            UInt32(littleEndian: rawBuffer.load(fromByteOffset: offset, as: UInt32.self))
         }
     }
 }
@@ -164,6 +159,13 @@ actor BeatAnalyzer {
         }
 
         var samples: [Float] = []
+        let duration = try? await asset.load(.duration)
+        if let duration, duration.seconds.isFinite {
+            let estimatedSamples = Int(duration.seconds * targetSampleRate)
+            if estimatedSamples > 0 {
+                samples.reserveCapacity(estimatedSamples)
+            }
+        }
         while reader.status == .reading {
             try Task.checkCancellation()
             guard let buffer = output.copyNextSampleBuffer() else { break }
@@ -264,7 +266,7 @@ nonisolated enum BeatDetectionCore {
             guard value >= envelope[index - 1], value > envelope[index + 1] else { continue }
             let start = max(0, index - medianRadius)
             let end = min(envelope.count - 1, index + medianRadius)
-            let threshold = runningMedian(Array(envelope[start...end])) + delta
+            let threshold = runningMedian(envelope[start...end]) + delta
             guard value >= threshold else { continue }
             if let last = peaks.last, index - last < minDistance {
                 if value > envelope[last] {
@@ -313,8 +315,7 @@ nonisolated enum BeatDetectionCore {
         }
         let interval = 60 / tempoBPM
         guard interval > 0 else { return [] }
-        var firstBeat = Double(firstPeak) * hopDuration
-        while firstBeat - interval >= 0 { firstBeat -= interval }
+        let firstBeat = (Double(firstPeak) * hopDuration).truncatingRemainder(dividingBy: interval)
 
         var beats: [CMTime] = []
         var seconds = firstBeat
@@ -342,7 +343,7 @@ nonisolated enum BeatDetectionCore {
         return values.map { $0 / maxValue }
     }
 
-    private static func runningMedian(_ values: [Float]) -> Float {
+    private static func runningMedian<C: Collection>(_ values: C) -> Float where C.Element == Float {
         guard !values.isEmpty else { return 0 }
         let sorted = values.sorted()
         let mid = sorted.count / 2
