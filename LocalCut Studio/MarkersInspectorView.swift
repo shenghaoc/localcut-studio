@@ -9,12 +9,9 @@ struct MarkersInspectorView: View {
 
     var body: some View {
         Section("Markers") {
-            HStack {
-                Button("Add at Playhead") { model.addMarkerAtPlayhead() }
-                Spacer()
-            }
-
             if model.project.markers.isEmpty {
+                // The empty state owns the sole call to action; the top toolbar
+                // button only reappears once there are markers to manage.
                 ContentUnavailableView {
                     Label("No Markers", systemImage: "mappin")
                 } description: {
@@ -24,10 +21,15 @@ struct MarkersInspectorView: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                 }
-            }
+            } else {
+                HStack {
+                    Button("Add at Playhead") { model.addMarkerAtPlayhead() }
+                    Spacer()
+                }
 
-            ForEach(model.project.markers) { marker in
-                markerRow(marker)
+                ForEach(model.project.markers) { marker in
+                    markerRow(marker)
+                }
             }
         }
     }

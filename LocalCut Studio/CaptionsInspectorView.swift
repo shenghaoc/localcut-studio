@@ -16,13 +16,9 @@ struct CaptionsInspectorView: View {
 
     var body: some View {
         Section("Captions") {
-            HStack {
-                Button("Import SRT/VTT…") { showSRTImporter = true }
-                Button("Add Empty Track") { model.addEmptyCaptionTrack() }
-                Spacer()
-            }
-
             if model.project.captionTracks.isEmpty {
+                // The empty state owns the sole call to action; the top toolbar
+                // buttons only reappear once there are tracks to manage.
                 ContentUnavailableView {
                     Label("No Caption Tracks", systemImage: "captions.bubble")
                 } description: {
@@ -36,13 +32,17 @@ struct CaptionsInspectorView: View {
                     }
                     .controlSize(.small)
                 }
-            }
+            } else {
+                HStack {
+                    Button("Import SRT/VTT…") { showSRTImporter = true }
+                    Button("Add Empty Track") { model.addEmptyCaptionTrack() }
+                    Spacer()
+                }
 
-            ForEach(model.project.captionTracks) { track in
-                trackBlock(track)
-            }
+                ForEach(model.project.captionTracks) { track in
+                    trackBlock(track)
+                }
 
-            if !model.project.captionTracks.isEmpty {
                 Text("Caption styling shows in preview and burned-in video exports; SRT/VTT sidecars stay plain text.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
