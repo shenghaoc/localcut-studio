@@ -156,6 +156,21 @@ struct TimelineView: View {
 
     // MARK: Scrollable timeline content
 
+    private struct PlayheadView: View {
+        var model: EditorModel
+        var pps: CGFloat
+
+        var body: some View {
+            let x = CGFloat(model.currentTime) * pps
+            return Rectangle()
+                .fill(Color.red)
+                .frame(width: 1.5)
+                .frame(maxHeight: .infinity)
+                .offset(x: x)
+                .allowsHitTesting(false)
+        }
+    }
+
     private var timelineScroller: some View {
         ScrollView([.horizontal]) {
             ZStack(alignment: .topLeading) {
@@ -170,7 +185,7 @@ struct TimelineView: View {
                         captionLane(for: track)
                     }
                 }
-                playhead
+                PlayheadView(model: model, pps: pps)
             }
             .frame(width: contentWidth, alignment: .topLeading)
         }
@@ -673,18 +688,6 @@ struct TimelineView: View {
         captionDrag = nil
         model.retimeCaptionLine(drag.lineID, in: drag.trackID, start: drag.candidateStart)
         model.commitCoalescedUndo()
-    }
-
-    // MARK: - Playhead
-
-    private var playhead: some View {
-        let x = CGFloat(model.currentTime) * pps
-        return Rectangle()
-            .fill(Color.red)
-            .frame(width: 1.5)
-            .frame(maxHeight: .infinity)
-            .offset(x: x)
-            .allowsHitTesting(false)
     }
 
     /// Choose a tick spacing (seconds) that stays legible at the current zoom.

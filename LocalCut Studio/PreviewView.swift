@@ -20,6 +20,23 @@ struct PreviewPlayerView: NSViewRepresentable {
     }
 }
 
+private struct TransportTimeView: View {
+    var model: EditorModel
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(TimeFormatting.timecode(model.currentTime))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Text("/")
+                .foregroundStyle(.tertiary)
+            Text(TimeFormatting.timecode(model.totalDuration))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 /// The preview pane: video canvas plus a transport bar with the playhead time.
 struct PreviewView: View {
     @Bindable var model: EditorModel
@@ -76,14 +93,7 @@ struct PreviewView: View {
             .help("Play / Pause")
             .accessibilityLabel(model.isPlaying ? Text("Pause") : Text("Play"))
 
-            Text(TimeFormatting.timecode(model.currentTime))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-            Text("/")
-                .foregroundStyle(.tertiary)
-            Text(TimeFormatting.timecode(model.totalDuration))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
+            TransportTimeView(model: model)
 
             Spacer()
 
