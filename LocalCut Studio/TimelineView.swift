@@ -132,7 +132,7 @@ struct TimelineView: View {
                 .padding(.horizontal, 8)
                 .frame(height: laneHeight)
                 .foregroundStyle(.secondary)
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(trackAccessibilityLabel(track))
             }
             ForEach(captionTracks) { track in
@@ -147,7 +147,7 @@ struct TimelineView: View {
                 .padding(.horizontal, 8)
                 .frame(height: laneHeight)
                 .foregroundStyle(track.isMuted ? .tertiary : .secondary)
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(captionTrackAccessibilityLabel(track))
             }
         }
