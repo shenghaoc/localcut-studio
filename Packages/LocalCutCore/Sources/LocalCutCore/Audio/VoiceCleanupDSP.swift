@@ -146,7 +146,7 @@ public enum VoiceCleanupDSP {
                                         gain: inout Float) {
         let attack = smoothingCoefficient(milliseconds: settings.attackMS, sampleRate: sampleRate)
         let release = smoothingCoefficient(milliseconds: settings.releaseMS, sampleRate: sampleRate)
-        let makeup = settings.makeupGainDB
+        let makeupGain = linearGain(fromDB: settings.makeupGainDB)
 
         var frame = 0
         while frame < samples.count {
@@ -154,17 +154,19 @@ public enum VoiceCleanupDSP {
             var magnitude: Float = 0
             for i in frame..<end { magnitude = max(magnitude, abs(samples[i])) }
 
-            var targetDB = makeup
             let levelDB = decibels(fromLinear: magnitude)
+            var targetGR: Float = 1
             if levelDB > settings.thresholdDB {
                 let compressed = settings.thresholdDB + (levelDB - settings.thresholdDB) / settings.ratio
-                targetDB += compressed - levelDB
+                targetGR = linearGain(fromDB: compressed - levelDB)
             }
 
-            let target = linearGain(fromDB: targetDB)
-            let coefficient = target < gain ? attack : release
-            gain += (target - gain) * coefficient
-            for i in frame..<end { samples[i] *= gain }
+            // Smooth only the gain reduction (starts at 1.0); apply the static
+            // makeup gain afterwards so there is no start-of-track fade-in.
+            let coefficient = targetGR < gain ? attack : release
+            gain += (targetGR - gain) * coefficient
+            let totalGain = gain * makeupGain
+            for i in frame..<end { samples[i] *= totalGain }
             frame += channels
         }
     }
@@ -190,6 +192,8 @@ public struct EBUR128LoudnessAnalyser: Sendable {
     private var ringIndex = 0
     private var primedSamples = 0
     private var windowEnergies: [Float] = []
+    private var samplesSinceLastWindow = 0
+    private var hasFirstWindow = false
 
     public init(sampleRate: Double = 48_000, channels: Int = 2) {
         self.sampleRate = sampleRate
@@ -229,6 +233,8 @@ public struct EBUR128LoudnessAnalyser: Sendable {
         ringIndex = 0
         primedSamples = 0
         windowEnergies.removeAll()
+        samplesSinceLastWindow = 0
+        hasFirstWindow = false
     }
 
     public func integratedLoudness() -> Float {
@@ -249,15 +255,33 @@ public struct EBUR128LoudnessAnalyser: Sendable {
 
     private mutating func appendWindow(_ filteredChannels: [[Float]], frames: Int) {
         guard frames > 0, let windowLength = ringBuffers.first?.count else { return }
+        // EBU R128 requires one overlapping 400 ms energy point every 100 ms,
+        // independent of the incoming buffer size. Count samples between windows
+        // so the density stays at 10 points/second regardless of chunking.
+        let hopLength = max(1, Int((sampleRate * 0.1).rounded()))
         for frame in 0..<frames {
             for channel in 0..<channels {
                 ringBuffers[channel][ringIndex] = filteredChannels[channel][frame]
             }
             ringIndex = (ringIndex + 1) % windowLength
             primedSamples = min(windowLength, primedSamples + 1)
-        }
-        guard primedSamples == windowLength else { return }
 
+            guard primedSamples == windowLength else { continue }
+            if !hasFirstWindow {
+                hasFirstWindow = true
+                samplesSinceLastWindow = 0
+                appendCurrentWindowEnergy(windowLength: windowLength)
+            } else {
+                samplesSinceLastWindow += 1
+                if samplesSinceLastWindow >= hopLength {
+                    samplesSinceLastWindow = 0
+                    appendCurrentWindowEnergy(windowLength: windowLength)
+                }
+            }
+        }
+    }
+
+    private mutating func appendCurrentWindowEnergy(windowLength: Int) {
         var energy: Float = 0
         for channel in 0..<channels {
             var meanSquare: Float = 0

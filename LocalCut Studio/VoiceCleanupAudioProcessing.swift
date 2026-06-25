@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreMedia
+import Accelerate
 import LocalCutCore
 
 enum VoiceCleanupAudioProcessing {
@@ -142,13 +143,13 @@ enum VoiceCleanupAudioProcessing {
         guard status == noErr else { return nil }
 
         var samples = Array(repeating: Float(0), count: frameCount * channels)
-        data.withUnsafeBytes { bytes in
-            for index in samples.indices {
-                let offset = index * MemoryLayout<Int16>.size
-                let bits = UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
-                samples[index] = max(-1, Float(Int16(bitPattern: bits)) / 32768)
+        data.withUnsafeBytes { rawBuffer in
+            if let int16Pointer = rawBuffer.bindMemory(to: Int16.self).baseAddress {
+                vDSP_vflt16(int16Pointer, 1, &samples, 1, vDSP_Length(samples.count))
             }
         }
+        var scale = Float(1.0 / 32768.0)
+        vDSP_vsmul(samples, 1, &scale, &samples, 1, vDSP_Length(samples.count))
         return PCMBlock(samples: samples, channels: channels, sampleRate: asbd.mSampleRate)
     }
 
@@ -158,15 +159,17 @@ enum VoiceCleanupAudioProcessing {
                                                           source: CMSampleBuffer) -> CMSampleBuffer? {
         guard channels > 0 else { return nil }
         let frameCount = samples.count / channels
+        var clamped = Array(repeating: Float(0), count: samples.count)
+        var low: Float = -1.0
+        var high: Float = 0.999_969_5
+        vDSP_vclip(samples, 1, &low, &high, &clamped, 1, vDSP_Length(samples.count))
+        var scale = Float(32767.0)
+        vDSP_vsmul(clamped, 1, &scale, &clamped, 1, vDSP_Length(clamped.count))
+
         var outputBytes = Data(count: samples.count * MemoryLayout<Int16>.size)
-        outputBytes.withUnsafeMutableBytes { (rawBytes: UnsafeMutableRawBufferPointer) in
-            for index in samples.indices {
-                let clamped = max(-1, min(0.999_969_5, samples[index]))
-                let intValue = Int16(clamped * 32767)
-                let bits = UInt16(bitPattern: intValue)
-                let offset = index * MemoryLayout<Int16>.size
-                rawBytes[offset] = UInt8(bits & 0x00ff)
-                rawBytes[offset + 1] = UInt8((bits >> 8) & 0x00ff)
+        outputBytes.withUnsafeMutableBytes { rawBuffer in
+            if let int16Pointer = rawBuffer.bindMemory(to: Int16.self).baseAddress {
+                vDSP_vfix16(clamped, 1, int16Pointer, 1, vDSP_Length(clamped.count))
             }
         }
 

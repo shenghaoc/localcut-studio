@@ -118,11 +118,23 @@ extension EditorModel {
                         note: "Normalisation skipped: project has no renderable audio."))
                     return
                 }
-                let result = try VoiceCleanupAudioProcessing.measureLoudness(
-                    composition: built.composition,
-                    audioMix: built.audioMix,
-                    duration: built.duration,
-                    settings: project.voiceCleanup)
+                // `measureLoudness` decodes and DSP-processes the whole project
+                // synchronously, so keep it off the main actor to avoid freezing
+                // the UI during measurement. The composition is a freshly-built
+                // local value consumed only by this detached task, so confining
+                // it with `nonisolated(unsafe)` is sound under Swift 6 (mirrors
+                // the writer path in RenderQueue).
+                let settings = project.voiceCleanup
+                let duration = built.duration
+                nonisolated(unsafe) let composition = built.composition
+                nonisolated(unsafe) let audioMix = built.audioMix
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try VoiceCleanupAudioProcessing.measureLoudness(
+                        composition: composition,
+                        audioMix: audioMix,
+                        duration: duration,
+                        settings: settings)
+                }.value
                 applyLoudnessAnalysis(result)
             } catch {
                 statusMessage = "Loudness measurement failed: \(error.localizedDescription)"
