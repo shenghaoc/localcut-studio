@@ -195,7 +195,7 @@ private enum CoverExportError: LocalizedError {
 }
 
 private extension CoverFormat {
-    var utType: UTType {
+    nonisolated var utType: UTType {
         switch self {
         case .png: .png
         case .jpeg: .jpeg
