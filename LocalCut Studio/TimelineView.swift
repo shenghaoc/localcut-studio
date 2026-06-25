@@ -170,7 +170,7 @@ struct TimelineView: View {
                         captionLane(for: track)
                     }
                 }
-                playhead
+                PlayheadView(model: model, pps: pps)
             }
             .frame(width: contentWidth, alignment: .topLeading)
         }
@@ -675,24 +675,30 @@ struct TimelineView: View {
         model.commitCoalescedUndo()
     }
 
-    // MARK: - Playhead
-
-    private var playhead: some View {
-        let x = CGFloat(model.currentTime) * pps
-        return Rectangle()
-            .fill(Color.red)
-            .frame(width: 1.5)
-            .frame(maxHeight: .infinity)
-            .offset(x: x)
-            .allowsHitTesting(false)
-    }
-
     /// Choose a tick spacing (seconds) that stays legible at the current zoom.
     private func tickStep() -> Double {
         let targetPixels: CGFloat = 60
         let raw = Double(targetPixels / pps)
         let candidates: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300]
         return candidates.first { $0 >= raw } ?? 600
+    }
+}
+
+// MARK: - Playhead
+
+/// The red scrubber line. Isolated so it can re-evaluate on every
+/// `currentTime` tick without invalidating the rest of `TimelineView`.
+private struct PlayheadView: View {
+    var model: EditorModel
+    var pps: CGFloat
+
+    var body: some View {
+        Rectangle()
+            .fill(.red)
+            .frame(width: 1.5)
+            .frame(maxHeight: .infinity)
+            .offset(x: CGFloat(model.currentTime) * pps)
+            .allowsHitTesting(false)
     }
 }
 
