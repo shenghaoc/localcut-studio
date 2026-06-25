@@ -1,6 +1,6 @@
 # Design: Phase 34 — Beat Detection and Beat-Synced Editing (卡点)
 
-> Status: **Proposed**. Target tag: **v0.1.3**.
+> Status: **In progress**. Target tag: **v0.1.3**.
 
 ## Goal
 
@@ -8,14 +8,14 @@ Offline beat analysis of any audio source on a background actor, with results ca
 
 ## Prerequisites
 
-- Timeline markers (not yet specced) — `TimelineMarker { kind, time, label }` rendered on the ruler with add/remove + keyboard.
+- Timeline markers — `TimelineMarker { kind, time, label }` rendered on the ruler with add/remove + keyboard.
 - Project bundle / persistence layer (`feature-project-persistence`) — beat analysis is cached per source under the bundle's `Caches/` directory keyed by SHA-256 of the audio asset.
 
 ## Approach
 
 1. **Analysis pipeline.** Background actor. Decode the source's audio track via `AVAssetReader` at 22.05 kHz mono (decimation is cheap and the spectral-flux step doesn't need full bandwidth). Compute STFT with `vDSP_fft_zrip` on 1024-sample windows with 50% overlap. Half-wave-rectified spectral flux gives onset strength. Pick peaks via adaptive thresholding (running median + delta). Estimate tempo via autocorrelation of the onset envelope and confirm a beat grid by dynamic-programming track-back.
 2. **Output.** A `BeatAnalysis { tempoBPM, beatTimes: [CMTime], confidence: Float }` per source.
-3. **Cache.** Store as a small binary blob under `Caches/beats/<sha256>.beat` (versioned header). Re-run only when the source's SHA-256 changes. Eligible for inclusion in the project bundle's `cache/` directory for portability.
+3. **Cache.** Store as a small binary blob under `Caches/beats/<sha256>.beat` (versioned header). Re-run only when the source's SHA-256 changes. Eligible for inclusion in the project bundle's `Caches/beats/` directory for portability.
 4. **Marker integration.** `BeatAnalysis.beatTimes` are SOURCE-relative (relative to the audio file's start, not the timeline). For ruler markers, snap targets, and cut-at-beats we project per clip through the clip's source-to-timeline mapping:
    ```
    timelineBeat = clip.timelineStart + clip.mapSourceTimeToTimeline(sourceBeat − clip.sourceStart)

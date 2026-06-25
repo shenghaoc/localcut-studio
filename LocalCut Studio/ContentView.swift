@@ -92,6 +92,12 @@ struct DocumentCommands: Commands {
             Button("Split Clip at Playhead") { model.splitSelectedClipAtPlayhead() }
                 .keyboardShortcut("k", modifiers: .command)
                 .disabled(model.selectedClipID == nil)
+            Button("Analyse Beats for Selection") { model.analyzeBeatsForSelection() }
+                .disabled(!model.canAnalyzeBeatsForSelection)
+            Button("Cut Selected Clip at Beats") { model.cutSelectedClipAtBeats() }
+                .disabled(!model.canCutSelectedClipAtBeats)
+            Button("Align Selected Clip to Beat") { model.alignSelectedClipToBeat() }
+                .disabled(!model.canAlignSelectedClipToBeat)
             Button("Add Transition at Selected Cut") { model.addTransitionToSelectedClip() }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(!model.canAddTransitionAtSelection)

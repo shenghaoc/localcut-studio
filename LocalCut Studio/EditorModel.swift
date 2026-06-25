@@ -38,6 +38,15 @@ final class EditorModel {
     // Timeline view state
     var pixelsPerSecond: Double = 80
 
+    // Beat tools (Phase 34)
+    var showBeatMarkers = false
+    var snapToBeats = false
+    /// Global draw/snap offset in seconds, clamped by the inspector to ±200 ms.
+    var beatOffsetSeconds: Double = 0
+    /// Maximum distance for Align to Beat in seconds.
+    var beatAlignWindowSeconds: Double = 0.15
+    var beatAnalyses: [MediaItem.ID: BeatAnalysis] = [:]
+
     // Scopes panel (colour-management feature) — session-only UI flag, not persisted.
     var showScopes: Bool = false
 
@@ -76,6 +85,9 @@ final class EditorModel {
 
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
+    @ObservationIgnored let beatAnalyzer = BeatAnalyzer()
+    @ObservationIgnored var beatAnalysisTask: Task<Void, Never>?
+    @ObservationIgnored var beatAnalysisKeys: [MediaItem.ID: String] = [:]
 
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.
@@ -184,6 +196,7 @@ final class EditorModel {
 
     deinit {
         previewRebuildCoordinator.cancelAll()
+        beatAnalysisTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
@@ -781,7 +794,11 @@ final class EditorModel {
     /// Collects all authored snap targets: playhead position(s), every clip
     /// boundary (excluding the given clip), and the timeline origin (0).
     func snapTargets(excluding clipID: Clip.ID? = nil) -> [CMTime] {
-        projectEditingService.snapTargets(excluding: clipID, model: self)
+        var targets = projectEditingService.snapTargets(excluding: clipID, model: self)
+        if snapToBeats {
+            targets.append(contentsOf: projectedBeatTimes(excluding: clipID))
+        }
+        return targets
     }
 
     /// Returns the nearest snap target within threshold, or the candidate
