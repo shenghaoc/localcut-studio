@@ -43,11 +43,11 @@ enum CompositionBuilder {
         let transitionType: TransitionType?
         let transitionWipeAngle: Double?
         let showSkinMask: Bool
-        let clipStartTime: CMTime
+        let clipSourceStart: CMTime
         let sourceRange: CMTimeRange
 
         var layer: CompositorLayer {
-            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipStartTime: clipStartTime, sourceRange: sourceRange, timeRange: timeRange)
+            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipSourceStart: clipSourceStart, sourceRange: sourceRange, timeRange: timeRange)
         }
 
         func contains(_ seconds: Double) -> Bool {
@@ -104,35 +104,57 @@ enum CompositionBuilder {
 
                 // A clip may be split into pieces where it spans another track's
                 // transition cut; each piece is packed onto the first free track.
+                var dedicatedRetimedTrack: AVMutableCompositionTrack?
                 for piece in TransitionLayout.pieces(for: clip, overlap: overlaps[clipIndex], cuts: cuts) {
                     let start = piece.effectiveStart
-                    let poolIndex: Int
-                    if let free = pool.firstIndex(where: { $0.lastEnd <= start }) {
-                        poolIndex = free
+                    let compTrack: AVMutableCompositionTrack
+                    if clip.hasTimeRemap {
+                        if let existing = dedicatedRetimedTrack {
+                            compTrack = existing
+                        } else {
+                            guard let newTrack = composition.addMutableTrack(
+                                withMediaType: .video,
+                                preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                            dedicatedRetimedTrack = newTrack
+                            compTrack = newTrack
+                        }
                     } else {
-                        guard let newTrack = composition.addMutableTrack(
-                            withMediaType: .video,
-                            preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-                        pool.append((newTrack, .zero))
-                        poolIndex = pool.count - 1
+                        let poolIndex: Int
+                        if let free = pool.firstIndex(where: { $0.lastEnd <= start }) {
+                            poolIndex = free
+                        } else {
+                            guard let newTrack = composition.addMutableTrack(
+                                withMediaType: .video,
+                                preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                            pool.append((newTrack, .zero))
+                            poolIndex = pool.count - 1
+                        }
+                        compTrack = pool[poolIndex].track
+                        pool[poolIndex].lastEnd = piece.effectiveEnd
                     }
-                    let compTrack = pool[poolIndex].track
-                    try compTrack.insertTimeRange(piece.sourceRange, of: sourceTrack, at: start)
-                    pool[poolIndex].lastEnd = piece.effectiveEnd
 
-                    segments.append(VideoSegment(
-                        clipID: clip.id,
-                        compTrackID: compTrack.trackID,
-                        timeRange: CMTimeRange(start: start, duration: piece.duration),
-                        transform: transform,
-                        opacity: clip.opacity,
-                        effects: clip.effects,
-                        transitionRange: piece.transitionRange,
-                        transitionType: piece.overlap > .zero ? clip.transition?.type : nil,
-                        transitionWipeAngle: piece.overlap > .zero ? clip.transition?.wipeAngle : nil,
-                        showSkinMask: showSkinMask,
-                        clipStartTime: clip.timelineStart,
-                        sourceRange: piece.sourceRange))
+                    let remapSegments = try insertRetimedPiece(
+                        clip: clip,
+                        piece: piece,
+                        sourceTrack: sourceTrack,
+                        into: compTrack)
+                    for remapSegment in remapSegments {
+                        let segmentStart = start + (remapSegment.outputOffset - piece.outputOffset)
+                        segments.append(VideoSegment(
+                            clipID: clip.id,
+                            compTrackID: compTrack.trackID,
+                            timeRange: CMTimeRange(start: segmentStart,
+                                                   duration: remapSegment.outputDuration),
+                            transform: transform,
+                            opacity: clip.opacity,
+                            effects: clip.effects,
+                            transitionRange: piece.transitionRange,
+                            transitionType: piece.overlap > .zero ? clip.transition?.type : nil,
+                            transitionWipeAngle: piece.overlap > .zero ? clip.transition?.wipeAngle : nil,
+                            showSkinMask: showSkinMask,
+                            clipSourceStart: clip.sourceStart,
+                            sourceRange: remapSegment.sourceRange))
+                    }
                 }
             }
             projectTrackSegments.append(segments)
@@ -151,6 +173,7 @@ enum CompositionBuilder {
         var audioMixParameters: [AVMutableAudioMixInputParameters] = []
         var hasAudioCrossfade = false
         var hasBusContribution = false
+        var hasTimePitchContribution = false
         for projectTrack in project.audioTracks where !projectTrack.isMuted {
             let trackInput = project.trackInputs.first(where: { $0.id == projectTrack.id })
             let baseline = AudioBusMixing.baselineVolume(masterGain: project.masterGain,
@@ -169,7 +192,11 @@ enum CompositionBuilder {
                     guard let compTrack = composition.addMutableTrack(
                         withMediaType: .audio,
                         preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-                    try compTrack.insertTimeRange(piece.sourceRange, of: sourceTrack, at: piece.effectiveStart)
+                    _ = try insertRetimedPiece(
+                        clip: clip,
+                        piece: piece,
+                        sourceTrack: sourceTrack,
+                        into: compTrack)
                     placed.append((compTrack, clip, piece))
                 }
             }
@@ -179,6 +206,10 @@ enum CompositionBuilder {
                 let piece = placed[index].piece
                 let clip = placed[index].clip
                 let params = AVMutableAudioMixInputParameters(track: placed[index].track)
+                if clip.hasTimeRemap, clip.preservePitch {
+                    params.audioTimePitchAlgorithm = clip.pitchAlgorithm.avFoundationAlgorithm
+                    hasTimePitchContribution = true
+                }
                 let leadOverlap = index > 0
                     ? CMTimeMaximum(.zero, placed[index - 1].piece.effectiveEnd - piece.effectiveStart) : .zero
                 let trailOverlap = index < placed.count - 1
@@ -317,7 +348,7 @@ enum CompositionBuilder {
             workingColourSpace: project.workingColourSpace)
 
         let audioMix: AVAudioMix?
-        if hasAudioCrossfade || hasBusContribution {
+        if hasAudioCrossfade || hasBusContribution || hasTimePitchContribution {
             let mix = AVMutableAudioMix()
             mix.inputParameters = audioMixParameters
             audioMix = mix
@@ -330,6 +361,30 @@ enum CompositionBuilder {
             videoComposition: videoComposition,
             audioMix: audioMix,
             duration: totalDuration.seconds)
+    }
+
+    /// Inserts every speed-plan subsegment for `piece` into one composition
+    /// track, scaling immediately after each insert. Later subsegments are not
+    /// present yet, so `scaleTimeRange` cannot shift unrelated clips; ramped
+    /// video clips still get dedicated tracks at the call site to keep that
+    /// invariant true across transition pieces.
+    @discardableResult
+    private static func insertRetimedPiece(clip: Clip,
+                                           piece: TransitionLayout.Piece,
+                                           sourceTrack: AVAssetTrack,
+                                           into compTrack: AVMutableCompositionTrack)
+        throws -> [TimeRemapSegment] {
+        let remapSegments = TimeRemapping.segmentPlan(for: clip, sourceRange: piece.sourceRange)
+        for segment in remapSegments {
+            let start = piece.effectiveStart + (segment.outputOffset - piece.outputOffset)
+            try compTrack.insertTimeRange(segment.sourceRange, of: sourceTrack, at: start)
+            if abs((segment.outputDuration - segment.sourceRange.duration).seconds) > 0.000_001 {
+                compTrack.scaleTimeRange(
+                    CMTimeRange(start: start, duration: segment.sourceRange.duration),
+                    toDuration: segment.outputDuration)
+            }
+        }
+        return remapSegments
     }
 
     // MARK: - Volume envelope application (P16)
@@ -363,11 +418,12 @@ enum CompositionBuilder {
                                             baseline: Float) {
         guard !envelope.isEmpty else { return }
 
-        let clipDuration = clip.duration
+        let clipDuration = clip.outputDuration
         let (fadeIn, fadeOut) = envelope.clampedFades(clipDuration: clipDuration)
-        // Clip-relative offset of this piece: how far into the clip's source it
-        // starts. For a single-piece clip this is .zero.
-        let pieceClipRelOffset = piece.sourceRange.start - clip.sourceStart
+        // Clip-relative offset of this piece in output time. Volume envelopes
+        // are timeline gestures, so they follow the retimed clip length instead
+        // of the raw source span.
+        let pieceClipRelOffset = piece.outputOffset
         let pieceClipRelRange = CMTimeRange(start: pieceClipRelOffset, duration: piece.duration)
 
         // Envelope ramps to write, in clip-relative coordinates with their final
@@ -535,7 +591,7 @@ enum CompositionBuilder {
                     opacity: 1,
                     effects: [],
                     showSkinMask: false,
-                    clipStartTime: tail.start,
+                    clipSourceStart: tail.start,
                     sourceRange: tail,
                     timeRange: tail)))
             }

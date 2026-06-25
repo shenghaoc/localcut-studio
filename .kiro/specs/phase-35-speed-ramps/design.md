@@ -1,6 +1,6 @@
 # Design: Phase 35 — Time Remapping (speed ramps + pitch-preserving time-stretch)
 
-> Status: **Proposed**. Target tag: **v0.1.4**.
+> Status: **In progress**. Target tag: **v0.1.4**.
 
 ## Goal
 

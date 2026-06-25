@@ -610,7 +610,7 @@ struct TimelineView: View {
         let nameLabel: Text = clipName.map(Text.init) ?? Text("Clip")
         // Announce the rippled (effective) start so VoiceOver matches the drawn
         // block position when an upstream transition has shortened the timeline.
-        let valueLabel = Text("Starts \(TimeFormatting.timecode(effectiveStart.seconds)), \(TimeFormatting.timecode(clip.duration.seconds)) long")
+        let valueLabel = Text("Starts \(TimeFormatting.timecode(effectiveStart.seconds)), \(TimeFormatting.timecode(clip.outputDuration.seconds)) long")
 
         return ZStack {
             RoundedRectangle(cornerRadius: 6)
@@ -728,7 +728,7 @@ struct TimelineView: View {
         func effectiveX(_ authored: Double) -> CGFloat { CGFloat(authored - shiftSeconds) * pps }
 
         guard let mode = dragMode else {
-            let width = max(CGFloat(clip.duration.seconds) * pps, 2)
+            let width = max(CGFloat(clip.outputDuration.seconds) * pps, 2)
             return ClipDisplayValues(width: width, x: effectiveX(clip.timelineStart.seconds), yOffset: 4, opacity: 1)
         }
 
@@ -744,13 +744,13 @@ struct TimelineView: View {
             return ClipDisplayValues(width: width, x: effectiveX(clip.timelineStart.seconds), yOffset: 4, opacity: 1)
 
         case .moving(let id, let candidateStart, _, let targetIdx) where id == clip.id:
-            let width = max(CGFloat(clip.duration.seconds) * pps, 2)
+            let width = max(CGFloat(clip.outputDuration.seconds) * pps, 2)
             let trackDelta = targetIdx - trackIndex
             let yOffset: CGFloat = 4 + CGFloat(trackDelta) * (laneHeight + 1)
             return ClipDisplayValues(width: width, x: effectiveX(candidateStart.seconds), yOffset: yOffset, opacity: 0.7)
 
         default:
-            let width = max(CGFloat(clip.duration.seconds) * pps, 2)
+            let width = max(CGFloat(clip.outputDuration.seconds) * pps, 2)
             return ClipDisplayValues(width: width, x: effectiveX(clip.timelineStart.seconds), yOffset: 4, opacity: 1)
         }
     }
@@ -817,7 +817,7 @@ struct TimelineView: View {
                 if !NSEvent.modifierFlags.contains(.option) {
                     candidateStart = model.resolveSnap(
                         candidate: candidateStart, excluding: clip.id,
-                        trailingEdgeOffset: clip.duration)
+                        trailingEdgeOffset: clip.outputDuration)
                 }
 
                 dragMode = .moving(clipID: clip.id, candidateStart: candidateStart,

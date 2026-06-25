@@ -475,6 +475,145 @@ final class EditorModel {
     }
     #endif
 
+    // MARK: - Time remapping
+
+    var selectedClipOutputDuration: CMTime {
+        selectedClip?.outputDuration ?? .zero
+    }
+
+    var selectedClipSpeedAtPlayhead: Float {
+        guard let time = selectedClipTimeRemapLocalSourceTime else {
+            return selectedClip?.speedCurve.defaultValue ?? TimeRemapping.identitySpeed
+        }
+        return selectedClip?.speedCurve.value(at: time) ?? TimeRemapping.identitySpeed
+    }
+
+    var selectedClipSpeedKeyframeAtPlayhead: Keyframe<Float>? {
+        guard let time = selectedClipTimeRemapLocalSourceTime else { return nil }
+        return nearestSpeedKeyframe(to: time)
+    }
+
+    var selectedClipTimeRemapLocalSourceTime: CMTime? {
+        guard let clip = selectedClip else { return nil }
+        let playhead = CMTime(seconds: currentTime, preferredTimescale: 600)
+        guard playhead >= clip.timelineStart, playhead <= clip.timelineEnd else { return nil }
+        let outputOffset = CMTimeMaximum(.zero, CMTimeMinimum(playhead - clip.timelineStart, clip.outputDuration))
+        return clip.sourceOffset(forOutputOffset: outputOffset)
+    }
+
+    func updateSelectedClipTimeRemap(_ actionName: String = "Adjust Speed",
+                                     invalidateVideo: Bool = true,
+                                     _ transform: @escaping (inout Clip) -> Void) {
+        guard let id = selectedClipID else { return }
+        performCoalescedUndoable(actionName, target: id, rebuild: .debounced) {
+            mutateClip(id: id, invalidateVideo: invalidateVideo, transform)
+        }
+    }
+
+    func updateSelectedClipTimeRemapDiscrete(_ actionName: String,
+                                             invalidateVideo: Bool = true,
+                                             _ transform: (inout Clip) -> Void) {
+        guard let id = selectedClipID else { return }
+        performUndoable(actionName) {
+            mutateClip(id: id, invalidateVideo: invalidateVideo, transform)
+            scheduleRebuild()
+        }
+    }
+
+    func addOrUpdateSelectedClipSpeedKeyframe() {
+        guard let id = selectedClipID,
+              let localTime = selectedClipTimeRemapLocalSourceTime,
+              let clip = selectedClip else {
+            statusMessage = "Move the playhead over the selected clip to add a speed keyframe."
+            return
+        }
+
+        let existingID = selectedClipSpeedKeyframeAtPlayhead?.id
+        let value = clip.speedCurve.defaultValue
+        updateSelectedClipTimeRemapDiscrete(
+            existingID == nil ? "Add Speed Keyframe" : "Update Speed Keyframe") { clip in
+                if let existingID {
+                    clip.speedCurve.updateKeyframe(id: existingID, time: localTime, value: value)
+                } else {
+                    clip.speedCurve.addKeyframe(at: localTime, value: value)
+                }
+                clip.clampTimeRemap()
+            }
+        statusMessage = "Speed keyframe set at \(TimeFormatting.timecode(localTime.seconds))."
+        selectedClipID = id
+    }
+
+    func removeSelectedClipSpeedKeyframe() {
+        guard let keyframe = selectedClipSpeedKeyframeAtPlayhead else {
+            statusMessage = "No speed keyframe at the playhead."
+            return
+        }
+
+        updateSelectedClipTimeRemapDiscrete("Remove Speed Keyframe") { clip in
+            clip.speedCurve.removeKeyframe(id: keyframe.id)
+            clip.clampTimeRemap()
+        }
+        statusMessage = "Removed speed keyframe."
+    }
+
+    func seekToPreviousSelectedClipSpeedKeyframe() {
+        guard let clip = selectedClip,
+              let localTime = selectedClipTimeRemapLocalSourceTime else { return }
+        let tolerance = speedKeyframeHitToleranceSeconds
+        guard let previous = clip.speedCurve.keyframes.last(where: {
+            $0.time.seconds < localTime.seconds - tolerance
+        }) else { return }
+        let outputOffset = clip.outputOffset(forSourceOffset: previous.time)
+        seek(toSeconds: (clip.timelineStart + outputOffset).seconds)
+    }
+
+    func seekToNextSelectedClipSpeedKeyframe() {
+        guard let clip = selectedClip,
+              let localTime = selectedClipTimeRemapLocalSourceTime else { return }
+        let tolerance = speedKeyframeHitToleranceSeconds
+        guard let next = clip.speedCurve.keyframes.first(where: {
+            $0.time.seconds > localTime.seconds + tolerance
+        }) else { return }
+        let outputOffset = clip.outputOffset(forSourceOffset: next.time)
+        seek(toSeconds: (clip.timelineStart + outputOffset).seconds)
+    }
+
+    func resetSelectedClipSpeed() {
+        updateSelectedClipTimeRemapDiscrete("Reset Speed") { clip in
+            clip.speedCurve = TimeRemapping.identitySpeedCurve
+            clip.preservePitch = true
+            clip.pitchAlgorithm = .timeDomain
+        }
+    }
+
+    private var speedKeyframeHitToleranceSeconds: Double {
+        0.5 / max(1, project.frameRate)
+    }
+
+    private func nearestSpeedKeyframe(to time: CMTime) -> Keyframe<Float>? {
+        let tolerance = speedKeyframeHitToleranceSeconds
+        return selectedClip?.speedCurve.keyframes
+            .map { keyframe in (keyframe, abs((keyframe.time - time).seconds)) }
+            .filter { $0.1 <= tolerance }
+            .min { $0.1 < $1.1 }?
+            .0
+    }
+
+    private func mutateClip(id: Clip.ID,
+                            invalidateVideo: Bool,
+                            _ transform: (inout Clip) -> Void) {
+        for track in allTracks {
+            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
+            let speedBefore = track.clips[index].speedCurve
+            transform(&track.clips[index])
+            track.clips[index].clampTimeRemap()
+            if invalidateVideo, track.clips[index].speedCurve != speedBefore {
+                RenderCache.shared.invalidate(clipID: id)
+            }
+            return
+        }
+    }
+
     // MARK: - Skin smoothing
 
     /// Returns the skin smooth effect for the selected clip, inserting a neutral one if absent.
@@ -541,7 +680,8 @@ final class EditorModel {
         guard let clip = selectedClip else { return nil }
         let playhead = CMTime(seconds: currentTime, preferredTimescale: 600)
         guard playhead >= clip.timelineStart, playhead <= clip.timelineEnd else { return nil }
-        return CMTimeMaximum(.zero, CMTimeMinimum(playhead - clip.timelineStart, clip.duration))
+        let outputOffset = CMTimeMaximum(.zero, CMTimeMinimum(playhead - clip.timelineStart, clip.outputDuration))
+        return clip.sourceOffset(forOutputOffset: outputOffset)
     }
 
     var selectedClipSkinSmoothStrengthAtPlayhead: Float {
@@ -720,8 +860,8 @@ final class EditorModel {
         let ordered = context.track.clips.sorted { $0.timelineStart < $1.timelineStart }
         let overlaps = TransitionLayout.orderedOverlaps(ordered)
         guard let index = ordered.firstIndex(where: { $0.id == clipID }) else { return .zero }
-        let availableTail = CMTimeMaximum(context.previous.duration - overlaps[index - 1], .zero)
-        return CMTimeMinimum(context.clip.duration, availableTail)
+        let availableTail = CMTimeMaximum(context.previous.outputDuration - overlaps[index - 1], .zero)
+        return CMTimeMinimum(context.clip.outputDuration, availableTail)
     }
 
     /// Whether a transition can be added at the current clip selection: a video

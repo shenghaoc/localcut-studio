@@ -35,7 +35,7 @@ public enum TransitionLayout: Sendable {
         }
 
         public var id: Clip.ID { clip.id }
-        public var effectiveEnd: CMTime { effectiveStart + clip.duration }
+        public var effectiveEnd: CMTime { effectiveStart + clip.outputDuration }
 
         public var transitionRange: CMTimeRange? {
             guard overlap > .zero, clip.transition != nil else { return nil }
@@ -52,31 +52,44 @@ public enum TransitionLayout: Sendable {
         guard let transition = clip.transition, let previous else { return .zero }
         let gap = abs((clip.timelineStart - previous.timelineEnd).seconds)
         guard gap < adjacencyTolerance else { return .zero }
-        let maxOverlap = CMTimeMinimum(previous.duration, clip.duration)
+        let maxOverlap = CMTimeMinimum(previous.outputDuration, clip.outputDuration)
         let clamped = CMTimeMinimum(transition.duration, maxOverlap)
         return CMTimeMaximum(clamped, .zero)
     }
 
-    /// A sub-range of a clip placed in effective (rippled) time.
+    /// A sub-range of a clip placed in effective (rippled) time. A clip that
+    /// spans a transition cut on another track is split into several pieces so
+    /// each side of the cut ripples by the correct amount and stays in sync.
     public struct Piece: Identifiable, Sendable {
         public let clipID: Clip.ID
         public let index: Int
+        /// Range within the source media to read.
         public let sourceRange: CMTimeRange
+        /// Clip-local output offset where this piece begins.
+        public let outputOffset: CMTime
+        /// Timeline duration after retiming.
+        public let outputDuration: CMTime
+        /// Where this piece begins on the rippled timeline.
         public let effectiveStart: CMTime
+        /// Incoming-transition overlap — non-zero only on the head piece of a
+        /// clip that owns a transition.
         public let overlap: CMTime
 
         public init(clipID: Clip.ID, index: Int, sourceRange: CMTimeRange,
+                    outputOffset: CMTime, outputDuration: CMTime,
                     effectiveStart: CMTime, overlap: CMTime) {
             self.clipID = clipID
             self.index = index
             self.sourceRange = sourceRange
+            self.outputOffset = outputOffset
+            self.outputDuration = outputDuration
             self.effectiveStart = effectiveStart
             self.overlap = overlap
         }
 
         public var id: String { "\(clipID)-\(index)" }
-        public var duration: CMTime { sourceRange.duration }
-        public var effectiveEnd: CMTime { effectiveStart + sourceRange.duration }
+        public var duration: CMTime { outputDuration }
+        public var effectiveEnd: CMTime { effectiveStart + outputDuration }
         public var transitionRange: CMTimeRange? {
             overlap > .zero ? CMTimeRange(start: effectiveStart, duration: overlap) : nil
         }
@@ -99,16 +112,22 @@ public enum TransitionLayout: Sendable {
         for index in 0..<(bounds.count - 1) {
             let lower = bounds[index]
             let upper = bounds[index + 1]
-            let duration = upper - lower
-            guard duration > .zero else { continue }
+            let outputDuration = upper - lower
+            guard outputDuration > .zero else { continue }
 
-            let sourceOffset = lower - start
-            let sourceRange = CMTimeRange(start: clip.sourceStart + sourceOffset, duration: duration)
+            let outputOffset = lower - start
+            let sourceOffset = clip.sourceOffset(forOutputOffset: outputOffset)
+            let sourceEndOffset = clip.sourceOffset(forOutputOffset: outputOffset + outputDuration)
+            let sourceDuration = sourceEndOffset - sourceOffset
+            guard sourceDuration > .zero else { continue }
+            let sourceRange = CMTimeRange(start: clip.sourceStart + sourceOffset, duration: sourceDuration)
             let effectiveStart = lower - shift(at: lower, cuts: cuts)
             pieces.append(Piece(
                 clipID: clip.id,
                 index: index,
                 sourceRange: sourceRange,
+                outputOffset: outputOffset,
+                outputDuration: outputDuration,
                 effectiveStart: effectiveStart,
                 overlap: index == 0 ? overlap : .zero))
         }
@@ -125,7 +144,7 @@ public enum TransitionLayout: Sendable {
         for clip in ordered {
             var overlap = effectiveOverlap(into: clip, previous: previous)
             if let previous {
-                let availableTail = CMTimeMaximum(previous.duration - previousOverlap, .zero)
+                let availableTail = CMTimeMaximum(previous.outputDuration - previousOverlap, .zero)
                 overlap = CMTimeMinimum(overlap, availableTail)
             }
             result.append(overlap)

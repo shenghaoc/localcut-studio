@@ -86,17 +86,25 @@ final class ProjectEditingService {
         guard playhead > clip.timelineStart, playhead < clip.timelineEnd else { return }
 
         model.performUndoable("Split Clip") {
-            let offset = playhead - clip.timelineStart
+            let outputOffset = playhead - clip.timelineStart
+            let sourceOffset = clip.sourceOffset(forOutputOffset: outputOffset)
             var left = clip
-            left.duration = offset
+            left.duration = sourceOffset
 
+            // Carry the authored envelope and speed ramp to the right half so a
+            // split doesn't silently drop volume automation or speed keyframes.
+            // The render-time fade clamp already trims fades that no longer fit
+            // either side's duration.
             let right = Clip(mediaID: clip.mediaID,
-                             sourceStart: clip.sourceStart + offset,
-                             duration: clip.duration - offset,
+                             sourceStart: clip.sourceStart + sourceOffset,
+                             duration: clip.duration - sourceOffset,
                              timelineStart: playhead,
                              opacity: clip.opacity,
                              effects: clip.effects,
-                             volumeEnvelope: clip.volumeEnvelope)
+                             volumeEnvelope: clip.volumeEnvelope,
+                             speedCurve: clip.speedCurve,
+                             preservePitch: clip.preservePitch,
+                             pitchAlgorithm: clip.pitchAlgorithm)
 
             track.clips.replaceSubrange(index...index, with: [left, right])
             model.selectedClipID = left.id
@@ -148,21 +156,28 @@ final class ProjectEditingService {
                         newTimelineStart = max(newTimelineStart, prev.timelineEnd)
                     }
 
-                    let delta = newTimelineStart - clip.timelineStart
-                    clip.sourceStart = clip.sourceStart + delta
+                    let outputDelta = newTimelineStart - clip.timelineStart
+                    let sourceDelta = clip.sourceOffset(forOutputOffset: outputDelta)
+                    clip.sourceStart = clip.sourceStart + sourceDelta
                     clip.timelineStart = newTimelineStart
-                    clip.duration = originalEnd - newTimelineStart
+                    clip.duration = CMTimeMaximum(clip.duration - sourceDelta, .zero)
 
                 case .right:
                     let maxSourceRemaining = sourceDuration - clip.sourceStart
-                    var newDuration = time - clip.timelineStart
-                    newDuration = max(newDuration, minDur)
-                    newDuration = min(newDuration, maxSourceRemaining)
+                    let maxOutputDuration = TimeRemapping.outputDuration(
+                        sourceDuration: maxSourceRemaining,
+                        speedCurve: clip.speedCurve)
+                    var newOutputDuration = time - clip.timelineStart
+                    newOutputDuration = max(newOutputDuration, minDur)
+                    newOutputDuration = min(newOutputDuration, maxOutputDuration)
                     if let next = nextClip {
                         let maxDuration = next.timelineStart - clip.timelineStart
-                        newDuration = min(newDuration, maxDuration)
+                        newOutputDuration = min(newOutputDuration, maxDuration)
                     }
-                    clip.duration = newDuration
+                    clip.duration = TimeRemapping.sourceOffset(
+                        forOutputOffset: newOutputDuration,
+                        sourceDuration: maxSourceRemaining,
+                        speedCurve: clip.speedCurve)
                 }
 
                 track.clips[index] = clip
