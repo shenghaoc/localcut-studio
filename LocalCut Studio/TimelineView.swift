@@ -154,18 +154,21 @@ struct TimelineView: View {
         .frame(width: gutterWidth)
     }
 
-    private func trackAccessibilityLabel(_ track: Track) -> String {
+    private func trackAccessibilityLabel(_ track: Track) -> Text {
         let kind = track.kind == .video ? String(localized: "video") : String(localized: "audio")
         let count = track.clips.count
-        let clipLabel = String(localized: "^[\(count) clip](inflect: true)")
-        return String(localized: "\(track.name), \(kind) track, \(clipLabel)")
+        let clipLabel = AttributedString(localized: "^[\(count) clip](inflect: true)")
+        return Text(verbatim: "\(track.name), \(kind) track, ") + Text(clipLabel)
     }
 
-    private func captionTrackAccessibilityLabel(_ track: CaptionTrack) -> String {
+    private func captionTrackAccessibilityLabel(_ track: CaptionTrack) -> Text {
         let count = track.lines.count
-        let lineLabel = String(localized: "^[\(count) caption line](inflect: true)")
-        let muted = track.isMuted ? String(localized: ", muted") : ""
-        return String(localized: "\(track.name), caption track, \(lineLabel)\(muted)")
+        let lineLabel = AttributedString(localized: "^[\(count) caption line](inflect: true)")
+        var label = Text(verbatim: "\(track.name), ") + Text("caption track, ") + Text(lineLabel)
+        if track.isMuted {
+            label = label + Text(", muted")
+        }
+        return label
     }
 
     // MARK: Scrollable timeline content
