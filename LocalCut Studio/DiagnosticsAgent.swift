@@ -55,6 +55,9 @@ final class DiagnosticsAgent {
         category: "sample")
 
     @ObservationIgnored nonisolated(unsafe) private var timer: Timer?
+    /// The bridge this agent reads from and gates. Injectable so tests can
+    /// supply an isolated instance instead of sharing `DiagnosticsBridge.shared`.
+    @ObservationIgnored private let bridge: DiagnosticsBridge
 
     /// CPU calibration baseline. `nil` until the first tick after `start()`.
     @ObservationIgnored private var previousCPUSeconds: Double?
@@ -71,10 +74,12 @@ final class DiagnosticsAgent {
     private static let sparklineCapacity = 60
 
     init(
+        bridge: DiagnosticsBridge = .shared,
         now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         frameDuration: @escaping @MainActor () -> Double = { 1.0 / 30.0 },
         droppedFramesProvider: @escaping @MainActor () -> Int = { 0 }
     ) {
+        self.bridge = bridge
         self.now = now
         self.frameDuration = frameDuration
         self.droppedFramesProvider = droppedFramesProvider
@@ -90,7 +95,7 @@ final class DiagnosticsAgent {
         // to satisfy the spec's "deinit stops the agent" intent — closing the
         // gate here keeps the next session from inheriting an open gate from a
         // torn-down one.
-        DiagnosticsBridge.shared.setEnabled(false)
+        bridge.setEnabled(false)
     }
 
     // MARK: - Lifecycle
@@ -103,8 +108,8 @@ final class DiagnosticsAgent {
         // published by the most recent `EditorModel.rebuild()` and the panel
         // visibility toggle does *not* schedule a rebuild, so wiping it would
         // leave the Decoders row stuck at 0 until the next edit (Codex P1).
-        DiagnosticsBridge.shared.clearRenderSamples()
-        DiagnosticsBridge.shared.setEnabled(true)
+        bridge.clearRenderSamples()
+        bridge.setEnabled(true)
         previousCPUSeconds = nil
         previousWallClock = nil
         // Seed the drop baseline from the live cumulative count so the first
@@ -141,7 +146,7 @@ final class DiagnosticsAgent {
         isRunning = false
         // Close the hot-path gate so the compositor stops paying for the
         // timestamp + record call on every preview / export frame.
-        DiagnosticsBridge.shared.setEnabled(false)
+        bridge.setEnabled(false)
     }
 
     /// Drives one sample synchronously. Tests call this instead of waiting on the
@@ -153,7 +158,7 @@ final class DiagnosticsAgent {
     // MARK: - Tick
 
     private func tick() {
-        let bridge = DiagnosticsBridge.shared.snapshot()
+        let snapshot = bridge.snapshot()
         let wallNow = now()
 
         // Dropped frames: pull from the player and report the per-tick delta.
@@ -166,8 +171,8 @@ final class DiagnosticsAgent {
         cpuUtilisation = sampleCPU(now: wallNow)
 
         // Render time: percentile over the ring, last sample, sparkline window.
-        let times = bridge.renderTimes
-        lastFrameTime = bridge.lastRenderTime.isFinite ? bridge.lastRenderTime : 0
+        let times = snapshot.renderTimes
+        lastFrameTime = snapshot.lastRenderTime.isFinite ? snapshot.lastRenderTime : 0
         p95RenderTime = percentile(times, p: 0.95)
         sparkline = Array(times.suffix(Self.sparklineCapacity).map { $0 * 1000 })
 
@@ -175,8 +180,8 @@ final class DiagnosticsAgent {
         // average. Zeroed when no new frames arrived this tick so the metric
         // doesn't drag the historical mean off the ring while the player is
         // paused (Gemini medium #2).
-        let framesThisTick = bridge.totalFrameCount - previousTotalFrameCount
-        previousTotalFrameCount = bridge.totalFrameCount
+        let framesThisTick = snapshot.totalFrameCount - previousTotalFrameCount
+        previousTotalFrameCount = snapshot.totalFrameCount
         let frame = frameDuration()
         if framesThisTick > 0, !times.isEmpty, frame > 0 {
             let mean = times.reduce(0, +) / Double(times.count)
@@ -185,7 +190,7 @@ final class DiagnosticsAgent {
             gpuUtilisation = 0
         }
 
-        decoderCount = bridge.decoderCount
+        decoderCount = snapshot.decoderCount
         sampleCount += 1
 
         log.info("""

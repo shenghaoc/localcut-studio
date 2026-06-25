@@ -9,6 +9,8 @@ public final class DiagnosticsBridge: Sendable {
 
     public static let renderTimeCapacity = 256
 
+    public init() {}
+
     public struct Snapshot: Sendable {
         public let renderTimes: [Double]
         public let lastRenderTime: Double
