@@ -38,6 +38,34 @@ func limiterClampsSamples() {
     #expect(samples.allSatisfy { abs($0) <= ceiling + 0.0001 })
 }
 
+@Test("VoiceCleanupDSP: compressor applies makeup gain immediately without fade-in")
+func compressorMakeupHasNoStartFadeIn() {
+    var settings = VoiceCleanupSettings()
+    settings.compressor.bypass = false
+    settings.compressor.thresholdDB = -18   // signal stays below threshold (no GR)
+    settings.compressor.makeupGainDB = 6     // ~2x linear makeup gain
+    var state = VoiceCleanupProcessorState()
+
+    let amplitude: Float = 0.01              // -40 dBFS, comfortably below threshold
+    let input = Array(repeating: amplitude, count: 480 * 2)
+    var samples = input
+    VoiceCleanupDSP.processInterleaved(
+        &samples,
+        channels: 2,
+        sampleRate: 48_000,
+        settings: settings,
+        state: &state)
+
+    let makeup = VoiceCleanupDSP.linearGain(fromDB: 6)
+    let expected = amplitude * makeup
+    // The very first frame is already at full makeup gain — no slow ramp up
+    // from unity that the old combined-gain smoothing produced.
+    #expect(abs(samples[0] - expected) < 1e-5)
+    // Below threshold there is no gain reduction, so every sample equals
+    // input × makeup with no envelope drift.
+    #expect(samples.allSatisfy { abs($0 - expected) < 1e-5 })
+}
+
 @Test("VoiceCleanupDSP: ranges shorter than 3 seconds skip normalisation")
 func shortLoudnessRangeSkipsNormalisation() {
     let samples = Array(repeating: Float(0.1), count: 2 * 48_000 * 2)

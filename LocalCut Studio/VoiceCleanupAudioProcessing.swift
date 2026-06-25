@@ -157,7 +157,7 @@ enum VoiceCleanupAudioProcessing {
                                                           channels: Int,
                                                           sampleRate: Double,
                                                           source: CMSampleBuffer) -> CMSampleBuffer? {
-        guard channels > 0 else { return nil }
+        guard channels > 0, !samples.isEmpty else { return nil }
         let frameCount = samples.count / channels
         var clamped = Array(repeating: Float(0), count: samples.count)
         var low: Float = -1.0

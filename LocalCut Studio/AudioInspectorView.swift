@@ -238,11 +238,10 @@ struct AudioInspectorView: View {
                                  value: voiceCleanupBinding(\.limiter.ceilingDB, target: "audio.voiceCleanup.limiter.ceiling"),
                                  range: -9 ... -0.1, step: 0.1,
                                  onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
-                LabeledSliderRow(label: "Release",
-                                 display: String(format: "%.0f ms", model.project.voiceCleanup.limiter.releaseMS),
-                                 value: voiceCleanupBinding(\.limiter.releaseMS, target: "audio.voiceCleanup.limiter.release"),
-                                 range: 1 ... 2000, step: 1,
-                                 onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+                // The limiter is currently a hard clipper (`applyLimiter`), so
+                // `LimiterSettings.releaseMS` has no audible effect yet. The
+                // Release control is deferred until the look-ahead limiter lands
+                // (tracked in the Phase 36 tasks) to avoid exposing a no-op knob.
             }
 
             LabeledContent("Latency Budget") {

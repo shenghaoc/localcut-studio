@@ -56,7 +56,7 @@ public enum VoiceCleanupDSP {
         clamped.clamp()
 
         if !clamped.denoiser.bypass {
-            applyDenoiser(to: &samples, settings: clamped.denoiser)
+            applyDenoiser(to: &samples, channels: channels, settings: clamped.denoiser)
         }
         if !clamped.gate.bypass {
             applyGate(to: &samples, channels: channels, sampleRate: sampleRate,
@@ -100,18 +100,29 @@ public enum VoiceCleanupDSP {
             durationSeconds: duration)
     }
 
-    private static func applyDenoiser(to samples: inout [Float], settings: DenoiserSettings) {
-        guard !samples.isEmpty else { return }
+    private static func applyDenoiser(to samples: inout [Float],
+                                      channels: Int,
+                                      settings: DenoiserSettings) {
+        guard !samples.isEmpty, channels > 0 else { return }
         let floor = linearGain(fromDB: settings.noiseFloorDB)
         let knee = max(floor * 6, 0.000_001)
 
-        var magnitudes = Array(repeating: Float(0), count: samples.count)
-        vDSP_vabs(samples, 1, &magnitudes, 1, vDSP_Length(samples.count))
+        // Process per frame and derive a single reduction from the loudest
+        // channel so both channels are attenuated together. Linking the
+        // channels preserves the stereo image (independent per-sample gains
+        // cause image shifting / fluttering) and avoids the per-buffer heap
+        // allocation a separate magnitudes array would need (Gemini review).
+        var frame = 0
+        while frame < samples.count {
+            let end = min(frame + channels, samples.count)
+            var magnitude: Float = 0
+            for i in frame..<end { magnitude = max(magnitude, abs(samples[i])) }
 
-        for index in samples.indices {
-            let proximity = 1 - min(1, magnitudes[index] / knee)
+            let proximity = 1 - min(1, magnitude / knee)
             let reduction = settings.reduction * proximity
-            samples[index] *= max(0, 1 - reduction)
+            let gain = max(0, 1 - reduction)
+            for i in frame..<end { samples[i] *= gain }
+            frame += channels
         }
     }
 
@@ -196,6 +207,12 @@ public struct EBUR128LoudnessAnalyser: Sendable {
     private var hasFirstWindow = false
 
     public init(sampleRate: Double = 48_000, channels: Int = 2) {
+        // The K-weighting biquad coefficients below are precomputed for 48 kHz.
+        // Feeding any other rate would silently produce wrong loudness, so make
+        // the unsupported case a hard programmer error (Gemini review). All
+        // current callers resample to 48 kHz before measuring.
+        precondition(sampleRate == 48_000,
+                     "EBUR128LoudnessAnalyser currently only supports a 48 kHz sample rate.")
         self.sampleRate = sampleRate
         self.channels = max(1, channels)
         self.channelStates = Array(repeating: KWeightingFilter(), count: max(1, channels))

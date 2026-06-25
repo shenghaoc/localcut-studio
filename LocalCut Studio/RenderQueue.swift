@@ -162,6 +162,11 @@ private nonisolated final class ResumeBox: @unchecked Sendable {
     }
 }
 
+/// Holds the running voice-cleanup DSP state (gate / compressor envelopes)
+/// across `requestMediaDataWhenReady` callbacks. No lock is needed — unlike
+/// `ResumeBox`, `state` is touched exclusively inside the pump's request block,
+/// which AVFoundation invokes serially on `pumpQueue`, and the box never escapes
+/// that closure. `@unchecked Sendable` documents that confinement.
 private nonisolated final class VoiceCleanupStateBox: @unchecked Sendable {
     var state = VoiceCleanupProcessorState()
 }
