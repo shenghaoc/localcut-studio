@@ -53,6 +53,66 @@ struct Phase39Tests {
         #expect(decoded.aspect == .vertical9x16)
     }
 
+    @Test("Unknown aspect raw value falls back to inference instead of failing")
+    func decodeUnknownAspectFallsBackToInference() throws {
+        let json = """
+        {
+          "name": "FutureAspect",
+          "renderWidth": 1080,
+          "renderHeight": 1920,
+          "frameRate": 30,
+          "media": [],
+          "videoTracks": [],
+          "audioTracks": [],
+          "aspect": "ultrawide21x9"
+        }
+        """
+
+        let decoded = try ProjectDocument(data: Data(json.utf8))
+
+        #expect(decoded.aspect == .vertical9x16)
+    }
+
+    @Test("Malformed cover frame drops to nil without failing the open")
+    func decodeMalformedCoverFrameDropsToNil() throws {
+        let json = """
+        {
+          "name": "BadCover",
+          "renderWidth": 1920,
+          "renderHeight": 1080,
+          "frameRate": 30,
+          "media": [],
+          "videoTracks": [],
+          "audioTracks": [],
+          "coverFrame": { "format": "png" }
+        }
+        """
+
+        let decoded = try ProjectDocument(data: Data(json.utf8))
+
+        #expect(decoded.coverFrame == nil)
+        #expect(decoded.aspect == .widescreen16x9)
+    }
+
+    @Test("Custom aspect and size round-trip")
+    func customAspectRoundTrips() throws {
+        let document = ProjectDocument(
+            name: "Custom",
+            renderWidth: 1000,
+            renderHeight: 1001,
+            frameRate: 30,
+            media: [],
+            videoTracks: [],
+            audioTracks: [],
+            aspect: .custom)
+
+        let decoded = try ProjectDocument(data: document.encoded())
+
+        #expect(decoded.aspect == .custom)
+        #expect(decoded.renderWidth == 1000)
+        #expect(decoded.renderHeight == 1001)
+    }
+
     @Test("Built-in safe-zone profiles validate")
     func safeZoneProfilesValidate() {
         #expect(SafeZoneLibrary.builtInProfiles.count >= 6)

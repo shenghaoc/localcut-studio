@@ -863,13 +863,28 @@ struct InspectorView: View {
                 ForEach(ProjectAspect.builtIns) { aspect in
                     Text(aspect.displayName).tag(aspect)
                 }
-                if model.project.aspect == .custom {
-                    Text("Custom").tag(ProjectAspect.custom)
-                }
+                Text("Custom").tag(ProjectAspect.custom)
             }
-            LabeledContent("Canvas") {
-                Text("\(Int(model.project.renderSize.width))×\(Int(model.project.renderSize.height))")
-                    .foregroundStyle(.secondary)
+            if model.project.aspect == .custom {
+                LabeledContent("Width") {
+                    TextField("Width", value: customWidthBinding, format: .number)
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 80)
+                        .accessibilityLabel("Custom canvas width in pixels")
+                }
+                LabeledContent("Height") {
+                    TextField("Height", value: customHeightBinding, format: .number)
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 80)
+                        .accessibilityLabel("Custom canvas height in pixels")
+                }
+            } else {
+                LabeledContent("Canvas") {
+                    Text("\(Int(model.project.renderSize.width))×\(Int(model.project.renderSize.height))")
+                        .foregroundStyle(.secondary)
+                }
             }
             Picker("Frame Rate", selection: frameRateBinding) {
                 Text("24 fps").tag(24.0)
@@ -977,6 +992,24 @@ struct InspectorView: View {
         Binding(
             get: { model.project.aspect },
             set: { model.setProjectAspect($0) })
+    }
+
+    private var customWidthBinding: Binding<Double> {
+        Binding(
+            get: { model.project.renderSize.width },
+            set: { newValue in
+                let width = max(2, newValue.rounded())
+                model.setRenderSize(CGSize(width: width, height: model.project.renderSize.height))
+            })
+    }
+
+    private var customHeightBinding: Binding<Double> {
+        Binding(
+            get: { model.project.renderSize.height },
+            set: { newValue in
+                let height = max(2, newValue.rounded())
+                model.setRenderSize(CGSize(width: model.project.renderSize.width, height: height))
+            })
     }
 
     private var frameRateBinding: Binding<Double> {
