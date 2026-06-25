@@ -646,11 +646,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let strength = params.strength(at: time)
         guard strength > 0, params.radius > 0 else { return image }
 
-        let threshold = CGFloat(params.threshold)
+        let threshold = params.threshold
         let brightPass = CIFilter.colorControls()
         brightPass.inputImage = image
-        brightPass.brightness = -Float(threshold * 0.45)
-        brightPass.contrast = Float(2.5 + threshold * 4)
+        brightPass.brightness = -threshold * 0.45
+        brightPass.contrast = 2.5 + threshold * 4
         brightPass.saturation = 0.85
 
         let blur = CIFilter.gaussianBlur()

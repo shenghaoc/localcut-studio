@@ -105,7 +105,7 @@ extension EditorModel {
     // MARK: - Look presets
 
     func applyBuiltInLookPreset(_ preset: LookPresetV1) {
-        applyLookPreset(preset, sourceURL: nil)
+        applyLookPreset(preset, lutBookmark: nil)
     }
 
     func importLookPreset(url: URL) async {
@@ -115,20 +115,23 @@ extension EditorModel {
         }
 
         do {
-            // Read and decode off the main actor: a preset on a slow network
-            // share or iCloud Drive would otherwise block the UI. Security-scoped
-            // access is thread-bound, so start/stop must bracket the read in the
-            // same background context.
-            let preset = try await Task.detached {
+            // Read, decode, and resolve the sidecar LUT bookmark off the main
+            // actor: a preset on a slow network share or iCloud Drive would
+            // otherwise block the UI, and the bookmark resolution does its own
+            // disk I/O. Security-scoped access is thread-bound, so start/stop
+            // must bracket the work in the same background context.
+            let (preset, lutBookmark) = try await Task.detached {
                 let didAccess = url.startAccessingSecurityScopedResource()
                 defer {
                     if didAccess { url.stopAccessingSecurityScopedResource() }
                 }
                 let data = try Data(contentsOf: url)
-                return try LookPresetV1(data: data)
+                let preset = try LookPresetV1(data: data)
+                let bookmark = EditorModel.resolvePresetLUT(preset.lut, sourceURL: url)
+                return (preset, bookmark)
             }.value
 
-            applyLookPreset(preset, sourceURL: url)
+            applyLookPreset(preset, lutBookmark: lutBookmark)
         } catch {
             statusMessage = "Could not import \(url.lastPathComponent)."
         }
@@ -171,21 +174,27 @@ extension EditorModel {
             statusMessage = "The selected clip has no look effects to export."
             return
         }
-        do {
-            try preset.encoded().write(to: url, options: [.atomic])
-            statusMessage = "Exported look preset \(url.lastPathComponent)."
-        } catch {
-            statusMessage = "Could not export \(url.lastPathComponent)."
+        Task {
+            do {
+                // Encode is cheap, but the disk write can stall on a slow network
+                // share or iCloud Drive, so push it off the main actor.
+                let data = try preset.encoded()
+                try await Task.detached {
+                    try data.write(to: url, options: [.atomic])
+                }.value
+                statusMessage = "Exported look preset \(url.lastPathComponent)."
+            } catch {
+                statusMessage = "Could not export \(url.lastPathComponent)."
+            }
         }
     }
 
-    private func applyLookPreset(_ preset: LookPresetV1, sourceURL: URL?) {
+    private func applyLookPreset(_ preset: LookPresetV1, lutBookmark: Data?) {
         guard let id = selectedVideoClipID else {
             statusMessage = "Select a video clip before applying a look preset."
             return
         }
 
-        let lutBookmark = resolvePresetLUT(preset.lut, sourceURL: sourceURL)
         performUndoable("Apply Look Preset") {
             for track in project.videoTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
@@ -220,7 +229,7 @@ extension EditorModel {
         return "\(base) Look"
     }
 
-    private func resolvePresetLUT(_ reference: LookPresetLUTReference?, sourceURL: URL?) -> Data? {
+    nonisolated static func resolvePresetLUT(_ reference: LookPresetLUTReference?, sourceURL: URL?) -> Data? {
         guard let reference, let sourceURL else { return nil }
         let lutURL = sourceURL.deletingLastPathComponent().appendingPathComponent(reference.relativePath)
         let didAccess = lutURL.startAccessingSecurityScopedResource()

@@ -468,6 +468,7 @@ struct InspectorView: View {
                     value: grainBinding(\.amount.defaultValue),
                     range: 0...1,
                     step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetGrain(\.amount.defaultValue, to: 0))
                 LabeledSliderRow(
                     label: "Size",
@@ -475,6 +476,7 @@ struct InspectorView: View {
                     value: grainBinding(\.size),
                     range: 0.25...8,
                     step: 0.05,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetGrain(\.size, to: 1))
                 Toggle("Monochrome", isOn: Binding(
                     get: { model.selectedClipGrain.monochrome },
@@ -490,6 +492,7 @@ struct InspectorView: View {
                     value: halationBinding(\.strength.defaultValue),
                     range: 0...1,
                     step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetHalation(\.strength.defaultValue, to: 0))
                 LabeledSliderRow(
                     label: "Threshold",
@@ -497,6 +500,7 @@ struct InspectorView: View {
                     value: halationBinding(\.threshold),
                     range: 0...1,
                     step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetHalation(\.threshold, to: 0.72))
                 LabeledSliderRow(
                     label: "Radius",
@@ -504,6 +508,7 @@ struct InspectorView: View {
                     value: halationBinding(\.radius),
                     range: 0...80,
                     step: 1,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetHalation(\.radius, to: 16))
             }
 
@@ -514,6 +519,7 @@ struct InspectorView: View {
                     value: vignetteBinding(\.amount.defaultValue),
                     range: -1...1,
                     step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetVignette(\.amount.defaultValue, to: 0))
                 LabeledSliderRow(
                     label: "Radius",
@@ -521,6 +527,7 @@ struct InspectorView: View {
                     value: vignetteBinding(\.radius),
                     range: 0.05...2,
                     step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetVignette(\.radius, to: 0.65))
                 LabeledSliderRow(
                     label: "Softness",
@@ -528,6 +535,7 @@ struct InspectorView: View {
                     value: vignetteBinding(\.softness),
                     range: 0.01...1,
                     step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetVignette(\.softness, to: 0.35))
             }
 
