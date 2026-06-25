@@ -94,7 +94,9 @@ final class EditorModel {
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
     @ObservationIgnored let beatAnalyzer = BeatAnalyzer()
-    @ObservationIgnored var beatAnalysisTask: Task<Void, Never>?
+    // `nonisolated(unsafe)` so the nonisolated `deinit` can cancel it, matching
+    // the other deinit-accessed observers (timeObserver/endObserver/accessedURLs).
+    @ObservationIgnored nonisolated(unsafe) var beatAnalysisTask: Task<Void, Never>?
     @ObservationIgnored var beatAnalysisKeys: [MediaItem.ID: String] = [:]
     @ObservationIgnored var cachedProjectedBeatTimes: [CMTime] = []
     @ObservationIgnored var projectedBeatTimesRevision: Int = 0
