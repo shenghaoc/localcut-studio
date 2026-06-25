@@ -329,20 +329,25 @@ nonisolated enum BeatDetectionCore {
         let maxLag = max(minLag, Int((60 / minBPM / hopDuration).rounded()))
         guard envelope.count > maxLag else { return 0 }
 
-        // Raw (unnormalised) autocorrelation of the onset envelope at `lag`.
-        func autocorrelation(at lag: Int) -> Float {
-            guard lag >= 1, lag < envelope.count else { return 0 }
-            var score: Float = 0
-            for index in lag..<envelope.count {
-                score += envelope[index] * envelope[index - lag]
-            }
-            return score
+        // Raw (unnormalised) autocorrelation per lag, computed once in the
+        // sweep below and reused by the octave correction. Every lag the
+        // correction inspects lies in `minLag...maxLag`, so the cache covers
+        // it with no recomputation.
+        var rawAutocorrelation = [Float](repeating: 0, count: maxLag - minLag + 1)
+        func cachedAutocorrelation(at lag: Int) -> Float {
+            guard lag >= minLag, lag <= maxLag else { return 0 }
+            return rawAutocorrelation[lag - minLag]
         }
 
         var bestLag = minLag
         var bestScore: Float = 0
         for lag in minLag...maxLag {
-            let normalizedScore = autocorrelation(at: lag) / Float(envelope.count - lag)
+            var score: Float = 0
+            for index in lag..<envelope.count {
+                score += envelope[index] * envelope[index - lag]
+            }
+            rawAutocorrelation[lag - minLag] = score
+            let normalizedScore = score / Float(envelope.count - lag)
             if normalizedScore > bestScore {
                 bestScore = normalizedScore
                 bestLag = lag
@@ -362,16 +367,18 @@ nonisolated enum BeatDetectionCore {
         var improved = true
         while improved {
             improved = false
-            let peakEnergy = autocorrelation(at: bestLag)
+            let peakEnergy = cachedAutocorrelation(at: bestLag)
             guard peakEnergy > 0 else { break }
             for divisor in [2, 3] {
                 let target = Double(bestLag) / Double(divisor)
                 guard target >= Double(minLag) else { continue }
-                // The two integer lags straddling the ideal sub-harmonic.
-                let candidates = Set([Int(target.rounded(.down)), Int(target.rounded(.up))])
+                // The (at most two) integer lags straddling the ideal sub-harmonic.
+                let lower = Int(target.rounded(.down))
+                let upper = Int(target.rounded(.up))
+                let candidates = lower == upper ? [lower] : [lower, upper]
                 var pick: (lag: Int, energy: Float)?
                 for candidate in candidates where candidate >= minLag && candidate <= maxLag {
-                    let energy = autocorrelation(at: candidate)
+                    let energy = cachedAutocorrelation(at: candidate)
                     if pick == nil || energy > pick!.energy {
                         pick = (candidate, energy)
                     }
