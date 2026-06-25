@@ -17,8 +17,8 @@ struct CaptionsInspectorView: View {
     var body: some View {
         Section("Captions") {
             if model.project.captionTracks.isEmpty {
-                // The empty state owns the sole call to action; the top toolbar
-                // buttons only reappear once there are tracks to manage.
+                // Empty state owns the sole call to action; the Import / Add
+                // Empty Track buttons reappear only once there are tracks.
                 ContentUnavailableView {
                     Label("No Caption Tracks", systemImage: "captions.bubble")
                 } description: {
