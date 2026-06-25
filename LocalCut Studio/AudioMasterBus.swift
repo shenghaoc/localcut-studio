@@ -116,9 +116,6 @@ final class AudioMasterBus {
     func prepareLive() {
         guard !isLiveRunning else { return }
         do {
-            // `prepare()` allocates render resources without starting; needed
-            // for some node types before `start()`.
-            liveEngine.prepare()
             try liveEngine.start()
             installLiveTapIfNeeded()
             isLiveRunning = true

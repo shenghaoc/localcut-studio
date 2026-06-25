@@ -80,10 +80,17 @@ struct AudioInspectorView: View {
                         .accessibilityLabel("Master output meter")
                 }
             } else {
-                Text(audioMeterStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(audioMeterStatus)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(audioMeterStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(audioMeterStatus)
+                    Button("Start Live Meter") {
+                        model.prepareAudioMetering()
+                    }
+                    .controlSize(.small)
+                    .accessibilityLabel("Start live audio meter")
+                }
             }
 
             ForEach(model.project.audioTracks) { track in
@@ -122,7 +129,7 @@ struct AudioInspectorView: View {
         if let error = model.audioBus.lastStartError {
             return "Live metering unavailable: \(error)"
         }
-        return "Starting live meter…"
+        return "Live meter idle."
     }
 
     private func trackGainBinding(track: Track) -> Binding<Double> {
