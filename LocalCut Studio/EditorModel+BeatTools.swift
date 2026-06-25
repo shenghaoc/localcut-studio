@@ -32,7 +32,25 @@ extension EditorModel {
         // Match the command's own target set (it aligns to beats excluding the
         // selected clip), so the control isn't enabled only to report "no beat".
         guard let id = selectedClipID else { return false }
-        return !projectedBeatTimes(excluding: id).isEmpty
+        return hasProjectedBeats(excluding: id)
+    }
+
+    /// Existence check for command enablement: returns `true` as soon as any clip
+    /// other than `clipID` contributes an in-range projected beat. Unlike
+    /// `projectedBeatTimes(excluding:)` it short-circuits and skips the cross-clip
+    /// dedup/sort, so it's cheap to call on every inspector render.
+    func hasProjectedBeats(excluding clipID: Clip.ID?) -> Bool {
+        let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
+        for track in project.videoTracks + project.audioTracks {
+            for clip in track.clips where clip.id != clipID {
+                guard let media = project.media(for: clip.mediaID), media.hasAudio,
+                      let analysis = beatAnalyses[media.id] else { continue }
+                if !projectedBeatTimes(for: clip, analysis: analysis, offset: offset).isEmpty {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     func analyzeBeatsForSelection() {
