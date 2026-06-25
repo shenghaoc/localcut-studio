@@ -62,8 +62,14 @@ public enum BeatAnalysisCache {
     }
 
     private static func readUInt32(from data: Data, offset: Int) -> UInt32 {
-        data.withUnsafeBytes { rawBuffer in
-            UInt32(littleEndian: rawBuffer.load(fromByteOffset: offset, as: UInt32.self))
+        // Copy the four bytes into an aligned local rather than `load(as:)`,
+        // which requires the source offset to be 4-byte aligned — not guaranteed
+        // for a sliced or arbitrarily backed `Data`, and an alignment fault on ARM.
+        var value: UInt32 = 0
+        let start = data.startIndex + offset
+        withUnsafeMutableBytes(of: &value) { dest in
+            _ = data.copyBytes(to: dest, from: start ..< start + 4)
         }
+        return UInt32(littleEndian: value)
     }
 }

@@ -196,6 +196,31 @@ struct BeatToolsEditorTests {
         #expect(model.project.videoTracks.first!.clips[0].duration == time(5))
     }
 
+    @Test("Cut at beats never produces sub-frame clips from densely spaced beats")
+    func cutAtBeatsEnforcesMinFrameGap() {
+        let model = EditorModel()
+        model.project.frameRate = 30
+        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        media.duration = time(8)
+        media.hasAudio = true
+        media.hasVideo = true
+        model.project.mediaItems.append(media)
+        let clip = Clip(mediaID: media.id, sourceStart: .zero, duration: time(2), timelineStart: .zero)
+        model.project.videoTracks.first!.clips = [clip]
+        model.selectedClipID = clip.id
+        // Beats every 5 ms — far below one frame (1/30 s) — would yield sub-frame
+        // clips without the consecutive min-gap filter.
+        let dense = stride(from: 0.2, through: 1.8, by: 0.005).map { time($0) }
+        model.beatAnalyses[media.id] = BeatAnalysis(tempoBPM: 200, beatTimes: dense, confidence: 0.9)
+
+        model.cutSelectedClipAtBeats()
+
+        let oneFrame = CMTime(value: 1, timescale: CMTimeScale(model.project.frameRate))
+        let clips = model.project.videoTracks.first!.clips
+        #expect(clips.count > 1) // it did cut
+        #expect(clips.allSatisfy { $0.duration >= oneFrame })
+    }
+
     @Test("Align to beat moves the selected clip to the nearest projected beat")
     func alignToBeat() throws {
         let (model, media, _, _) = makeModel()

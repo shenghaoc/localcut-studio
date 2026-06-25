@@ -205,14 +205,17 @@ struct TimelineView: View {
                     t += step
                 }
 
+                // One Path stroked once, not one stroke per marker — long
+                // timelines can carry thousands of beats and per-line draw calls
+                // dominate scroll cost.
+                var beatPath = Path()
                 for marker in beatMarkers {
                     let x = CGFloat(marker.time.seconds) * pps
                     guard x >= 0, x <= size.width else { continue }
-                    var line = Path()
-                    line.move(to: CGPoint(x: x, y: 0))
-                    line.addLine(to: CGPoint(x: x, y: rulerHeight))
-                    context.stroke(line, with: .color(.yellow.opacity(0.65)), lineWidth: 1)
+                    beatPath.move(to: CGPoint(x: x, y: 0))
+                    beatPath.addLine(to: CGPoint(x: x, y: rulerHeight))
                 }
+                context.stroke(beatPath, with: .color(.yellow.opacity(0.65)), lineWidth: 1)
             }
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)

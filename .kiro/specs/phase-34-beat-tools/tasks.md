@@ -108,6 +108,20 @@ Resolved from automated review of the implementation:
   media-bin selection; "Align to Beat" refuses (no move) when the nearest beat
   slot is occupied and sanitises transitions on neighbours it pulls apart; Align
   enablement uses the same excluded target set the command does.
+- [x] **T7.6** `dpBeatTrack`'s primary peak search uses a monotonic window index
+  over the sorted peaks — O(N+M) instead of O(N·M), output-identical — so long
+  (hour-plus) sources don't stall the analysis actor.
+- [x] **T7.7** `beatCutTimes` enforces a one-frame minimum between *consecutive*
+  cuts so densely spaced beats can't create sub-frame clips (test
+  `cutAtBeatsEnforcesMinFrameGap`).
+- [x] **T7.8** `BeatAnalysisCache.readUInt32` copies bytes into an aligned local
+  rather than `load(as:)`, avoiding an alignment fault on a sliced/unaligned `Data`.
+- [x] **T7.9** Beat markers render as a single stroked `Path` rather than one
+  draw call per marker.
+- [n/a] **T7.10** `vDSP_ctoz` stride stays `2`: `ctoz` reads `__C` as a real
+  `Float` array of `2N` elements, so the stride is in Floats (Apple's documented
+  idiom) — `1` would read half the window and corrupt the spectrum. The real-WAV
+  `deterministicFileAnalysis` (recovers 120 BPM) confirms the FFT is correct.
 
 ## Verification
 

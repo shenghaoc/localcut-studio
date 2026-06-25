@@ -323,9 +323,20 @@ extension EditorModel {
         let oneFrame = CMTime(value: 1, timescale: CMTimeScale(max(1, project.frameRate)))
         let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
         let projected = projectedBeatTimes(for: clip, analysis: analysis, offset: offset)
-        return deduplicatedBeatTimes(projected).filter { cut in
+        let inBounds = deduplicatedBeatTimes(projected).filter { cut in
             cut - clip.timelineStart >= oneFrame && clip.timelineEnd - cut >= oneFrame
         }
+        // Enforce a one-frame minimum between *consecutive* cuts too, so densely
+        // spaced beats (high tempo, double onsets) can't produce sub-frame clips
+        // that break rendering or zero-width timeline drawing. The trailing
+        // segment is already ≥ one frame from the bounds filter above.
+        var cuts: [CMTime] = []
+        var previous = clip.timelineStart
+        for cut in inBounds where cut - previous >= oneFrame {
+            cuts.append(cut)
+            previous = cut
+        }
+        return cuts
     }
 
     /// Merges beats within ≈1.7 ms of each other. This catches exact or

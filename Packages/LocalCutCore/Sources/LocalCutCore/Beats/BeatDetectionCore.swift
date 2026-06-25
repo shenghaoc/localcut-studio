@@ -220,22 +220,35 @@ public enum BeatDetectionCore {
 
         var beats: [CMTime] = []
         var t = firstPeakTime
+        // `peaks` is sorted ascending and the grid only moves forward, so a
+        // monotonic window index keeps the primary search O(N + M) overall
+        // instead of O(N · M). This visits exactly the same peaks (those within
+        // ±halfBeat of the grid) in the same order, so the chosen beat is
+        // identical — it just stops scanning peaks that can no longer qualify.
+        var windowStart = 0
         while t <= durationSeconds {
             let expectedGrid = t
             let centerFrame = Int(round(t / hopDuration))
             var bestPeak: Int?
             var bestCost = Double.infinity
 
-            for peak in peaks {
+            while windowStart < peaks.count,
+                  Double(peaks[windowStart]) * hopDuration < expectedGrid - halfBeat {
+                windowStart += 1
+            }
+            var index = windowStart
+            while index < peaks.count {
+                let peak = peaks[index]
                 let peakTime = Double(peak) * hopDuration
+                if peakTime > expectedGrid + halfBeat { break }
                 let delta = abs(peakTime - expectedGrid)
-                guard delta <= halfBeat else { continue }
                 let onsetStrength = Double(envelope[peak])
                 let cost = delta - onsetStrength * hopDuration
                 if cost < bestCost {
                     bestCost = cost
                     bestPeak = peak
                 }
+                index += 1
             }
 
             // Search broader radius if no peak found within tight window
