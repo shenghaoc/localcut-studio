@@ -38,6 +38,23 @@ final class EditorModel {
     // Timeline view state
     var pixelsPerSecond: Double = 80
 
+    // Beat tools (Phase 34)
+    var showBeatMarkers = false
+    var snapToBeats = false
+    /// Global draw/snap offset in seconds, clamped by the inspector to ±200 ms.
+    /// Changing it must drop the projected-beat memo so markers, snap targets,
+    /// and cut/align reflect the new offset on the next read.
+    var beatOffsetSeconds: Double = 0 {
+        didSet { invalidateProjectedBeatTimesCache() }
+    }
+    /// Maximum distance for Align to Beat in seconds.
+    var beatAlignWindowSeconds: Double = 0.15
+    /// Per-source beat analyses. Mutating this set (analysis completes, caches
+    /// load, document reset) invalidates the projected-beat memo.
+    var beatAnalyses: [MediaItem.ID: BeatAnalysis] = [:] {
+        didSet { invalidateProjectedBeatTimesCache() }
+    }
+
     // Scopes panel (colour-management feature) — session-only UI flag, not persisted.
     var showScopes: Bool = false
 
@@ -76,6 +93,14 @@ final class EditorModel {
 
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
+    @ObservationIgnored let beatAnalyzer = BeatAnalyzer()
+    // `nonisolated(unsafe)` so the nonisolated `deinit` can cancel it, matching
+    // the other deinit-accessed observers (timeObserver/endObserver/accessedURLs).
+    @ObservationIgnored nonisolated(unsafe) var beatAnalysisTask: Task<Void, Never>?
+    @ObservationIgnored var beatAnalysisKeys: [MediaItem.ID: String] = [:]
+    @ObservationIgnored var cachedProjectedBeatTimes: [CMTime] = []
+    @ObservationIgnored var projectedBeatTimesRevision: Int = 0
+    @ObservationIgnored var lastProjectedBeatTimesRevision: Int = -1
 
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.
@@ -184,6 +209,7 @@ final class EditorModel {
 
     deinit {
         previewRebuildCoordinator.cancelAll()
+        beatAnalysisTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
@@ -241,7 +267,13 @@ final class EditorModel {
 
     /// Starts a preview rebuild, cancelling any rebuild already in flight so the
     /// most recent project state is the one that reaches the player.
+    ///
+    /// Every clip-geometry change (trim, move, split, delete, cut/align, undo,
+    /// redo, persistence reload) funnels through here, so this is also the
+    /// single chokepoint that drops the projected-beat memo when the timeline
+    /// layout the beats project through changes.
     func scheduleRebuild() {
+        invalidateProjectedBeatTimesCache()
         previewRebuildCoordinator.scheduleRebuild(model: self)
     }
 
@@ -781,7 +813,15 @@ final class EditorModel {
     /// Collects all authored snap targets: playhead position(s), every clip
     /// boundary (excluding the given clip), and the timeline origin (0).
     func snapTargets(excluding clipID: Clip.ID? = nil) -> [CMTime] {
+        // Beat targets are added inside ProjectEditingService.snapTargets so both
+        // this wrapper and the drag-gesture resolveSnap path see them.
         projectEditingService.snapTargets(excluding: clipID, model: self)
+    }
+
+    /// Clears transitions left dangling on clips no longer adjacent to a
+    /// predecessor (e.g. after a beat align moves a clip away from its neighbour).
+    func sanitizeTransitions() {
+        projectEditingService.sanitizeTransitions(model: self)
     }
 
     /// Returns the nearest snap target within threshold, or the candidate

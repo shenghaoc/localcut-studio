@@ -1,5 +1,8 @@
 # Requirements: Phase 34 — Beat Detection and Beat-Synced Editing
 
+> Status: **All met.** See `tasks.md` for the per-task mapping and the folded
+> `bugfix-phase-34-beat-ci` defects (B1–B4).
+
 ## R1 — Analysis
 
 - **R1.1** Beat analysis runs on a background actor (off the main actor); the UI remains interactive throughout.

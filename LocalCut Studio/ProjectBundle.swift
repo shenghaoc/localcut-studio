@@ -129,6 +129,8 @@ nonisolated enum ProjectBundleLayout {
     static let fingerprintsJSON = "fingerprints.json"
     /// Directory containing bundled media copies.
     static let assetsSubdirectory = "assets"
+    /// Directory containing portable beat-analysis cache blobs.
+    static let beatCachesSubdirectory = "Caches/beats"
 
     /// Bundle-relative path for the given media UUID + source extension. Stable
     /// across renames in the bin so the on-disk layout doesn't churn on every

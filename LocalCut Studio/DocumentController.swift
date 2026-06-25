@@ -18,6 +18,11 @@ final class DocumentController {
         model.project.markers = []
         model.project.masterGain = 1
         model.project.trackInputs = []
+        model.beatAnalyses = [:]
+        model.beatAnalysisKeys = [:]
+        model.showBeatMarkers = false
+        model.snapToBeats = false
+        model.beatOffsetSeconds = 0
         model.documentURL = nil
         model.isDirty = false
         model.unresolvedMedia = []
@@ -48,6 +53,13 @@ final class DocumentController {
         model.undoManager.removeAllActions()
         model.coalescedCommitTask?.cancel()
         model.cancelPreviewRebuilds()
+        model.beatAnalysisTask?.cancel()
+        model.beatAnalysisTask = nil
+        model.beatAnalyses = [:]
+        model.beatAnalysisKeys = [:]
+        model.showBeatMarkers = false
+        model.snapToBeats = false
+        model.beatOffsetSeconds = 0
         model.coalescedUndoBefore = nil
         model.coalescedUndoName = nil
         model.coalescedUndoTarget = nil
@@ -172,6 +184,7 @@ final class DocumentController {
         for item in model.project.mediaItems {
             Task { await item.loadThumbnail() }
         }
+        model.loadAvailableBeatCaches()
 
         var notes: [String] = []
         if isNewerSchema { notes.append("saved in a newer format — saving downconverts to this version") }
@@ -214,6 +227,7 @@ final class DocumentController {
                                                      bundledMedia: bundledMedia,
                                                      previousFingerprints: model.lastBundleFingerprints)
                 model.lastBundleFingerprints = index
+                model.persistBeatCachesSynchronously(to: url)
             } else {
                 let data = try encodedDocument(forBundle: false, model: model)
                 try data.write(to: url, options: .atomic)
@@ -356,6 +370,7 @@ final class DocumentController {
             model.lastBundleFingerprints = index
 
             replaceMediaItemsForBundle(at: bundleURL, model: model)
+            await model.persistBeatCaches(to: bundleURL)
             adoptBundleAccess(bundleURL, didStart: scoped, model: model)
             didTransferAccess = scoped
 
@@ -479,6 +494,7 @@ final class DocumentController {
             model.lastBundleFingerprints = index
 
             replaceMediaItemsForBundle(at: bundleURL, model: model)
+            await model.persistBeatCaches(to: bundleURL)
             adoptBundleAccess(bundleURL, didStart: scoped, model: model)
             didTransferAccess = scoped
 

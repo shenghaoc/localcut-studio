@@ -44,7 +44,7 @@ Each spec has `design.md`, `requirements.md`, and `tasks.md` (bugfix specs use `
 
 **Effects & grade** — [Colour grading](.kiro/specs/feature-colour-grading/tasks.md) (custom `AVVideoCompositing`, shared preview/export path) · [Colour management + scopes](.kiro/specs/feature-colour-management/tasks.md) · [Title raster path](.kiro/specs/feature-title-raster/tasks.md) · [Skin smoothing (Phase 32a, no ML)](.kiro/specs/phase-32a-skin-smoothing/tasks.md)
 
-**Audio & captions** — [Audio master bus](.kiro/specs/feature-audio-master-bus/tasks.md) · [Caption tracks](.kiro/specs/feature-caption-tracks/tasks.md) · [Animated caption styles (Phase 30, 花字)](.kiro/specs/phase-30-animated-captions/tasks.md)
+**Audio & captions** — [Audio master bus](.kiro/specs/feature-audio-master-bus/tasks.md) · [Caption tracks](.kiro/specs/feature-caption-tracks/tasks.md) · [Animated caption styles (Phase 30, 花字)](.kiro/specs/phase-30-animated-captions/tasks.md) · [Beat tools (Phase 34, 卡点)](.kiro/specs/phase-34-beat-tools/tasks.md)
 
 **Project & infra** — [Project persistence](.kiro/specs/feature-project-persistence/tasks.md) · [Project bundles](.kiro/specs/feature-project-bundles/tasks.md) · [Render cache](.kiro/specs/feature-render-cache/tasks.md) · [Export presets + render queue](.kiro/specs/feature-export-queue/tasks.md) · [Timeline markers](.kiro/specs/feature-markers/tasks.md) · [Capability tiers](.kiro/specs/feature-capability-tiers/tasks.md) · [LocalCutCore package](.kiro/specs/feature-localcutcore-package/tasks.md) · [Diagnostics panel](.kiro/specs/feature-diagnostics/tasks.md)
 
@@ -52,11 +52,10 @@ Each spec has `design.md`, `requirements.md`, and `tasks.md` (bugfix specs use `
 
 ### Proposed (ready — not blocked)
 
-In ship order. **Phase 34 is next.**
+In ship order. **Phase 35 is next.**
 
 | Tag | Spec | Scope |
 | --- | --- | --- |
-| v0.1.3 | [Phase 34 — Beat tools (卡点)](.kiro/specs/phase-34-beat-tools/tasks.md) | Offline beat analysis on a background actor, beat markers, snap-to-beat, auto-cut clips to beats. |
 | v0.1.4 | [Phase 35 — Time remapping](.kiro/specs/phase-35-speed-ramps/tasks.md) | Keyframed speed ramps (0.25×–4×) with pitch-preserving audio time-stretch. |
 | v0.1.5 | [Phase 36 — Voice cleanup](.kiro/specs/phase-36-voice-cleanup/tasks.md) | Master-bus denoise/gate, EBU R128 loudness normalisation, limiter — live and offline. |
 | v0.1.6 | [Phase 38 — Look packs & overlays](.kiro/specs/phase-38-look-packs/tasks.md) | Film-emulation nodes + JSON look presets; animated overlays (WebP/Lottie/alpha video). |

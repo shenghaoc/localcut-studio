@@ -178,6 +178,7 @@ struct TimelineView: View {
 
     private var ruler: some View {
         let markers = model.project.markers
+        let beatMarkers = model.showBeatMarkers ? model.projectedBeatMarkers() : []
         let selectedMarkerID = model.selectedMarkerID
         return ZStack(alignment: .topLeading) {
             // Scrub gesture lives on the Canvas — *not* the ZStack — so the
@@ -203,6 +204,18 @@ struct TimelineView: View {
                     }
                     t += step
                 }
+
+                // One Path stroked once, not one stroke per marker — long
+                // timelines can carry thousands of beats and per-line draw calls
+                // dominate scroll cost.
+                var beatPath = Path()
+                for marker in beatMarkers {
+                    let x = CGFloat(marker.time.seconds) * pps
+                    guard x >= 0, x <= size.width else { continue }
+                    beatPath.move(to: CGPoint(x: x, y: 0))
+                    beatPath.addLine(to: CGPoint(x: x, y: rulerHeight))
+                }
+                context.stroke(beatPath, with: .color(.yellow.opacity(0.65)), lineWidth: 1)
             }
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
