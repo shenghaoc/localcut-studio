@@ -143,7 +143,7 @@ struct AudioInspectorView: View {
                 LabeledSliderRow(
                     label: "Target",
                     display: String(format: "%.0f LUFS", model.project.voiceCleanup.loudness.customTargetLUFS),
-                    value: voiceCleanupBinding(\.loudness.customTargetLUFS, target: "audio.voiceCleanup.loudness.target"),
+                    value: customTargetBinding,
                     range: -36 ... -6,
                     step: 1,
                     onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
@@ -151,7 +151,7 @@ struct AudioInspectorView: View {
             LabeledSliderRow(
                 label: "Applied Gain",
                 display: String(format: "%+.1f dB", model.project.voiceCleanup.loudness.appliedGainDB),
-                value: voiceCleanupBinding(\.loudness.appliedGainDB, target: "audio.voiceCleanup.loudness.gain"),
+                value: appliedGainBinding,
                 range: -30 ... 30,
                 step: 0.5,
                 onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
@@ -286,6 +286,39 @@ struct AudioInspectorView: View {
                     if newValue != .custom {
                         $0.loudness.customTargetLUFS = newValue.targetLUFS
                     }
+                    // Re-derive the applied gain for the new target so a prior
+                    // measurement isn't left rendering to the old target.
+                    $0.loudness.refreshAppliedGainFromMeasurement()
+                }
+            })
+    }
+
+    /// Custom-target slider. Like the preset picker, it re-derives the applied
+    /// gain from any existing measurement so the rendered loudness tracks the
+    /// target the user is dialling in.
+    private var customTargetBinding: Binding<Float> {
+        Binding(
+            get: { model.project.voiceCleanup.loudness.customTargetLUFS },
+            set: { newValue in
+                model.updateVoiceCleanup(coalesced: true,
+                                         target: AnyHashable("audio.voiceCleanup.loudness.target")) {
+                    $0.loudness.customTargetLUFS = newValue
+                    $0.loudness.refreshAppliedGainFromMeasurement()
+                }
+            })
+    }
+
+    /// Manual Applied Gain slider. Mirrors `applyLoudnessAnalysis`: a non-zero
+    /// gain enables normalisation so the value the inspector shows actually
+    /// reaches the DSP/export (both are gated on `loudness.enabled`).
+    private var appliedGainBinding: Binding<Float> {
+        Binding(
+            get: { model.project.voiceCleanup.loudness.appliedGainDB },
+            set: { newValue in
+                model.updateVoiceCleanup(coalesced: true,
+                                         target: AnyHashable("audio.voiceCleanup.loudness.gain")) {
+                    $0.loudness.appliedGainDB = newValue
+                    $0.loudness.enabled = newValue != 0
                 }
             })
     }

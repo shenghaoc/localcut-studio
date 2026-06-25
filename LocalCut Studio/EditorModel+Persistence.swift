@@ -202,6 +202,7 @@ extension EditorModel {
 
     /// Performs a discrete, immediately-committed mutation as one undo step.
     func performUndoable(_ name: String, mutate: () -> Void) {
+        invalidateLoudnessMeasurement()
         commitCoalescedUndo()
         let before = captureState()
         mutate()
@@ -226,6 +227,7 @@ extension EditorModel {
     /// adjacent gestures never fold into one undo step.
     func performCoalescedUndoable(_ name: String, target: AnyHashable?,
                                   rebuild mode: RebuildMode, mutate: () -> Void) {
+        invalidateLoudnessMeasurement()
         if coalescedUndoBefore != nil,
            coalescedUndoName != name || coalescedUndoTarget != target {
             commitCoalescedUndo()
@@ -332,6 +334,7 @@ extension EditorModel {
 extension EditorModel {
     /// Replaces the current project with an empty one (File ▸ New).
     func newDocument() {
+        invalidateLoudnessMeasurement()
         documentController.newDocument(model: self)
     }
 
@@ -358,6 +361,7 @@ extension EditorModel {
               bundleAccessDidStart: Bool = false,
               bundleFingerprints: FingerprintIndex = FingerprintIndex(),
               externallyEditedAssets: [String] = []) async {
+        invalidateLoudnessMeasurement()
         await documentController.load(document: document,
                                       from: url,
                                       bundleURL: bundleURL,

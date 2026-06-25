@@ -101,6 +101,13 @@ final class EditorModel {
     // Skin smoothing debug
     var showSkinMask = false
 
+    /// Monotonic token guarding asynchronous loudness measurements. Bumped on any
+    /// project mutation or document load (see `invalidateLoudnessMeasurement`), so
+    /// a measurement that finishes after the project it measured has changed — an
+    /// edit, a new target, or a different document — is discarded rather than
+    /// writing a stale gain into the current project and undo stack.
+    @ObservationIgnored var loudnessMeasurementToken = 0
+
     /// Session cache of imported LUT filenames keyed by their bookmark, so the
     /// inspector can show a LUT's name without resolving the security-scoped
     /// bookmark on the main actor on every render. Not persisted; a LUT from a

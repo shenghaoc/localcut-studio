@@ -66,6 +66,33 @@ func compressorMakeupHasNoStartFadeIn() {
     #expect(samples.allSatisfy { abs($0 - expected) < 1e-5 })
 }
 
+@Test("Loudness: changing the target re-derives applied gain from the measurement")
+func loudnessTargetRederivesAppliedGain() {
+    var loudness = LoudnessNormalisationSettings()
+    loudness.preset = .custom
+    loudness.customTargetLUFS = -14
+    loudness.measuredLUFS = -20
+    loudness.refreshAppliedGainFromMeasurement()
+    #expect(abs(loudness.appliedGainDB - 6) < 0.001)   // -14 − (-20) = +6
+    #expect(loudness.enabled)
+
+    loudness.customTargetLUFS = -23
+    loudness.refreshAppliedGainFromMeasurement()
+    #expect(abs(loudness.appliedGainDB - (-3)) < 0.001) // -23 − (-20) = -3
+    #expect(loudness.enabled)
+}
+
+@Test("Loudness: a manually dialled gain is preserved when nothing was measured")
+func loudnessManualGainPreservedWithoutMeasurement() {
+    var loudness = LoudnessNormalisationSettings()
+    loudness.measuredLUFS = nil
+    loudness.appliedGainDB = 4
+    loudness.enabled = true
+    loudness.refreshAppliedGainFromMeasurement()
+    #expect(loudness.appliedGainDB == 4)
+    #expect(loudness.enabled)
+}
+
 @Test("VoiceCleanupDSP: ranges shorter than 3 seconds skip normalisation")
 func shortLoudnessRangeSkipsNormalisation() {
     let samples = Array(repeating: Float(0.1), count: 2 * 48_000 * 2)

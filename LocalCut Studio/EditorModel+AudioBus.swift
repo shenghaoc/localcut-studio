@@ -93,6 +93,13 @@ extension EditorModel {
         }
     }
 
+    /// Discards any in-flight loudness measurement by advancing the token, so a
+    /// result computed against a now-changed project is ignored before it can be
+    /// applied. Called from the central edit and document-load paths.
+    func invalidateLoudnessMeasurement() {
+        loudnessMeasurementToken &+= 1
+    }
+
     func measureCurrentProjectLoudness() {
         let duration = project.duration.seconds
         guard duration >= 3 else {
@@ -105,11 +112,16 @@ extension EditorModel {
             return
         }
 
+        // Supersede any prior measurement and remember which generation this run
+        // belongs to; stale results are dropped at the apply site below.
+        invalidateLoudnessMeasurement()
+        let token = loudnessMeasurementToken
         statusMessage = "Measuring loudness…"
         Task { [weak self] in
             guard let self else { return }
             do {
                 guard let built = try await CompositionBuilder.build(project: project, showSkinMask: showSkinMask) else {
+                    guard token == loudnessMeasurementToken else { return }
                     applyLoudnessAnalysis(LoudnessAnalysisResult(
                         measuredLUFS: -.infinity,
                         targetLUFS: project.voiceCleanup.loudness.targetLUFS,
@@ -135,8 +147,11 @@ extension EditorModel {
                         duration: duration,
                         settings: settings)
                 }.value
+                // Drop the result if the project moved on while we measured.
+                guard token == loudnessMeasurementToken else { return }
                 applyLoudnessAnalysis(result)
             } catch {
+                guard token == loudnessMeasurementToken else { return }
                 statusMessage = "Loudness measurement failed: \(error.localizedDescription)"
             }
         }

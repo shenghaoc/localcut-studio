@@ -1043,6 +1043,19 @@ public struct LoudnessNormalisationSettings: Hashable, Codable, Sendable {
         preset == .custom ? customTargetLUFS : preset.targetLUFS
     }
 
+    /// Recomputes `appliedGainDB` from a previously measured loudness against the
+    /// current `targetLUFS`. The measurement (program loudness) is independent of
+    /// the target, so changing the preset/target should re-derive the gain rather
+    /// than leave a stale value that renders to the old target. No-op when nothing
+    /// has been measured, so a manually dialled-in gain is preserved.
+    public mutating func refreshAppliedGainFromMeasurement() {
+        guard let measuredLUFS, measuredLUFS.isFinite else { return }
+        appliedGainDB = VoiceCleanupDSP.normalisationGain(
+            measuredLUFS: measuredLUFS, targetLUFS: targetLUFS)
+        enabled = appliedGainDB != 0
+        clamp()
+    }
+
     public mutating func clamp() {
         customTargetLUFS = max(-36, min(-6, customTargetLUFS))
         if let measuredLUFS, !measuredLUFS.isFinite {

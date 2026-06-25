@@ -6,8 +6,14 @@ import CoreGraphics
 /// Codable snapshot of a `Project`, split from the runtime model. Holds plain
 /// values plus security-scoped bookmarks instead of live `AVURLAsset`s.
 public struct ProjectDocument: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 3
-    public static let singleFileSchemaVersion = 2
+    // Bumped to 5 (single-file 4) when `audioBus.voiceCleanup` was added. Both
+    // write-versions must exceed the previous release's ceiling (3); otherwise
+    // an older build opens a voiceCleanup-bearing document without the
+    // "newer format" guard, silently drops the unknown field, and overwrites it
+    // on the next save. Keeping single-file one below the bundle version
+    // preserves the prior "single-file downconverts" relationship.
+    public static let currentSchemaVersion = 5
+    public static let singleFileSchemaVersion = 4
     public static let currentBundleFormat = "1"
     public static let fileExtension = "lcstudio"
 
