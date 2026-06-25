@@ -11,7 +11,7 @@ struct InspectorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            EditorPanelHeader("Inspector", systemImage: "slider.horizontal.3")
+            EditorPanelHeader("Inspector")
             Divider()
 
             Form {

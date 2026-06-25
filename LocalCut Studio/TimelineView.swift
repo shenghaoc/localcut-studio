@@ -34,14 +34,6 @@ struct TimelineView: View {
         model.project.captionTracks
     }
 
-    private var timelineSummary: String {
-        let clipCount = tracks.reduce(0) { $0 + $1.clips.count }
-        let captionCount = captionTracks.reduce(0) { $0 + $1.lines.count }
-        let clipLabel = clipCount == 1 ? "1 clip" : "\(clipCount) clips"
-        let captionLabel = captionCount == 1 ? "1 caption" : "\(captionCount) captions"
-        return "\(clipLabel) / \(captionLabel) / \(TimeFormatting.timecode(model.totalDuration))"
-    }
-
     /// Project-wide transition cuts used to ripple clip positions so the timeline
     /// matches the rendered composition.
     private var transitionCuts: [TransitionLayout.Cut] {
@@ -110,13 +102,7 @@ struct TimelineView: View {
     // MARK: Header
 
     private var header: some View {
-        EditorPanelHeader("Timeline", systemImage: "timeline.selection") {
-            Text(timelineSummary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .lineLimit(1)
-                .accessibilityLabel("Timeline summary, \(timelineSummary)")
+        EditorPanelHeader("Timeline") {
             Image(systemName: "minus.magnifyingglass")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -744,6 +730,20 @@ private struct PlayheadView: View {
 }
 
 // MARK: - Marker glyph + keyboard
+
+/// Small downward playhead marker at the ruler/lane boundary, matching the
+/// design-system timeline reference while the vertical red line remains the
+/// precise scrub position.
+private struct PlayheadHead: Shape {
+    nonisolated func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
 
 /// A four-pointed diamond drawn for each marker glyph.
 private struct MarkerDiamond: Shape {

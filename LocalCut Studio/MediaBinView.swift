@@ -13,7 +13,7 @@ struct MediaBinView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 6) {
-                EditorPanelHeader("Media", systemImage: "rectangle.stack") {
+                EditorPanelHeader("Media") {
                     Button {
                         showImporter = true
                     } label: {
