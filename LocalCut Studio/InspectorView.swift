@@ -930,6 +930,7 @@ struct InspectorView: View {
                 }
             }
             TextField("Title", text: coverTitleBinding)
+                .onSubmit { model.commitCoalescedUndo() }
             HStack {
                 Button {
                     exportCoverTapped()

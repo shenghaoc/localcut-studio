@@ -29,10 +29,10 @@ extension EditorModel {
     }
 
     func setCoverTitle(_ text: String) {
-        performUndoable("Set Cover Title") {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        performCoalescedUndoable("Set Cover Title", target: "cover-title", rebuild: .skip) {
             var cover = project.coverFrame
                 ?? CoverFrameDoc(time: CMTimeCode(CMTime(seconds: max(0, currentTime), preferredTimescale: 600)))
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             cover.title = trimmed.isEmpty ? nil : CoverTitleDoc(text: trimmed)
             project.coverFrame = cover
         }
@@ -65,24 +65,26 @@ extension EditorModel {
         generator.requestedTimeToleranceAfter = .zero
 
         let seconds = min(max(0, cover.time.cmTime.seconds), max(0, built.duration))
-        let frameImage = try await Self.generateCoverImage(
-            generator: generator,
-            time: CMTime(seconds: seconds, preferredTimescale: 600))
-        let renderSize = project.renderSize
-        let title = cover.title
+        // AVAssetImageGenerator's async `image(at:)` already runs off the main
+        // actor; mirrors the thumbnail path in Models.swift.
+        let (frameImage, _) = try await generator.image(
+            at: CMTime(seconds: seconds, preferredTimescale: 600))
+        // AppKit drawing must stay on the main actor; only the CPU-heavy ImageIO
+        // encoding is offloaded to a detached task.
+        let imageWithTitle = try Self.imageWithTitleIfNeeded(
+            frameImage,
+            title: cover.title,
+            renderSize: project.renderSize)
         let format = cover.format
         return try await Task.detached {
-            let image = try Self.imageWithTitleIfNeeded(
-                frameImage,
-                title: title,
-                renderSize: renderSize)
-            return try Self.encodeCoverImage(image, format: format)
+            try Self.encodeCoverImage(imageWithTitle, format: format)
         }.value
     }
 
-    nonisolated private static func imageWithTitleIfNeeded(_ image: CGImage,
-                                                           title: CoverTitleDoc?,
-                                                           renderSize: CGSize) throws -> CGImage {
+    @MainActor
+    private static func imageWithTitleIfNeeded(_ image: CGImage,
+                                               title: CoverTitleDoc?,
+                                               renderSize: CGSize) throws -> CGImage {
         guard let title, !title.text.isEmpty else { return image }
         let width = max(1, Int(renderSize.width.rounded()))
         let height = max(1, Int(renderSize.height.rounded()))
@@ -96,12 +98,14 @@ extension EditorModel {
             isPlanar: false,
             colorSpaceName: .deviceRGB,
             bytesPerRow: 0,
-            bitsPerPixel: 0) else {
+            bitsPerPixel: 0),
+              let graphicsContext = NSGraphicsContext(bitmapImageRep: rep) else {
             throw CoverExportError.imageEncodingFailed
         }
         let size = NSSize(width: width, height: height)
         NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current = graphicsContext
+        defer { NSGraphicsContext.restoreGraphicsState() }
         NSColor.black.setFill()
         NSRect(origin: .zero, size: size).fill()
         NSImage(cgImage: image, size: size).draw(
@@ -128,22 +132,8 @@ extension EditorModel {
         NSString(string: title.text).draw(
             in: NSRect(x: originX, y: originY, width: textWidth, height: textHeight),
             withAttributes: attributes)
-        NSGraphicsContext.restoreGraphicsState()
         guard let cgImage = rep.cgImage else { throw CoverExportError.imageEncodingFailed }
         return cgImage
-    }
-
-    private static func generateCoverImage(generator: AVAssetImageGenerator,
-                                           time: CMTime) async throws -> CGImage {
-        try await withCheckedThrowingContinuation { continuation in
-            generator.generateCGImageAsynchronously(for: time) { image, _, error in
-                if let image {
-                    continuation.resume(returning: image)
-                } else {
-                    continuation.resume(throwing: error ?? CoverExportError.imageEncodingFailed)
-                }
-            }
-        }
     }
 
     nonisolated private static func encodeCoverImage(_ image: CGImage, format: CoverFormat) throws -> Data {
