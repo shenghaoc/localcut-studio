@@ -88,7 +88,9 @@ nonisolated enum CaptureTarget: Hashable, Sendable {
         case .display(_, let width, let height),
              .window(_, _, _, let width, let height),
              .application(_, _, _, _, let width, let height):
-            (max(16, width), max(16, height))
+            // VideoToolbox H.264/HEVC hardware encoders require even dimensions;
+            // round down to the nearest even number to avoid AVAssetWriter failures.
+            (max(16, width) & ~1, max(16, height) & ~1)
         }
     }
 }
@@ -492,7 +494,11 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
         }
         let input = try AVCaptureDeviceInput(device: device)
         session.beginConfiguration()
-        session.sessionPreset = mediaType == .video ? .high : .high
+        // Only video sessions benefit from a quality preset; setting it on an
+        // audio-only session is unsupported and can fail.
+        if mediaType == .video, session.canSetSessionPreset(.high) {
+            session.sessionPreset = .high
+        }
         guard session.canAddInput(input) else {
             session.commitConfiguration()
             throw CaptureEngineError.captureSessionFailed("Input rejected for \(device.localizedName)")
