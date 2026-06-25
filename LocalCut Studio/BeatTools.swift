@@ -359,12 +359,15 @@ nonisolated enum BeatDetectionCore {
 
         let interval = 60 / tempoBPM
         let halfBeat = interval * 0.4
+        // Anchor the grid on the first detected onset peak rather than on the
+        // bare phase offset: starting at `firstPeakTime.truncatingRemainder`
+        // would emit spurious leading beats (e.g. at t=0) before any onset
+        // exists. The first peak is itself a valid grid position.
         let firstPeakTime = Double(peaks.first!) * hopDuration
-        let basePhase = firstPeakTime.truncatingRemainder(dividingBy: interval)
         let searchRadius = Int(ceil(halfBeat / hopDuration))
 
         var beats: [CMTime] = []
-        var t = basePhase
+        var t = firstPeakTime
         while t <= durationSeconds {
             let expectedGrid = t
             let centerFrame = Int(round(t / hopDuration))
