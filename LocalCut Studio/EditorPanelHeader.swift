@@ -15,6 +15,7 @@ struct EditorPanelHeader<Trailing: View>: View {
         HStack(spacing: 8) {
             Text(title)
                 .font(.headline)
+                .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
             trailing
         }

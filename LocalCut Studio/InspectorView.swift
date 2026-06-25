@@ -61,6 +61,9 @@ struct InspectorView: View {
     @ViewBuilder
     private func clipSection(_ clip: Clip) -> some View {
         Section("Clip") {
+            if let media = model.project.media(for: clip.mediaID) {
+                InspectorPosterView(media: media)
+            }
             LabeledContent("Start", value: TimeFormatting.timecode(clip.timelineStart.seconds))
             LabeledContent("Duration", value: TimeFormatting.timecode(clip.duration.seconds))
 
@@ -402,6 +405,7 @@ struct InspectorView: View {
     @ViewBuilder
     private func mediaSection(_ media: MediaItem) -> some View {
         Section("Media") {
+            InspectorPosterView(media: media)
             LabeledContent("Name", value: media.name)
             LabeledContent("Duration", value: TimeFormatting.timecode(media.durationSeconds))
             if media.hasVideo {
@@ -463,5 +467,29 @@ struct InspectorView: View {
         Binding(
             get: { model.project.workingColourSpace },
             set: { model.setWorkingColourSpace($0) })
+    }
+}
+
+private struct InspectorPosterView: View {
+    let media: MediaItem
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(.quaternary)
+
+            if let thumbnail = media.thumbnail {
+                Image(decorative: thumbnail, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: media.hasVideo ? "film" : "waveform")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 92, idealHeight: 110, maxHeight: 120)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .accessibilityHidden(true)
     }
 }

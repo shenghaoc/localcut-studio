@@ -155,17 +155,17 @@ struct TimelineView: View {
     }
 
     private func trackAccessibilityLabel(_ track: Track) -> String {
-        let kind = track.kind == .video ? "video" : "audio"
+        let kind = track.kind == .video ? String(localized: "video") : String(localized: "audio")
         let count = track.clips.count
-        let clipLabel = count == 1 ? "1 clip" : "\(count) clips"
-        return "\(track.name), \(kind) track, \(clipLabel)"
+        let clipLabel = String(localized: "^[\(count) clip](inflect: true)")
+        return String(localized: "\(track.name), \(kind) track, \(clipLabel)")
     }
 
     private func captionTrackAccessibilityLabel(_ track: CaptionTrack) -> String {
         let count = track.lines.count
-        let lineLabel = count == 1 ? "1 caption line" : "\(count) caption lines"
-        let muted = track.isMuted ? ", muted" : ""
-        return "\(track.name), caption track, \(lineLabel)\(muted)"
+        let lineLabel = String(localized: "^[\(count) caption line](inflect: true)")
+        let muted = track.isMuted ? String(localized: ", muted") : ""
+        return String(localized: "\(track.name), caption track, \(lineLabel)\(muted)")
     }
 
     // MARK: Scrollable timeline content
