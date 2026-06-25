@@ -24,3 +24,6 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 ## 2026-06-23 — Add Call to Action to Empty State
 **Learning:** Empty states without a clear, prominent Call to Action (CTA) button force the user to hunt for the standard UI control (like a small `+` in a header toolbar) to proceed. In `MediaBinView`, the `ContentUnavailableView` instructed the user to import media but lacked a button to do so.
 **Action:** Whenever using `ContentUnavailableView` or any empty state screen, leverage the `actions` parameter to include a prominent `Button` that directly initiates the primary action needed to populate the view.
+## 2026-06-25 — Replace Plain Text Empty States with ContentUnavailableView
+**Learning:** Using simple `Text` elements for empty states in inspector panels lacks affordance and feels like a dead end. Users shouldn't have to seek out buttons located elsewhere (like header controls) just to begin an interaction when an area is blank.
+**Action:** Transition all plain text empty states to `ContentUnavailableView`, and leverage the `actions` parameter to include prominent buttons that map directly to the primary ways to populate that content (e.g., "Add at Playhead" for markers, "Import SRT/VTT" or "Add Empty Track" for captions).

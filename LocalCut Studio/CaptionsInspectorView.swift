@@ -16,23 +16,33 @@ struct CaptionsInspectorView: View {
 
     var body: some View {
         Section("Captions") {
-            HStack {
-                Button("Import SRT/VTT…") { showSRTImporter = true }
-                Button("Add Empty Track") { model.addEmptyCaptionTrack() }
-                Spacer()
-            }
-
             if model.project.captionTracks.isEmpty {
-                Text("No caption tracks. Import an SRT/VTT or add an empty track to begin.")
-                    .foregroundStyle(.secondary)
-                    .font(.callout)
-            }
+                // Empty state owns the sole call to action; the Import / Add
+                // Empty Track buttons reappear only once there are tracks.
+                ContentUnavailableView {
+                    Label("No Caption Tracks", systemImage: "captions.bubble")
+                } description: {
+                    Text("Import an SRT/VTT or add an empty track to begin.")
+                } actions: {
+                    HStack {
+                        Button("Import SRT/VTT…") { showSRTImporter = true }
+                            .buttonStyle(.borderedProminent)
+                        Button("Add Empty Track") { model.addEmptyCaptionTrack() }
+                            .buttonStyle(.bordered)
+                    }
+                    .controlSize(.small)
+                }
+            } else {
+                HStack {
+                    Button("Import SRT/VTT…") { showSRTImporter = true }
+                    Button("Add Empty Track") { model.addEmptyCaptionTrack() }
+                    Spacer()
+                }
 
-            ForEach(model.project.captionTracks) { track in
-                trackBlock(track)
-            }
+                ForEach(model.project.captionTracks) { track in
+                    trackBlock(track)
+                }
 
-            if !model.project.captionTracks.isEmpty {
                 Text("Caption styling shows in preview and burned-in video exports; SRT/VTT sidecars stay plain text.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
