@@ -14,6 +14,11 @@
   `estimateTempoBPM`, comparing raw onset energy at `bestLag/2` and `bestLag/3`.
 - [x] **B3.2** Inline comments record why the raw-energy comparison and the 0.5
   threshold are used, and why the `/(count-lag)` normalisation is preserved.
+- [x] **B3.3** Octave candidate lags use an ordered `[lower, upper]` list with a
+  strict-`>` tie rule (prefer the lower lag) instead of a `Set`, so selection is
+  deterministic — required by the SHA-keyed cache contract.
+- [x] **B4.1** Bump `BeatAnalysisCache.version` 1 → 2 so v1 blobs holding the old
+  half-tempo result are rejected and re-analysed after upgrade.
 
 ## Verification
 

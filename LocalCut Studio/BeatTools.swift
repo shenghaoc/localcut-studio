@@ -45,7 +45,10 @@ nonisolated struct ProjectedBeatMarker: Identifiable, Hashable, Sendable {
 
 nonisolated enum BeatAnalysisCache {
     private static let magic = Data([0x4C, 0x43, 0x42, 0x54]) // "LCBT"
-    private static let version: UInt32 = 1
+    // v2: the tempo-octave correction changed estimator output, so v1 blobs
+    // (which may hold the old half-tempo result) must be rejected and
+    // re-analysed rather than served from the SHA-keyed cache.
+    private static let version: UInt32 = 2
     static let fileExtension = "beat"
 
     static func fileName(for key: String) -> String {

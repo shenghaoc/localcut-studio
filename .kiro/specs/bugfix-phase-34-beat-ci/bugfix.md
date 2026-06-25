@@ -81,6 +81,21 @@ integer-period unit test land on the fundamental, so it must be preserved.
   tolerance), keep `tempoEstimate()` at exactly 120, and leave a real 60 BPM
   track at 60.
 
+### B4 — Stale `.beat` caches survive the estimator change
+
+`.beat` blobs are keyed only by the audio file's SHA-256, and
+`analyzeBeatsForSelection` / `loadAvailableBeatCaches` return a cached analysis
+before re-running the estimator. A project that already cached the B3
+half-tempo result would keep showing ≈60 BPM after upgrade until the user
+manually cleared caches.
+
+- **Flagged in review**: PR #46 Codex **P1 — "Invalidate stale beat caches for
+  the new estimator"**.
+- **Fix**: bump `BeatAnalysisCache.version` 1 → 2. The decode guard
+  (`guard encodedVersion == version else { return nil }`) then rejects every v1
+  blob and forces a re-analysis with the corrected estimator. Round-trip tests
+  encode and decode with the same `version`, so they are unaffected.
+
 ## Why it matters
 
 The whole point of the beat-tools foundation is "deterministic onset/tempo/beat
