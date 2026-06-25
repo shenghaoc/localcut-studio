@@ -891,7 +891,7 @@ final class EditorModel {
     func prepareAudioMetering() {
         audioBus.prepareLive()
         if let error = audioBus.lastStartError {
-            statusMessage = "Audio metering unavailable: \(error)"
+            statusMessage = "Live metering unavailable: \(error)"
         }
     }
 

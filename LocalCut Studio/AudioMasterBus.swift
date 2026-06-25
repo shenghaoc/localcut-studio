@@ -160,7 +160,7 @@ final class AudioMasterBus {
     }
 
     /// Failures raised while bringing the live metering graph up.
-    enum LiveMeterError: LocalizedError {
+    private enum LiveMeterError: LocalizedError {
         /// The live engine started but its main mixer reported no usable output
         /// format (no audio device / headless environment), so no tap could be
         /// installed.
