@@ -247,19 +247,17 @@ struct DiagnosticsTests {
 
     @Test("Agent's deinit closes the bridge gate even when stop() wasn't called (R2.4)")
     func deinitClosesGate() {
-        // This test intentionally uses the shared singleton to verify that
-        // the agent's deinit closes the gate on whichever bridge it was given.
-        DiagnosticsBridge.shared.reset()
+        let bridge = DiagnosticsBridge()
         do {
-            let agent = DiagnosticsAgent(bridge: .shared)
+            let agent = DiagnosticsAgent(bridge: bridge)
             agent.start()
-            #expect(DiagnosticsBridge.shared.isEnabled)
+            #expect(bridge.isEnabled)
             // No explicit stop() — the editor's teardown path relies on the
             // agent's deinit invalidating the timer and closing the gate when
             // the last strong reference drops.
         }
         // The agent has been released; the bridge gate must have been closed.
-        #expect(!DiagnosticsBridge.shared.isEnabled)
+        #expect(!bridge.isEnabled)
     }
 
     // MARK: - clearRenderSamples preserves decoder / drops
