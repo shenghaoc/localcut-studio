@@ -65,10 +65,9 @@ extension EditorModel {
         generator.requestedTimeToleranceAfter = .zero
 
         let seconds = min(max(0, cover.time.cmTime.seconds), max(0, built.duration))
-        // AVAssetImageGenerator's async `image(at:)` already runs off the main
-        // actor; mirrors the thumbnail path in Models.swift.
-        let (frameImage, _) = try await generator.image(
-            at: CMTime(seconds: seconds, preferredTimescale: 600))
+        let frameImage = try await Self.generateCoverImage(
+            generator: generator,
+            time: CMTime(seconds: seconds, preferredTimescale: 600))
         // AppKit drawing must stay on the main actor; only the CPU-heavy ImageIO
         // encoding is offloaded to a detached task.
         let imageWithTitle = try Self.imageWithTitleIfNeeded(
@@ -79,6 +78,22 @@ extension EditorModel {
         return try await Task.detached {
             try Self.encodeCoverImage(imageWithTitle, format: format)
         }.value
+    }
+
+    /// Bridges the completion-handler frame API into async/await. Kept over the
+    /// async `image(at:)` because `generator` is main-actor-isolated here, and
+    /// sending it into the `@concurrent` `image(at:)` is a Swift 6 data race.
+    private static func generateCoverImage(generator: AVAssetImageGenerator,
+                                           time: CMTime) async throws -> CGImage {
+        try await withCheckedThrowingContinuation { continuation in
+            generator.generateCGImageAsynchronously(for: time) { image, _, error in
+                if let image {
+                    continuation.resume(returning: image)
+                } else {
+                    continuation.resume(throwing: error ?? CoverExportError.imageEncodingFailed)
+                }
+            }
+        }
     }
 
     @MainActor
