@@ -7,9 +7,13 @@ import LocalCutCore
 extension EditorModel {
 
     var selectedBeatSource: MediaItem? {
-        if let media = selectedMedia { return media }
-        guard let clip = selectedClip else { return nil }
-        return project.media(for: clip.mediaID)
+        // Prefer the timeline clip (consistent with the main inspector): a clip
+        // tap sets selectedClipID without clearing an earlier media-bin
+        // selection, so checking media first would target the stale source.
+        if let clip = selectedClip, let media = project.media(for: clip.mediaID) {
+            return media
+        }
+        return selectedMedia
     }
 
     var canAnalyzeBeatsForSelection: Bool {
@@ -25,7 +29,10 @@ extension EditorModel {
     }
 
     var canAlignSelectedClipToBeat: Bool {
-        selectedClipID != nil && !projectedBeatTimes().isEmpty
+        // Match the command's own target set (it aligns to beats excluding the
+        // selected clip), so the control isn't enabled only to report "no beat".
+        guard let id = selectedClipID else { return false }
+        return !projectedBeatTimes(excluding: id).isEmpty
     }
 
     func analyzeBeatsForSelection() {
@@ -79,7 +86,11 @@ extension EditorModel {
                 return
             } catch {
                 await MainActor.run {
-                    guard let self else { return }
+                    // Mirror the success path: a failure from a task cancelled by a
+                    // document switch (or for a source no longer present) must not
+                    // overwrite the active project's status with a stale message.
+                    guard let self, !Task.isCancelled,
+                          self.project.mediaItems.contains(where: { $0.id == mediaID }) else { return }
                     self.statusMessage = "Beat analysis failed for \(mediaName): \(error.localizedDescription)"
                 }
             }
@@ -175,16 +186,30 @@ extension EditorModel {
             return
         }
 
+        // Reject a target whose slot is occupied rather than letting
+        // nonOverlappingStart silently drop the clip at a far gap while still
+        // reporting a successful align.
+        let desiredStart = max(target, .zero)
+        let resolvedStart = nonOverlappingStart(for: clip, on: context.track,
+                                                requested: desiredStart, excluding: id)
+        let oneFrame = CMTime(value: 1, timescale: CMTimeScale(max(1, project.frameRate)))
+        guard abs((resolvedStart - desiredStart).seconds) < oneFrame.seconds else {
+            statusMessage = "The nearest beat is blocked by another clip on this track."
+            return
+        }
+
         performUndoable("Align to Beat") {
             var moved = context.track.clips.remove(at: context.index)
             if moved.transition != nil {
                 moved.transition = nil
                 if selectedTransitionClipID == id { selectedTransitionClipID = nil }
             }
-            moved.timelineStart = max(target, .zero)
-            moved.timelineStart = nonOverlappingStart(for: moved, on: context.track, requested: moved.timelineStart)
+            moved.timelineStart = resolvedStart
             context.track.clips.append(moved)
             context.track.clips.sort { $0.timelineStart < $1.timelineStart }
+            // Drop transitions on neighbours the move pulled apart (a plain clip
+            // move sanitises these too).
+            sanitizeTransitions()
             selectedClipID = moved.id
             selectedTransitionClipID = nil
             statusMessage = "Aligned clip to beat at \(TimeFormatting.timecode(moved.timelineStart.seconds))."
@@ -207,6 +232,10 @@ extension EditorModel {
             for item in media {
                 guard !Task.isCancelled else { return }
                 let scopeStarted = item.url.startAccessingSecurityScopedResource()
+                // `defer` balances the scoped access on every exit from this
+                // iteration, including the `catch { continue }` path — otherwise
+                // an unreadable file or corrupt cache leaks the access.
+                defer { if scopeStarted { item.url.stopAccessingSecurityScopedResource() } }
                 do {
                     let key = try Fingerprint.sha256(of: item.url)
                     if let analysis = try BeatAnalysisCache.read(key: key, in: cacheDirectory) {
@@ -216,7 +245,6 @@ extension EditorModel {
                 } catch {
                     continue
                 }
-                if scopeStarted { item.url.stopAccessingSecurityScopedResource() }
             }
 
             await MainActor.run {
@@ -358,9 +386,12 @@ extension EditorModel {
             .time
     }
 
-    private func nonOverlappingStart(for clip: Clip, on track: Track, requested: CMTime) -> CMTime {
+    private func nonOverlappingStart(for clip: Clip, on track: Track, requested: CMTime,
+                                     excluding clipID: Clip.ID? = nil) -> CMTime {
         let duration = clip.duration
-        let others = track.clips.sorted { $0.timelineStart < $1.timelineStart }
+        let others = track.clips
+            .filter { $0.id != clipID }
+            .sorted { $0.timelineStart < $1.timelineStart }
         let requestedEnd = requested + duration
         let hasOverlap = others.contains { other in
             requested < other.timelineEnd && requestedEnd > other.timelineStart

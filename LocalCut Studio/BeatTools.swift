@@ -44,8 +44,13 @@ actor BeatAnalyzer {
 
         var samples: [Float] = []
         let duration = try? await asset.load(.duration)
-        if let duration, duration.seconds.isFinite {
-            let estimatedSamples = Int(duration.seconds * targetSampleRate)
+        if let duration, duration.seconds.isFinite, duration.seconds > 0 {
+            // Cap the speculative reservation: a corrupt or hostile asset can
+            // report an implausibly large duration, and Int(seconds * rate) would
+            // otherwise trap on overflow or balloon allocation before the reader
+            // has validated a single sample. One hour covers any realistic source.
+            let cappedSeconds = min(duration.seconds, 3600)
+            let estimatedSamples = Int(cappedSeconds * targetSampleRate)
             if estimatedSamples > 0 {
                 samples.reserveCapacity(estimatedSamples)
             }

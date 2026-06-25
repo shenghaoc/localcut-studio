@@ -88,6 +88,24 @@ struct BeatDetectionCoreTests {
         #expect(restored == analysis)
     }
 
+    @Test("A corrupt cache payload reads as a miss, not a thrown error")
+    func corruptCacheReadsAsMiss() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("beat-corrupt-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let analysis = BeatAnalysis(tempoBPM: 120,
+                                    beatTimes: [CMTime(seconds: 1, preferredTimescale: 600)],
+                                    confidence: 0.5)
+        try BeatAnalysisCache.write(analysis, key: "k", in: directory)
+
+        // Truncate the JSON payload so the header still validates but decode fails.
+        let url = BeatAnalysisCache.url(for: "k", in: directory)
+        let full = try Data(contentsOf: url)
+        try full.prefix(full.count - 5).write(to: url)
+
+        #expect(try BeatAnalysisCache.read(key: "k", in: directory) == nil)
+    }
+
     private func pulseTrain(sampleRate: Int, duration: Double, interval: Double) -> [Float] {
         let count = Int(Double(sampleRate) * duration)
         var samples = Array(repeating: Float(0), count: count)

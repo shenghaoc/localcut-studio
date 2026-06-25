@@ -214,6 +214,12 @@ final class ProjectEditingService {
                 targets.append(clip.timelineEnd)
             }
         }
+        // Beat targets must live here (not only in EditorModel.snapTargets) so the
+        // trim/move drag path — which calls resolveSnap → this method — actually
+        // snaps to beats when the toggle is on.
+        if model.snapToBeats {
+            targets.append(contentsOf: model.projectedBeatTimes(excluding: clipID))
+        }
         return targets
     }
 
@@ -292,7 +298,7 @@ final class ProjectEditingService {
         }
     }
 
-    private func sanitizeTransitions(model: EditorModel) {
+    func sanitizeTransitions(model: EditorModel) {
         for track in allTracks(in: model) {
             let ordered = track.clips.sorted { $0.timelineStart < $1.timelineStart }
             for (position, clip) in ordered.enumerated() where clip.transition != nil {

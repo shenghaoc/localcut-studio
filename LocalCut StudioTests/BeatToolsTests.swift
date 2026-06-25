@@ -171,6 +171,16 @@ struct BeatToolsEditorTests {
         #expect(model.snapTargets(excluding: videoClip.id).contains(time(2)))
     }
 
+    @Test("resolveSnap (the actual drag path) snaps to beats when the toggle is on")
+    func resolveSnapUsesBeatTargets() {
+        let (model, _, _, videoClip) = makeModel()
+        let candidate = time(1.97) // 0.03 s from beat 2.0, inside the 0.1 s threshold
+
+        #expect(model.resolveSnap(candidate: candidate, excluding: videoClip.id) == candidate)
+        model.snapToBeats = true
+        #expect(model.resolveSnap(candidate: candidate, excluding: videoClip.id) == time(2))
+    }
+
     @Test("Cut at beats splits the selected clip in one undoable edit")
     func cutAtBeatsUndo() {
         let (model, _, _, videoClip) = makeModel()
@@ -198,6 +208,24 @@ struct BeatToolsEditorTests {
 
         let moved = try #require(model.project.videoTracks.first!.clips.first)
         #expect(moved.timelineStart == time(2))
+    }
+
+    @Test("Align refuses (no move) when the nearest beat slot is blocked by another clip")
+    func alignRejectsBlockedBeat() throws {
+        let (model, media, _, _) = makeModel()
+        // Blocker occupies the beat-2 slot; the mover sits just off beat 2.
+        let blocker = Clip(mediaID: media.id, sourceStart: .zero, duration: time(2), timelineStart: time(1.5))
+        let mover = Clip(mediaID: media.id, sourceStart: .zero, duration: time(1), timelineStart: time(2.08))
+        model.project.videoTracks.first!.clips = [blocker, mover]
+        model.selectedClipID = mover.id
+        model.beatAlignWindowSeconds = 0.2
+
+        model.alignSelectedClipToBeat()
+
+        let moverNow = try #require(model.project.videoTracks.first!.clips.first { $0.id == mover.id })
+        #expect(moverNow.timelineStart == time(2.08)) // unchanged
+        #expect(model.statusMessage.contains("blocked"))
+        #expect(!model.canUndo) // nothing was mutated
     }
 
     @Test("Bundle cache persistence writes beat blobs under Caches/beats")

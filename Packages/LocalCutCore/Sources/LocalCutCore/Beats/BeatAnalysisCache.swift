@@ -25,7 +25,10 @@ public enum BeatAnalysisCache {
         let fileURL = url(for: key, in: directory)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
         let data = try Data(contentsOf: fileURL)
-        return try decode(data)
+        // A truncated or otherwise corrupt payload is treated as a cache miss
+        // (returns nil) so the caller re-analyses and overwrites the bad blob,
+        // rather than surfacing a hard failure for a perfectly readable source.
+        return try? decode(data)
     }
 
     public static func write(_ analysis: BeatAnalysis, key: String, in directory: URL) throws {

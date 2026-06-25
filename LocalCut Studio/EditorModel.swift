@@ -811,11 +811,15 @@ final class EditorModel {
     /// Collects all authored snap targets: playhead position(s), every clip
     /// boundary (excluding the given clip), and the timeline origin (0).
     func snapTargets(excluding clipID: Clip.ID? = nil) -> [CMTime] {
-        var targets = projectEditingService.snapTargets(excluding: clipID, model: self)
-        if snapToBeats {
-            targets.append(contentsOf: projectedBeatTimes(excluding: clipID))
-        }
-        return targets
+        // Beat targets are added inside ProjectEditingService.snapTargets so both
+        // this wrapper and the drag-gesture resolveSnap path see them.
+        projectEditingService.snapTargets(excluding: clipID, model: self)
+    }
+
+    /// Clears transitions left dangling on clips no longer adjacent to a
+    /// predecessor (e.g. after a beat align moves a clip away from its neighbour).
+    func sanitizeTransitions() {
+        projectEditingService.sanitizeTransitions(model: self)
     }
 
     /// Returns the nearest snap target within threshold, or the candidate
