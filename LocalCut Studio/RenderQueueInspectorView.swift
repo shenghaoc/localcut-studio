@@ -60,7 +60,8 @@ struct RenderQueueInspectorView: View {
         default: codec = preset.videoCodec
         }
         let size = "\(Int(preset.targetSize.width))×\(Int(preset.targetSize.height))"
-        return "\(codec) • \(size) • \(preset.aspect.displayName)"
+        let container = preset.defaultFilenameExtension.uppercased()
+        return "\(container) • \(codec) • \(size) • \(preset.aspect.displayName) • \(preset.bitrate.displayName)"
     }
 
     // MARK: - Queue
@@ -98,6 +99,8 @@ struct RenderQueueInspectorView: View {
             HStack {
                 VStack(alignment: .leading) {
                     Text(job.outputDisplayName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     Text(job.preset.name)
                         .font(.caption)
                         .foregroundStyle(.secondary)

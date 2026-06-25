@@ -11,12 +11,7 @@ struct InspectorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Inspector").font(.headline)
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            EditorPanelHeader("Inspector", systemImage: "slider.horizontal.3")
             Divider()
 
             Form {

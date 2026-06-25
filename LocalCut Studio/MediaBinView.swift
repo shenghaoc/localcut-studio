@@ -13,10 +13,7 @@ struct MediaBinView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 6) {
-                HStack {
-                    Text("Media")
-                        .font(.headline)
-                    Spacer()
+                EditorPanelHeader("Media", systemImage: "rectangle.stack") {
                     Button {
                         showImporter = true
                     } label: {
@@ -33,9 +30,9 @@ struct MediaBinView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .help("Copy newly imported media into .lcbundle saves")
                     .accessibilityLabel("Copy imported media into bundle")
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
 
             Divider()
 

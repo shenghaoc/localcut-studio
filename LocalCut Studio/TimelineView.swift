@@ -34,6 +34,14 @@ struct TimelineView: View {
         model.project.captionTracks
     }
 
+    private var timelineSummary: String {
+        let clipCount = tracks.reduce(0) { $0 + $1.clips.count }
+        let captionCount = captionTracks.reduce(0) { $0 + $1.lines.count }
+        let clipLabel = clipCount == 1 ? "1 clip" : "\(clipCount) clips"
+        let captionLabel = captionCount == 1 ? "1 caption" : "\(captionCount) captions"
+        return "\(clipLabel) / \(captionLabel) / \(TimeFormatting.timecode(model.totalDuration))"
+    }
+
     /// Project-wide transition cuts used to ripple clip positions so the timeline
     /// matches the rendered composition.
     private var transitionCuts: [TransitionLayout.Cut] {
@@ -102,9 +110,13 @@ struct TimelineView: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Text("Timeline").font(.headline)
-            Spacer()
+        EditorPanelHeader("Timeline", systemImage: "timeline.selection") {
+            Text(timelineSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .accessibilityLabel("Timeline summary, \(timelineSummary)")
             Image(systemName: "minus.magnifyingglass")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -115,8 +127,6 @@ struct TimelineView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
     }
 
     // MARK: Left gutter (track labels)
@@ -136,6 +146,8 @@ struct TimelineView: View {
                 .padding(.horizontal, 8)
                 .frame(height: laneHeight)
                 .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(trackAccessibilityLabel(track))
             }
             ForEach(captionTracks) { track in
                 Divider()
@@ -149,9 +161,25 @@ struct TimelineView: View {
                 .padding(.horizontal, 8)
                 .frame(height: laneHeight)
                 .foregroundStyle(track.isMuted ? .tertiary : .secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(captionTrackAccessibilityLabel(track))
             }
         }
         .frame(width: gutterWidth)
+    }
+
+    private func trackAccessibilityLabel(_ track: Track) -> String {
+        let kind = track.kind == .video ? "video" : "audio"
+        let count = track.clips.count
+        let clipLabel = count == 1 ? "1 clip" : "\(count) clips"
+        return "\(track.name), \(kind) track, \(clipLabel)"
+    }
+
+    private func captionTrackAccessibilityLabel(_ track: CaptionTrack) -> String {
+        let count = track.lines.count
+        let lineLabel = count == 1 ? "1 caption line" : "\(count) caption lines"
+        let muted = track.isMuted ? ", muted" : ""
+        return "\(track.name), caption track, \(lineLabel)\(muted)"
     }
 
     // MARK: Scrollable timeline content

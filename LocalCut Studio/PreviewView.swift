@@ -24,16 +24,21 @@ private struct TransportTimeView: View {
     var model: EditorModel
 
     var body: some View {
+        let current = TimeFormatting.timecode(model.currentTime)
+        let duration = TimeFormatting.timecode(model.totalDuration)
+
         HStack(spacing: 4) {
-            Text(TimeFormatting.timecode(model.currentTime))
+            Text(current)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
             Text("/")
                 .foregroundStyle(.tertiary)
-            Text(TimeFormatting.timecode(model.totalDuration))
+            Text(duration)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(String(localized: "Playhead \(current) of \(duration)"))
     }
 }
 
@@ -57,6 +62,9 @@ struct PreviewView: View {
                     }
                 }
                 .layoutPriority(1)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Preview")
+                .accessibilityValue(previewAccessibilityValue)
 
                 if model.showScopes {
                     ScopesView()
@@ -100,7 +108,15 @@ struct PreviewView: View {
             Text("\(Int(model.project.renderSize.width))×\(Int(model.project.renderSize.height)) · \(Int(model.project.frameRate)) fps")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .help("Project render format")
         }
         .buttonStyle(.borderless)
+    }
+
+    private var previewAccessibilityValue: String {
+        if model.player.currentItem == nil {
+            return String(localized: "No preview. Add a clip to the timeline to see it here.")
+        }
+        return String(localized: "Showing the current timeline frame.")
     }
 }
