@@ -156,6 +156,21 @@ struct TimelineView: View {
 
     // MARK: Scrollable timeline content
 
+    private struct PlayheadView: View {
+        var model: EditorModel
+        var pps: CGFloat
+
+        var body: some View {
+            let x = CGFloat(model.currentTime) * pps
+            return Rectangle()
+                .fill(Color.red)
+                .frame(width: 1.5)
+                .frame(maxHeight: .infinity)
+                .offset(x: x)
+                .allowsHitTesting(false)
+        }
+    }
+
     private var timelineScroller: some View {
         ScrollView([.horizontal]) {
             ZStack(alignment: .topLeading) {
@@ -681,24 +696,6 @@ struct TimelineView: View {
         let raw = Double(targetPixels / pps)
         let candidates: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300]
         return candidates.first { $0 >= raw } ?? 600
-    }
-}
-
-// MARK: - Playhead
-
-/// The red scrubber line. Isolated so it can re-evaluate on every
-/// `currentTime` tick without invalidating the rest of `TimelineView`.
-private struct PlayheadView: View {
-    var model: EditorModel
-    var pps: CGFloat
-
-    var body: some View {
-        Rectangle()
-            .fill(.red)
-            .frame(width: 1.5)
-            .frame(maxHeight: .infinity)
-            .offset(x: CGFloat(model.currentTime) * pps)
-            .allowsHitTesting(false)
     }
 }
 

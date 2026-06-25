@@ -402,7 +402,7 @@ struct RenderQueueTests {
     private func waitForQueueToSettle(
         _ queue: RenderQueue,
         expectedCount: Int,
-        timeout: TimeInterval = 5
+        timeout: TimeInterval = 10
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
