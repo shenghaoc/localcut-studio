@@ -9,6 +9,7 @@ final class DocumentController {
     func newDocument(model: EditorModel) {
         releaseSession(model: model)
         model.project.name = "Untitled"
+        model.project.aspect = .widescreen16x9
         model.project.renderSize = CGSize(width: 1920, height: 1080)
         model.project.frameRate = 30
         model.project.workingColourSpace = .sRGB
@@ -27,6 +28,7 @@ final class DocumentController {
         model.showBeatMarkers = false
         model.snapToBeats = false
         model.beatOffsetSeconds = 0
+        model.project.coverFrame = nil
         model.documentURL = nil
         model.isDirty = false
         model.unresolvedMedia = []
@@ -54,6 +56,7 @@ final class DocumentController {
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
+        model.project.coverFrame = nil
         model.selectedClipID = nil
         model.selectedMediaID = nil
         model.selectedTransitionClipID = nil
@@ -154,9 +157,11 @@ final class DocumentController {
         let width = max(1, document.renderWidth.isFinite ? document.renderWidth : 1920)
         let height = max(1, document.renderHeight.isFinite ? document.renderHeight : 1080)
         model.project.renderSize = CGSize(width: width, height: height)
+        model.project.aspect = document.aspect
         model.project.frameRate = max(1, document.frameRate.isFinite ? document.frameRate : 30)
         EffectCompositor.purgeCaptionRasterCache()
         model.project.workingColourSpace = document.workingColourSpace
+        model.project.coverFrame = document.coverFrame
 
         var unresolved: [MediaRef] = []
         var refreshedBookmark = false

@@ -31,22 +31,39 @@ struct RenderQueueInspectorView: View {
     }
 
     private func presetRow(_ preset: ExportPreset) -> some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(preset.name)
-                Text(presetSubtitle(preset))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(preset.name)
+                    Text(presetSubtitle(preset))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer()
+                Button("Add to Queue…") {
+                    addToQueue(preset: preset)
+                }
+                .controlSize(.small)
+                .help("Pick an output file and enqueue a render with this preset.")
+                .accessibilityLabel("Add \(preset.name) to queue")
             }
-            Spacer()
-            Button("Add to Queue…") {
-                addToQueue(preset: preset)
+            if preset.projectAspect != model.project.aspect {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(.yellow)
+                        .accessibilityHidden(true)
+                    Text("Project is \(model.project.aspect.displayName).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Switch to \(preset.projectAspect.displayName)") {
+                        model.setProjectAspect(preset.projectAspect)
+                    }
+                    .controlSize(.mini)
+                    .help("Switch the project canvas before queueing this preset.")
+                }
             }
-            .controlSize(.small)
-            .help("Pick an output file and enqueue a render with this preset.")
-            .accessibilityLabel("Add \(preset.name) to queue")
         }
     }
 

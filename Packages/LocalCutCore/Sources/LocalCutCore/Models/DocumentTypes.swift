@@ -28,6 +28,8 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     public var markers: [TimelineMarker]
     public var audioBus: AudioBusDoc
     public var overlays: [OverlayClipDoc]
+    public var aspect: ProjectAspect
+    public var coverFrame: CoverFrameDoc?
 
     public init(schemaVersion: Int = ProjectDocument.currentSchemaVersion,
                 bundleFormat: String? = nil,
@@ -42,7 +44,9 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
                 captionTracks: [CaptionTrackDoc] = [],
                 markers: [TimelineMarker] = [],
                 audioBus: AudioBusDoc = AudioBusDoc(),
-                overlays: [OverlayClipDoc] = []) {
+                overlays: [OverlayClipDoc] = [],
+                aspect: ProjectAspect? = nil,
+                coverFrame: CoverFrameDoc? = nil) {
         self.schemaVersion = schemaVersion
         self.bundleFormat = bundleFormat
         self.name = name
@@ -57,12 +61,14 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         self.markers = markers
         self.audioBus = audioBus
         self.overlays = overlays
+        self.aspect = aspect ?? ProjectAspect.infer(width: renderWidth, height: renderHeight)
+        self.coverFrame = coverFrame
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, bundleFormat, name, renderWidth, renderHeight, frameRate,
              workingColourSpace, media, videoTracks, audioTracks, captionTracks,
-             markers, audioBus, overlays
+             markers, audioBus, overlays, aspect, coverFrame
     }
 
     public init(from decoder: any Decoder) throws {
@@ -85,6 +91,9 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         markers = try c.decodeIfPresent([TimelineMarker].self, forKey: .markers) ?? []
         audioBus = try c.decodeIfPresent(AudioBusDoc.self, forKey: .audioBus) ?? AudioBusDoc()
         overlays = try c.decodeIfPresent([OverlayClipDoc].self, forKey: .overlays) ?? []
+        aspect = try c.decodeIfPresent(ProjectAspect.self, forKey: .aspect)
+            ?? ProjectAspect.infer(width: renderWidth, height: renderHeight)
+        coverFrame = try c.decodeIfPresent(CoverFrameDoc.self, forKey: .coverFrame)
     }
 
     public func encoded() throws -> Data {
@@ -95,6 +104,119 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
 
     public init(data: Data) throws {
         self = try JSONDecoder().decode(ProjectDocument.self, from: data)
+    }
+}
+
+// MARK: - Phase 39 canvas and cover metadata
+
+public enum ProjectAspect: String, Codable, Hashable, Sendable, CaseIterable, Identifiable {
+    case widescreen16x9
+    case vertical9x16
+    case square1x1
+    case portrait4x5
+    case custom
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .widescreen16x9: "16:9"
+        case .vertical9x16: "9:16"
+        case .square1x1: "1:1"
+        case .portrait4x5: "4:5"
+        case .custom: "Custom"
+        }
+    }
+
+    public var defaultRenderSize: CGSize {
+        switch self {
+        case .widescreen16x9: CGSize(width: 1920, height: 1080)
+        case .vertical9x16: CGSize(width: 1080, height: 1920)
+        case .square1x1: CGSize(width: 1080, height: 1080)
+        case .portrait4x5: CGSize(width: 1080, height: 1350)
+        case .custom: CGSize(width: 1920, height: 1080)
+        }
+    }
+
+    public static var builtIns: [ProjectAspect] {
+        [.widescreen16x9, .vertical9x16, .square1x1, .portrait4x5]
+    }
+
+    public static func infer(width: Double, height: Double) -> ProjectAspect {
+        guard width.isFinite, height.isFinite, width > 0, height > 0 else {
+            return .widescreen16x9
+        }
+        let ratio = width / height
+        let candidates: [(ProjectAspect, Double)] = [
+            (.widescreen16x9, 16.0 / 9.0),
+            (.vertical9x16, 9.0 / 16.0),
+            (.square1x1, 1.0),
+            (.portrait4x5, 4.0 / 5.0),
+        ]
+        let tolerance = 0.01
+        guard let match = candidates.min(by: { abs($0.1 - ratio) < abs($1.1 - ratio) }),
+              abs(match.1 - ratio) <= tolerance else {
+            return .custom
+        }
+        return match.0
+    }
+}
+
+public enum CoverFormat: String, Codable, Hashable, Sendable, CaseIterable, Identifiable {
+    case png
+    case jpeg
+    case heic
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .png: "PNG"
+        case .jpeg: "JPEG"
+        case .heic: "HEIC"
+        }
+    }
+
+    public var fileExtension: String {
+        switch self {
+        case .png: "png"
+        case .jpeg: "jpg"
+        case .heic: "heic"
+        }
+    }
+}
+
+public struct CoverTitleDoc: Codable, Equatable, Sendable {
+    public var text: String
+    public var fontSize: Double
+    public var normalizedX: Double
+    public var normalizedY: Double
+
+    public init(text: String,
+                fontSize: Double = 72,
+                normalizedX: Double = 0.5,
+                normalizedY: Double = 0.82) {
+        self.text = text
+        self.fontSize = fontSize
+        self.normalizedX = normalizedX
+        self.normalizedY = normalizedY
+    }
+}
+
+public struct CoverFrameDoc: Codable, Equatable, Sendable {
+    public var time: CMTimeCode
+    public var format: CoverFormat
+    public var title: CoverTitleDoc?
+    public var bundleRelativePath: String?
+
+    public init(time: CMTimeCode,
+                format: CoverFormat = .png,
+                title: CoverTitleDoc? = nil,
+                bundleRelativePath: String? = nil) {
+        self.time = time
+        self.format = format
+        self.title = title
+        self.bundleRelativePath = bundleRelativePath
     }
 }
 

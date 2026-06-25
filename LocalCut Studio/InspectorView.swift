@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
+import AppKit
 import LocalCutCore
 
 /// Context-sensitive properties for the current selection plus project-wide
@@ -40,6 +41,7 @@ struct InspectorView: View {
                 }
             }
 
+            coverSection
             projectSection
             overlayListSection
         }
@@ -857,16 +859,36 @@ struct InspectorView: View {
     @ViewBuilder
     private var projectSection: some View {
         Section("Project") {
-            Picker("Resolution", selection: resolutionBinding) {
-                Text("1920 × 1080").tag(CGSize(width: 1920, height: 1080))
-                Text("1280 × 720").tag(CGSize(width: 1280, height: 720))
-                Text("3840 × 2160").tag(CGSize(width: 3840, height: 2160))
-                Text("1080 × 1920 (Vertical)").tag(CGSize(width: 1080, height: 1920))
+            Picker("Aspect", selection: aspectBinding) {
+                ForEach(ProjectAspect.builtIns) { aspect in
+                    Text(aspect.displayName).tag(aspect)
+                }
+                if model.project.aspect == .custom {
+                    Text("Custom").tag(ProjectAspect.custom)
+                }
+            }
+            LabeledContent("Canvas") {
+                Text("\(Int(model.project.renderSize.width))×\(Int(model.project.renderSize.height))")
+                    .foregroundStyle(.secondary)
             }
             Picker("Frame Rate", selection: frameRateBinding) {
                 Text("24 fps").tag(24.0)
                 Text("30 fps").tag(30.0)
                 Text("60 fps").tag(60.0)
+            }
+        }
+        Section("Safe Zones") {
+            Toggle("Show Safe Zones", isOn: $model.showSafeZones)
+            Picker("Platform", selection: $model.selectedSafeZoneProfileID) {
+                ForEach(SafeZoneLibrary.builtInProfiles) { profile in
+                    Text(profile.displayName).tag(profile.platformID)
+                }
+            }
+            if let profile = model.selectedSafeZoneProfile,
+               profile.aspect != model.project.aspect {
+                Text("Switch the project aspect to \(profile.aspect.displayName) to show this overlay.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         Section("Colour") {
@@ -887,10 +909,73 @@ struct InspectorView: View {
         }
     }
 
-    private var resolutionBinding: Binding<CGSize> {
+    @ViewBuilder
+    private var coverSection: some View {
+        Section("Cover") {
+            LabeledContent("Time") {
+                Text(coverTimeLabel)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            HStack {
+                Button("Set to Playhead") {
+                    model.setCoverTimeToPlayhead()
+                }
+                .controlSize(.small)
+                Spacer()
+            }
+            Picker("Format", selection: coverFormatBinding) {
+                ForEach(CoverFormat.allCases) { format in
+                    Text(format.displayName).tag(format)
+                }
+            }
+            TextField("Title", text: coverTitleBinding)
+            HStack {
+                Button {
+                    exportCoverTapped()
+                } label: {
+                    Label("Export Cover…", systemImage: "photo")
+                }
+                .disabled(model.totalDuration <= 0)
+                .controlSize(.small)
+                Spacer()
+            }
+        }
+    }
+
+    private var coverTimeLabel: String {
+        let time = model.project.coverFrame?.time.cmTime.seconds ?? model.currentTime
+        return TimeFormatting.timecode(time)
+    }
+
+    private var coverFormatBinding: Binding<CoverFormat> {
         Binding(
-            get: { model.project.renderSize },
-            set: { model.setRenderSize($0) })
+            get: { model.project.coverFrame?.format ?? .png },
+            set: { model.setCoverFormat($0) })
+    }
+
+    private var coverTitleBinding: Binding<String> {
+        Binding(
+            get: { model.project.coverFrame?.title?.text ?? "" },
+            set: { model.setCoverTitle($0) })
+    }
+
+    private func exportCoverTapped() {
+        let format = model.project.coverFrame?.format ?? .png
+        let panel = NSSavePanel()
+        if let type = UTType(filenameExtension: format.fileExtension) {
+            panel.allowedContentTypes = [type]
+        }
+        panel.nameFieldStringValue = "\(model.project.name)-cover.\(format.fileExtension)"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await model.exportCover(to: url) }
+    }
+
+    private var aspectBinding: Binding<ProjectAspect> {
+        Binding(
+            get: { model.project.aspect },
+            set: { model.setProjectAspect($0) })
     }
 
     private var frameRateBinding: Binding<Double> {

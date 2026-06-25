@@ -116,6 +116,14 @@ struct PreviewView: View {
                     description: Text("Import media, then drag a clip to the timeline."))
                 .foregroundStyle(.secondary)
             }
+            if model.showSafeZones,
+               let profile = SafeZoneLibrary.validProfile(
+                id: model.selectedSafeZoneProfileID,
+                for: model.project.aspect) {
+                SafeZoneOverlayView(
+                    profile: profile,
+                    renderSize: model.project.renderSize)
+            }
         }
     }
 

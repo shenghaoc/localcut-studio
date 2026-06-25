@@ -322,6 +322,21 @@ final class ProjectEditingService {
         guard size != model.project.renderSize else { return }
         model.performUndoable("Change Resolution") {
             model.project.renderSize = size
+            model.project.aspect = ProjectAspect.infer(
+                width: Double(size.width),
+                height: Double(size.height))
+            RenderCache.shared.invalidate(notMatchingRenderSize: size)
+            EffectCompositor.purgeCaptionRasterCache()
+            model.scheduleRebuild()
+        }
+    }
+
+    func setProjectAspect(_ aspect: ProjectAspect, model: EditorModel) {
+        let size = aspect == .custom ? model.project.renderSize : aspect.defaultRenderSize
+        guard aspect != model.project.aspect || size != model.project.renderSize else { return }
+        model.performUndoable("Change Aspect") {
+            model.project.aspect = aspect
+            model.project.renderSize = size
             RenderCache.shared.invalidate(notMatchingRenderSize: size)
             EffectCompositor.purgeCaptionRasterCache()
             model.scheduleRebuild()

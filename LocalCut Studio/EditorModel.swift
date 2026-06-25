@@ -64,6 +64,8 @@ final class EditorModel {
 
     // Scopes panel (colour-management feature) — session-only UI flag, not persisted.
     var showScopes: Bool = false
+    var showSafeZones: Bool = false
+    var selectedSafeZoneProfileID: String = SafeZoneLibrary.defaultProfileID
 
     /// Whether the inspector side rail is shown. Lifted off the view's
     /// `@SceneStorage` so the View ▸ Show Inspector menu command, its ⌥⌘I
@@ -1161,6 +1163,11 @@ final class EditorModel {
     /// Changes the output canvas size as one undoable step.
     func setRenderSize(_ size: CGSize) {
         projectEditingService.setRenderSize(size, model: self)
+    }
+
+    /// Changes the output canvas aspect as one undoable step.
+    func setProjectAspect(_ aspect: ProjectAspect) {
+        projectEditingService.setProjectAspect(aspect, model: self)
     }
 
     /// Changes the output frame rate as one undoable step.
