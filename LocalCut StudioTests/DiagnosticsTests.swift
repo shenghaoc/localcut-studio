@@ -248,14 +248,14 @@ struct DiagnosticsTests {
     @Test("Agent's deinit closes the bridge gate even when stop() wasn't called (R2.4)")
     func deinitClosesGate() {
         let bridge = DiagnosticsBridge()
-        do {
-            let agent = DiagnosticsAgent(bridge: bridge)
-            agent.start()
-            #expect(bridge.isEnabled)
-            // No explicit stop() — the editor's teardown path relies on the
-            // agent's deinit invalidating the timer and closing the gate when
-            // the last strong reference drops.
-        }
+        var agent: DiagnosticsAgent? = DiagnosticsAgent(bridge: bridge)
+        agent?.start()
+        #expect(bridge.isEnabled)
+        // No explicit stop() — the editor's teardown path relies on the
+        // agent's deinit invalidating the timer and closing the gate when
+        // the last strong reference drops.
+        agent = nil
+
         // The agent has been released; the bridge gate must have been closed.
         #expect(!bridge.isEnabled)
     }
