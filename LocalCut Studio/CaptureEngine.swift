@@ -231,7 +231,12 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private let input: AVAssetWriterInput
     private let sessionStartHostTimeUs: Int64
     private let manifest: CaptureManifestFileWriter
+    private let onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)?
     private let lock = NSLock()
+
+    /// Roughly two seconds of drops at 30 fps before we warn the user; a single
+    /// hiccup shouldn't raise an alarm, sustained loss should.
+    private static let sustainedDropThreshold = 60
 
     private var didStartWriting = false
     private var isFinished = false
@@ -240,6 +245,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private var sampleCount = 0
     private var droppedSamples = 0
     private var didRecordBackpressure = false
+    private var didNotifyBackpressure = false
 
     init(source: CaptureSourceDescriptor,
          outputURL: URL,
@@ -247,7 +253,8 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
          outputSettings: [String: Any],
          fragmentInterval: CMTime,
          sessionStartHostTimeUs: Int64,
-         manifest: CaptureManifestFileWriter) throws {
+         manifest: CaptureManifestFileWriter,
+         onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil) throws {
         self.source = source
         self.outputURL = outputURL
         self.writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
@@ -256,6 +263,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         self.input.expectsMediaDataInRealTime = true
         self.sessionStartHostTimeUs = sessionStartHostTimeUs
         self.manifest = manifest
+        self.onSustainedBackpressure = onSustainedBackpressure
 
         guard writer.canAdd(input) else {
             throw CaptureEngineError.writerRejectedInput(source.displayName)
@@ -293,6 +301,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         guard input.isReadyForMoreMediaData else {
             droppedSamples += 1
             recordBackpressure(reason: "writer input was not ready")
+            notifySustainedBackpressureIfNeeded()
             return
         }
 
@@ -302,7 +311,16 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         } else {
             droppedSamples += 1
             recordBackpressure(reason: writer.error?.localizedDescription ?? "append failed")
+            notifySustainedBackpressureIfNeeded()
         }
+    }
+
+    private func notifySustainedBackpressureIfNeeded() {
+        // Fire once per source when drops cross the sustained threshold so the
+        // UI can warn the user instead of silently producing a gapped capture.
+        guard !didNotifyBackpressure, droppedSamples >= Self.sustainedDropThreshold else { return }
+        didNotifyBackpressure = true
+        onSustainedBackpressure?(source)
     }
 
     private func recordBackpressure(reason: String) {
@@ -588,7 +606,8 @@ actor CaptureCoordinator {
     private var activeSession: ActiveSession?
 
     func start(_ request: CaptureStartRequest,
-               onStreamStopped: (@Sendable (Error) -> Void)? = nil) async throws {
+               onStreamStopped: (@Sendable (Error) -> Void)? = nil,
+               onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil) async throws {
         guard activeSession == nil else { throw CaptureEngineError.alreadyRecording }
         let sourceCount = (request.target.map { _ in 1 } ?? 0)
             + (request.includeSystemAudio ? 1 : 0)
@@ -602,11 +621,28 @@ actor CaptureCoordinator {
         guard capability.tier >= .accelerated else {
             throw CaptureEngineError.captureSessionFailed(capability.reason)
         }
+        // Phase 41: one/two video streams need .accelerated, three or more need
+        // .pro headroom (extra encoders / memory).
+        if videoStreamCount >= 3, capability.tier < .pro {
+            throw CaptureEngineError.captureSessionFailed(
+                "Recording three or more video sources requires a Pro-tier Mac.")
+        }
 
         let id = UUID()
         let directoryURL = request.rootURL
             .appendingPathComponent(id.uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+        // Preflight free space so a capture doesn't begin only to fail once
+        // samples are already being written and the take is half-recorded.
+        if let available = try? directoryURL.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+        ).volumeAvailableCapacityForImportantUsage,
+           available < Self.minimumFreeBytes {
+            try? FileManager.default.removeItem(at: directoryURL)
+            throw CaptureEngineError.captureSessionFailed(
+                "Not enough free space on the recordings volume — free at least \(Self.minimumFreeBytes / 1_000_000_000) GB and try again.")
+        }
         let manifestURL = directoryURL.appendingPathComponent("manifest.ndjson")
         let manifest = try CaptureManifestFileWriter(url: manifestURL)
         let startHostTimeUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
@@ -640,7 +676,8 @@ actor CaptureCoordinator {
                 outputSettings: settings,
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
-                manifest: manifest)
+                manifest: manifest,
+                onSustainedBackpressure: onBackpressure)
             descriptors.append(source)
             encoders[source.id] = CaptureEncoderConfig(
                 codec: "h264",
@@ -664,7 +701,8 @@ actor CaptureCoordinator {
                 outputSettings: Self.audioSettings(sampleRate: 48_000, channels: 2),
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
-                manifest: manifest)
+                manifest: manifest,
+                onSustainedBackpressure: onBackpressure)
             descriptors.append(source)
             encoders[source.id] = CaptureEncoderConfig(
                 codec: "aac",
@@ -705,7 +743,8 @@ actor CaptureCoordinator {
                     bitrate: bitrate),
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
-                manifest: manifest)
+                manifest: manifest,
+                onSustainedBackpressure: onBackpressure)
             descriptors.append(source)
             encoders[source.id] = CaptureEncoderConfig(
                 codec: "h264",
@@ -729,7 +768,8 @@ actor CaptureCoordinator {
                 outputSettings: Self.audioSettings(sampleRate: 48_000, channels: 1),
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
-                manifest: manifest)
+                manifest: manifest,
+                onSustainedBackpressure: onBackpressure)
             descriptors.append(source)
             encoders[source.id] = CaptureEncoderConfig(
                 codec: "aac",
@@ -783,28 +823,29 @@ actor CaptureCoordinator {
         }
 
         // Finish every writer even if one fails, so no FileHandle or fragmented
-        // .mov is left open, and always write the finalize record + close the
-        // manifest. Surface the first failure to the caller afterwards.
+        // .mov is left open.
         var finishErrors: [Error] = []
         for writer in active.writers {
             do {
                 let ended = try await writer.finish()
-                try active.manifest.append(.sourceEnded(ended))
+                try? active.manifest.append(.sourceEnded(ended))
             } catch {
                 finishErrors.append(error)
             }
         }
-        let durationUs = max(
-            0,
-            CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock())) - active.startHostTimeUs)
-        try? active.manifest.append(.finalize(CaptureFinalizeRecord(
-            atUs: active.startHostTimeUs + durationUs,
-            durationUs: durationUs)))
-        active.manifest.close()
-
-        if let firstError = finishErrors.first {
-            throw firstError
+        // Only finalize a clean stop. If a writer failed, leave the manifest
+        // unfinalized so the session is still re-offered by crash recovery on the
+        // next launch — but always return a partial result here so the UI can
+        // land the sources that did finish, rather than throwing them away.
+        if finishErrors.isEmpty {
+            let durationUs = max(
+                0,
+                CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock())) - active.startHostTimeUs)
+            try? active.manifest.append(.finalize(CaptureFinalizeRecord(
+                atUs: active.startHostTimeUs + durationUs,
+                durationUs: durationUs)))
         }
+        active.manifest.close()
 
         let data = try Data(contentsOf: active.manifestURL)
         let parsed = CaptureManifest.parseNDJSON(data)
@@ -840,6 +881,10 @@ actor CaptureCoordinator {
                 wasRecovered: true)
         }
     }
+
+    /// Refuse to start a capture when the recordings volume has less than this
+    /// much important-usage space available.
+    private static let minimumFreeBytes: Int64 = 2_000_000_000
 
     private static func webcamDimensions(deviceID: String) -> (width: Int, height: Int) {
         let fallback = (width: 1280, height: 720)

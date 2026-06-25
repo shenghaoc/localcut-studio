@@ -7,6 +7,10 @@ import LocalCutCore
 private enum RecordingFolderStore {
     static let bookmarkKey = "LocalCutStudio.recordingsFolderBookmark"
 
+    static var hasStoredBookmark: Bool {
+        UserDefaults.standard.data(forKey: bookmarkKey) != nil
+    }
+
     static func store(_ url: URL) throws {
         let bookmark = try url.bookmarkData(
             options: .withSecurityScope,
@@ -82,7 +86,15 @@ extension EditorModel {
     }
 
     func scanRecoveredRecordings() async {
-        guard let root = resolvedRecordingsFolder(promptIfMissing: false) else { return }
+        guard let root = resolvedRecordingsFolder(promptIfMissing: false) else {
+            // A bookmark exists but couldn't be resolved (folder moved, app
+            // reinstalled): tell the user how to get recovery back instead of
+            // silently showing an empty bin.
+            if RecordingFolderStore.hasStoredBookmark {
+                statusMessage = "Choose your recordings folder to recover past sessions."
+            }
+            return
+        }
         do {
             recoveredCaptureSessions = try await captureCoordinator.scanRecoveredSessions(rootURL: root)
             if !recoveredCaptureSessions.isEmpty {
@@ -120,6 +132,13 @@ extension EditorModel {
                     self.statusMessage = "Screen capture stopped: \(error.localizedDescription)"
                     self.stopRecording()
                 }
+            }, onBackpressure: { [weak self] source in
+                // Sustained frame drops — warn the user so they don't finish with
+                // a silently gapped take.
+                Task { @MainActor in
+                    guard let self, self.isRecording else { return }
+                    self.statusMessage = "Recording can't keep up — dropping data from \(source.displayName). Free disk space or lower the frame rate."
+                }
             })
             recordingStartedAt = Date()
             isRecording = true
@@ -151,8 +170,11 @@ extension EditorModel {
 
     func importRecoveredCaptureSession(_ result: CaptureSessionResult) {
         Task {
-            await landCaptureSession(result)
-            recoveredCaptureSessions.removeAll { $0.id == result.id }
+            // Keep the recovery row until landing actually succeeds, so a
+            // temporarily unreadable source can be retried instead of vanishing.
+            if await landCaptureSession(result) {
+                recoveredCaptureSessions.removeAll { $0.id == result.id }
+            }
         }
     }
 
@@ -162,11 +184,12 @@ extension EditorModel {
         var didAccess: Bool
     }
 
-    func landCaptureSession(_ result: CaptureSessionResult) async {
+    @discardableResult
+    func landCaptureSession(_ result: CaptureSessionResult) async -> Bool {
         let recoveredSources = result.manifest.recoveredSources
         guard !recoveredSources.isEmpty else {
             statusMessage = "Recording stopped, but no readable sources were found."
-            return
+            return false
         }
 
         var loaded: [LoadedCapturedSource] = []
@@ -208,7 +231,7 @@ extension EditorModel {
             statusMessage = loadErrors.isEmpty
                 ? "Recording stopped, but no captured files could be loaded."
                 : "Recording stopped. Sources failed: \(loadErrors.joined(separator: "; "))"
-            return
+            return false
         }
 
         performUndoable(result.wasRecovered ? "Add Recovered Recording" : "Add Recording") {
@@ -247,5 +270,6 @@ extension EditorModel {
         for entry in loaded where entry.item.hasVideo {
             Task { await entry.item.loadThumbnail() }
         }
+        return true
     }
 }

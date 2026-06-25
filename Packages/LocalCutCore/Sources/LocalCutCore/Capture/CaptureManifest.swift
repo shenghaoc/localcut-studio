@@ -325,7 +325,15 @@ public struct CaptureManifest: Hashable, Sendable {
     public static func parseNDJSON(_ data: Data,
                                    decoder: JSONDecoder = CaptureManifestJSON.decoder) -> CaptureManifest {
         let text = String(decoding: data, as: UTF8.self)
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+        // A crash can interrupt a write mid-record, leaving a final line without
+        // its terminating newline. Such a record may be truncated (or, worse, a
+        // syntactically valid but partial `finalize`), so only trust complete,
+        // newline-terminated lines: drop the trailing segment when the data
+        // doesn't end in "\n".
+        if !text.hasSuffix("\n"), !lines.isEmpty {
+            lines.removeLast()
+        }
         var records: [CaptureManifestRecord] = []
         for line in lines {
             guard let lineData = line.data(using: .utf8),
