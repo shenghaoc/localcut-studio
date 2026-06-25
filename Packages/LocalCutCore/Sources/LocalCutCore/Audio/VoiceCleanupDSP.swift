@@ -1,0 +1,322 @@
+import Foundation
+import Accelerate
+
+public struct VoiceCleanupProcessorState: Sendable {
+    public var gateGain: Float
+    public var compressorGain: Float
+
+    public init(gateGain: Float = 1, compressorGain: Float = 1) {
+        self.gateGain = gateGain
+        self.compressorGain = compressorGain
+    }
+}
+
+public struct LoudnessAnalysisResult: Hashable, Sendable {
+    public var measuredLUFS: Float
+    public var targetLUFS: Float
+    public var gainDB: Float
+    public var durationSeconds: Double
+    public var note: String?
+
+    public init(measuredLUFS: Float,
+                targetLUFS: Float,
+                gainDB: Float,
+                durationSeconds: Double,
+                note: String? = nil) {
+        self.measuredLUFS = measuredLUFS
+        self.targetLUFS = targetLUFS
+        self.gainDB = gainDB
+        self.durationSeconds = durationSeconds
+        self.note = note
+    }
+}
+
+public enum VoiceCleanupDSP {
+    public static func linearGain(fromDB db: Float) -> Float {
+        pow(10, db / 20)
+    }
+
+    public static func decibels(fromLinear linear: Float) -> Float {
+        guard linear > 0 else { return -120 }
+        return 20 * log10(linear)
+    }
+
+    public static func normalisationGain(measuredLUFS: Float, targetLUFS: Float) -> Float {
+        guard measuredLUFS.isFinite, targetLUFS.isFinite else { return 0 }
+        return max(-30, min(30, targetLUFS - measuredLUFS))
+    }
+
+    public static func processInterleaved(_ samples: inout [Float],
+                                          channels: Int,
+                                          sampleRate: Double,
+                                          settings: VoiceCleanupSettings,
+                                          state: inout VoiceCleanupProcessorState) {
+        guard channels > 0, !samples.isEmpty else { return }
+        var clamped = settings
+        clamped.clamp()
+
+        if !clamped.denoiser.bypass {
+            applyDenoiser(to: &samples, settings: clamped.denoiser)
+        }
+        if !clamped.gate.bypass {
+            applyGate(to: &samples, channels: channels, sampleRate: sampleRate,
+                      settings: clamped.gate, gain: &state.gateGain)
+        }
+        if !clamped.compressor.bypass {
+            applyCompressor(to: &samples, channels: channels, sampleRate: sampleRate,
+                            settings: clamped.compressor, gain: &state.compressorGain)
+        }
+        if clamped.loudness.enabled, abs(clamped.loudness.appliedGainDB) > 0.0001 {
+            var gain = linearGain(fromDB: clamped.loudness.appliedGainDB)
+            vDSP_vsmul(samples, 1, &gain, &samples, 1, vDSP_Length(samples.count))
+        }
+        if !clamped.limiter.bypass {
+            applyLimiter(to: &samples, settings: clamped.limiter)
+        }
+    }
+
+    public static func measureIntegratedLoudness(interleaved samples: [Float],
+                                                 channels: Int,
+                                                 sampleRate: Double,
+                                                 targetLUFS: Float) -> LoudnessAnalysisResult {
+        let duration = channels > 0 ? Double(samples.count / channels) / sampleRate : 0
+        guard duration >= 3 else {
+            return LoudnessAnalysisResult(
+                measuredLUFS: -.infinity,
+                targetLUFS: targetLUFS,
+                gainDB: 0,
+                durationSeconds: duration,
+                note: "Normalisation skipped: selection is shorter than 3 seconds.")
+        }
+
+        var analyser = EBUR128LoudnessAnalyser(sampleRate: sampleRate, channels: channels)
+        analyser.feedInterleaved(samples, channels: channels)
+        let measured = analyser.integratedLoudness()
+        let gain = normalisationGain(measuredLUFS: measured, targetLUFS: targetLUFS)
+        return LoudnessAnalysisResult(
+            measuredLUFS: measured,
+            targetLUFS: targetLUFS,
+            gainDB: gain,
+            durationSeconds: duration)
+    }
+
+    private static func applyDenoiser(to samples: inout [Float], settings: DenoiserSettings) {
+        guard !samples.isEmpty else { return }
+        let floor = linearGain(fromDB: settings.noiseFloorDB)
+        let knee = max(floor * 6, 0.000_001)
+
+        var magnitudes = Array(repeating: Float(0), count: samples.count)
+        vDSP_vabs(samples, 1, &magnitudes, 1, vDSP_Length(samples.count))
+
+        for index in samples.indices {
+            let proximity = 1 - min(1, magnitudes[index] / knee)
+            let reduction = settings.reduction * proximity
+            samples[index] *= max(0, 1 - reduction)
+        }
+    }
+
+    private static func applyGate(to samples: inout [Float],
+                                  channels: Int,
+                                  sampleRate: Double,
+                                  settings: GateSettings,
+                                  gain: inout Float) {
+        let threshold = linearGain(fromDB: settings.thresholdDB)
+        let closedGain = linearGain(fromDB: settings.rangeDB)
+        let attack = smoothingCoefficient(milliseconds: settings.attackMS, sampleRate: sampleRate)
+        let release = smoothingCoefficient(milliseconds: settings.releaseMS, sampleRate: sampleRate)
+
+        var frame = 0
+        while frame < samples.count {
+            let end = min(frame + channels, samples.count)
+            var magnitude: Float = 0
+            for i in frame..<end { magnitude = max(magnitude, abs(samples[i])) }
+
+            let target = magnitude >= threshold ? Float(1) : closedGain
+            let coefficient = target > gain ? attack : release
+            gain += (target - gain) * coefficient
+            for i in frame..<end { samples[i] *= gain }
+            frame += channels
+        }
+    }
+
+    private static func applyCompressor(to samples: inout [Float],
+                                        channels: Int,
+                                        sampleRate: Double,
+                                        settings: CompressorSettings,
+                                        gain: inout Float) {
+        let attack = smoothingCoefficient(milliseconds: settings.attackMS, sampleRate: sampleRate)
+        let release = smoothingCoefficient(milliseconds: settings.releaseMS, sampleRate: sampleRate)
+        let makeup = settings.makeupGainDB
+
+        var frame = 0
+        while frame < samples.count {
+            let end = min(frame + channels, samples.count)
+            var magnitude: Float = 0
+            for i in frame..<end { magnitude = max(magnitude, abs(samples[i])) }
+
+            var targetDB = makeup
+            let levelDB = decibels(fromLinear: magnitude)
+            if levelDB > settings.thresholdDB {
+                let compressed = settings.thresholdDB + (levelDB - settings.thresholdDB) / settings.ratio
+                targetDB += compressed - levelDB
+            }
+
+            let target = linearGain(fromDB: targetDB)
+            let coefficient = target < gain ? attack : release
+            gain += (target - gain) * coefficient
+            for i in frame..<end { samples[i] *= gain }
+            frame += channels
+        }
+    }
+
+    private static func applyLimiter(to samples: inout [Float], settings: LimiterSettings) {
+        let ceiling = linearGain(fromDB: settings.ceilingDB)
+        for index in samples.indices {
+            samples[index] = max(-ceiling, min(ceiling, samples[index]))
+        }
+    }
+
+    private static func smoothingCoefficient(milliseconds: Float, sampleRate: Double) -> Float {
+        let samples = max(1, Double(milliseconds) * sampleRate / 1000)
+        return Float(1 - exp(-1 / samples))
+    }
+}
+
+public struct EBUR128LoudnessAnalyser: Sendable {
+    private let sampleRate: Double
+    private let channels: Int
+    private var channelStates: [KWeightingFilter]
+    private var ringBuffers: [[Float]]
+    private var ringIndex = 0
+    private var primedSamples = 0
+    private var windowEnergies: [Float] = []
+
+    public init(sampleRate: Double = 48_000, channels: Int = 2) {
+        self.sampleRate = sampleRate
+        self.channels = max(1, channels)
+        self.channelStates = Array(repeating: KWeightingFilter(), count: max(1, channels))
+        let windowLength = max(1, Int((sampleRate * 0.4).rounded()))
+        self.ringBuffers = Array(repeating: Array(repeating: 0, count: windowLength),
+                                 count: max(1, channels))
+    }
+
+    public mutating func feedInterleaved(_ samples: [Float], channels inputChannels: Int) {
+        let inputChannels = max(1, inputChannels)
+        let hopLength = max(1, Int((sampleRate * 0.1).rounded()))
+        let frameCount = samples.count / inputChannels
+        var cursor = 0
+        while cursor < frameCount {
+            let frames = min(hopLength, frameCount - cursor)
+            var filteredChannels: [[Float]] = []
+            for channel in 0..<channels {
+                var mono = Array(repeating: Float(0), count: frames)
+                let sourceChannel = min(channel, inputChannels - 1)
+                for frame in 0..<frames {
+                    mono[frame] = samples[(cursor + frame) * inputChannels + sourceChannel]
+                }
+                filteredChannels.append(channelStates[channel].process(mono))
+            }
+            appendWindow(filteredChannels, frames: frames)
+            cursor += frames
+        }
+    }
+
+    public mutating func reset() {
+        channelStates = Array(repeating: KWeightingFilter(), count: channels)
+        let windowLength = max(1, Int((sampleRate * 0.4).rounded()))
+        ringBuffers = Array(repeating: Array(repeating: 0, count: windowLength),
+                            count: channels)
+        ringIndex = 0
+        primedSamples = 0
+        windowEnergies.removeAll()
+    }
+
+    public func integratedLoudness() -> Float {
+        let absolute = windowEnergies.filter {
+            loudness(energy: $0) >= -70
+        }
+        guard !absolute.isEmpty else { return -.infinity }
+
+        let ungatedEnergy = absolute.reduce(Float(0), +) / Float(absolute.count)
+        let ungated = loudness(energy: ungatedEnergy)
+        let relativeThreshold = ungated - 10
+        let gated = absolute.filter { loudness(energy: $0) >= relativeThreshold }
+        guard !gated.isEmpty else { return -.infinity }
+
+        let finalEnergy = gated.reduce(Float(0), +) / Float(gated.count)
+        return loudness(energy: finalEnergy)
+    }
+
+    private mutating func appendWindow(_ filteredChannels: [[Float]], frames: Int) {
+        guard frames > 0, let windowLength = ringBuffers.first?.count else { return }
+        for frame in 0..<frames {
+            for channel in 0..<channels {
+                ringBuffers[channel][ringIndex] = filteredChannels[channel][frame]
+            }
+            ringIndex = (ringIndex + 1) % windowLength
+            primedSamples = min(windowLength, primedSamples + 1)
+        }
+        guard primedSamples == windowLength else { return }
+
+        var energy: Float = 0
+        for channel in 0..<channels {
+            var meanSquare: Float = 0
+            vDSP_measqv(ringBuffers[channel], 1, &meanSquare, vDSP_Length(windowLength))
+            energy += meanSquare
+        }
+        windowEnergies.append(max(energy, Float.leastNonzeroMagnitude))
+    }
+
+    private func loudness(energy: Float) -> Float {
+        guard energy > 0 else { return -.infinity }
+        return -0.691 + 10 * log10(energy)
+    }
+}
+
+private struct KWeightingFilter: Sendable {
+    private var stage1 = BiquadState()
+    private var stage2 = BiquadState()
+
+    mutating func process(_ input: [Float]) -> [Float] {
+        let pre = stage1.process(
+            input,
+            b0: 1.535_124_9,
+            b1: -2.691_696_2,
+            b2: 1.198_392_9,
+            a1: -1.690_659_3,
+            a2: 0.732_480_76)
+        return stage2.process(
+            pre,
+            b0: 1,
+            b1: -2,
+            b2: 1,
+            a1: -1.990_047_5,
+            a2: 0.990_072_25)
+    }
+}
+
+private struct BiquadState: Sendable {
+    private var x1: Float = 0
+    private var x2: Float = 0
+    private var y1: Float = 0
+    private var y2: Float = 0
+
+    mutating func process(_ input: [Float],
+                          b0: Float,
+                          b1: Float,
+                          b2: Float,
+                          a1: Float,
+                          a2: Float) -> [Float] {
+        var output = Array(repeating: Float(0), count: input.count)
+        for index in input.indices {
+            let x = input[index]
+            let y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            output[index] = y
+            x2 = x1
+            x1 = x
+            y2 = y1
+            y1 = y
+        }
+        return output
+    }
+}

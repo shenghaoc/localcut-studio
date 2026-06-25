@@ -105,6 +105,23 @@ func clipEnvelopeIsUndoable() {
     #expect(model.project.audioTracks[0].clips[0].volumeEnvelope.isEmpty)
 }
 
+@MainActor
+@Test("VoiceCleanup: insert settings route through undo")
+func voiceCleanupSettingsAreUndoable() {
+    let model = EditorModel()
+    #expect(model.project.voiceCleanup.gate.bypass == true)
+
+    model.updateVoiceCleanup("Enable Gate") {
+        $0.gate.bypass = false
+        $0.gate.thresholdDB = -35
+    }
+    #expect(model.project.voiceCleanup.gate.bypass == false)
+    #expect(model.project.voiceCleanup.gate.thresholdDB == -35)
+
+    model.undo()
+    #expect(model.project.voiceCleanup.gate.bypass == true)
+}
+
 // MARK: - R6.4 — VolumeEnvelope clamping
 
 @Test("VolumeEnvelope: fadeIn + fadeOut greater than clip duration each clamp to half (R6.4)")
@@ -416,6 +433,35 @@ struct AudioBusRegressionTests {
         #expect(restoredClip.volumeEnvelope.ramps.count == 1)
         #expect(abs(restoredClip.volumeEnvelope.ramps[0].fromVolume - 0.2) < 1e-6)
         #expect(abs(restoredClip.volumeEnvelope.ramps[0].toVolume - 0.9) < 1e-6)
+    }
+
+    @Test("ProjectDocument: voice cleanup settings round-trip losslessly")
+    func voiceCleanupRoundTrips() throws {
+        let project = Project()
+        project.voiceCleanup.denoiser.bypass = false
+        project.voiceCleanup.denoiser.reduction = 0.7
+        project.voiceCleanup.gate.bypass = false
+        project.voiceCleanup.gate.thresholdDB = -42
+        project.voiceCleanup.compressor.bypass = false
+        project.voiceCleanup.compressor.ratio = 4
+        project.voiceCleanup.limiter.bypass = false
+        project.voiceCleanup.limiter.ceilingDB = -1.5
+        project.voiceCleanup.loudness.enabled = true
+        project.voiceCleanup.loudness.preset = .voice
+        project.voiceCleanup.loudness.measuredLUFS = -20
+        project.voiceCleanup.loudness.appliedGainDB = 4
+
+        let data = try ProjectDocument(project: project).encoded()
+        let back = try ProjectDocument(data: data)
+
+        #expect(back.audioBus.voiceCleanup.denoiser.bypass == false)
+        #expect(abs(back.audioBus.voiceCleanup.denoiser.reduction - 0.7) < 1e-6)
+        #expect(back.audioBus.voiceCleanup.gate.thresholdDB == -42)
+        #expect(back.audioBus.voiceCleanup.compressor.ratio == 4)
+        #expect(back.audioBus.voiceCleanup.limiter.ceilingDB == -1.5)
+        #expect(back.audioBus.voiceCleanup.loudness.preset == .voice)
+        #expect(back.audioBus.voiceCleanup.loudness.measuredLUFS == -20)
+        #expect(back.audioBus.voiceCleanup.loudness.appliedGainDB == 4)
     }
 
     @Test("TrackDoc: track id round-trips so audio bus inputs match restored tracks (codex P1)")

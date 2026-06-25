@@ -44,6 +44,8 @@ struct ProjectState: Equatable {
     var masterGain: Float
     /// Per-audio-track pan + gain on the bus.
     var trackInputs: [TrackInput]
+    /// Phase 36 bus insert settings.
+    var voiceCleanup: VoiceCleanupSettings
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
@@ -62,6 +64,7 @@ struct ProjectState: Equatable {
             && lhs.lutDisplayNames == rhs.lutDisplayNames
             && lhs.masterGain == rhs.masterGain
             && lhs.trackInputs == rhs.trackInputs
+            && lhs.voiceCleanup == rhs.voiceCleanup
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
@@ -101,6 +104,7 @@ extension EditorModel {
             lutDisplayNames: lutDisplayNames,
             masterGain: project.masterGain,
             trackInputs: project.trackInputs,
+            voiceCleanup: project.voiceCleanup,
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID,
             selectedMarkerID: selectedMarkerID)
@@ -173,6 +177,7 @@ extension EditorModel {
         project.markers = state.markers
         project.masterGain = state.masterGain
         project.trackInputs = state.trackInputs
+        project.voiceCleanup = state.voiceCleanup
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID

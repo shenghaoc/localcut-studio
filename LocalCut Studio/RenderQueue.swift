@@ -162,6 +162,10 @@ private nonisolated final class ResumeBox: @unchecked Sendable {
     }
 }
 
+private nonisolated final class VoiceCleanupStateBox: @unchecked Sendable {
+    var state = VoiceCleanupProcessorState()
+}
+
 nonisolated struct BookmarkResolution: Equatable, Sendable {
     let url: URL
     let refreshedBookmark: Data?
@@ -535,6 +539,8 @@ final class RenderQueue {
 
             let hasAudio = !built.composition.tracks(withMediaType: .audio).isEmpty
             let shouldUseWriterForOfflineMeter = offlineMeterSink != nil && hasAudio
+            let shouldUseWriterForVoiceCleanup = built.audioCleanup.requiresOfflineProcessing && hasAudio
+            let shouldUseWriter = shouldUseWriterForOfflineMeter || shouldUseWriterForVoiceCleanup
             if shouldUseWriterForOfflineMeter {
                 offlineMeterActivitySink?(true)
             }
@@ -544,7 +550,7 @@ final class RenderQueue {
                 }
             }
 
-            if !shouldUseWriterForOfflineMeter,
+            if !shouldUseWriter,
                let presetName = preset.assetExportSessionPresetName {
                 try await exportWithSession(
                     presetName: presetName, preset: preset,
@@ -785,9 +791,11 @@ final class RenderQueue {
         }
 
         let sink = offlineMeterSink
+        let cleanup = built.audioCleanup.requiresOfflineProcessing ? built.audioCleanup : nil
         if let audioOutput = readerAudioOutput {
             await Self.pump(input: audioInput, from: audioOutput,
-                            totalDuration: totalDuration, progress: nil, meter: sink)
+                            totalDuration: totalDuration, progress: nil, meter: sink,
+                            voiceCleanup: cleanup)
         } else if canAddAudio {
             audioInput.markAsFinished()
         }
@@ -824,10 +832,12 @@ final class RenderQueue {
         from output: AVAssetReaderOutput,
         totalDuration: Double,
         progress: (@Sendable (Double) -> Void)?,
-        meter: (@Sendable (AudioMeterSnapshot) -> Void)? = nil
+        meter: (@Sendable (AudioMeterSnapshot) -> Void)? = nil,
+        voiceCleanup: VoiceCleanupSettings? = nil
     ) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let resume = ResumeBox()
+            let voiceCleanupState = VoiceCleanupStateBox()
             // `requestMediaDataWhenReady`'s block is `@Sendable`, but the writer
             // input and reader output it touches aren't `Sendable`. They're safe
             // here because the block only ever runs on the single serial
@@ -838,8 +848,19 @@ final class RenderQueue {
             input.requestMediaDataWhenReady(on: pumpQueue) {
                 while input.isReadyForMoreMediaData {
                     if let sample = output.copyNextSampleBuffer() {
-                        input.append(sample)
-                        if let meter, let snapshot = audioMeterSnapshot(from: sample) {
+                        let outputSample: CMSampleBuffer
+                        if let voiceCleanup,
+                           let processed = VoiceCleanupAudioProcessing.process(
+                            sample: sample,
+                            settings: voiceCleanup,
+                            state: &voiceCleanupState.state) {
+                            outputSample = processed
+                        } else {
+                            outputSample = sample
+                        }
+
+                        input.append(outputSample)
+                        if let meter, let snapshot = audioMeterSnapshot(from: outputSample) {
                             meter(snapshot)
                         }
                         if let progress, totalDuration > 0 {
@@ -1257,6 +1278,9 @@ final class RenderQueue {
         project.name = doc.name
         project.renderSize = preset.targetSize.cgSize
         project.frameRate = preset.frameRate ?? doc.frameRate
+        project.masterGain = doc.audioBus.masterGain
+        project.trackInputs = doc.audioBus.trackInputs.map(\.trackInput)
+        project.voiceCleanup = doc.audioBus.voiceCleanup
 
         // Index pre-resolved results by ref ID for O(1) lookup.
         var resolvedByID: [UUID: URL?] = [:]
@@ -1290,13 +1314,13 @@ final class RenderQueue {
         project.mediaItems = rebuilt
 
         project.videoTracks = doc.videoTracks.map { track in
-            let runtime = Track(name: track.name.isEmpty ? "V1" : track.name, kind: .video)
+            let runtime = Track(id: track.id, name: track.name.isEmpty ? "V1" : track.name, kind: .video)
             runtime.isMuted = track.isMuted
             runtime.clips = track.clips.map { $0.makeClip() }
             return runtime
         }
         project.audioTracks = doc.audioTracks.map { track in
-            let runtime = Track(name: track.name.isEmpty ? "A1" : track.name, kind: .audio)
+            let runtime = Track(id: track.id, name: track.name.isEmpty ? "A1" : track.name, kind: .audio)
             runtime.isMuted = track.isMuted
             runtime.clips = track.clips.map { $0.makeClip() }
             return runtime

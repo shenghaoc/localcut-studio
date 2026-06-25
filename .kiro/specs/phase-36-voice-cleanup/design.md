@@ -1,6 +1,13 @@
 # Design: Phase 36 — Voice Cleanup
 
-> Status: **Proposed**. Target tag: **v0.1.5**.
+> Status: **In progress**. Target tag: **v0.1.5**.
+
+## Implementation status
+
+Current branch implements the model, inspector, document persistence, EBU R128
+measurement, and AVAssetWriter PCM export-path processing foundation. The final
+custom vDSP `AVAudioUnit` and live preview routing through the same master-bus
+node graph remain open tasks in `tasks.md`.
 
 ## Goal
 

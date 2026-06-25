@@ -9,6 +9,7 @@ struct BuiltComposition {
     let composition: AVComposition
     let videoComposition: AVVideoComposition?
     let audioMix: AVAudioMix?
+    let audioCleanup: VoiceCleanupSettings
     let duration: Double
 }
 
@@ -372,6 +373,7 @@ enum CompositionBuilder {
             composition: composition,
             videoComposition: videoComposition,
             audioMix: audioMix,
+            audioCleanup: project.voiceCleanup,
             duration: totalDuration.seconds)
     }
 

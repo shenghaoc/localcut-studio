@@ -96,18 +96,23 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
 public struct AudioBusDoc: Codable, Equatable, Sendable {
     public var masterGain: Float
     public var trackInputs: [TrackInputDoc]
+    public var voiceCleanup: VoiceCleanupSettings
 
-    public init(masterGain: Float = 1, trackInputs: [TrackInputDoc] = []) {
+    public init(masterGain: Float = 1,
+                trackInputs: [TrackInputDoc] = [],
+                voiceCleanup: VoiceCleanupSettings = VoiceCleanupSettings()) {
         self.masterGain = masterGain
         self.trackInputs = trackInputs
+        self.voiceCleanup = voiceCleanup
     }
 
-    private enum CodingKeys: String, CodingKey { case masterGain, trackInputs }
+    private enum CodingKeys: String, CodingKey { case masterGain, trackInputs, voiceCleanup }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         masterGain = try c.decodeIfPresent(Float.self, forKey: .masterGain) ?? 1
         trackInputs = try c.decodeIfPresent([TrackInputDoc].self, forKey: .trackInputs) ?? []
+        voiceCleanup = try c.decodeIfPresent(VoiceCleanupSettings.self, forKey: .voiceCleanup) ?? VoiceCleanupSettings()
     }
 }
 

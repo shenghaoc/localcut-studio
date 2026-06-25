@@ -11,13 +11,11 @@ import LocalCutCore
 /// - **offlineEngine** runs in `.offline` (`enableManualRenderingMode`) for
 ///   export and tests.
 ///
-/// The split is deliberate: per the ROADMAP's Apple API spot-checks,
-/// `AVAudioInputNode.setVoiceProcessingEnabled(_:)` (used by Phase 36 / 41 on
-/// the input side) **refuses** `manualRenderingMode = .offline`, so the bus
-/// cannot share one engine instance across both modes. This file lays the
-/// plumbing; Phase 36 attaches its denoiser to both graphs through different
-/// code paths (voice-processing on live, vDSP AU on offline) so preview and
-/// export stay sample-identical.
+/// The split is deliberate: AVAudioEngine real-time and manual-offline modes
+/// are separate lifetimes. This file lays the plumbing; Phase 36 layers
+/// cleanup parameters and export-side PCM processing on top, while full live
+/// bus routing remains the point where preview and export can share the same
+/// cleanup graph.
 ///
 /// The class is `@MainActor @Observable` because parameter edits flow from the
 /// inspector and route through the existing undo machinery; sample-rate state
@@ -202,9 +200,9 @@ final class AudioMasterBus {
     /// format and frame count, attaches a meter tap, and starts the engine so
     /// `renderOfflineBlock(into:)` can pull data through it.
     ///
-    /// `setVoiceProcessingEnabled(_:)` is **never** called on this engine —
-    /// the API refuses `.offline`. Phase 36's denoiser will attach a vDSP
-    /// `AVAudioUnit` here instead.
+    /// `setVoiceProcessingEnabled(_:)` is **never** called on this engine:
+    /// Phase 36's cleanup is a master-bus/export concern for existing media,
+    /// not the input-node microphone processing used by capture phases.
     ///
     /// Setup is wrapped so a failure (manual-rendering enable, start) tears
     /// down the partially-attached graph before rethrowing — a later retry
@@ -345,8 +343,8 @@ final class AudioMasterBus {
 ///
 /// **Pan is not applied here.** `TrackInput.pan` is stored and persisted, but
 /// applying it requires an `AVAudioMixerNode.pan` write on the live graph and
-/// a panner node on the offline graph — both deferred to Phase 36 where the
-/// bus actually owns the audio rendering path. Until then, the UI does not
+/// a panner node on the offline graph — both deferred until the bus actually
+/// owns the live audio rendering path. Until then, the UI does not
 /// expose a pan control, so a project's pan field stays at its default.
 enum AudioBusMixing {
 
