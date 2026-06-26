@@ -388,9 +388,15 @@ private struct WindowConfigurator: NSViewRepresentable {
         /// Size the editor to a comfortable canvas the first time it ever opens,
         /// centred on the active screen. Guarded by a one-shot default so later
         /// launches keep whatever size the user left it at.
+        private static var didEnqueueInitialFrame = false
+
         private static func applyInitialFrameIfNeeded(_ window: NSWindow) {
             let key = "editor.didSetInitialWindowFrame"
-            guard !UserDefaults.standard.bool(forKey: key) else { return }
+            // `attach(to:)` can fire several times within one run-loop tick during
+            // window setup; the in-memory flag stops us enqueuing the deferred
+            // block more than once before the UserDefaults one-shot is written.
+            guard !didEnqueueInitialFrame, !UserDefaults.standard.bool(forKey: key) else { return }
+            didEnqueueInitialFrame = true
             // Defer past SwiftUI's own first-layout sizing pass, which otherwise
             // clobbers a frame set synchronously during attach. Only record the
             // one-shot once the frame actually lands.

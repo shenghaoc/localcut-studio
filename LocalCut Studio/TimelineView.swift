@@ -152,27 +152,28 @@ struct TimelineView: View {
             }
         }
         .frame(width: gutterWidth)
+        .background(Color.lcRail)
     }
 
     private func trackAccessibilityLabel(_ track: Track) -> Text {
-        let kind = track.kind == .video ? String(localized: "video") : String(localized: "audio")
+        let name = track.name
         let count = track.clips.count
-        // Compose into one AttributedString so the verbatim track name and the
-        // inflected clip count combine without the deprecated `Text + Text`.
-        var label = AttributedString("\(track.name), \(kind) track, ")
-        label += AttributedString(localized: "^[\(count) clip](inflect: true)")
+        // One whole localized string per kind so a translator controls the entire
+        // order (name / kind / count), not just isolated fragments.
+        let label = track.kind == .video
+            ? AttributedString(localized: "\(name), video track, ^[\(count) clip](inflect: true)")
+            : AttributedString(localized: "\(name), audio track, ^[\(count) clip](inflect: true)")
         return Text(label)
     }
 
     private func captionTrackAccessibilityLabel(_ track: CaptionTrack) -> Text {
+        let name = track.name
         let count = track.lines.count
-        var label = AttributedString("\(track.name), ")
-        label += AttributedString(localized: "caption track, ")
-        // Two full localized variants (rather than appending ", muted") so a
-        // translator can reorder the mute suffix relative to the rest.
-        label += AttributedString(localized: track.isMuted
-            ? "^[\(count) caption line](inflect: true), muted"
-            : "^[\(count) caption line](inflect: true)")
+        // Whole localized strings (muted vs not) so the mute state can be
+        // reordered relative to the track name and kind in any locale.
+        let label = track.isMuted
+            ? AttributedString(localized: "\(name), caption track, ^[\(count) caption line](inflect: true), muted")
+            : AttributedString(localized: "\(name), caption track, ^[\(count) caption line](inflect: true)")
         return Text(label)
     }
 
@@ -247,6 +248,7 @@ struct TimelineView: View {
             }
         }
         .frame(height: rulerHeight)
+        .background(Color.lcRail)
     }
 
     /// Scrub gesture that also clears any marker selection on a fresh press,

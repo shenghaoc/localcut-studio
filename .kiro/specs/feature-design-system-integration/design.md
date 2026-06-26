@@ -28,7 +28,13 @@ padding is a parameter defaulting to 8 (Inspector, Media); the Timeline passes
 used. The view draws no `Divider` — call sites (`InspectorView`,
 `MediaBinView`, `TimelineView`) own their own separators so the header composes
 with adjacent controls. An `EmptyView` trailing convenience init covers headers
-with no actions (Inspector).
+with no actions.
+
+The Media bin and Timeline panes use `EditorPanelHeader` directly. The side rail
+instead switches panes with a segmented control (Inspector / Audio / Captions /
+Tools); that switcher carries `.accessibilityAddTraits(.isHeader)` and an
+`accessibilityValue` of the active pane, so it stands in for a per-pane header in
+the VoiceOver rotor's Headings list without a title that would duplicate the tab.
 
 ### Timeline chrome
 

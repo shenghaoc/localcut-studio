@@ -17,4 +17,9 @@ extension Color {
     /// surface instead of a void. Uses the system content-background colour so it
     /// tracks the active appearance rather than pinning a fixed grey.
     static let lcLane = Color(nsColor: .underPageBackgroundColor)
+
+    /// Slightly lifted gutter/ruler surface sitting above the recessed lanes, so
+    /// the track headers and time ruler read as a control band. Semantic system
+    /// colour so it adapts with the appearance like `lcLane`.
+    static let lcRail = Color(nsColor: .windowBackgroundColor)
 }

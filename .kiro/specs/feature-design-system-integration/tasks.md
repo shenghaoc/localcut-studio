@@ -64,6 +64,22 @@
   rail, and matching toolbar toggle so the preview/timeline can reclaim width
   when the inspector is not needed.
 
+## Review hardening (codex/gemini, post-visual-pass)
+
+- [x] **T8.1** Restore the `Color.lcRail` token and apply it to the timeline
+  gutter and ruler so the rail reads as a band above the lanes (the de-hardcode
+  refactor had dropped it).
+- [x] **T8.2** Rebuild the track/caption accessibility labels as whole localized
+  strings (one per kind / muted state) so translators control the full order.
+- [x] **T8.3** Apply `.accessibilityElement(children: .ignore)` to the preview
+  canvas *before* its overlays so the transport controls stay separate,
+  individually reachable elements.
+- [x] **T8.4** Give the side-rail segmented switcher `.isHeader` so rotor users
+  reach a pane heading after the per-pane `EditorPanelHeader` was dropped.
+- [x] **T8.5** Guard `WindowConfigurator.applyInitialFrameIfNeeded` with an
+  in-memory flag so repeated `attach(to:)` calls don't enqueue the deferred
+  frame block more than once.
+
 ## Verification
 
 - [x] **T6.1** `xcodebuild test` (Debug, macOS) compiles with zero warnings and

@@ -69,6 +69,13 @@ struct PreviewView: View {
     var body: some View {
         HStack(spacing: 0) {
             videoCanvas
+                // Collapse the non-interactive canvas to a single labelled element
+                // *before* the overlays are added, so the transport controls and
+                // format badge stay separate accessible siblings rather than being
+                // swallowed (or read twice) inside the preview container.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Preview")
+                .accessibilityValue(previewAccessibilityValue)
                 .overlay(alignment: .bottom) {
                     TransportControls(
                         isPlaying: model.isPlaying,
@@ -82,9 +89,6 @@ struct PreviewView: View {
                     formatBadge.padding(12)
                 }
                 .layoutPriority(1)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("Preview")
-                .accessibilityValue(previewAccessibilityValue)
 
             if model.showScopes {
                 ScopesView()

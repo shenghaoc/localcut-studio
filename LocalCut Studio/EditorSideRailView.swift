@@ -38,6 +38,11 @@ struct EditorSideRailView: View {
                 .controlSize(.small)
                 .accessibilityLabel("Side panel")
                 .accessibilityValue(group.wrappedValue.title)
+                // The segmented switcher stands in for a per-pane EditorPanelHeader:
+                // marking it a header keeps the rail reachable from the VoiceOver
+                // rotor's Headings list, announcing the active pane, without a
+                // redundant title under tabs that already name the panel.
+                .accessibilityAddTraits(.isHeader)
 
                 Button {
                     onCollapse()
