@@ -493,12 +493,26 @@ final class EditorModel {
         return nearestSpeedKeyframe(to: time)
     }
 
-    var selectedClipTimeRemapLocalSourceTime: CMTime? {
+    /// Source-local time at the playhead for the selected clip, or nil when the
+    /// playhead falls outside the clip's authored range. Maps the output-domain
+    /// playhead back through the speed curve to clip-source time. Shared by the
+    /// speed and skin-smooth keyframe authoring paths so the two can't drift.
+    private var selectedClipSourceLocalPlayheadTime: CMTime? {
         guard let clip = selectedClip else { return nil }
-        let playhead = CMTime(seconds: currentTime, preferredTimescale: 600)
+        // `currentTime` is effective (rippled) time; convert it to this clip's
+        // authored time by adding back the leftward transition ripple, mirroring
+        // `splitSelectedClipAtPlayhead`. Otherwise a clip after an upstream
+        // transition maps the playhead to the wrong source offset.
+        let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks.map(\.clips))
+        let shift = TransitionLayout.shift(at: clip.timelineStart, cuts: cuts)
+        let playhead = CMTime(seconds: currentTime, preferredTimescale: 600) + shift
         guard playhead >= clip.timelineStart, playhead <= clip.timelineEnd else { return nil }
         let outputOffset = CMTimeMaximum(.zero, CMTimeMinimum(playhead - clip.timelineStart, clip.outputDuration))
         return clip.sourceOffset(forOutputOffset: outputOffset)
+    }
+
+    var selectedClipTimeRemapLocalSourceTime: CMTime? {
+        selectedClipSourceLocalPlayheadTime
     }
 
     func updateSelectedClipTimeRemap(_ actionName: String = "Adjust Speed",
@@ -602,16 +616,82 @@ final class EditorModel {
     private func mutateClip(id: Clip.ID,
                             invalidateVideo: Bool,
                             _ transform: (inout Clip) -> Void) {
-        for track in allTracks {
-            guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
-            let speedBefore = track.clips[index].speedCurve
-            transform(&track.clips[index])
-            track.clips[index].clampTimeRemap()
-            if invalidateVideo, track.clips[index].speedCurve != speedBefore {
-                RenderCache.shared.invalidate(clipID: id)
-            }
-            return
+        guard let (track, index) = trackAndIndex(of: id) else { return }
+        applyRetime(on: track, index: index, invalidateVideo: invalidateVideo, transform)
+
+        // Linked A/V: a media item carrying both streams is placed as paired
+        // clips on sibling tracks (same media + range). Retime the matching clip
+        // so audio and video keep the same length and stay in sync — without this,
+        // editing one side drifts the other past the picture.
+        let edited = track.clips[index]
+        if let pairID = pairedClipID(for: edited, ownerKind: track.kind),
+           let (pairTrack, pairIndex) = trackAndIndex(of: pairID) {
+            applyRetime(on: pairTrack, index: pairIndex, invalidateVideo: invalidateVideo, transform)
         }
+    }
+
+    /// Applies a time-remap `transform` to the clip at `index` on `track`, clamps
+    /// it, then preserves the track's non-overlap/adjacency invariant: a speed
+    /// change alters the clip's timeline length, so later clips ripple by the
+    /// delta and transitions whose cut is no longer adjacent are dropped.
+    private func applyRetime(on track: Track,
+                             index: Int,
+                             invalidateVideo: Bool,
+                             _ transform: (inout Clip) -> Void) {
+        let speedBefore = track.clips[index].speedCurve
+        let outputBefore = track.clips[index].outputDuration
+        transform(&track.clips[index])
+        track.clips[index].clampTimeRemap()
+        let outputAfter = track.clips[index].outputDuration
+        if outputAfter != outputBefore {
+            rippleDownstream(on: track, after: track.clips[index], by: outputAfter - outputBefore)
+            sanitizeTransitions()
+        }
+        if invalidateVideo, track.clips[index].speedCurve != speedBefore {
+            RenderCache.shared.invalidate(clipID: track.clips[index].id)
+        }
+    }
+
+    /// The track and index hosting `id`, or nil if not found.
+    private func trackAndIndex(of id: Clip.ID) -> (track: Track, index: Int)? {
+        for track in allTracks {
+            if let index = track.clips.firstIndex(where: { $0.id == id }) {
+                return (track, index)
+            }
+        }
+        return nil
+    }
+
+    /// Shifts every clip that starts after `clip` on `track` by `delta`, keeping
+    /// the tail's spacing while removing the overlap (delta > 0) or gap (delta < 0)
+    /// a length change introduced. Starts are clamped to the timeline origin.
+    private func rippleDownstream(on track: Track, after clip: Clip, by delta: CMTime) {
+        guard delta != .zero else { return }
+        let pivot = clip.timelineStart
+        for i in track.clips.indices where track.clips[i].id != clip.id {
+            if track.clips[i].timelineStart > pivot {
+                track.clips[i].timelineStart = CMTimeMaximum(.zero, track.clips[i].timelineStart + delta)
+            }
+        }
+    }
+
+    /// The id of the clip on the sibling track that mirrors `clip` (same media and
+    /// source/timeline range) when the media carries both video and audio. Used to
+    /// keep linked A/V retimes in sync.
+    private func pairedClipID(for clip: Clip, ownerKind: TrackKind) -> Clip.ID? {
+        guard let media = project.media(for: clip.mediaID), media.hasVideo, media.hasAudio else { return nil }
+        let siblingKind: TrackKind = ownerKind == .video ? .audio : .video
+        for track in allTracks where track.kind == siblingKind {
+            if let match = track.clips.first(where: {
+                $0.mediaID == clip.mediaID
+                    && $0.timelineStart == clip.timelineStart
+                    && $0.sourceStart == clip.sourceStart
+                    && $0.duration == clip.duration
+            }) {
+                return match.id
+            }
+        }
+        return nil
     }
 
     // MARK: - Skin smoothing
@@ -677,11 +757,7 @@ final class EditorModel {
     /// nil when the effective playhead is outside the selected clip's authored
     /// range, because authoring a clip-local keyframe there would be ambiguous.
     var selectedClipSkinSmoothLocalPlayheadTime: CMTime? {
-        guard let clip = selectedClip else { return nil }
-        let playhead = CMTime(seconds: currentTime, preferredTimescale: 600)
-        guard playhead >= clip.timelineStart, playhead <= clip.timelineEnd else { return nil }
-        let outputOffset = CMTimeMaximum(.zero, CMTimeMinimum(playhead - clip.timelineStart, clip.outputDuration))
-        return clip.sourceOffset(forOutputOffset: outputOffset)
+        selectedClipSourceLocalPlayheadTime
     }
 
     var selectedClipSkinSmoothStrengthAtPlayhead: Float {
@@ -739,7 +815,10 @@ final class EditorModel {
         guard let previous = selectedClipSkinSmooth.strength.keyframes.last(where: {
             $0.time.seconds < localTime.seconds - tolerance
         }) else { return }
-        seek(toSeconds: (clip.timelineStart + previous.time).seconds)
+        // Keyframe times are clip-source-relative; map back to the output domain
+        // so the seek lands on the right frame for retimed clips.
+        let outputOffset = clip.outputOffset(forSourceOffset: previous.time)
+        seek(toSeconds: (clip.timelineStart + outputOffset).seconds)
     }
 
     func seekToNextSelectedClipSkinSmoothStrengthKeyframe() {
@@ -749,7 +828,10 @@ final class EditorModel {
         guard let next = selectedClipSkinSmooth.strength.keyframes.first(where: {
             $0.time.seconds > localTime.seconds + tolerance
         }) else { return }
-        seek(toSeconds: (clip.timelineStart + next.time).seconds)
+        // Keyframe times are clip-source-relative; map back to the output domain
+        // so the seek lands on the right frame for retimed clips.
+        let outputOffset = clip.outputOffset(forSourceOffset: next.time)
+        seek(toSeconds: (clip.timelineStart + outputOffset).seconds)
     }
 
     private var skinSmoothKeyframeHitToleranceSeconds: Double {

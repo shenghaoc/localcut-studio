@@ -59,7 +59,6 @@ public nonisolated enum TimeRemapping {
     public static let maxSpeed: Float = 4.0
     public static let identitySpeed: Float = 1.0
     public static let defaultSegmentsPerKeyframePair = 10
-    public static let timeToleranceSeconds = 1.0 / 600.0
 
     public static var identitySpeedCurve: Keyframed<Float> {
         Keyframed<Float>(defaultValue: identitySpeed)
@@ -193,9 +192,13 @@ public nonisolated enum TimeRemapping {
         let totalOutput = plan.reduce(CMTime.zero) { $0 + $1.outputDuration }
         let target = CMTimeMinimum(CMTimeMaximum(.zero, outputOffset.sanitized), totalOutput)
 
+        // `target` is clamped to `totalOutput`, which equals the last segment's
+        // accumulated end exactly, so `target <= end` always matches there. No
+        // tolerance band — it would snap a target just past an intermediate
+        // boundary back onto the previous segment.
         for segment in plan {
             let end = segment.outputOffset + segment.outputDuration
-            if target <= end || abs((target - end).seconds) <= timeToleranceSeconds {
+            if target <= end {
                 let relative = target - segment.outputOffset
                 let progress = fraction(relative, of: segment.outputDuration)
                 return segment.sourceRange.start + multiplied(segment.sourceRange.duration, by: progress)
@@ -211,9 +214,12 @@ public nonisolated enum TimeRemapping {
         guard !plan.isEmpty else { return .zero }
         let target = CMTimeMinimum(CMTimeMaximum(.zero, sourceOffset.sanitized), sourceDuration.sanitized)
 
+        // `target` is clamped to `sourceDuration`, which equals the last
+        // segment's source end exactly, so `target <= end` always matches there.
+        // No tolerance band — it would snap a target just past an intermediate
+        // boundary back onto the previous segment.
         for segment in plan {
-            if target <= segment.sourceRange.end
-                || abs((target - segment.sourceRange.end).seconds) <= timeToleranceSeconds {
+            if target <= segment.sourceRange.end {
                 let relative = target - segment.sourceRange.start
                 let progress = fraction(relative, of: segment.sourceRange.duration)
                 return segment.outputOffset + multiplied(segment.outputDuration, by: progress)
@@ -224,7 +230,11 @@ public nonisolated enum TimeRemapping {
 
     static func multiplied(_ time: CMTime, by multiplier: Double) -> CMTime {
         guard time.isNumeric, time.seconds.isFinite, multiplier.isFinite else { return .zero }
-        return CMTime(seconds: max(0, time.seconds * multiplier), preferredTimescale: 600)
+        // Preserve the input's timescale so retimed high-rate audio times
+        // (44.1k/48k) don't quantise to a coarse 600 grid, while keeping 600 as a
+        // floor so coarse inputs never regress below the previous precision.
+        let timescale = max(time.timescale, CMTimeScale(600))
+        return CMTime(seconds: max(0, time.seconds * multiplier), preferredTimescale: timescale)
     }
 
     private static func fraction(_ time: CMTime, of duration: CMTime) -> Double {

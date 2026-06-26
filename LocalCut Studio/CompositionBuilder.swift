@@ -103,35 +103,25 @@ enum CompositionBuilder {
                     into: renderSize)
 
                 // A clip may be split into pieces where it spans another track's
-                // transition cut; each piece is packed onto the first free track.
-                var dedicatedRetimedTrack: AVMutableCompositionTrack?
+                // transition cut; the tail piece ripples left under the head, so
+                // pieces can overlap. Pack each piece onto the first free pool
+                // track so overlapping pieces — including a retimed clip's own
+                // halves — never share a composition track and corrupt each other
+                // when scaled.
                 for piece in TransitionLayout.pieces(for: clip, overlap: overlaps[clipIndex], cuts: cuts) {
                     let start = piece.effectiveStart
-                    let compTrack: AVMutableCompositionTrack
-                    if clip.hasTimeRemap {
-                        if let existing = dedicatedRetimedTrack {
-                            compTrack = existing
-                        } else {
-                            guard let newTrack = composition.addMutableTrack(
-                                withMediaType: .video,
-                                preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-                            dedicatedRetimedTrack = newTrack
-                            compTrack = newTrack
-                        }
+                    let poolIndex: Int
+                    if let free = pool.firstIndex(where: { $0.lastEnd <= start }) {
+                        poolIndex = free
                     } else {
-                        let poolIndex: Int
-                        if let free = pool.firstIndex(where: { $0.lastEnd <= start }) {
-                            poolIndex = free
-                        } else {
-                            guard let newTrack = composition.addMutableTrack(
-                                withMediaType: .video,
-                                preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-                            pool.append((newTrack, .zero))
-                            poolIndex = pool.count - 1
-                        }
-                        compTrack = pool[poolIndex].track
-                        pool[poolIndex].lastEnd = piece.effectiveEnd
+                        guard let newTrack = composition.addMutableTrack(
+                            withMediaType: .video,
+                            preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                        pool.append((newTrack, .zero))
+                        poolIndex = pool.count - 1
                     }
+                    let compTrack = pool[poolIndex].track
+                    pool[poolIndex].lastEnd = piece.effectiveEnd
 
                     let remapSegments = try insertRetimedPiece(
                         clip: clip,
@@ -206,8 +196,14 @@ enum CompositionBuilder {
                 let piece = placed[index].piece
                 let clip = placed[index].clip
                 let params = AVMutableAudioMixInputParameters(track: placed[index].track)
-                if clip.hasTimeRemap, clip.preservePitch {
-                    params.audioTimePitchAlgorithm = clip.pitchAlgorithm.avFoundationAlgorithm
+                if clip.hasTimeRemap {
+                    // Pitch-preserving stretch uses the chosen spectral/time-domain
+                    // algorithm; with preservation off we force `.varispeed` so the
+                    // audio bends with the speed (chipmunk / slow-mo). Either way a
+                    // retimed clip needs an audio mix, so flag the contribution.
+                    params.audioTimePitchAlgorithm = clip.preservePitch
+                        ? clip.pitchAlgorithm.avFoundationAlgorithm
+                        : .varispeed
                     hasTimePitchContribution = true
                 }
                 let leadOverlap = index > 0
