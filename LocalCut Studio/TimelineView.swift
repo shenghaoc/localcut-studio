@@ -290,15 +290,20 @@ struct TimelineView: View {
     }
 
     private var timelineScrollAnchor: some View {
-        Color.clear
-            .frame(width: 1, height: 1)
-            // Offset by negative half the viewport so the scroll-to anchor
-            // lands at the viewport centre rather than the leading edge,
-            // keeping the playhead centred when using the "Center playhead"
-            // button or keyboard-focus scroll.
-            .offset(x: CGFloat(timelineScrollTargetSeconds) * pps - timelineViewportWidth / 2, y: 0)
-            .id(TimelineScrollAnchor.viewportTarget)
-            .accessibilityHidden(true)
+        // Lay the anchor out at the target time *minus half the viewport* via a
+        // real leading spacer, so a `.leading` scroll lands the target at centre.
+        // `.offset` is a render-only transform — it does NOT move the layout
+        // frame `ScrollViewReader.scrollTo` targets, so the anchor stayed at x=0
+        // and every scroll request (center / page / focus) snapped to the start.
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: max(0, CGFloat(timelineScrollTargetSeconds) * pps - timelineViewportWidth / 2),
+                       height: 1)
+            Color.clear
+                .frame(width: 1, height: 1)
+                .id(TimelineScrollAnchor.viewportTarget)
+        }
+        .accessibilityHidden(true)
     }
 
     private var ruler: some View {
