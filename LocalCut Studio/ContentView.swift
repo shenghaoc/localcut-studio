@@ -193,7 +193,8 @@ struct EditorView: View {
             }
             .frame(minHeight: 320)
             .background(SplitViewAutosaveConfigurator(autosaveName: "editor.workspace.columns",
-                                                       isVertical: true))
+                                                       isVertical: true,
+                                                       isEnabled: model.inspectorVisible))
 
             TimelineView(model: model)
                 .frame(minHeight: 200, idealHeight: 260)
