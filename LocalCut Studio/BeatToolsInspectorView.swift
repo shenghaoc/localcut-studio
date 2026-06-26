@@ -54,7 +54,10 @@ struct BeatToolsInspectorView: View {
                 spokenValue: "\(Int(model.beatAlignWindowSeconds * 1000)) milliseconds",
                 value: $model.beatAlignWindowSeconds,
                 range: 0.02...0.5,
-                step: 0.01)
+                step: 0.01,
+                // Restore the model's default window (EditorModel.swift), matching
+                // the right-click reset every other adjustable row offers.
+                resetAction: { model.beatAlignWindowSeconds = 0.15 })
 
             HStack {
                 Button {

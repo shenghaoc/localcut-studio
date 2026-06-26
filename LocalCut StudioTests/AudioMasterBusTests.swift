@@ -167,6 +167,57 @@ func offlineGraphBuildsWithoutVoiceProcessing() throws {
     #expect(bus.isOfflineRunning == false)
 }
 
+// MARK: - Offline metering state + live lifecycle (new surface; Codex review)
+
+@MainActor
+@Test("AudioMasterBus: setOfflineMeteringActive mirrors the lock onto the observable flag")
+func offlineMeteringStateTransitions() {
+    let bus = AudioMasterBus()
+    #expect(bus.isOfflineMetering == false)        // default
+
+    bus.setOfflineMeteringActive(true)
+    #expect(bus.isOfflineMetering == true)
+
+    bus.setOfflineMeteringActive(false)            // mirrors the export-path defer cleanup
+    #expect(bus.isOfflineMetering == false)
+}
+
+@MainActor
+@Test("AudioMasterBus: offline meter publisher writes a snapshot readable via meterSnapshot")
+func offlineMeterPublisherUpdatesSnapshot() {
+    let bus = AudioMasterBus()
+    #expect(bus.meterSnapshot.peakLeft == 0)       // starts silent
+
+    let snapshot = AudioMeterSnapshot(peakLeft: 0.8, peakRight: 0.4,
+                                      rmsLeft: 0.5, rmsRight: 0.25,
+                                      sampledAt: ContinuousClock.now)
+    // The publisher is the @Sendable closure the export writer pumps from
+    // off-main; it must land under the same lock the observable accessor reads.
+    bus.offlineMeterSnapshotPublisher(snapshot)
+
+    #expect(abs(bus.meterSnapshot.peakLeft - 0.8) < 1e-6)
+    #expect(abs(bus.meterSnapshot.rmsRight - 0.25) < 1e-6)
+}
+
+@MainActor
+@Test("AudioMasterBus: live engine prepare is idempotent and teardown leaves a clean state")
+func liveEngineLifecycleIsClean() {
+    let bus = AudioMasterBus()
+    // prepareLive() may succeed (audio device present) or be caught & torn down
+    // (headless runner) — either way it must never crash and a second call is a
+    // no-op. teardown is the deterministic invariant we assert.
+    bus.prepareLive()
+    bus.prepareLive()                 // idempotent: no double tap / re-entry
+    bus.teardownLive()
+    #expect(bus.isLiveRunning == false)
+    bus.teardownLive()                // idempotent when already down
+    #expect(bus.isLiveRunning == false)
+    // A failed start surfaces a message rather than throwing at the call site.
+    if bus.lastStartError != nil {
+        #expect(bus.lastStartError?.isEmpty == false)
+    }
+}
+
 @MainActor
 @Test("AudioMasterBus: renderOfflineBlock returns success after scheduling a buffer (R6.2)")
 func renderOfflineBlockSucceedsWithScheduledBuffer() throws {

@@ -71,9 +71,13 @@ struct ScopesView: View {
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
             .accessibilityLabel(kind == .waveform ? "Waveform scope" : "Vectorscope")
+            .accessibilityValue(latest == nil ? "No frames yet" : "Live")
         }
         .frame(minWidth: 200, idealWidth: 240, minHeight: 160, idealHeight: 220)
-        .background(.regularMaterial)
+        // Scopes are a content readout, not chrome — sit them on the recessed
+        // content surface (matching the timeline lanes) rather than a sidebar
+        // material that would read as window chrome.
+        .background(Color.lcLane)
         .task { await refreshSamplesUntilCancelled() }
     }
 

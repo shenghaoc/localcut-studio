@@ -38,6 +38,11 @@ final class EditorModel {
     // Timeline view state
     var pixelsPerSecond: Double = 80
 
+    /// Whether newly imported media should be copied into `.lcbundle` saves.
+    /// Shared between the Media Bin toggle and the File ▸ Import… menu command
+    /// so the user's preference is respected from either entry point.
+    var copyImportsIntoBundle: Bool = true
+
     // Beat tools (Phase 34)
     var showBeatMarkers = false
     var snapToBeats = false
@@ -57,6 +62,25 @@ final class EditorModel {
 
     // Scopes panel (colour-management feature) — session-only UI flag, not persisted.
     var showScopes: Bool = false
+
+    /// Whether the inspector side rail is shown. Lifted off the view's
+    /// `@SceneStorage` so the View ▸ Show Inspector menu command, its ⌥⌘I
+    /// shortcut, the toolbar button, and the collapsed-rail restore strip all
+    /// share one source of truth. Persisted app-wide via the injectable
+    /// `defaultsStore` (defaults to `UserDefaults.standard`; tests pass a
+    /// scratch suite so they don't write to the user's preferences).
+    var inspectorVisible: Bool = true {
+        didSet { defaultsStore.set(inspectorVisible, forKey: Self.inspectorVisibleKey) }
+    }
+
+    @ObservationIgnored
+    static let inspectorVisibleKey = "editor.inspectorVisible"
+
+    /// Backing store for persisted UI flags (`inspectorVisible` today; could
+    /// be extended). Holds the injected `UserDefaults` so tests can verify the
+    /// round-trip without polluting the user's defaults database.
+    @ObservationIgnored
+    private let defaultsStore: UserDefaults
 
     // Status / export
     var statusMessage = "Import media to begin."
@@ -153,7 +177,15 @@ final class EditorModel {
     /// document can neither leak security-scoped access nor land clips in another.
     @ObservationIgnored var sessionGeneration = 0
 
-    init() {
+    init(defaultsStore: UserDefaults = .standard) {
+        // Capture the injected defaults BEFORE setting any property whose
+        // didSet writes through it (currently `inspectorVisible`). The custom
+        // suite path is the test seam.
+        self.defaultsStore = defaultsStore
+        // Seed inspectorVisible from the store *after* the property is in
+        // place, so a true round-trip reads what tests wrote.
+        self.inspectorVisible = (defaultsStore.object(forKey: Self.inspectorVisibleKey) as? Bool) ?? true
+
         // Initialise the render queue first — it's the one `let` without an
         // inline default, so it must be set before any other access on self.
         self.renderQueue = RenderQueue()
@@ -880,10 +912,18 @@ final class EditorModel {
     }
 
     func seek(toSeconds seconds: Double) {
+        seek(toSeconds: seconds, tolerance: .zero)
+    }
+
+    /// Seek with a caller-supplied tolerance. Use a non-zero tolerance during
+    /// interactive scrubbing for smooth 60 fps tracking, then call
+    /// `seek(toSeconds:)` (zero tolerance) on gesture end for frame-accurate
+    /// positioning.
+    func seek(toSeconds seconds: Double, tolerance: CMTime) {
         let clamped = max(0, min(seconds, totalDuration))
         currentTime = clamped
         player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600),
-                    toleranceBefore: .zero, toleranceAfter: .zero)
+                    toleranceBefore: tolerance, toleranceAfter: tolerance)
     }
 
     // MARK: - Audio metering

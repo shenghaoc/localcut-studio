@@ -62,6 +62,11 @@ struct LabeledSliderRow<Value: BinaryFloatingPoint>: View where Value.Stride: Bi
                 .accessibilityLabel(spokenLabel ?? label)
                 .accessibilityValue(spokenValue ?? display)
         }
+        // The grouped Form draws a row separator at the row's bottom edge; with
+        // the slider as the bottom element the line otherwise hugs it and reads
+        // as a slider underline. A little bottom padding detaches the separator
+        // so it reads as a normal inter-row divider.
+        .padding(.bottom, 4)
     }
 
     private var captionSpacing: CGFloat? {
@@ -103,3 +108,20 @@ struct LabeledSliderRow<Value: BinaryFloatingPoint>: View where Value.Stride: Bi
         }
     }
 }
+#Preview("Slider rows in a grouped form") {
+    @Previewable @State var opacity = 0.7
+    @Previewable @State var temp = 0.2
+    Form {
+        Section("Clip") {
+            LabeledContent("Start", value: "0:00.00")
+            LabeledSliderRow(label: "Opacity", display: "70%", value: $opacity, range: 0...1)
+        }
+        Section("Colour") {
+            LabeledSliderRow(label: "Temperature", display: "+0.20", value: $temp, range: -1...1)
+            LabeledSliderRow(label: "Tint", display: "+0.00", value: $temp, range: -1...1)
+        }
+    }
+    .formStyle(.grouped)
+    .frame(width: 320, height: 320)
+}
+

@@ -324,6 +324,7 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "LocalCut Studio" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "LocalCut Studio/LocalCut Studio.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -357,6 +358,7 @@
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "LocalCut Studio" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "LocalCut Studio/LocalCut Studio.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

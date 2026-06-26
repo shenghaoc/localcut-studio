@@ -10,44 +10,33 @@ struct InspectorView: View {
     @State private var showLUTImporter = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Inspector").font(.headline)
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider()
-
-            Form {
-                if let transition = model.selectedTransition {
-                    transitionSection(transition)
-                } else if let clip = model.selectedClip {
-                    clipSection(clip)
-                    if clipIsVideo(clip) {
-                        colourSection
-                        beautySection
-                    } else {
-                        AudioClipFadesInspectorView(model: model, clip: clip)
-                    }
-                } else if let media = model.selectedMedia {
-                    mediaSection(media)
+        // The side rail's segmented switcher (EditorSideRailView) is the sole
+        // heading for the Inspector pane — adding an EditorPanelHeader here
+        // would duplicate the tab label and create a VoiceOver header echo.
+        // Sibling Audio/Captions panes already comply (audit P2).
+        Form {
+            if let transition = model.selectedTransition {
+                transitionSection(transition)
+            } else if let clip = model.selectedClip {
+                clipSection(clip)
+                if clipIsVideo(clip) {
+                    colourSection
+                    beautySection
                 } else {
-                    Section {
-                        Text("Select a clip or media item.")
-                            .foregroundStyle(.secondary)
-                    }
+                    AudioClipFadesInspectorView(model: model, clip: clip)
                 }
-
-                AudioInspectorView(model: model)
-                BeatToolsInspectorView(model: model)
-                CaptionsInspectorView(model: model)
-                RenderQueueInspectorView(model: model)
-                MarkersInspectorView(model: model)
-                projectSection
+            } else if let media = model.selectedMedia {
+                mediaSection(media)
+            } else {
+                Section {
+                    Text("Select a clip or media item.")
+                        .foregroundStyle(.secondary)
+                }
             }
-            .formStyle(.grouped)
+
+            projectSection
         }
+        .formStyle(.grouped)
         .fileImporter(
             isPresented: $showLUTImporter,
             allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data],
@@ -66,8 +55,15 @@ struct InspectorView: View {
     @ViewBuilder
     private func clipSection(_ clip: Clip) -> some View {
         Section("Clip") {
-            LabeledContent("Start", value: TimeFormatting.timecode(clip.timelineStart.seconds))
-            LabeledContent("Duration", value: TimeFormatting.timecode(clip.duration.seconds))
+            if let media = model.project.media(for: clip.mediaID) {
+                InspectorPosterView(media: media)
+            }
+            LabeledContent("Start") {
+                Text(TimeFormatting.timecode(clip.timelineStart.seconds)).monospacedDigit()
+            }
+            LabeledContent("Duration") {
+                Text(TimeFormatting.timecode(clip.duration.seconds)).monospacedDigit()
+            }
 
             LabeledSliderRow(
                 label: "Opacity",
@@ -348,7 +344,6 @@ struct InspectorView: View {
                         smooth.bypass = newValue
                     }
                 }))
-            .toggleStyle(.switch)
 
             Toggle("Show Mask", isOn: Binding(
                 get: { model.showSkinMask },
@@ -356,7 +351,6 @@ struct InspectorView: View {
                     model.showSkinMask = newValue
                     model.scheduleRebuild()
                 }))
-            .toggleStyle(.switch)
 
             HStack {
                 Button("Reset") { model.resetClipSkinSmooth() }
@@ -407,8 +401,11 @@ struct InspectorView: View {
     @ViewBuilder
     private func mediaSection(_ media: MediaItem) -> some View {
         Section("Media") {
+            InspectorPosterView(media: media)
             LabeledContent("Name", value: media.name)
-            LabeledContent("Duration", value: TimeFormatting.timecode(media.durationSeconds))
+            LabeledContent("Duration") {
+                Text(TimeFormatting.timecode(media.durationSeconds)).monospacedDigit()
+            }
             if media.hasVideo {
                 LabeledContent("Size", value: "\(Int(media.naturalSize.width))×\(Int(media.naturalSize.height))")
             }
@@ -468,5 +465,29 @@ struct InspectorView: View {
         Binding(
             get: { model.project.workingColourSpace },
             set: { model.setWorkingColourSpace($0) })
+    }
+}
+
+private struct InspectorPosterView: View {
+    let media: MediaItem
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(.quaternary)
+
+            if let thumbnail = media.thumbnail {
+                Image(decorative: thumbnail, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: media.hasVideo ? "film" : "waveform")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 92, idealHeight: 110, maxHeight: 120)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .accessibilityHidden(true)
     }
 }

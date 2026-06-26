@@ -20,87 +20,156 @@ struct PreviewPlayerView: NSViewRepresentable {
     }
 }
 
-private struct TransportTimeView: View {
-    var model: EditorModel
+/// Floating playback controls. Value-based (no `EditorModel`) so it previews in
+/// isolation and stays a pure control surface. As interactive controls floating
+/// over video, this is the canonical Liquid Glass case — the glass capsule
+/// supplies its own material, so nothing here hard-codes a colour or background.
+private struct TransportControls: View {
+    let isPlaying: Bool
+    let current: String
+    let duration: String
+    let hasContent: Bool
+    let skipToStart: () -> Void
+    let togglePlayPause: () -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
-            Text(TimeFormatting.timecode(model.currentTime))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-            Text("/")
-                .foregroundStyle(.tertiary)
-            Text(TimeFormatting.timecode(model.totalDuration))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            Button(action: skipToStart) {
+                Image(systemName: "backward.end.fill")
+            }
+            .help("Go to start")
+            .accessibilityLabel("Go to start")
+
+            Button(action: togglePlayPause) {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .frame(width: 20)
+            }
+            // Spacebar play/pause is handled by the window-level EditorKeyHandler
+            // (a local NSEvent monitor that defers to text-input first responders),
+            // not a `.keyboardShortcut` here: a key-equivalent — on a menu Command
+            // *or* a view button — fires before a focused text field gets the
+            // event, so it would swallow spaces typed into the marker-rename
+            // popover / caption fields.
+            .help("Play / Pause")
+            .accessibilityLabel(isPlaying ? Text("Pause") : Text("Play"))
+
+            HStack(spacing: 4) {
+                Text(current).monospacedDigit().foregroundStyle(.secondary)
+                Text("/").foregroundStyle(.tertiary)
+                Text(duration).monospacedDigit().foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(String(localized: "Playhead \(current) of \(duration)"))
         }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .glassEffect(.regular.interactive())
+        // No content ⇒ the transport is a live-looking no-op; disable it so the
+        // controls give honest feedback.
+        .disabled(!hasContent)
     }
 }
 
 /// The preview pane: video canvas plus a transport bar with the playhead time.
 struct PreviewView: View {
     @Bindable var model: EditorModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ZStack {
-                    Color.black
-                    if model.player.currentItem != nil {
-                        PreviewPlayerView(player: model.player)
-                    } else {
-                        ContentUnavailableView(
-                            "No Preview",
-                            systemImage: "film.stack",
-                            description: Text("Add a clip to the timeline to see it here."))
-                        .foregroundStyle(.white.opacity(0.6))
-                    }
+        HStack(spacing: 0) {
+            videoCanvas
+                // Collapse the non-interactive canvas to a single labelled element
+                // *before* the overlays are added, so the transport controls and
+                // format badge stay separate accessible siblings rather than being
+                // swallowed (or read twice) inside the preview container.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Preview")
+                .accessibilityValue(previewAccessibilityValue)
+                .overlay(alignment: .bottom) {
+                    TransportControls(
+                        isPlaying: model.isPlaying,
+                        current: TimeFormatting.timecode(model.currentTime),
+                        duration: TimeFormatting.timecode(model.totalDuration),
+                        hasContent: model.player.currentItem != nil,
+                        skipToStart: { model.seek(toSeconds: 0) },
+                        togglePlayPause: { model.togglePlayPause() })
+                    .padding(.bottom, 16)
+                }
+                .overlay(alignment: .topTrailing) {
+                    formatBadge.padding(12)
                 }
                 .layoutPriority(1)
 
-                if model.showScopes {
-                    ScopesView()
-                        .frame(minWidth: 200, idealWidth: 240)
-                        .transition(.move(edge: .trailing))
-                }
+            if model.showScopes {
+                ScopesView()
+                    .frame(minWidth: 200, idealWidth: 240)
+                    .transition(reduceMotion ? .opacity : .move(edge: .trailing))
             }
-            .animation(.default, value: model.showScopes)
+        }
+        .animation(reduceMotion ? nil : .default, value: model.showScopes)
+    }
 
-            transportBar
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.bar)
+    private var videoCanvas: some View {
+        ZStack {
+            Color.black
+            if model.player.currentItem != nil {
+                PreviewPlayerView(player: model.player)
+            } else {
+                ContentUnavailableView(
+                    "No Preview",
+                    systemImage: "film.stack",
+                    description: Text("Import media, then drag a clip to the timeline."))
+                .foregroundStyle(.secondary)
+            }
         }
     }
 
-    private var transportBar: some View {
-        HStack(spacing: 12) {
-            Button {
-                model.seek(toSeconds: 0)
-            } label: {
-                Image(systemName: "backward.end.fill")
-            }
-            .help("Go to start")
-            .accessibilityLabel("Go to start")
+    /// Informational render-format readout. A non-interactive label belongs to
+    /// the content layer, so it uses a standard material capsule rather than
+    /// Liquid Glass (HIG: glass is reserved for the interactive/functional layer).
+    private var formatBadge: some View {
+        Text("\(Int(model.project.renderSize.width))×\(Int(model.project.renderSize.height)) · \(Int(model.project.frameRate)) fps")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(.thinMaterial, in: .capsule)
+            .help("Project render format")
+            // VoiceOver would otherwise read the raw "1920×1080 · 30 fps" glyphs;
+            // spell out the dimensions and frame rate instead.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Render format"))
+            .accessibilityValue(Text("\(Int(model.project.renderSize.width)) by \(Int(model.project.renderSize.height)), \(Int(model.project.frameRate)) frames per second"))
+    }
 
-            Button {
-                model.togglePlayPause()
-            } label: {
-                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                    .frame(width: 20)
-            }
-            .keyboardShortcut(.space, modifiers: [])
-            .help("Play / Pause")
-            .accessibilityLabel(model.isPlaying ? Text("Pause") : Text("Play"))
-
-            TransportTimeView(model: model)
-
-            Spacer()
-
-            Text("\(Int(model.project.renderSize.width))×\(Int(model.project.renderSize.height)) · \(Int(model.project.frameRate)) fps")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+    private var previewAccessibilityValue: String {
+        if model.player.currentItem == nil {
+            return String(localized: "No preview. Import media, then drag a clip to the timeline.")
         }
-        .buttonStyle(.borderless)
+        return String(localized: "Showing the current timeline frame.")
     }
 }
+// Renders the floating transport over a media-like gradient so the Liquid Glass
+// capsule can be inspected in isolation (the gradient is preview scaffolding to
+// stand in for video — it is not shipped UI).
+#Preview("Transport over media") {
+    ZStack {
+        LinearGradient(colors: [.indigo, .blue, .black],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+        VStack {
+            Spacer()
+            TransportControls(
+                isPlaying: false,
+                current: "00:00:02:10",
+                duration: "00:01:23:00",
+                hasContent: true,
+                skipToStart: {},
+                togglePlayPause: {})
+            .padding(.bottom, 16)
+        }
+    }
+    .frame(width: 560, height: 320)
+}
+

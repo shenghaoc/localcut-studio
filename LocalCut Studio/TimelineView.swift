@@ -13,8 +13,23 @@ struct TimelineView: View {
     private let gutterWidth: CGFloat = 56
     private let edgeZoneWidth: CGFloat = 8
     private let markerGlyphSize: CGFloat = 12
+    /// Cached system separator colour for the marker stroke. Computed once
+    /// (per type) rather than allocated per glyph per ruler tick (audit P3).
+    private static let markerSeparatorStroke: Color = Color(nsColor: .separatorColor)
     @State private var renamingMarkerID: TimelineMarker.ID?
     @State private var renameDraft: String = ""
+    @State private var timelineScrollTargetSeconds: Double = 0
+    @State private var timelineScrollRequest = 0
+    /// Viewport width captured via GeometryReader so the center-playhead
+    /// action can offset the scroll anchor by half the visible area.
+    @State private var timelineViewportWidth: CGFloat = 0
+    /// Live leading-edge of the visible timeline window, in seconds, fed by
+    /// `onScrollGeometryChange`. Lets the page-scroll buttons and the
+    /// accessibilityAdjustableAction base their delta on the *current* viewport
+    /// — including manual trackpad / scrollbar scrolls — instead of the stale
+    /// last programmatic target (Codex P2 on d8c7ee2).
+    @State private var timelineCurrentScrollSeconds: Double = 0
+    @FocusState private var focusedClipID: Clip.ID?
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
 
@@ -51,7 +66,10 @@ struct TimelineView: View {
     @State private var dragMode: DragMode?
     @State private var captionDrag: CaptionLineDrag?
     @State private var hoverEdge: HoverEdge?
-
+    // Track which trim-edge hover-cursor we currently own so `onDisappear` only
+    // pops a cursor this view actually pushed — an unconditional pop would
+    // unbalance the global NSCursor stack when a clip leaves the ForEach while
+    // not hovered. (The ruler and markers use declarative `.pointerStyle`.)
     private struct CaptionLineDrag: Equatable {
         let lineID: CaptionLine.ID
         let trackID: CaptionTrack.ID
@@ -61,6 +79,16 @@ struct TimelineView: View {
     enum HoverEdge: Equatable {
         case left(Clip.ID)
         case right(Clip.ID)
+    }
+
+    private enum TimelineScrollAnchor: Hashable {
+        case viewportTarget
+    }
+
+    private struct ClipFocusCandidate {
+        let id: Clip.ID
+        let startSeconds: Double
+        let trackIndex: Int
     }
 
     var body: some View {
@@ -73,9 +101,19 @@ struct TimelineView: View {
                 timelineScroller
             }
         }
-        .background(MarkerKeyHandler(onAdd: { model.addMarkerAtPlayhead() },
+        .background(EditorKeyHandler(onAdd: { model.addMarkerAtPlayhead() },
                                      onRename: { beginRenamingSelectedMarker() },
-                                     onDelete: { deleteSelectedMarkerIfAny() }))
+                                     onDelete: { deleteSelectedMarkerIfAny() },
+                                     onTogglePlay: { model.togglePlayPause() }))
+        .onMoveCommand(perform: moveTimelineSelection)
+        .onChange(of: focusedClipID) { _, newValue in
+            guard let newValue, model.selectedClipID != newValue else { return }
+            model.selectClip(id: newValue)
+            scrollTimelineToClip(id: newValue)
+        }
+        .onChange(of: model.selectedClipID) { _, newValue in
+            focusedClipID = newValue
+        }
     }
 
     /// Opens the rename popover for the selected marker; reports guidance when
@@ -102,9 +140,40 @@ struct TimelineView: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Text("Timeline").font(.headline)
-            Spacer()
+        EditorPanelHeader("Timeline", verticalPadding: 6) {
+            Button {
+                scrollTimelinePage(-1)
+            } label: {
+                Image(systemName: "arrow.left.to.line.compact")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .disabled(model.totalDuration <= 0)
+            .help("Scroll timeline left")
+            .accessibilityLabel("Scroll timeline left")
+
+            Button {
+                requestTimelineScroll(to: model.currentTime)
+            } label: {
+                Image(systemName: "smallcircle.filled.circle")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .disabled(model.totalDuration <= 0)
+            .help("Center playhead in timeline")
+            .accessibilityLabel("Center playhead in timeline")
+
+            Button {
+                scrollTimelinePage(1)
+            } label: {
+                Image(systemName: "arrow.right.to.line.compact")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .disabled(model.totalDuration <= 0)
+            .help("Scroll timeline right")
+            .accessibilityLabel("Scroll timeline right")
+
             Image(systemName: "minus.magnifyingglass")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -115,8 +184,6 @@ struct TimelineView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
     }
 
     // MARK: Left gutter (track labels)
@@ -136,6 +203,8 @@ struct TimelineView: View {
                 .padding(.horizontal, 8)
                 .frame(height: laneHeight)
                 .foregroundStyle(.secondary)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(trackAccessibilityLabel(track))
             }
             ForEach(captionTracks) { track in
                 Divider()
@@ -149,31 +218,121 @@ struct TimelineView: View {
                 .padding(.horizontal, 8)
                 .frame(height: laneHeight)
                 .foregroundStyle(track.isMuted ? .tertiary : .secondary)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(captionTrackAccessibilityLabel(track))
             }
         }
         .frame(width: gutterWidth)
+        .background(Color.lcRail)
+    }
+
+    private func trackAccessibilityLabel(_ track: Track) -> Text {
+        let name = track.name
+        let count = track.clips.count
+        // One whole localized string per kind so a translator controls the entire
+        // order (name / kind / count), not just isolated fragments.
+        let label = track.kind == .video
+            ? AttributedString(localized: "\(name), video track, ^[\(count) clip](inflect: true)")
+            : AttributedString(localized: "\(name), audio track, ^[\(count) clip](inflect: true)")
+        return Text(label)
+    }
+
+    private func captionTrackAccessibilityLabel(_ track: CaptionTrack) -> Text {
+        let name = track.name
+        let count = track.lines.count
+        // Whole localized strings (muted vs not) so the mute state can be
+        // reordered relative to the track name and kind in any locale.
+        let label = track.isMuted
+            ? AttributedString(localized: "\(name), caption track, ^[\(count) caption line](inflect: true), muted")
+            : AttributedString(localized: "\(name), caption track, ^[\(count) caption line](inflect: true)")
+        return Text(label)
     }
 
     // MARK: Scrollable timeline content
 
     private var timelineScroller: some View {
-        ScrollView([.horizontal]) {
-            ZStack(alignment: .topLeading) {
-                VStack(spacing: 0) {
-                    ruler
-                    ForEach(Array(tracks.enumerated()), id: \.element.id) { trackIndex, track in
-                        Divider()
-                        lane(for: track, trackIndex: trackIndex)
+        ScrollViewReader { proxy in
+            ScrollView([.horizontal]) {
+                // Compute transition cuts once per body invalidation — every
+                // video lane shares the same set, so reading the computed var
+                // per-lane would otherwise re-sort/-merge all video clips for
+                // each lane on every currentTime tick (audit P3).
+                let cuts = transitionCuts
+                ZStack(alignment: .topLeading) {
+                    VStack(spacing: 0) {
+                        ruler
+                        ForEach(Array(tracks.enumerated()), id: \.element.id) { trackIndex, track in
+                            Divider()
+                            lane(for: track, trackIndex: trackIndex, cuts: cuts)
+                        }
+                        ForEach(captionTracks) { track in
+                            Divider()
+                            captionLane(for: track)
+                        }
                     }
-                    ForEach(captionTracks) { track in
-                        Divider()
-                        captionLane(for: track)
+                    timelineScrollAnchor
+                    PlayheadView(model: model, pps: pps, rulerHeight: rulerHeight)
+                }
+                .frame(width: contentWidth, alignment: .topLeading)
+            }
+            // Mirror the live viewport leading-edge into state so page-scroll
+            // buttons + the adjustable a11y action use the *current* offset
+            // (including manual trackpad / scrollbar scrolls), not a stale
+            // programmatic target (Codex P2 on d8c7ee2).
+            .onScrollGeometryChange(for: Double.self) { geo in
+                Double(geo.contentOffset.x) / max(Double(pps), 1)
+            } action: { _, newSeconds in
+                timelineCurrentScrollSeconds = newSeconds
+            }
+            .background {
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { timelineViewportWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, new in timelineViewportWidth = new }
+                }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Timeline viewport")
+            .accessibilityValue("Around \(TimeFormatting.timecode(timelineScrollTargetSeconds))")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment:
+                    scrollTimelinePage(1)
+                case .decrement:
+                    scrollTimelinePage(-1)
+                @unknown default:
+                    break
+                }
+            }
+            .onChange(of: timelineScrollRequest) { _, _ in
+                // Defer one runloop: the same update changed
+                // timelineScrollTargetSeconds (and thus the anchor's spacer
+                // width), so scrolling synchronously would read the anchor's
+                // pre-layout geometry and target the previous position.
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        proxy.scrollTo(TimelineScrollAnchor.viewportTarget, anchor: .leading)
                     }
                 }
-                PlayheadView(model: model, pps: pps)
             }
-            .frame(width: contentWidth, alignment: .topLeading)
         }
+    }
+
+    private var timelineScrollAnchor: some View {
+        // Lay the anchor out at the target time *minus half the viewport* via a
+        // real leading spacer, so a `.leading` scroll lands the target at centre.
+        // `.offset` is a render-only transform — it does NOT move the layout
+        // frame `ScrollViewReader.scrollTo` targets, so the anchor stayed at x=0
+        // and every scroll request (center / page / focus) snapped to the start.
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: max(0, CGFloat(timelineScrollTargetSeconds) * pps - timelineViewportWidth / 2),
+                       height: 1)
+            Color.clear
+                .frame(width: 1, height: 1)
+                .id(TimelineScrollAnchor.viewportTarget)
+        }
+        .accessibilityHidden(true)
     }
 
     private var ruler: some View {
@@ -199,7 +358,7 @@ struct TimelineView: View {
                     line.addLine(to: CGPoint(x: x, y: rulerHeight))
                     context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
                     if isMajor {
-                        let text = Text(TimeFormatting.timecode(t)).font(.system(size: 9)).foregroundStyle(.secondary)
+                        let text = Text(TimeFormatting.timecode(t)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
                         context.draw(text, at: CGPoint(x: x + 2, y: tickTop), anchor: .topLeading)
                     }
                     t += step
@@ -219,12 +378,18 @@ struct TimelineView: View {
             }
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
+            // Declarative resize cursor signals the ruler is scrubbable. Region-
+            // based, so there's no shared NSCursor push/pop stack to unbalance
+            // when the ruler Canvas rebuilds on zoom.
+            .pointerStyle(.columnResize)
+            .help("Drag to scrub")
 
             ForEach(markers) { marker in
                 markerGlyph(marker, isSelected: marker.id == selectedMarkerID)
             }
         }
         .frame(height: rulerHeight)
+        .background(Color.lcRail)
     }
 
     /// Scrub gesture that also clears any marker selection on a fresh press,
@@ -235,6 +400,12 @@ struct TimelineView: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 if model.selectedMarkerID != nil { model.selectedMarkerID = nil }
+                // Fast seek during drag; the playhead head's gesture handles
+                // the precise end-of-drag seek when the user scrubs there.
+                model.seek(toSeconds: Double(value.location.x / pps),
+                           tolerance: CMTime(seconds: 0.1, preferredTimescale: 600))
+            }
+            .onEnded { value in
                 model.seek(toSeconds: Double(value.location.x / pps))
             }
     }
@@ -250,13 +421,15 @@ struct TimelineView: View {
     @ViewBuilder
     private func markerGlyph(_ marker: TimelineMarker, isSelected: Bool) -> some View {
         let x = CGFloat(marker.time.seconds) * pps
-        let fill: Color = marker.colour.map { Color(cgColor: $0.cgColor) } ?? Color.accentColor
-        let strokeColor: Color = isSelected ? .accentColor : .black.opacity(0.4)
+        let fill: Color = marker.colour.map { Color(cgColor: $0.cgColor) } ?? Color.lcAccent
+        // Adaptive separator colour rather than a fixed translucent black so the
+        // outline tracks Dark Mode and Increase Contrast; selected stays on gold.
+        let strokeColor: Color = isSelected ? .lcAccent : Self.markerSeparatorStroke
         let strokeWidth: CGFloat = isSelected ? 2 : 1
         let labelWidth: CGFloat = 60
         VStack(spacing: 1) {
             Text(marker.name)
-                .font(.system(size: 9))
+                .font(.caption2)
                 .lineLimit(1)
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 3)
@@ -271,6 +444,9 @@ struct TimelineView: View {
                 .frame(width: markerGlyphSize, height: markerGlyphSize)
                 .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
+                // Pointing-hand cursor over the marker (declarative; replaces a
+                // manual NSCursor push/pop hover wrapper).
+                .pointerStyle(.link)
                 .onTapGesture { model.selectMarker(id: marker.id) }
                 .popover(isPresented: Binding(
                     get: { renamingMarkerID == marker.id },
@@ -307,16 +483,15 @@ struct TimelineView: View {
         model.renameMarker(id: id, to: renameDraft)
     }
 
-    private func lane(for track: Track, trackIndex: Int) -> some View {
-        let placements = TransitionLayout.placements(for: track.clips, cuts: transitionCuts)
+    private func lane(for track: Track, trackIndex: Int, cuts: [TransitionLayout.Cut]) -> some View {
+        let placements = TransitionLayout.placements(for: track.clips, cuts: cuts)
         let effectiveStarts = Dictionary(uniqueKeysWithValues: placements.map { ($0.clip.id, $0.effectiveStart) })
         return ZStack(alignment: .topLeading) {
-            Color.clear
+            Color.lcLane
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    model.selectedClipID = nil
-                    model.selectedTransitionClipID = nil
-                    model.selectedMarkerID = nil
+                    model.clearSelection()
+                    focusedClipID = nil
                 }
             ForEach(track.clips) { clip in
                 clipBlock(clip, kind: track.kind, trackID: track.id, trackIndex: trackIndex,
@@ -334,12 +509,11 @@ struct TimelineView: View {
 
     private func captionLane(for track: CaptionTrack) -> some View {
         ZStack(alignment: .topLeading) {
-            Color.clear
+            Color.lcLane
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    model.selectedClipID = nil
-                    model.selectedTransitionClipID = nil
-                    model.selectedMarkerID = nil
+                    model.clearSelection()
+                    focusedClipID = nil
                 }
             ForEach(track.lines) { line in
                 captionLineBlock(line, in: track)
@@ -401,20 +575,18 @@ struct TimelineView: View {
                 .fill(Color.orange.opacity(isSelected ? 0.5 : 0.3))
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(isSelected ? Color.accentColor : Color.orange.opacity(0.8),
+                        .strokeBorder(isSelected ? Color.lcAccent : Color.orange.opacity(0.8),
                                       lineWidth: isSelected ? 2 : 1))
                 .overlay(
                     Image(systemName: type.symbolName)
-                        .font(.system(size: 10))
+                        .font(.caption2)
                         .foregroundStyle(.white))
                 .frame(width: width, height: laneHeight - 16)
                 .offset(x: x, y: 8)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    model.selectedClipID = nil
-                    model.selectedMediaID = nil
-                    model.selectedMarkerID = nil
-                    model.selectedTransitionClipID = placement.clip.id
+                    model.selectTransition(clipID: placement.clip.id)
+                    focusedClipID = nil
                 }
                 .accessibilityLabel("\(type.displayName) transition")
                 .accessibilityAddTraits(.isButton)
@@ -443,16 +615,13 @@ struct TimelineView: View {
         return ZStack {
             RoundedRectangle(cornerRadius: 6)
                 .fill(baseColor.opacity(isDragging(clip.id) ? 0.2 : 0.35))
-                .overlay(alignment: .leading) {
-                    Text(clipName ?? "Clip")
-                        .font(.caption2)
-                        .lineLimit(1)
-                        .padding(.horizontal, 6)
-                        .foregroundStyle(.primary)
+                .overlay {
+                    ClipIdentityOverlay(name: clipName ?? "Clip",
+                                        systemImage: kind == .video ? "film" : "waveform")
                 }
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(isSelected ? Color.accentColor : baseColor.opacity(0.6),
+                        .strokeBorder(isSelected ? Color.lcAccent : baseColor.opacity(0.6),
                                       lineWidth: isSelected ? 2 : 1))
 
             // Edge zones for trim handles
@@ -466,13 +635,11 @@ struct TimelineView: View {
         .offset(x: x, y: displayValues.yOffset)
         .opacity(displayValues.opacity)
         .onTapGesture {
-            model.selectedClipID = clip.id
-            model.selectedTransitionClipID = nil
-            model.selectedMarkerID = nil
+            selectTimelineClip(clip)
         }
         .contextMenu {
             Button("Split at Playhead") {
-                model.selectedClipID = clip.id
+                model.selectClip(id: clip.id)
                 model.splitSelectedClipAtPlayhead()
             }
             // Transitions are video-only — hide the entry on audio clips
@@ -487,18 +654,36 @@ struct TimelineView: View {
             }
             Divider()
             Button("Delete Clip", role: .destructive) {
-                model.selectedClipID = clip.id
+                model.selectClip(id: clip.id)
                 model.deleteSelectedClip()
             }
         }
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
+        .focusable()
+        .focused($focusedClipID, equals: clip.id)
         .accessibilityLabel(nameLabel)
         .accessibilityValue(valueLabel)
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAction(named: "Select") {
+            selectTimelineClip(clip)
+        }
+        .accessibilityAction(named: "Split at Playhead") {
+            model.selectClip(id: clip.id)
+            model.splitSelectedClipAtPlayhead()
+        }
+        .accessibilityAction(named: "Delete Clip") {
+            model.selectClip(id: clip.id)
+            model.deleteSelectedClip()
+        }
         .onHover { hovering in
             if !hovering { hoverEdge = nil }
         }
+        // Move affordance: open hand over the clip body, closed hand while it's
+        // being dragged. Declarative `.pointerStyle` is region-based (no NSCursor
+        // push/pop stack to unbalance) and coexists with the trim handles, whose
+        // edge zones sit on top and show the resize cursor.
+        .pointerStyle(isDragging(clip.id) ? .grabActive : .grabIdle)
     }
 
     private func trimHandle(edge: EditorModel.TrimEdge, clip: Clip, shift: CMTime) -> some View {
@@ -509,25 +694,19 @@ struct TimelineView: View {
             .fill(isHovered ? Color.white.opacity(0.15) : Color.clear)
             .frame(width: edgeZoneWidth)
             .contentShape(Rectangle())
+            // Region-based cursor: no NSCursor push/pop stack to unbalance.
+            // Previously this used onHover { push() / pop() } + commitDrag's
+            // pop(), which had two reproducible imbalance paths (drag bypassed
+            // onHover-out → trailing pop ran twice; click-anchored handles
+            // skipped onHover entirely on commit). `.pointerStyle` is the
+            // declarative replacement that already shipped for ruler/marker
+            // cursors (audit P2).
+            .pointerStyle(.columnResize)
             .onHover { hovering in
-                let inTrimDrag: Bool = switch dragMode {
-                case .trimmingLeft, .trimmingRight: true
-                default: false
-                }
                 if hovering {
                     hoverEdge = activeEdge
-                    if !inTrimDrag { NSCursor.resizeLeftRight.push() }
-                } else {
-                    if hoverEdge == activeEdge {
-                        hoverEdge = nil
-                    }
-                    if !inTrimDrag { NSCursor.pop() }
-                }
-            }
-            .onDisappear {
-                if hoverEdge == activeEdge {
+                } else if hoverEdge == activeEdge {
                     hoverEdge = nil
-                    NSCursor.pop()
                 }
             }
             .gesture(trimDragGesture(clip: clip, edge: edge, shift: shift))
@@ -666,13 +845,14 @@ struct TimelineView: View {
         guard let mode = dragMode else { return }
         dragMode = nil
 
+        // Cursor management was moved to declarative `.pointerStyle` on the
+        // trim handles, so no NSCursor.pop() is needed here (the old paired
+        // pops created two reproducible imbalance paths — see trimHandle).
         switch mode {
         case .trimmingLeft(let id, let candidate):
-            NSCursor.pop()
             model.trimClip(id: id, edge: .left, to: candidate)
 
         case .trimmingRight(let id, let candidate):
-            NSCursor.pop()
             model.trimClip(id: id, edge: .right, to: candidate)
 
         case .moving(let id, let candidateStart, _, let targetIndex):
@@ -695,27 +875,250 @@ struct TimelineView: View {
         let candidates: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300]
         return candidates.first { $0 >= raw } ?? 600
     }
+
+    // MARK: - Keyboard focus + timeline scrolling
+
+    private var clipFocusCandidates: [ClipFocusCandidate] {
+        tracks.enumerated().flatMap { trackIndex, track in
+            // Use rippled (effective) start positions so keyboard-focus
+            // scroll targets match the drawn clip positions when upstream
+            // transitions shift later clips rightward.
+            let placements = TransitionLayout.placements(for: track.clips, cuts: transitionCuts)
+            let effectiveStarts = Dictionary(uniqueKeysWithValues: placements.map { ($0.clip.id, $0.effectiveStart) })
+            return track.clips.map {
+                ClipFocusCandidate(id: $0.id,
+                                   startSeconds: (effectiveStarts[$0.id] ?? $0.timelineStart).seconds,
+                                   trackIndex: trackIndex)
+            }
+        }
+        .sorted {
+            if $0.startSeconds == $1.startSeconds {
+                return $0.trackIndex < $1.trackIndex
+            }
+            return $0.startSeconds < $1.startSeconds
+        }
+    }
+
+    private var timelinePageSeconds: Double {
+        TimelineScrollMath.pageSeconds(pps: pps)
+    }
+
+    private func selectTimelineClip(_ clip: Clip) {
+        model.selectClip(id: clip.id)
+        focusedClipID = clip.id
+        // Use the rippled (effective) start so projects with upstream
+        // transitions don't scroll to the authored position — matches the
+        // drawn clip location and keyboard-nav behaviour (Codex P2 on e5cae6b).
+        scrollTimelineToClip(id: clip.id)
+    }
+
+    private func moveTimelineSelection(_ direction: MoveCommandDirection) {
+        let candidates = clipFocusCandidates
+        guard !candidates.isEmpty else { return }
+        let currentID = focusedClipID ?? model.selectedClipID
+        let currentIndex = currentID.flatMap { id in candidates.firstIndex { $0.id == id } }
+
+        let targetIndex: Int? = switch direction {
+        case .left, .up:
+            currentIndex.map { max(0, $0 - 1) } ?? candidates.count - 1
+        case .right, .down:
+            currentIndex.map { min(candidates.count - 1, $0 + 1) } ?? 0
+        default:
+            nil
+        }
+
+        guard let targetIndex else { return }
+        let target = candidates[targetIndex]
+        model.selectClip(id: target.id)
+        focusedClipID = target.id
+        requestTimelineScroll(to: target.startSeconds)
+    }
+
+    private func scrollTimelineToClip(id: Clip.ID) {
+        guard let candidate = clipFocusCandidates.first(where: { $0.id == id }) else { return }
+        requestTimelineScroll(to: candidate.startSeconds)
+    }
+
+    private func scrollTimelinePage(_ direction: Int) {
+        // Page from the live viewport centre, not from the last programmatic
+        // target — manual trackpad / scrollbar scrolls don't update the target,
+        // so this would otherwise jump back to wherever the user last clicked
+        // (Codex P2 on d8c7ee2). Math lives in `TimelineScrollMath` so it can
+        // be unit-tested without a View context.
+        let currentCentre = TimelineScrollMath.viewportCentreSeconds(
+            scrollLeadingSeconds: timelineCurrentScrollSeconds,
+            viewportWidth: timelineViewportWidth,
+            pps: pps)
+        requestTimelineScroll(to: currentCentre + Double(direction) * timelinePageSeconds)
+    }
+
+    private func requestTimelineScroll(to seconds: Double) {
+        timelineScrollTargetSeconds = TimelineScrollMath.clampedTarget(
+            seconds, totalDuration: model.totalDuration)
+        timelineScrollRequest += 1
+    }
+}
+
+/// Pure scroll-math helpers extracted from `TimelineView` so the page-scroll,
+/// viewport-centre, and target-clamp formulas can be unit-tested without a
+/// View context (audit P3). Holding them in a top-level enum keeps the View
+/// methods one-liners that just delegate.
+enum TimelineScrollMath {
+    /// How many seconds of timeline a single page button advances. Floored at
+    /// 5 s so the page step still feels useful when the user is zoomed in.
+    static func pageSeconds(pps: CGFloat) -> Double {
+        max(5, 640 / max(Double(pps), 1))
+    }
+
+    /// Visible duration of the timeline viewport in seconds.
+    static func viewportSeconds(viewportWidth: CGFloat, pps: CGFloat) -> Double {
+        Double(viewportWidth) / max(Double(pps), 1)
+    }
+
+    /// Time at the centre of the visible viewport — `scrollLeadingSeconds`
+    /// comes straight from `onScrollGeometryChange` (the leading edge in
+    /// seconds), so this is the live position the user actually sees.
+    static func viewportCentreSeconds(scrollLeadingSeconds: Double,
+                                      viewportWidth: CGFloat,
+                                      pps: CGFloat) -> Double {
+        scrollLeadingSeconds + viewportSeconds(viewportWidth: viewportWidth, pps: pps) / 2
+    }
+
+    /// Clamps a requested target to the project range — negative requests pin
+    /// to 0, requests past `totalDuration` pin to the end (or 0 when there is
+    /// no content yet).
+    static func clampedTarget(_ seconds: Double, totalDuration: Double) -> Double {
+        min(max(seconds, 0), max(totalDuration, 0))
+    }
 }
 
 // MARK: - Playhead
+
+private struct ClipIdentityOverlay: View {
+    let name: String
+    let systemImage: String
+
+    private let repeatEvery: CGFloat = 360
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                ForEach(labelOffsets(width: proxy.size.width), id: \.self) { offset in
+                    label
+                        .offset(x: offset)
+                }
+            }
+        }
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var label: some View {
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .imageScale(.small)
+            Text(name)
+                .lineLimit(1)
+        }
+        .font(.caption2)
+        .padding(.horizontal, 6)
+        .foregroundStyle(.primary)
+    }
+
+    private func labelOffsets(width: CGFloat) -> [CGFloat] {
+        guard width > 0 else { return [] }
+        var offsets: [CGFloat] = [6]
+        var next = repeatEvery
+        while next < width - 20 {
+            offsets.append(next)
+            next += repeatEvery
+        }
+        return offsets
+    }
+}
 
 /// The red scrubber line. Isolated so it can re-evaluate on every
 /// `currentTime` tick without invalidating the rest of `TimelineView`.
 private struct PlayheadView: View {
     var model: EditorModel
     var pps: CGFloat
+    var rulerHeight: CGFloat
+
+    private let headWidth: CGFloat = 11
+    private let headHeight: CGFloat = 7
+    private let lineWidth: CGFloat = 1.5
+    // Grab target around the head: wider than the 11pt triangle so it's an easy
+    // hit, and only as tall as the ruler/lane boundary band so it doesn't cover
+    // the marker label band above it.
+    private let headHitWidth: CGFloat = 22
+    private let headHitHeight: CGFloat = 16
+
+    // Playhead time captured when the head drag begins, so we scrub by the
+    // gesture's translation (origin-independent — the head is an offset subview).
+    @State private var dragStartSeconds: Double?
 
     var body: some View {
-        Rectangle()
-            .fill(.red)
-            .frame(width: 1.5)
-            .frame(maxHeight: .infinity)
-            .offset(x: CGFloat(model.currentTime) * pps)
-            .allowsHitTesting(false)
+        let x = CGFloat(model.currentTime) * pps
+        // Both elements are centred on `x` (the head triangle's midpoint and the
+        // line's mid-width), so the head cap sits exactly over the scrub line.
+        ZStack(alignment: .topLeading) {
+            // Precise scrub line spanning the full timeline height — kept
+            // non-interactive so clicks fall through to clips and the ruler.
+            Rectangle()
+                .fill(.red)
+                .frame(width: lineWidth)
+                .frame(maxHeight: .infinity)
+                .offset(x: x - lineWidth / 2)
+                .allowsHitTesting(false)
+
+            // Draggable head pinned to the ruler/lane boundary.
+            PlayheadHead()
+                .fill(.red)
+                .frame(width: headWidth, height: headHeight)
+                .frame(width: headHitWidth, height: headHitHeight, alignment: .bottom)
+                .contentShape(Rectangle())
+                .offset(x: x - headHitWidth / 2, y: rulerHeight - headHitHeight)
+                .pointerStyle(dragStartSeconds == nil ? .grabIdle : .grabActive)
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let start = dragStartSeconds ?? model.currentTime
+                            if dragStartSeconds == nil { dragStartSeconds = start }
+                            if model.selectedMarkerID != nil { model.selectedMarkerID = nil }
+                            // Fast seek (non-zero tolerance) during drag keeps the
+                            // scrub at 60 fps; the precise frame-accurate seek
+                            // happens on gesture end below.
+                            model.seek(toSeconds: start + Double(value.translation.width / pps),
+                                       tolerance: CMTime(seconds: 0.1, preferredTimescale: 600))
+                        }
+                        .onEnded { value in
+                            let start = dragStartSeconds ?? model.currentTime
+                            model.seek(toSeconds: start + Double(value.translation.width / pps))
+                            dragStartSeconds = nil
+                        }
+                )
+                .help("Drag to scrub")
+                .accessibilityHidden(true)
+        }
     }
 }
 
 // MARK: - Marker glyph + keyboard
+
+/// Small downward playhead marker at the ruler/lane boundary, matching the
+/// design-system timeline reference while the vertical red line remains the
+/// precise scrub position.
+private struct PlayheadHead: Shape {
+    nonisolated func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
 
 /// A four-pointed diamond drawn for each marker glyph.
 private struct MarkerDiamond: Shape {
@@ -744,10 +1147,16 @@ private struct MarkerDiamond: Shape {
 /// none is selected, the event falls through to the existing toolbar
 /// `.keyboardShortcut(.delete, modifiers: [])` that drives clip / transition
 /// deletion. That's the contract the spec calls out (R4.5).
-private struct MarkerKeyHandler: NSViewRepresentable {
+/// Window-scoped key handler for bare-key editor shortcuts that must yield to
+/// text inputs: m / shift-m (add / rename marker), Delete (when a marker is
+/// selected), and Space (play/pause). These can't be menu/button
+/// key-equivalents because those fire before a focused text field, swallowing
+/// the key while the user is typing into a rename popover / caption field.
+private struct EditorKeyHandler: NSViewRepresentable {
     let onAdd: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Bool
+    let onTogglePlay: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -757,6 +1166,7 @@ private struct MarkerKeyHandler: NSViewRepresentable {
         context.coordinator.onAdd = onAdd
         context.coordinator.onRename = onRename
         context.coordinator.onDelete = onDelete
+        context.coordinator.onTogglePlay = onTogglePlay
         context.coordinator.install()
         return view
     }
@@ -766,6 +1176,7 @@ private struct MarkerKeyHandler: NSViewRepresentable {
         context.coordinator.onAdd = onAdd
         context.coordinator.onRename = onRename
         context.coordinator.onDelete = onDelete
+        context.coordinator.onTogglePlay = onTogglePlay
     }
 
     @MainActor
@@ -773,6 +1184,7 @@ private struct MarkerKeyHandler: NSViewRepresentable {
         var onAdd: (() -> Void)?
         var onRename: (() -> Void)?
         var onDelete: (() -> Bool)?
+        var onTogglePlay: (() -> Void)?
         weak var view: NSView?
         // `nonisolated(unsafe)` so `deinit` can clear it without hopping actors;
         // mutation only happens via `install`, called on the main actor, so the
@@ -827,30 +1239,106 @@ private struct MarkerKeyHandler: NSViewRepresentable {
                   ObjectIdentifier(hostWindow) == eventWindowID else {
                 return false
             }
-            // Anything other than plain or Shift modifiers (Command/Option/etc.)
-            // belongs to a different command; never swallow those.
-            let stripped = modifiers
-                .intersection(.deviceIndependentFlagsMask)
-                .subtracting([.shift, .capsLock, .numericPad, .function])
-            guard stripped.isEmpty else { return false }
-            // Don't steal keys from any first responder that owns a text input
-            // (rename popovers, inspector fields, the caption editor).
-            if let responder = hostWindow.firstResponder,
-               responder is NSText || responder is NSTextField || responder is NSTextView {
+            // Snapshot responder identity to pure booleans so the policy
+            // decision lives in a free function we can unit-test (audit P1
+            // testability extraction). The Space-trap fix and its NSControl
+            // / SwiftUI-hosted exemptions are all encoded in the policy enum.
+            let responder = hostWindow.firstResponder
+            let textInput = responder is NSText
+                || responder is NSTextField
+                || responder is NSTextView
+            let nonTimelineFocus = responder != nil
+                && responder !== view
+                && responder !== hostWindow
+            let action = EditorKeyHandlerPolicy.action(
+                keyCode: keyCode,
+                chars: chars,
+                modifiers: modifiers,
+                firstResponderIsTextInput: textInput,
+                firstResponderIsNonTimelineFocus: nonTimelineFocus)
+            switch action {
+            case .ignore:
                 return false
-            }
-
-            let shift = modifiers.contains(.shift)
-            // Delete / Backspace: only consume when a marker is selected so
-            // the existing clip / transition delete shortcut keeps firing.
-            let isDelete = (keyCode == 0x33 || keyCode == 0x75)
-
-            if chars == "m" || chars == "M" {
-                if shift { onRename?() } else { onAdd?() }
+            case .togglePlay:
+                onTogglePlay?()
                 return true
+            case .addMarker:
+                onAdd?()
+                return true
+            case .renameMarker:
+                onRename?()
+                return true
+            case .maybeDeleteMarker:
+                // Only consume when a marker is selected so the existing clip /
+                // transition delete shortcut keeps firing.
+                return onDelete?() == true
             }
-            if isDelete, onDelete?() == true { return true }
-            return false
         }
+    }
+}
+
+/// Pure decision layer for the editor's window-scoped key handler.
+///
+/// Extracting the policy lets us regression-test all the carve-outs that the
+/// Space-trap fix introduced (Codex P1 on d8c7ee2 + verifier strengthening
+/// for the SwiftUI-hosted control path) without standing up an `NSWindow`.
+/// The Coordinator only has to translate live responder state into the four
+/// booleans the policy takes; the rest is deterministic.
+enum EditorKeyHandlerPolicy {
+    enum Action: Equatable {
+        /// Pass the event through unchanged. Used for any event we don't own
+        /// (foreign window, modifier-laden chord, focused text input, etc.).
+        case ignore
+        /// Space — toggle play/pause.
+        case togglePlay
+        /// `m` — add a marker at the playhead.
+        case addMarker
+        /// `Shift+m` — open the rename popover on the selected marker.
+        case renameMarker
+        /// Backspace/Forward-Delete — try to delete the selected marker; the
+        /// Coordinator's `onDelete` callback returns whether a marker was
+        /// actually selected and consumed the key, so the toolbar's clip
+        /// delete shortcut keeps firing when no marker is selected.
+        case maybeDeleteMarker
+    }
+
+    /// Decide what to do with a key event delivered to the host window.
+    ///
+    /// - `firstResponderIsTextInput`: true when the focused responder is an
+    ///   `NSText`/`NSTextField`/`NSTextView` (rename popovers, inspector
+    ///   fields, caption editor) — never steal keys while the user is typing.
+    /// - `firstResponderIsNonTimelineFocus`: true when the focused responder
+    ///   is neither the timeline view itself nor the bare window — i.e. some
+    ///   AppKit `NSControl` or a SwiftUI Toggle/Button bridged through an
+    ///   `NSHostingView`. Space yields to those so a Tab-focused widget
+    ///   receives Space normally (HIG keyboard-trap fix).
+    static func action(keyCode: UInt16,
+                       chars: String,
+                       modifiers: NSEvent.ModifierFlags,
+                       firstResponderIsTextInput: Bool,
+                       firstResponderIsNonTimelineFocus: Bool) -> Action {
+        // Anything other than plain or Shift modifiers (Command/Option/etc.)
+        // belongs to a different command — never swallow those.
+        let stripped = modifiers
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.shift, .capsLock, .numericPad, .function])
+        guard stripped.isEmpty else { return .ignore }
+        // While the user is typing, every key passes through unchanged.
+        if firstResponderIsTextInput { return .ignore }
+
+        let shift = modifiers.contains(.shift)
+        // Space → play/pause. Yield when some other control owns focus so it
+        // can receive Space normally — keeps Tab-focused checkboxes/buttons
+        // out of the keyboard trap.
+        if keyCode == 0x31, !shift {
+            if firstResponderIsNonTimelineFocus { return .ignore }
+            return .togglePlay
+        }
+        if chars == "m" || chars == "M" {
+            return shift ? .renameMarker : .addMarker
+        }
+        // Backspace (0x33) / Forward-Delete (0x75) — try to delete a marker.
+        if keyCode == 0x33 || keyCode == 0x75 { return .maybeDeleteMarker }
+        return .ignore
     }
 }

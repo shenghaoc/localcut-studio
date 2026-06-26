@@ -37,6 +37,8 @@ struct RenderQueueInspectorView: View {
                 Text(presetSubtitle(preset))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             Spacer()
             Button("Add to Queue…") {
@@ -48,7 +50,7 @@ struct RenderQueueInspectorView: View {
         }
     }
 
-    /// One-line summary under the preset name: codec • size • aspect.
+    /// One-line summary under the preset name: container • codec • size • aspect • bitrate.
     private func presetSubtitle(_ preset: ExportPreset) -> String {
         let codec: String
         switch preset.videoCodec {
@@ -57,10 +59,11 @@ struct RenderQueueInspectorView: View {
         case AVVideoCodecType.proRes422HQ.rawValue: codec = "ProRes 422 HQ"
         case AVVideoCodecType.proRes422.rawValue: codec = "ProRes 422"
         case AVVideoCodecType.proRes4444.rawValue: codec = "ProRes 4444"
-        default: codec = preset.videoCodec
+        default: codec = preset.videoCodec.uppercased()
         }
         let size = "\(Int(preset.targetSize.width))×\(Int(preset.targetSize.height))"
-        return "\(codec) • \(size) • \(preset.aspect.displayName)"
+        let container = preset.defaultFilenameExtension.uppercased()
+        return "\(container) • \(codec) • \(size) • \(preset.aspect.displayName) • \(preset.bitrate.displayName)"
     }
 
     // MARK: - Queue
@@ -68,9 +71,11 @@ struct RenderQueueInspectorView: View {
     @ViewBuilder
     private var queueList: some View {
         if model.renderQueue.jobs.isEmpty {
-            Text("No queued renders.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            ContentUnavailableView {
+                Label("No Renders Queued", systemImage: "square.and.arrow.up")
+            } description: {
+                Text("Add a preset above to queue a render.")
+            }
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 if model.renderQueue.isRunning {
@@ -98,6 +103,8 @@ struct RenderQueueInspectorView: View {
             HStack {
                 VStack(alignment: .leading) {
                     Text(job.outputDisplayName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     Text(job.preset.name)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -155,7 +162,7 @@ struct RenderQueueInspectorView: View {
         let colour: Color
         switch job.status {
         case .queued: label = "Queued"; colour = .secondary
-        case .running: label = "Running \(Int(job.progress * 100))%"; colour = .accentColor
+        case .running: label = "Running \(Int(job.progress * 100))%"; colour = .lcAccent
         case .completed: label = "Completed"; colour = .green
         case .cancelled: label = "Cancelled"; colour = .secondary
         case .failed: label = "Failed"; colour = .red

@@ -14,6 +14,7 @@ struct LocalCutStudioApp: App {
             EditorView(model: model)
                 .frame(minWidth: 1000, minHeight: 640)
         }
+        .defaultSize(width: 1360, height: 860)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
@@ -31,10 +32,28 @@ struct ViewCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
+            Toggle(isOn: $model.inspectorVisible) {
+                Text("Show Inspector")
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option])
+
             Toggle(isOn: $model.isDiagnosticsVisible) {
                 Text("Show Diagnostics")
             }
             .keyboardShortcut("d", modifiers: [.command, .option])
+
+            Divider()
+
+            // Transport in the menu bar so playback has a discoverable home.
+            // The Space shortcut for play/pause is handled by `EditorKeyHandler`
+            // (a window-scoped NSEvent monitor in TimelineView.swift) — a bare
+            // `.space` menu key-equivalent is global in AppKit and would swallow
+            // spaces typed into text fields (e.g. the marker-rename popover).
+            Button(model.isPlaying ? "Pause" : "Play") { model.togglePlayPause() }
+                .disabled(model.totalDuration <= 0)
+            Button("Go to Start") { model.seek(toSeconds: 0) }
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .disabled(model.totalDuration <= 0)
         }
     }
 }
@@ -65,6 +84,9 @@ struct DocumentCommands: Commands {
                     }
                 }
             }
+            Divider()
+            Button("Import…") { model.requestImport() }
+                .keyboardShortcut("i", modifiers: .command)
         }
         CommandGroup(replacing: .saveItem) {
             Button("Save") { model.requestSave() }
@@ -74,6 +96,12 @@ struct DocumentCommands: Commands {
             Divider()
             Button("Convert to Bundle…") { model.requestConvertToBundle() }
                 .disabled(!model.canConvertToBundle)
+            Divider()
+            // Mirror the toolbar's primary output action so Export has a menu home
+            // and a standard shortcut.
+            Button("Export…") { model.requestExport() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(model.totalDuration <= 0)
         }
         CommandGroup(replacing: .undoRedo) {
             Button(model.undoTitle) { model.undo() }
@@ -103,7 +131,22 @@ struct DocumentCommands: Commands {
                 .disabled(!model.canAddTransitionAtSelection)
             Button("Remove Transition") { model.removeSelectedTransition() }
                 .disabled(model.selectedTransitionClipID == nil)
+            // Mirror the destructive toolbar button so deleting a clip/transition
+            // has a menu home; the toolbar keeps the same ⌫ shortcut.
+            Button("Delete Selected Clip") {
+                if model.selectedTransitionClipID != nil {
+                    model.removeSelectedTransition()
+                } else {
+                    model.deleteSelectedClip()
+                }
+            }
+            .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             Divider()
+            // No key equivalent here: the timeline's MarkerKeyHandler already owns
+            // the bare "m" key and correctly yields it to focused text fields. A
+            // bare-letter menu shortcut would instead hijack "m" while the user is
+            // typing (rename popover, captions). The menu item stays for discovery.
+            Button("Add Marker") { model.addMarkerAtPlayhead() }
             Button("Previous Marker") { model.selectPreviousMarker() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
                 .disabled(model.project.markers.isEmpty)
@@ -137,26 +180,42 @@ struct EditorView: View {
                     .frame(minWidth: 380)
                     .layoutPriority(1)
 
-                InspectorView(model: model)
-                    .frame(minWidth: 240, idealWidth: 280)
+                if model.inspectorVisible {
+                    EditorSideRailView(model: model) {
+                        model.inspectorVisible = false
+                    }
+                    .frame(minWidth: 300, idealWidth: 340)
+                } else {
+                    CollapsedSideRailView {
+                        model.inspectorVisible = true
+                    }
+                    .frame(width: 44)
+                }
             }
             .frame(minHeight: 320)
+            .background(SplitViewAutosaveConfigurator(autosaveName: "editor.workspace.columns",
+                                                       isVertical: true,
+                                                       isEnabled: model.inspectorVisible))
 
             TimelineView(model: model)
                 .frame(minHeight: 200, idealHeight: 260)
         }
+        .background(SplitViewAutosaveConfigurator(autosaveName: "editor.workspace.rows",
+                                                   isVertical: false))
         .toolbar { toolbarContent }
         .navigationTitle(model.project.name)
+        .tint(.lcAccent)
+        .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) { statusBar }
         .onDisappear { model.teardownAudioMetering() }
         .background(WindowConfigurator(model: model))
         .overlay(alignment: .topTrailing) {
             if model.isDiagnosticsVisible {
                 DiagnosticsView(agent: model.diagnostics)
-                    // Clear the unified toolbar (~52 pt on the .unified style)
-                    // plus a few points of breathing room so the panel doesn't
-                    // butt against the window chrome.
-                    .padding(.top, 60)
+                    // Overlay content already renders inside the unified toolbar's
+                    // reserved safe area, so a small fixed inset keeps the panel
+                    // off the chrome without hard-coding the toolbar's pixel height.
+                    .padding(.top, 8)
                     .padding(.trailing, 16)
                     .transition(.opacity)
             }
@@ -177,10 +236,11 @@ struct EditorView: View {
             Button {
                 model.addTransitionToSelectedClip()
             } label: {
-                Label("Transition", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                Label("Add Transition", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
             }
             .disabled(!model.canAddTransitionAtSelection)
-            .help("Add a transition at the selected clip's cut")
+            .help("Add transition at selected cut")
+            .accessibilityLabel("Add transition at selected cut")
 
             Button(role: .destructive) {
                 if model.selectedTransitionClipID != nil {
@@ -195,6 +255,14 @@ struct EditorView: View {
             .keyboardShortcut(.delete, modifiers: [])
             .help("Delete selected clip or transition")
 
+            Button {
+                model.inspectorVisible.toggle()
+            } label: {
+                Label(model.inspectorVisible ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.right")
+            }
+            .help(model.inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
+            .accessibilityLabel(model.inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
+
             Spacer()
 
             if model.renderQueue.isRunning {
@@ -204,7 +272,7 @@ struct EditorView: View {
             }
 
             Button {
-                exportTapped()
+                model.requestExport()
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
@@ -232,7 +300,7 @@ struct EditorView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .background(.ultraThinMaterial)
+        .background(.bar)
         // Announce status changes so background work and errors reach VoiceOver
         // (A11Y-CHECKLIST: status line is an announced live region).
         .onChange(of: model.statusMessage) { _, message in
@@ -251,26 +319,49 @@ struct EditorView: View {
                 .controlSize(.small)
         }
     }
+}
 
-    private func exportTapped() {
-        // Match the default preset's container so the panel filter, suggested
-        // filename, and the actual encode line up.
-        let preset = BuiltInExportPresets.defaultPreset
-        let panel = NSSavePanel()
-        if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
-            panel.allowedContentTypes = [type]
+private struct CollapsedSideRailView: View {
+    let onExpand: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Button {
+                onExpand()
+            } label: {
+                Image(systemName: "sidebar.right")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("Show inspector panel")
+            .accessibilityLabel("Show inspector panel")
+
+            Text("Inspector")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+                .rotationEffect(.degrees(90))
+                .frame(width: 30, height: 88)
+                .accessibilityHidden(true)
+
+            Spacer(minLength: 0)
         }
-        panel.nameFieldStringValue = "\(model.project.name).\(preset.defaultFilenameExtension)"
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await model.export(to: url) }
+        .padding(.vertical, 10)
+        .frame(maxHeight: .infinity)
+        .background(.bar)
     }
 }
 
 /// Bridges the SwiftUI window to AppKit so the title-bar edited dot, the
 /// represented document URL, and the save-on-close prompt reflect the model.
 /// The previous (SwiftUI) window delegate is preserved and forwarded to.
-private struct WindowConfigurator: NSViewRepresentable {
+/// Bridges the SwiftUI editor view to its hosting `NSWindow` so the title-bar
+/// edited dot, the represented document URL, and the save-on-close prompt all
+/// reflect the model. `internal` (not `private`) so tests can reach the
+/// `Coordinator.looksLikeSwiftUIDefaultSize` predicate that gates the first-
+/// launch frame override.
+struct WindowConfigurator: NSViewRepresentable {
     let model: EditorModel
 
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
@@ -321,13 +412,72 @@ private struct WindowConfigurator: NSViewRepresentable {
                 return
             }
             if window !== self.window {
+                // Symmetric teardown for the prior window (future-proofs the
+                // moment a second editor scene or window rebuild lands — today
+                // teardown happens through viewDidMoveToWindow(nil), but this
+                // closes the asymmetry cheaply; audit P3).
+                if let previous = self.window, previous !== window,
+                   previous.delegate === self {
+                    previous.delegate = previousDelegate
+                }
                 self.window = window
                 if window.delegate !== self {
                     previousDelegate = window.delegate
                     window.delegate = self
                 }
+                Self.applyInitialFrameIfNeeded(window)
             }
             sync()
+        }
+
+        /// Size the editor to a comfortable canvas the first time it ever opens,
+        /// centred on the active screen. Guarded by a one-shot default so later
+        /// launches keep whatever size the user left it at.
+        private static var didEnqueueInitialFrame = false
+
+        private static func applyInitialFrameIfNeeded(_ window: NSWindow) {
+            let key = "editor.didSetInitialWindowFrame"
+            // `attach(to:)` can fire several times within one run-loop tick during
+            // window setup; the in-memory flag stops us enqueuing the deferred
+            // block more than once before the UserDefaults one-shot is written.
+            guard !didEnqueueInitialFrame, !UserDefaults.standard.bool(forKey: key) else { return }
+            didEnqueueInitialFrame = true
+            // Defer past SwiftUI's own first-layout sizing pass, which otherwise
+            // clobbers a frame set synchronously during attach. Only record the
+            // one-shot once the frame actually lands.
+            DispatchQueue.main.async {
+                // Upgrade safety (Codex P3 on d8c7ee2): if the window already
+                // has a non-default frame, AppKit/SwiftUI has restored a saved
+                // layout from a previous app version that pre-dates this
+                // one-shot marker. Honor that frame and just record the marker
+                // so future launches skip this branch entirely. Predicate is
+                // pulled into a pure helper so the gating is unit-testable.
+                let defaultSize = CGSize(width: 1360, height: 860)
+                guard looksLikeSwiftUIDefaultSize(window.frame.size, defaultSize: defaultSize) else {
+                    UserDefaults.standard.set(true, forKey: key)
+                    return
+                }
+                guard let screen = window.screen ?? NSScreen.main else { return }
+                let visible = screen.visibleFrame
+                let width = min(defaultSize.width, visible.width - 80)
+                let height = min(defaultSize.height, visible.height - 80)
+                let frame = NSRect(x: visible.midX - width / 2,
+                                   y: visible.midY - height / 2,
+                                   width: width, height: height)
+                window.setFrame(frame, display: true, animate: false)
+                UserDefaults.standard.set(true, forKey: key)
+            }
+        }
+
+        /// Pure helper that decides whether the window's current size matches
+        /// the SwiftUI `defaultSize` (within a 1 pt tolerance) — i.e. SwiftUI
+        /// has not yet been overridden by a restored frame. `nonisolated` so
+        /// tests can call it without main-actor ceremony, and so the
+        /// `applyInitialFrameIfNeeded` deferred block reaches it from the
+        /// `DispatchQueue.main.async` closure (audit P3).
+        nonisolated static func looksLikeSwiftUIDefaultSize(_ current: CGSize, defaultSize: CGSize) -> Bool {
+            abs(current.width - defaultSize.width) < 1
+                && abs(current.height - defaultSize.height) < 1
         }
 
         /// Mirrors the model's edited/URL state onto the window chrome.
@@ -355,4 +505,8 @@ private struct WindowConfigurator: NSViewRepresentable {
             return super.forwardingTarget(for: aSelector)
         }
     }
+}
+#Preview("Editor") {
+    EditorView(model: EditorModel())
+        .frame(width: 1180, height: 760)
 }
