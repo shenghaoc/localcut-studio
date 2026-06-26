@@ -46,11 +46,19 @@ struct SplitViewAutosaveConfigurator: NSViewRepresentable {
 
         func configureSplitView() {
             guard let splitView = nearestSplitView(matchingVertical: isVertical) else { return }
-            splitView.identifier = NSUserInterfaceItemIdentifier(autosaveName)
-            // Suspend autosave while disabled so a transient collapsed divider
-            // position isn't written over the saved expanded layout; the last
-            // saved positions stay in defaults and restore when re-enabled.
-            splitView.autosaveName = isEnabled ? NSSplitView.AutosaveName(autosaveName) : nil
+            let targetIdentifier = NSUserInterfaceItemIdentifier(autosaveName)
+            if splitView.identifier != targetIdentifier {
+                splitView.identifier = targetIdentifier
+            }
+            // Suspend autosave while disabled (nil) so a transient collapsed
+            // divider position isn't written over the saved expanded layout; the
+            // last saved positions stay in defaults and restore when re-enabled.
+            // Only assign when actually changed so this update-pass call doesn't
+            // re-trigger a restore or fight an active divider drag every frame.
+            let targetAutosaveName = isEnabled ? NSSplitView.AutosaveName(autosaveName) : nil
+            if splitView.autosaveName != targetAutosaveName {
+                splitView.autosaveName = targetAutosaveName
+            }
         }
 
         private func nearestSplitView(matchingVertical vertical: Bool) -> NSSplitView? {

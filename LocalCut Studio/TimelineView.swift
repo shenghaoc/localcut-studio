@@ -282,8 +282,14 @@ struct TimelineView: View {
                 }
             }
             .onChange(of: timelineScrollRequest) { _, _ in
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    proxy.scrollTo(TimelineScrollAnchor.viewportTarget, anchor: .leading)
+                // Defer one runloop: the same update changed
+                // timelineScrollTargetSeconds (and thus the anchor's spacer
+                // width), so scrolling synchronously would read the anchor's
+                // pre-layout geometry and target the previous position.
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        proxy.scrollTo(TimelineScrollAnchor.viewportTarget, anchor: .leading)
+                    }
                 }
             }
         }
