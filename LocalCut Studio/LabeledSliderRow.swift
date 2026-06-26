@@ -96,6 +96,7 @@ struct LabeledSliderRow<Value: BinaryFloatingPoint>: View where Value.Stride: Bi
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
+            .accessibilityHidden(true)
         }
     }
 
