@@ -138,7 +138,7 @@ struct EditorView: View {
                     .layoutPriority(1)
 
                 EditorSideRailView(model: model)
-                    .frame(minWidth: 288, idealWidth: 320)
+                    .frame(minWidth: 300, idealWidth: 340)
             }
             .frame(minHeight: 320)
 
