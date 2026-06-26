@@ -117,7 +117,14 @@ public nonisolated enum TimeRemapping {
             let interval = upper - lower
             guard interval > .zero else { continue }
 
-            let subdivisions = curve.keyframes.count > 1 ? segmentsPerPair : 1
+            // Only subdivide when the interval actually contains a speed ramp.
+            // An interval whose endpoint speeds match is constant and needs
+            // just one segment. Evaluating at the endpoints (rather than
+            // filtering keyframes by time) avoids CMTime comparison edge cases.
+            let speedAtLower = clampedSpeed(curve.value(at: lower))
+            let speedAtUpper = clampedSpeed(curve.value(at: upper))
+            let speedsVary = abs(speedAtLower - speedAtUpper) > 0.0001
+            let subdivisions = speedsVary ? segmentsPerPair : 1
             for subIndex in 0..<subdivisions {
                 let startFraction = Double(subIndex) / Double(subdivisions)
                 let endFraction = Double(subIndex + 1) / Double(subdivisions)

@@ -499,14 +499,17 @@ final class EditorModel {
     /// speed and skin-smooth keyframe authoring paths so the two can't drift.
     private var selectedClipSourceLocalPlayheadTime: CMTime? {
         guard let clip = selectedClip else { return nil }
-        // `currentTime` is effective (rippled) time; convert it to this clip's
-        // authored time by adding back the leftward transition ripple, mirroring
-        // `splitSelectedClipAtPlayhead`. Otherwise a clip after an upstream
-        // transition maps the playhead to the wrong source offset.
+        // `currentTime` is effective (rippled) time; convert it to authored time
+        // via the layout's authored-times mapping. Using `shift(at:)` with the
+        // clip's start would assume a constant shift across the entire clip, but
+        // a transition cut *inside* the clip changes the shift for later pieces.
+        // `authoredTimes` returns every authored time that draws at this effective
+        // time, so we pick the one that falls within the selected clip's authored
+        // range.
         let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks.map(\.clips))
-        let shift = TransitionLayout.shift(at: clip.timelineStart, cuts: cuts)
-        let playhead = CMTime(seconds: currentTime, preferredTimescale: 600) + shift
-        guard playhead >= clip.timelineStart, playhead <= clip.timelineEnd else { return nil }
+        let playheadEffective = CMTime(seconds: currentTime, preferredTimescale: 600)
+        let candidates = TransitionLayout.authoredTimes(forEffective: playheadEffective, cuts: cuts)
+        guard let playhead = candidates.first(where: { $0 >= clip.timelineStart && $0 <= clip.timelineEnd }) else { return nil }
         let outputOffset = CMTimeMaximum(.zero, CMTimeMinimum(playhead - clip.timelineStart, clip.outputDuration))
         return clip.sourceOffset(forOutputOffset: outputOffset)
     }

@@ -187,15 +187,17 @@ final class ProjectEditingService {
                     } else {
                         sourceDelta = clip.sourceOffset(forOutputOffset: outputDelta)
                     }
-                    clip.sourceStart = CMTimeMaximum(.zero, clip.sourceStart + sourceDelta)
+                    let newSourceStart = CMTimeMaximum(.zero, clip.sourceStart + sourceDelta)
+                    let actualSourceDelta = newSourceStart - clip.sourceStart
+                    clip.sourceStart = newSourceStart
                     clip.timelineStart = newTimelineStart
-                    clip.duration = CMTimeMaximum(clip.duration - sourceDelta, .zero)
-                    // Source origin moved by `sourceDelta`; rebase the
+                    clip.duration = CMTimeMaximum(clip.duration - actualSourceDelta, .zero)
+                    // Source origin moved by `actualSourceDelta`; rebase the
                     // clip-source-relative speed and skin-smooth keyframes so the
                     // ramps stay pinned to the same media frames after the trim.
-                    clip.speedCurve = Self.rebaseKeyframeTrack(clip.speedCurve, originShiftedBy: sourceDelta)
+                    clip.speedCurve = Self.rebaseKeyframeTrack(clip.speedCurve, originShiftedBy: actualSourceDelta)
                     clip.effects = Self.mapSkinSmoothStrength(in: clip.effects) {
-                        Self.rebaseKeyframeTrack($0, originShiftedBy: sourceDelta)
+                        Self.rebaseKeyframeTrack($0, originShiftedBy: actualSourceDelta)
                     }
 
                 case .right:
