@@ -165,8 +165,23 @@ are all standard SwiftUI/AppKit (no new paradigms):
   transition / marker / render affordances that have no system-control
   equivalent, while standard list-row selection uses the system colour.
 
-### Deferred (medium-risk interaction work — documented, not yet done)
+### Keyboard & direct-manipulation follow-ups (now complete)
 
-Split-view divider autosave, a draggable playhead head, a clip-body move cursor,
-and media-bin arrow-key navigation are additive conveniences that need manual
-interaction testing to land safely; tracked for a follow-up.
+The medium-risk interaction items are done and manually verified with real media:
+
+- **Split-view divider autosave** — `SplitViewAutosaveConfigurator` walks to the
+  enclosing `NSSplitView` and sets `autosaveName`, so media-bin / inspector /
+  timeline divider positions persist across launches.
+- **Media-bin arrow-key navigation** — focusable rows (`@FocusState`) with
+  `onMoveCommand` / `onDeleteCommand` and a focus ring; timeline clips are
+  likewise focusable with arrow-key movement that scrolls the focused clip into
+  view, plus Page-Left/Right and center-playhead buttons and an
+  accessibility-adjustable timeline viewport.
+- **Long-clip identity** — `ClipIdentityOverlay` repeats the clip's glyph + name
+  across a long body so the tail of a clip isn't an unlabeled slab.
+- **Draggable playhead head** — the head is a grab target at the ruler/lane
+  boundary that scrubs by drag translation (origin-independent); the scrub line
+  stays non-interactive so clicks still fall through to clips and the ruler.
+- **Clip-body move cursor** — declarative `.pointerStyle(.grabIdle/.grabActive)`
+  on the clip body: region-based, so there's no `NSCursor` stack to unbalance,
+  and it coexists with the trim handles' resize cursor.

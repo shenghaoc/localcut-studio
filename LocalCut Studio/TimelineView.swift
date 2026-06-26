@@ -650,6 +650,11 @@ struct TimelineView: View {
         .onHover { hovering in
             if !hovering { hoverEdge = nil }
         }
+        // Move affordance: open hand over the clip body, closed hand while it's
+        // being dragged. Declarative `.pointerStyle` is region-based (no NSCursor
+        // push/pop stack to unbalance) and coexists with the trim handles, whose
+        // edge zones sit on top and show the resize cursor.
+        .pointerStyle(isDragging(clip.id) ? .grabActive : .grabIdle)
     }
 
     private func trimHandle(edge: EditorModel.TrimEdge, clip: Clip, shift: CMTime) -> some View {
@@ -967,27 +972,52 @@ private struct PlayheadView: View {
 
     private let headWidth: CGFloat = 11
     private let headHeight: CGFloat = 7
-
     private let lineWidth: CGFloat = 1.5
+    // Grab target around the head: wider than the 11pt triangle so it's an easy
+    // hit, and only as tall as the ruler/lane boundary band so it doesn't cover
+    // the marker label band above it.
+    private let headHitWidth: CGFloat = 22
+    private let headHitHeight: CGFloat = 16
+
+    // Playhead time captured when the head drag begins, so we scrub by the
+    // gesture's translation (origin-independent — the head is an offset subview).
+    @State private var dragStartSeconds: Double?
 
     var body: some View {
         let x = CGFloat(model.currentTime) * pps
         // Both elements are centred on `x` (the head triangle's midpoint and the
         // line's mid-width), so the head cap sits exactly over the scrub line.
         ZStack(alignment: .topLeading) {
-            // Small downward head pinned to the ruler/lane boundary.
-            PlayheadHead()
-                .fill(.red)
-                .frame(width: headWidth, height: headHeight)
-                .offset(x: x - headWidth / 2, y: rulerHeight - headHeight)
-            // Precise scrub line spanning the full timeline height.
+            // Precise scrub line spanning the full timeline height — kept
+            // non-interactive so clicks fall through to clips and the ruler.
             Rectangle()
                 .fill(.red)
                 .frame(width: lineWidth)
                 .frame(maxHeight: .infinity)
                 .offset(x: x - lineWidth / 2)
+                .allowsHitTesting(false)
+
+            // Draggable head pinned to the ruler/lane boundary.
+            PlayheadHead()
+                .fill(.red)
+                .frame(width: headWidth, height: headHeight)
+                .frame(width: headHitWidth, height: headHitHeight, alignment: .bottom)
+                .contentShape(Rectangle())
+                .offset(x: x - headHitWidth / 2, y: rulerHeight - headHitHeight)
+                .pointerStyle(dragStartSeconds == nil ? .grabIdle : .grabActive)
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            let start = dragStartSeconds ?? model.currentTime
+                            if dragStartSeconds == nil { dragStartSeconds = start }
+                            if model.selectedMarkerID != nil { model.selectedMarkerID = nil }
+                            model.seek(toSeconds: start + Double(value.translation.width / pps))
+                        }
+                        .onEnded { _ in dragStartSeconds = nil }
+                )
+                .help("Drag to scrub")
+                .accessibilityHidden(true)
         }
-        .allowsHitTesting(false)
     }
 }
 

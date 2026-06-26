@@ -99,8 +99,17 @@
   pointing-hand cursor.
 - [x] **T9.6** Unify list-row selection on the system selection colour (media
   bin + markers).
-- [ ] **T9.7** (deferred, medium-risk) Split-view divider autosave, draggable
-  playhead head, clip-body move cursor, media-bin arrow-key navigation.
+- [x] **T9.7** Formerly-deferred interaction work, now complete:
+  - Split-view divider autosave (`SplitViewAutosaveConfigurator`) and media-bin
+    arrow-key navigation (`@FocusState` + `onMoveCommand`) — landed in `f4a6cd7`
+    alongside timeline clip keyboard nav, page-scroll buttons, and repeated
+    long-clip identity labels.
+  - Draggable playhead head — the head is a grab target at the ruler/lane
+    boundary that scrubs by drag translation; the scrub line stays
+    non-interactive (`PlayheadView`).
+  - Clip-body move cursor — declarative `.pointerStyle(.grabIdle/.grabActive)` on
+    the clip body (region-based, no `NSCursor` stack to unbalance; coexists with
+    the trim handles' resize cursor).
 
 ## Verification
 
