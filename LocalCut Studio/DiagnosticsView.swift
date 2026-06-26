@@ -38,12 +38,11 @@ struct DiagnosticsView: View {
         }
         .padding(12)
         .frame(width: 280, alignment: .leading)
-        .background(VisualEffectBackground())
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(.separator, lineWidth: 1))
-        .shadow(radius: 8, y: 2)
+        // Liquid Glass: a diagnostics HUD is a functional panel floating over the
+        // editor content — the textbook case for the regular glass material,
+        // which supplies its own blur, border, and luminosity adaptation (no
+        // hand-rolled NSVisualEffectView / stroke / hard-coded colour).
+        .glassEffect(in: .rect(cornerRadius: 12))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Diagnostics panel")
     }
@@ -157,17 +156,3 @@ struct DiagnosticsView: View {
     }
 }
 
-/// Wraps `NSVisualEffectView` so a SwiftUI panel can pick up the system's
-/// translucent HUD background without leaking AppKit through the rest of the
-/// view code.
-struct VisualEffectBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .hudWindow
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-}

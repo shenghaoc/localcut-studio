@@ -433,3 +433,8 @@ private struct WindowConfigurator: NSViewRepresentable {
         }
     }
 }
+#Preview("Editor") {
+    EditorView(model: EditorModel())
+        .frame(width: 1180, height: 760)
+}
+
