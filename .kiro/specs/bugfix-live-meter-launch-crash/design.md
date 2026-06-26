@@ -27,7 +27,7 @@ Make live metering strictly opt-in and keep every failure recoverable.
    > guard (B5)* below.
 
 4. **Pre-flight guard (B5).** Before calling `start()`, validate the output
-   device: `liveEngine.outputNode.outputFormat(forBus: 0)` and throw
+   device: `liveEngine.outputNode.inputFormat(forBus: 0)` and throw
    `LiveMeterError.unavailableOutputFormat` when it reports a zero sample-rate /
    channel count. This converts the no-device / not-yet-ready case (the raise
    condition) into a catchable Swift error *before* `start()` runs, so the
@@ -44,7 +44,7 @@ func prepareLive() {
     do {
         // B5: pre-flight the output device so the no-format case throws a
         // catchable Swift error before start()/prepare() can raise an ObjC one.
-        let outputFormat = liveEngine.outputNode.outputFormat(forBus: 0)
+        let outputFormat = liveEngine.outputNode.inputFormat(forBus: 0)
         guard outputFormat.sampleRate > 0, outputFormat.channelCount > 0 else {
             throw LiveMeterError.unavailableOutputFormat
         }

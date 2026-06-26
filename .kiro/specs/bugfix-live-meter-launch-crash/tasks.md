@@ -19,7 +19,7 @@
   retry.
 - [x] **T1.7** Expose observable `AudioMasterBus.isOfflineMetering` and show the
   meter during offline export (`isLiveRunning || isOfflineMetering`).
-- [x] **T1.8** (B5) Pre-flight `liveEngine.outputNode.outputFormat(forBus: 0)` in
+- [x] **T1.8** (B5) Pre-flight `liveEngine.outputNode.inputFormat(forBus: 0)` in
   `prepareLive()` and throw `LiveMeterError.unavailableOutputFormat` before
   `start()`, closing the uncatchable-ObjC-exception path B1 left open.
 

@@ -133,7 +133,7 @@ final class AudioMasterBus {
             // A Swift `do/catch` cannot intercept a raised ObjC exception, so
             // that case crashes the whole app. Validating the format first lets
             // us throw a Swift error (handled below) before reaching `prepare()`.
-            let outputFormat = liveEngine.outputNode.outputFormat(forBus: 0)
+            let outputFormat = liveEngine.outputNode.inputFormat(forBus: 0)
             guard outputFormat.sampleRate > 0, outputFormat.channelCount > 0 else {
                 throw LiveMeterError.unavailableOutputFormat
             }

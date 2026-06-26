@@ -89,7 +89,7 @@ the panel that starts the live graph), before any media import. The B2 format
 check ran only *after* `start()`, so it could never prevent the raise.
 
 - **Fix**: Pre-flight the output device in `prepareLive()` —
-  `liveEngine.outputNode.outputFormat(forBus: 0)` — and throw the existing
+  `liveEngine.outputNode.inputFormat(forBus: 0)` — and throw the existing
   `LiveMeterError.unavailableOutputFormat` (a catchable Swift error) **before**
   reaching the raising `start()` / `prepare()`. The no-device / not-yet-ready
   case now tears the engine down cleanly instead of trapping the whole app.
