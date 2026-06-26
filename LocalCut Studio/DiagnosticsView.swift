@@ -150,7 +150,7 @@ struct DiagnosticsView: View {
                         if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
                     }
                 }
-                .stroke(Color.accentColor, lineWidth: 1.5)
+                .stroke(Color.lcAccent, lineWidth: 1.5)
             }
         }
     }

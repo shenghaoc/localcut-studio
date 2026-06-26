@@ -64,7 +64,7 @@ struct MarkersInspectorView: View {
         .padding(.vertical, 2)
         .background(
             // Subtle row highlight when this marker is the timeline selection.
-            (model.selectedMarkerID == marker.id ? Color.accentColor.opacity(0.08) : Color.clear)
+            (model.selectedMarkerID == marker.id ? Color.lcAccent.opacity(0.08) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 4)))
         .contentShape(Rectangle())
         // Funnel through `selectMarker(id:)` so the row tap honours the same

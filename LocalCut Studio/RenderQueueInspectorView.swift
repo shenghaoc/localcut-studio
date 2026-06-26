@@ -160,7 +160,7 @@ struct RenderQueueInspectorView: View {
         let colour: Color
         switch job.status {
         case .queued: label = "Queued"; colour = .secondary
-        case .running: label = "Running \(Int(job.progress * 100))%"; colour = .accentColor
+        case .running: label = "Running \(Int(job.progress * 100))%"; colour = .lcAccent
         case .completed: label = "Completed"; colour = .green
         case .cancelled: label = "Cancelled"; colour = .secondary
         case .failed: label = "Failed"; colour = .red

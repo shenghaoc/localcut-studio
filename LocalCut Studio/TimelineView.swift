@@ -272,8 +272,8 @@ struct TimelineView: View {
     @ViewBuilder
     private func markerGlyph(_ marker: TimelineMarker, isSelected: Bool) -> some View {
         let x = CGFloat(marker.time.seconds) * pps
-        let fill: Color = marker.colour.map { Color(cgColor: $0.cgColor) } ?? Color.accentColor
-        let strokeColor: Color = isSelected ? .accentColor : .black.opacity(0.4)
+        let fill: Color = marker.colour.map { Color(cgColor: $0.cgColor) } ?? Color.lcAccent
+        let strokeColor: Color = isSelected ? .lcAccent : .black.opacity(0.4)
         let strokeWidth: CGFloat = isSelected ? 2 : 1
         let labelWidth: CGFloat = 60
         VStack(spacing: 1) {
@@ -423,7 +423,7 @@ struct TimelineView: View {
                 .fill(Color.orange.opacity(isSelected ? 0.5 : 0.3))
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(isSelected ? Color.accentColor : Color.orange.opacity(0.8),
+                        .strokeBorder(isSelected ? Color.lcAccent : Color.orange.opacity(0.8),
                                       lineWidth: isSelected ? 2 : 1))
                 .overlay(
                     Image(systemName: type.symbolName)
@@ -474,7 +474,7 @@ struct TimelineView: View {
                 }
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(isSelected ? Color.accentColor : baseColor.opacity(0.6),
+                        .strokeBorder(isSelected ? Color.lcAccent : baseColor.opacity(0.6),
                                       lineWidth: isSelected ? 2 : 1))
 
             // Edge zones for trim handles
