@@ -87,14 +87,8 @@ struct PreviewView: View {
                 .accessibilityLabel("Preview")
                 .accessibilityValue(previewAccessibilityValue)
                 .overlay(alignment: .bottom) {
-                    TransportControls(
-                        isPlaying: model.isPlaying,
-                        current: TimeFormatting.timecode(model.currentTime),
-                        duration: TimeFormatting.timecode(model.totalDuration),
-                        hasContent: model.player.currentItem != nil,
-                        skipToStart: { model.seek(toSeconds: 0) },
-                        togglePlayPause: { model.togglePlayPause() })
-                    .padding(.bottom, 16)
+                    TransportOverlay(model: model)
+                        .padding(.bottom, 16)
                 }
                 .overlay(alignment: .topTrailing) {
                     formatBadge.padding(12)
@@ -142,6 +136,23 @@ struct PreviewView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text("Render format"))
             .accessibilityValue(Text("\(Int(model.project.renderSize.width)) by \(Int(model.project.renderSize.height)), \(Int(model.project.frameRate)) frames per second"))
+    }
+
+    /// Extracted view to isolate `@Observable` high-frequency updates (like `model.currentTime`)
+    /// from the main `PreviewView.body`, preventing unnecessary re-renders of the large
+    /// canvas component during playback.
+    private struct TransportOverlay: View {
+        var model: EditorModel
+
+        var body: some View {
+            TransportControls(
+                isPlaying: model.isPlaying,
+                current: TimeFormatting.timecode(model.currentTime),
+                duration: TimeFormatting.timecode(model.totalDuration),
+                hasContent: model.player.currentItem != nil,
+                skipToStart: { model.seek(toSeconds: 0) },
+                togglePlayPause: { model.togglePlayPause() })
+        }
     }
 
     private var previewAccessibilityValue: String {
