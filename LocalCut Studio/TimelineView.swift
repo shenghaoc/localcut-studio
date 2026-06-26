@@ -15,6 +15,9 @@ struct TimelineView: View {
     private let markerGlyphSize: CGFloat = 12
     @State private var renamingMarkerID: TimelineMarker.ID?
     @State private var renameDraft: String = ""
+    @State private var timelineScrollTargetSeconds: Double = 0
+    @State private var timelineScrollRequest = 0
+    @FocusState private var focusedClipID: Clip.ID?
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
 
@@ -69,6 +72,16 @@ struct TimelineView: View {
         case right(Clip.ID)
     }
 
+    private enum TimelineScrollAnchor: Hashable {
+        case viewportTarget
+    }
+
+    private struct ClipFocusCandidate {
+        let id: Clip.ID
+        let startSeconds: Double
+        let trackIndex: Int
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -82,6 +95,15 @@ struct TimelineView: View {
         .background(MarkerKeyHandler(onAdd: { model.addMarkerAtPlayhead() },
                                      onRename: { beginRenamingSelectedMarker() },
                                      onDelete: { deleteSelectedMarkerIfAny() }))
+        .onMoveCommand(perform: moveTimelineSelection)
+        .onChange(of: focusedClipID) { _, newValue in
+            guard let newValue, model.selectedClipID != newValue else { return }
+            model.selectClip(id: newValue)
+            scrollTimelineToClip(id: newValue)
+        }
+        .onChange(of: model.selectedClipID) { _, newValue in
+            focusedClipID = newValue
+        }
     }
 
     /// Opens the rename popover for the selected marker; reports guidance when
@@ -109,6 +131,39 @@ struct TimelineView: View {
 
     private var header: some View {
         EditorPanelHeader("Timeline", verticalPadding: 6) {
+            Button {
+                scrollTimelinePage(-1)
+            } label: {
+                Image(systemName: "arrow.left.to.line.compact")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .disabled(model.totalDuration <= 0)
+            .help("Scroll timeline left")
+            .accessibilityLabel("Scroll timeline left")
+
+            Button {
+                requestTimelineScroll(to: model.currentTime)
+            } label: {
+                Image(systemName: "smallcircle.filled.circle")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .disabled(model.totalDuration <= 0)
+            .help("Center playhead in timeline")
+            .accessibilityLabel("Center playhead in timeline")
+
+            Button {
+                scrollTimelinePage(1)
+            } label: {
+                Image(systemName: "arrow.right.to.line.compact")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .disabled(model.totalDuration <= 0)
+            .help("Scroll timeline right")
+            .accessibilityLabel("Scroll timeline right")
+
             Image(systemName: "minus.magnifyingglass")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -186,23 +241,52 @@ struct TimelineView: View {
     // MARK: Scrollable timeline content
 
     private var timelineScroller: some View {
-        ScrollView([.horizontal]) {
-            ZStack(alignment: .topLeading) {
-                VStack(spacing: 0) {
-                    ruler
-                    ForEach(Array(tracks.enumerated()), id: \.element.id) { trackIndex, track in
-                        Divider()
-                        lane(for: track, trackIndex: trackIndex)
+        ScrollViewReader { proxy in
+            ScrollView([.horizontal]) {
+                ZStack(alignment: .topLeading) {
+                    VStack(spacing: 0) {
+                        ruler
+                        ForEach(Array(tracks.enumerated()), id: \.element.id) { trackIndex, track in
+                            Divider()
+                            lane(for: track, trackIndex: trackIndex)
+                        }
+                        ForEach(captionTracks) { track in
+                            Divider()
+                            captionLane(for: track)
+                        }
                     }
-                    ForEach(captionTracks) { track in
-                        Divider()
-                        captionLane(for: track)
-                    }
+                    timelineScrollAnchor
+                    PlayheadView(model: model, pps: pps, rulerHeight: rulerHeight)
                 }
-                PlayheadView(model: model, pps: pps, rulerHeight: rulerHeight)
+                .frame(width: contentWidth, alignment: .topLeading)
             }
-            .frame(width: contentWidth, alignment: .topLeading)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Timeline viewport")
+            .accessibilityValue("Around \(TimeFormatting.timecode(timelineScrollTargetSeconds))")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment:
+                    scrollTimelinePage(1)
+                case .decrement:
+                    scrollTimelinePage(-1)
+                @unknown default:
+                    break
+                }
+            }
+            .onChange(of: timelineScrollRequest) { _, _ in
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    proxy.scrollTo(TimelineScrollAnchor.viewportTarget, anchor: .leading)
+                }
+            }
         }
+    }
+
+    private var timelineScrollAnchor: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .offset(x: CGFloat(timelineScrollTargetSeconds) * pps, y: 0)
+            .id(TimelineScrollAnchor.viewportTarget)
+            .accessibilityHidden(true)
     }
 
     private var ruler: some View {
@@ -377,9 +461,8 @@ struct TimelineView: View {
             Color.lcLane
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    model.selectedClipID = nil
-                    model.selectedTransitionClipID = nil
-                    model.selectedMarkerID = nil
+                    model.clearSelection()
+                    focusedClipID = nil
                 }
             ForEach(track.clips) { clip in
                 clipBlock(clip, kind: track.kind, trackID: track.id, trackIndex: trackIndex,
@@ -400,9 +483,8 @@ struct TimelineView: View {
             Color.lcLane
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    model.selectedClipID = nil
-                    model.selectedTransitionClipID = nil
-                    model.selectedMarkerID = nil
+                    model.clearSelection()
+                    focusedClipID = nil
                 }
             ForEach(track.lines) { line in
                 captionLineBlock(line, in: track)
@@ -474,10 +556,8 @@ struct TimelineView: View {
                 .offset(x: x, y: 8)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    model.selectedClipID = nil
-                    model.selectedMediaID = nil
-                    model.selectedMarkerID = nil
-                    model.selectedTransitionClipID = placement.clip.id
+                    model.selectTransition(clipID: placement.clip.id)
+                    focusedClipID = nil
                 }
                 .accessibilityLabel("\(type.displayName) transition")
                 .accessibilityAddTraits(.isButton)
@@ -506,18 +586,9 @@ struct TimelineView: View {
         return ZStack {
             RoundedRectangle(cornerRadius: 6)
                 .fill(baseColor.opacity(isDragging(clip.id) ? 0.2 : 0.35))
-                .overlay(alignment: .leading) {
-                    // Lead with a kind glyph so video vs audio reads without
-                    // relying on the fill hue alone (Differentiate Without Color).
-                    HStack(spacing: 4) {
-                        Image(systemName: kind == .video ? "film" : "waveform")
-                            .imageScale(.small)
-                        Text(clipName ?? "Clip")
-                            .lineLimit(1)
-                    }
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .foregroundStyle(.primary)
+                .overlay {
+                    ClipIdentityOverlay(name: clipName ?? "Clip",
+                                        systemImage: kind == .video ? "film" : "waveform")
                 }
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
@@ -535,13 +606,11 @@ struct TimelineView: View {
         .offset(x: x, y: displayValues.yOffset)
         .opacity(displayValues.opacity)
         .onTapGesture {
-            model.selectedClipID = clip.id
-            model.selectedTransitionClipID = nil
-            model.selectedMarkerID = nil
+            selectTimelineClip(clip)
         }
         .contextMenu {
             Button("Split at Playhead") {
-                model.selectedClipID = clip.id
+                model.selectClip(id: clip.id)
                 model.splitSelectedClipAtPlayhead()
             }
             // Transitions are video-only — hide the entry on audio clips
@@ -556,15 +625,28 @@ struct TimelineView: View {
             }
             Divider()
             Button("Delete Clip", role: .destructive) {
-                model.selectedClipID = clip.id
+                model.selectClip(id: clip.id)
                 model.deleteSelectedClip()
             }
         }
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
+        .focusable()
+        .focused($focusedClipID, equals: clip.id)
         .accessibilityLabel(nameLabel)
         .accessibilityValue(valueLabel)
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAction(named: "Select") {
+            selectTimelineClip(clip)
+        }
+        .accessibilityAction(named: "Split at Playhead") {
+            model.selectClip(id: clip.id)
+            model.splitSelectedClipAtPlayhead()
+        }
+        .accessibilityAction(named: "Delete Clip") {
+            model.selectClip(id: clip.id)
+            model.deleteSelectedClip()
+        }
         .onHover { hovering in
             if !hovering { hoverEdge = nil }
         }
@@ -764,9 +846,117 @@ struct TimelineView: View {
         let candidates: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300]
         return candidates.first { $0 >= raw } ?? 600
     }
+
+    // MARK: - Keyboard focus + timeline scrolling
+
+    private var clipFocusCandidates: [ClipFocusCandidate] {
+        tracks.enumerated().flatMap { trackIndex, track in
+            track.clips.map {
+                ClipFocusCandidate(id: $0.id,
+                                   startSeconds: $0.timelineStart.seconds,
+                                   trackIndex: trackIndex)
+            }
+        }
+        .sorted {
+            if $0.startSeconds == $1.startSeconds {
+                return $0.trackIndex < $1.trackIndex
+            }
+            return $0.startSeconds < $1.startSeconds
+        }
+    }
+
+    private var timelinePageSeconds: Double {
+        max(5, 640 / max(Double(pps), 1))
+    }
+
+    private func selectTimelineClip(_ clip: Clip) {
+        model.selectClip(id: clip.id)
+        focusedClipID = clip.id
+        requestTimelineScroll(to: clip.timelineStart.seconds)
+    }
+
+    private func moveTimelineSelection(_ direction: MoveCommandDirection) {
+        let candidates = clipFocusCandidates
+        guard !candidates.isEmpty else { return }
+        let currentID = focusedClipID ?? model.selectedClipID
+        let currentIndex = currentID.flatMap { id in candidates.firstIndex { $0.id == id } }
+
+        let targetIndex: Int? = switch direction {
+        case .left, .up:
+            currentIndex.map { max(0, $0 - 1) } ?? candidates.count - 1
+        case .right, .down:
+            currentIndex.map { min(candidates.count - 1, $0 + 1) } ?? 0
+        default:
+            nil
+        }
+
+        guard let targetIndex else { return }
+        let target = candidates[targetIndex]
+        model.selectClip(id: target.id)
+        focusedClipID = target.id
+        requestTimelineScroll(to: target.startSeconds)
+    }
+
+    private func scrollTimelineToClip(id: Clip.ID) {
+        guard let candidate = clipFocusCandidates.first(where: { $0.id == id }) else { return }
+        requestTimelineScroll(to: candidate.startSeconds)
+    }
+
+    private func scrollTimelinePage(_ direction: Int) {
+        requestTimelineScroll(to: timelineScrollTargetSeconds + Double(direction) * timelinePageSeconds)
+    }
+
+    private func requestTimelineScroll(to seconds: Double) {
+        timelineScrollTargetSeconds = min(max(seconds, 0), max(model.totalDuration, 0))
+        timelineScrollRequest += 1
+    }
 }
 
 // MARK: - Playhead
+
+private struct ClipIdentityOverlay: View {
+    let name: String
+    let systemImage: String
+
+    private let repeatEvery: CGFloat = 360
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                ForEach(labelOffsets(width: proxy.size.width), id: \.self) { offset in
+                    label
+                        .offset(x: offset)
+                }
+            }
+        }
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var label: some View {
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .imageScale(.small)
+            Text(name)
+                .lineLimit(1)
+        }
+        .font(.caption2)
+        .padding(.horizontal, 6)
+        .foregroundStyle(.primary)
+    }
+
+    private func labelOffsets(width: CGFloat) -> [CGFloat] {
+        guard width > 0 else { return [] }
+        var offsets: [CGFloat] = [6]
+        var next = repeatEvery
+        while next < width - 20 {
+            offsets.append(next)
+            next += repeatEvery
+        }
+        return offsets
+    }
+}
 
 /// The red scrubber line. Isolated so it can re-evaluate on every
 /// `currentTime` tick without invalidating the rest of `TimelineView`.

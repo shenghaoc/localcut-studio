@@ -192,10 +192,14 @@ struct EditorView: View {
                 }
             }
             .frame(minHeight: 320)
+            .background(SplitViewAutosaveConfigurator(autosaveName: "editor.workspace.columns",
+                                                       isVertical: true))
 
             TimelineView(model: model)
                 .frame(minHeight: 200, idealHeight: 260)
         }
+        .background(SplitViewAutosaveConfigurator(autosaveName: "editor.workspace.rows",
+                                                   isVertical: false))
         .toolbar { toolbarContent }
         .navigationTitle(model.project.name)
         .tint(.lcAccent)
@@ -469,4 +473,3 @@ private struct WindowConfigurator: NSViewRepresentable {
     EditorView(model: EditorModel())
         .frame(width: 1180, height: 760)
 }
-

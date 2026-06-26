@@ -9,6 +9,7 @@ struct MediaBinView: View {
     @Bindable var model: EditorModel
     @State private var showImporter = false
     @State private var copyImportsIntoBundle = true
+    @FocusState private var focusedMediaID: MediaItem.ID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,9 +52,14 @@ struct MediaBinView: View {
                             ForEach(model.project.mediaItems) { item in
                                 MediaRow(item: item,
                                          isSelected: model.selectedMediaID == item.id,
-                                         onSelect: { model.selectedMediaID = item.id },
+                                         isFocused: focusedMediaID == item.id,
+                                         onSelect: {
+                                             selectMedia(item.id)
+                                         },
                                          onAdd: { model.addToTimeline(mediaID: item.id) },
                                          onRemove: { model.removeMedia(itemID: item.id) })
+                                    .focusable()
+                                    .focused($focusedMediaID, equals: item.id)
                                     .contextMenu {
                                         Button("Add to Timeline") { model.addToTimeline(mediaID: item.id) }
                                         Divider()
@@ -63,6 +69,8 @@ struct MediaBinView: View {
                         }
                         .padding(8)
                     }
+                    .onMoveCommand(perform: moveMediaSelection)
+                    .onDeleteCommand(perform: deleteFocusedMedia)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -91,12 +99,50 @@ struct MediaBinView: View {
                 Task { await model.importMedia(urls: urls, wantsBundling: wantsBundling) }
             }
         }
+        .onChange(of: model.selectedMediaID) { _, newValue in
+            focusedMediaID = newValue
+        }
+        .onChange(of: model.project.mediaItems.map(\.id)) { _, ids in
+            if let focusedMediaID, !ids.contains(focusedMediaID) {
+                self.focusedMediaID = ids.first
+            }
+        }
+    }
+
+    private func selectMedia(_ id: MediaItem.ID) {
+        model.selectMedia(id: id)
+        focusedMediaID = id
+    }
+
+    private func moveMediaSelection(_ direction: MoveCommandDirection) {
+        let items = model.project.mediaItems
+        guard !items.isEmpty else { return }
+        let currentID = focusedMediaID ?? model.selectedMediaID
+        let currentIndex = currentID.flatMap { id in items.firstIndex { $0.id == id } }
+
+        let targetIndex: Int? = switch direction {
+        case .up:
+            currentIndex.map { max(0, $0 - 1) } ?? items.count - 1
+        case .down:
+            currentIndex.map { min(items.count - 1, $0 + 1) } ?? 0
+        default:
+            nil
+        }
+
+        guard let targetIndex else { return }
+        selectMedia(items[targetIndex].id)
+    }
+
+    private func deleteFocusedMedia() {
+        guard let id = focusedMediaID ?? model.selectedMediaID else { return }
+        model.removeMedia(itemID: id)
     }
 }
 
 private struct MediaRow: View {
     let item: MediaItem
     let isSelected: Bool
+    let isFocused: Bool
     let onSelect: () -> Void
     let onAdd: () -> Void
     let onRemove: () -> Void
@@ -129,6 +175,9 @@ private struct MediaRow: View {
         .padding(6)
         .background(isSelected ? Color(.selectedContentBackgroundColor) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(isFocused ? Color.lcAccent : Color.clear, lineWidth: 2))
     }
 
     private var mediaSummary: some View {
