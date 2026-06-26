@@ -19,6 +19,9 @@
   retry.
 - [x] **T1.7** Expose observable `AudioMasterBus.isOfflineMetering` and show the
   meter during offline export (`isLiveRunning || isOfflineMetering`).
+- [x] **T1.8** (B5) Pre-flight `liveEngine.outputNode.outputFormat(forBus: 0)` in
+  `prepareLive()` and throw `LiveMeterError.unavailableOutputFormat` before
+  `start()`, closing the uncatchable-ObjC-exception path B1 left open.
 
 ## Verification
 
@@ -27,3 +30,6 @@
   reopen/crash loop.
 - [x] **V3** Accessibility inspection confirms the Audio inspector reports
   `Live meter idle.` and exposes the `Start live audio meter` action.
+- [x] **V4** (B5) `AudioMasterBus` logic tests pass (offline build, meter,
+  gain), and a state-restoration relaunch reaches the editor window instead of
+  trapping in `AVAudioEngineGraph::Initialize`.
