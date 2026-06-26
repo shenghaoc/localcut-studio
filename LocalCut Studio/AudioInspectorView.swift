@@ -73,17 +73,24 @@ struct AudioInspectorView: View {
             // forcing the bus to mirror its snapshot onto an `@Observable`
             // property on every audio block.
             //
-            if model.audioBus.isLiveRunning {
+            if model.audioBus.isLiveRunning || model.audioBus.isOfflineMetering {
                 SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { _ in
                     MeterStrip(snapshot: model.audioBus.meterSnapshot)
                         .frame(height: 18)
                         .accessibilityLabel("Master output meter")
                 }
             } else {
-                Text(audioMeterStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(audioMeterStatus)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(audioMeterStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(audioMeterStatus)
+                    Button("Start Live Meter") {
+                        model.prepareAudioMetering()
+                    }
+                    .controlSize(.small)
+                    .accessibilityLabel("Start live audio meter")
+                }
             }
 
             ForEach(model.project.audioTracks) { track in
@@ -122,7 +129,7 @@ struct AudioInspectorView: View {
         if let error = model.audioBus.lastStartError {
             return "Live metering unavailable: \(error)"
         }
-        return "Starting live meter…"
+        return "Live meter idle."
     }
 
     private func trackGainBinding(track: Track) -> Binding<Double> {

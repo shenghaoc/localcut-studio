@@ -51,6 +51,7 @@ final class AudioMasterBus {
 
     func setOfflineMeteringActive(_ active: Bool) {
         offlineMeterActiveLock.withLock { $0 = active }
+        isOfflineMetering = active
     }
 
     nonisolated func publishOfflineMeterSnapshot(_ snapshot: AudioMeterSnapshot) {
@@ -79,6 +80,12 @@ final class AudioMasterBus {
 
     private(set) var isLiveRunning = false
     private(set) var isOfflineRunning = false
+
+    /// Mirrors `offlineMeterActiveLock` on the main actor so SwiftUI can show
+    /// the meter strip while an export publishes offline snapshots — even when
+    /// the live engine is stopped (the common case now that live metering is
+    /// opt-in). The lock copy stays the source of truth for the audio thread.
+    private(set) var isOfflineMetering = false
 
     /// Audio-thread-published meter snapshot. `nonisolated` because the lock
     /// itself is `Sendable` and is the actual synchronisation primitive — the
@@ -116,11 +123,8 @@ final class AudioMasterBus {
     func prepareLive() {
         guard !isLiveRunning else { return }
         do {
-            // `prepare()` allocates render resources without starting; needed
-            // for some node types before `start()`.
-            liveEngine.prepare()
             try liveEngine.start()
-            installLiveTapIfNeeded()
+            try installLiveTapIfNeeded()
             isLiveRunning = true
             lastStartError = nil
         } catch {
@@ -147,14 +151,34 @@ final class AudioMasterBus {
         isLiveRunning = false
     }
 
-    private func installLiveTapIfNeeded() {
+    private func installLiveTapIfNeeded() throws {
         guard !liveTapInstalled else { return }
         let format = liveEngine.mainMixerNode.outputFormat(forBus: 0)
-        // Bail rather than crash if the format is unavailable (no audio device).
-        guard format.channelCount > 0, format.sampleRate > 0 else { return }
+        // Throw rather than crash if the format is unavailable (no audio
+        // device). Propagating lets `prepareLive()` record the error and tear
+        // the engine down instead of leaving a running-but-untapped graph that
+        // reports `isLiveRunning == true` while metering nothing.
+        guard format.channelCount > 0, format.sampleRate > 0 else {
+            throw LiveMeterError.unavailableOutputFormat
+        }
         installMeterTap(on: liveEngine.mainMixerNode, format: format,
                         suspendsForOfflineMeter: true)
         liveTapInstalled = true
+    }
+
+    /// Failures raised while bringing the live metering graph up.
+    private enum LiveMeterError: LocalizedError {
+        /// The live engine started but its main mixer reported no usable output
+        /// format (no audio device / headless environment), so no tap could be
+        /// installed.
+        case unavailableOutputFormat
+
+        var errorDescription: String? {
+            switch self {
+            case .unavailableOutputFormat:
+                return "No audio output format is available for live metering."
+            }
+        }
     }
 
     // MARK: - Offline engine lifecycle
