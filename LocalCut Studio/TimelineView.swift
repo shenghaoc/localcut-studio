@@ -102,7 +102,7 @@ struct TimelineView: View {
     // MARK: Header
 
     private var header: some View {
-        EditorPanelHeader("Timeline") {
+        EditorPanelHeader("Timeline", verticalPadding: 6) {
             Image(systemName: "minus.magnifyingglass")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -157,18 +157,23 @@ struct TimelineView: View {
     private func trackAccessibilityLabel(_ track: Track) -> Text {
         let kind = track.kind == .video ? String(localized: "video") : String(localized: "audio")
         let count = track.clips.count
-        let clipLabel = AttributedString(localized: "^[\(count) clip](inflect: true)")
-        return Text(verbatim: "\(track.name), \(kind) track, ") + Text(clipLabel)
+        // Compose into one AttributedString so the verbatim track name and the
+        // inflected clip count combine without the deprecated `Text + Text`.
+        var label = AttributedString("\(track.name), \(kind) track, ")
+        label += AttributedString(localized: "^[\(count) clip](inflect: true)")
+        return Text(label)
     }
 
     private func captionTrackAccessibilityLabel(_ track: CaptionTrack) -> Text {
         let count = track.lines.count
-        let lineLabel = AttributedString(localized: "^[\(count) caption line](inflect: true)")
-        var label = Text(verbatim: "\(track.name), ") + Text("caption track, ") + Text(lineLabel)
-        if track.isMuted {
-            label = label + Text(", muted")
-        }
-        return label
+        var label = AttributedString("\(track.name), ")
+        label += AttributedString(localized: "caption track, ")
+        // Two full localized variants (rather than appending ", muted") so a
+        // translator can reorder the mute suffix relative to the rest.
+        label += AttributedString(localized: track.isMuted
+            ? "^[\(count) caption line](inflect: true), muted"
+            : "^[\(count) caption line](inflect: true)")
+        return Text(label)
     }
 
     // MARK: Scrollable timeline content
@@ -726,8 +731,12 @@ private struct PlayheadView: View {
     private let headWidth: CGFloat = 11
     private let headHeight: CGFloat = 7
 
+    private let lineWidth: CGFloat = 1.5
+
     var body: some View {
         let x = CGFloat(model.currentTime) * pps
+        // Both elements are centred on `x` (the head triangle's midpoint and the
+        // line's mid-width), so the head cap sits exactly over the scrub line.
         ZStack(alignment: .topLeading) {
             // Small downward head pinned to the ruler/lane boundary.
             PlayheadHead()
@@ -737,9 +746,9 @@ private struct PlayheadView: View {
             // Precise scrub line spanning the full timeline height.
             Rectangle()
                 .fill(.red)
-                .frame(width: 1.5)
+                .frame(width: lineWidth)
                 .frame(maxHeight: .infinity)
-                .offset(x: x)
+                .offset(x: x - lineWidth / 2)
         }
         .allowsHitTesting(false)
     }

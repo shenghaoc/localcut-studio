@@ -37,6 +37,8 @@ struct RenderQueueInspectorView: View {
                 Text(presetSubtitle(preset))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             Spacer()
             Button("Add to Queue…") {

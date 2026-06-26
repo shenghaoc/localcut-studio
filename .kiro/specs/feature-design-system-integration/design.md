@@ -22,10 +22,13 @@ Nothing here touches `CMTime` math, the compositor, or the document schema.
 
 A reusable header view matching the design-system `PanelHeader`: a `.headline`
 title carrying the `.isHeader` accessibility trait, an optional trailing
-`@ViewBuilder` slot for pane controls, and consistent 12/8 padding. Call sites
-(`InspectorView`, `MediaBinView`, `TimelineView`) own their own separators so
-the header composes with adjacent controls. An `EmptyView` trailing convenience
-init covers headers with no actions (Inspector).
+`@ViewBuilder` slot for pane controls, and 12 pt horizontal padding. Vertical
+padding is a parameter defaulting to 8 (Inspector, Media); the Timeline passes
+6 to preserve its exact gutter/ruler alignment, which the old hand-rolled header
+used. The view draws no `Divider` — call sites (`InspectorView`,
+`MediaBinView`, `TimelineView`) own their own separators so the header composes
+with adjacent controls. An `EmptyView` trailing convenience init covers headers
+with no actions (Inspector).
 
 ### Timeline chrome
 
@@ -49,8 +52,10 @@ adjacent labelled rows carry the readable metadata.
 
 `presetSubtitle` is enriched from `codec • size • aspect` to
 `container • codec • size • aspect • bitrate`, with the raw codec string
-upper-cased for unknown codecs. The job's output name truncates in the middle
-(`lineLimit(1)` + `.truncationMode(.middle)`) so long paths stay on one line.
+upper-cased for unknown codecs. The subtitle is `lineLimit(1)` +
+`.truncationMode(.tail)` so the five segments don't wrap in a narrow inspector.
+The job's output name truncates in the middle (`lineLimit(1)` +
+`.truncationMode(.middle)`) so long paths stay on one line.
 
 ## Accessibility
 
