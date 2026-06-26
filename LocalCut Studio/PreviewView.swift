@@ -44,11 +44,12 @@ private struct TransportControls: View {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .frame(width: 20)
             }
-            // Spacebar toggles playback, scoped to this view rather than a menu
-            // key-equivalent: a bare `.space` in the menu bar is global in AppKit
-            // and would swallow spaces typed into text fields. This button is the
-            // single owner of the shortcut.
-            .keyboardShortcut(.space, modifiers: [])
+            // Spacebar play/pause is handled by the window-level EditorKeyHandler
+            // (a local NSEvent monitor that defers to text-input first responders),
+            // not a `.keyboardShortcut` here: a key-equivalent — on a menu Command
+            // *or* a view button — fires before a focused text field gets the
+            // event, so it would swallow spaces typed into the marker-rename
+            // popover / caption fields.
             .help("Play / Pause")
             .accessibilityLabel(isPlaying ? Text("Pause") : Text("Play"))
 

@@ -92,9 +92,10 @@ struct TimelineView: View {
                 timelineScroller
             }
         }
-        .background(MarkerKeyHandler(onAdd: { model.addMarkerAtPlayhead() },
+        .background(EditorKeyHandler(onAdd: { model.addMarkerAtPlayhead() },
                                      onRename: { beginRenamingSelectedMarker() },
-                                     onDelete: { deleteSelectedMarkerIfAny() }))
+                                     onDelete: { deleteSelectedMarkerIfAny() },
+                                     onTogglePlay: { model.togglePlayPause() }))
         .onMoveCommand(perform: moveTimelineSelection)
         .onChange(of: focusedClipID) { _, newValue in
             guard let newValue, model.selectedClipID != newValue else { return }
@@ -1075,10 +1076,16 @@ private struct MarkerDiamond: Shape {
 /// none is selected, the event falls through to the existing toolbar
 /// `.keyboardShortcut(.delete, modifiers: [])` that drives clip / transition
 /// deletion. That's the contract the spec calls out (R4.5).
-private struct MarkerKeyHandler: NSViewRepresentable {
+/// Window-scoped key handler for bare-key editor shortcuts that must yield to
+/// text inputs: m / shift-m (add / rename marker), Delete (when a marker is
+/// selected), and Space (play/pause). These can't be menu/button
+/// key-equivalents because those fire before a focused text field, swallowing
+/// the key while the user is typing into a rename popover / caption field.
+private struct EditorKeyHandler: NSViewRepresentable {
     let onAdd: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Bool
+    let onTogglePlay: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -1088,6 +1095,7 @@ private struct MarkerKeyHandler: NSViewRepresentable {
         context.coordinator.onAdd = onAdd
         context.coordinator.onRename = onRename
         context.coordinator.onDelete = onDelete
+        context.coordinator.onTogglePlay = onTogglePlay
         context.coordinator.install()
         return view
     }
@@ -1097,6 +1105,7 @@ private struct MarkerKeyHandler: NSViewRepresentable {
         context.coordinator.onAdd = onAdd
         context.coordinator.onRename = onRename
         context.coordinator.onDelete = onDelete
+        context.coordinator.onTogglePlay = onTogglePlay
     }
 
     @MainActor
@@ -1104,6 +1113,7 @@ private struct MarkerKeyHandler: NSViewRepresentable {
         var onAdd: (() -> Void)?
         var onRename: (() -> Void)?
         var onDelete: (() -> Bool)?
+        var onTogglePlay: (() -> Void)?
         weak var view: NSView?
         // `nonisolated(unsafe)` so `deinit` can clear it without hopping actors;
         // mutation only happens via `install`, called on the main actor, so the
@@ -1175,6 +1185,13 @@ private struct MarkerKeyHandler: NSViewRepresentable {
             // Delete / Backspace: only consume when a marker is selected so
             // the existing clip / transition delete shortcut keeps firing.
             let isDelete = (keyCode == 0x33 || keyCode == 0x75)
+
+            // Space → play/pause. The text-input first-responder guard above
+            // already let spaces through while the user is typing.
+            if keyCode == 0x31, !shift {
+                onTogglePlay?()
+                return true
+            }
 
             if chars == "m" || chars == "M" {
                 if shift { onRename?() } else { onAdd?() }
