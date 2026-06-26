@@ -333,7 +333,7 @@ struct TimelineView: View {
         let placements = TransitionLayout.placements(for: track.clips, cuts: transitionCuts)
         let effectiveStarts = Dictionary(uniqueKeysWithValues: placements.map { ($0.clip.id, $0.effectiveStart) })
         return ZStack(alignment: .topLeading) {
-            Color.clear
+            Color.lcLane
                 .contentShape(Rectangle())
                 .onTapGesture {
                     model.selectedClipID = nil
@@ -356,7 +356,7 @@ struct TimelineView: View {
 
     private func captionLane(for track: CaptionTrack) -> some View {
         ZStack(alignment: .topLeading) {
-            Color.clear
+            Color.lcLane
                 .contentShape(Rectangle())
                 .onTapGesture {
                     model.selectedClipID = nil

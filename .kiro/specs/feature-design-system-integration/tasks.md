@@ -45,6 +45,22 @@
 - [x] **T5.3** Add the preview's localized `accessibilityValue` and the
   transport "Playhead … of …" label (R5.3).
 
+## Visual identity pass
+
+- [x] **T7.1** Add `Theme.swift` with `Color.lcAccent` (film-gold), `Color.lcLane`,
+  and `Color.lcRail`.
+- [x] **T7.2** Apply `.preferredColorScheme(.dark)` and `.tint(.lcAccent)` to the
+  `EditorView` root.
+- [x] **T7.3** Fill timeline video/audio/caption lanes with `Color.lcLane` so empty
+  tracks read as surfaces.
+- [x] **T7.4** `WindowConfigurator` sizes the editor to 1360×860 centred on first
+  launch only (one-shot `UserDefaults` guard, deferred one runloop tick); add
+  `.defaultSize` as a fallback.
+- [x] **T7.5** Move the "Copy imports into bundle" toggle to a caption-weight
+  footer; empty state reads "No media yet" with `film.stack`.
+- [x] **T7.6** `.labelsHidden()` on the side-rail segmented switchers so the
+  "Side panel"/"Project tool" labels stop hyphenating.
+
 ## Verification
 
 - [x] **T6.1** `xcodebuild test` (Debug, macOS) compiles with zero warnings and

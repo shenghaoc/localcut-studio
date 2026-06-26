@@ -32,6 +32,7 @@ struct EditorSideRailView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .controlSize(.small)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -68,6 +69,7 @@ struct EditorSideRailView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .controlSize(.small)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

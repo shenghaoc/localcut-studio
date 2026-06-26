@@ -71,9 +71,38 @@ The integration also closes the VoiceOver gaps the design pass surfaced:
 - The preview exposes a localized `accessibilityValue` describing the empty vs.
   active state; the transport time reads "Playhead m:ss.ff of m:ss.ff".
 
+## Visual identity pass
+
+A screen-recording review found the editor read as a default light-grey SwiftUI
+app floating small on the desktop — no identity, and footage-unfriendly. This
+pass gives it a deliberate dark "studio" look without touching any engine code,
+all driven from a tiny `Theme.swift` token set:
+
+- **Dark editor chrome.** `EditorView` applies `.preferredColorScheme(.dark)` so
+  the whole window is dark — the convention for video tools, so footage and
+  posters pop instead of fighting a bright shell.
+- **One brand accent.** `Color.lcAccent` is a warm film-gold applied via
+  `.tint` on the editor root, so the active side-rail tab, primary buttons,
+  steppers, and toggles share one identity colour that is deliberately *not*
+  the blue/teal every other NLE defaults to. The red scrub playhead stays red.
+- **A timeline that reads as a surface.** Video/audio/caption lanes fill with
+  `Color.lcLane` (a hair lighter than the window) so empty tracks look like
+  tracks, not a void; the gutter/ruler sit on `Color.lcRail`.
+- **A comfortable default window.** `WindowConfigurator` sizes the editor to a
+  1360×860 canvas centred on the active screen on first launch only (one-shot
+  `UserDefaults` guard, deferred one runloop tick so it survives SwiftUI's
+  initial-layout sizing). Later launches keep whatever size the user left.
+- **Quieter Media chrome.** The "Copy imports into bundle" toggle moves from
+  above the library to a small caption-weight footer — it is a save-time
+  preference, not a primary action — and the empty state reads "No media yet"
+  with a `film.stack` glyph.
+- **Side-rail label.** The segmented panel switcher takes `.labelsHidden()` so
+  the redundant "Side panel" text no longer hyphenates into "Side / pan- / el".
+
 ## Non-goals
 
 Real AVFoundation playback/export, trim/drag, and the inspector feature
 surfaces already exist in the app and are untouched. The standalone `app/`
 prototype is **not** merged. No new model fields, no schema bump, no test-count
-regression.
+regression. The accent and dark scheme are presentation-only (`.tint` /
+`.preferredColorScheme`); they introduce no custom-drawn control styles.

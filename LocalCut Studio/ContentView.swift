@@ -14,6 +14,7 @@ struct LocalCutStudioApp: App {
             EditorView(model: model)
                 .frame(minWidth: 1000, minHeight: 640)
         }
+        .defaultSize(width: 1360, height: 860)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
@@ -147,6 +148,8 @@ struct EditorView: View {
         }
         .toolbar { toolbarContent }
         .navigationTitle(model.project.name)
+        .tint(.lcAccent)
+        .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) { statusBar }
         .onDisappear { model.teardownAudioMetering() }
         .background(WindowConfigurator(model: model))
@@ -327,8 +330,31 @@ private struct WindowConfigurator: NSViewRepresentable {
                     previousDelegate = window.delegate
                     window.delegate = self
                 }
+                Self.applyInitialFrameIfNeeded(window)
             }
             sync()
+        }
+
+        /// Size the editor to a comfortable canvas the first time it ever opens,
+        /// centred on the active screen. Guarded by a one-shot default so later
+        /// launches keep whatever size the user left it at.
+        private static func applyInitialFrameIfNeeded(_ window: NSWindow) {
+            let key = "editor.didSetInitialWindowFrame"
+            guard !UserDefaults.standard.bool(forKey: key) else { return }
+            // Defer past SwiftUI's own first-layout sizing pass, which otherwise
+            // clobbers a frame set synchronously during attach. Only record the
+            // one-shot once the frame actually lands.
+            DispatchQueue.main.async {
+                guard let screen = window.screen ?? NSScreen.main else { return }
+                let visible = screen.visibleFrame
+                let width = min(1360, visible.width - 80)
+                let height = min(860, visible.height - 80)
+                let frame = NSRect(x: visible.midX - width / 2,
+                                   y: visible.midY - height / 2,
+                                   width: width, height: height)
+                window.setFrame(frame, display: true, animate: false)
+                UserDefaults.standard.set(true, forKey: key)
+            }
         }
 
         /// Mirrors the model's edited/URL state onto the window chrome.

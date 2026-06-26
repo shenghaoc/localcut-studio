@@ -12,68 +12,74 @@ struct MediaBinView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 6) {
-                EditorPanelHeader("Media") {
-                    Text("\(model.project.mediaItems.count)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.quaternary, in: Capsule())
-                        .accessibilityLabel("\(model.project.mediaItems.count) imported media items")
+            EditorPanelHeader("Media") {
+                Text("\(model.project.mediaItems.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.quaternary, in: Capsule())
+                    .accessibilityLabel("\(model.project.mediaItems.count) imported media items")
 
-                    Button {
-                        showImporter = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Import media…")
-                    .accessibilityLabel("Import media")
+                Button {
+                    showImporter = true
+                } label: {
+                    Image(systemName: "plus")
                 }
-
-                Toggle("Copy into Bundle", isOn: $copyImportsIntoBundle)
-                    .toggleStyle(.checkbox)
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .help("Copy newly imported media into .lcbundle saves")
-                    .accessibilityLabel("Copy imported media into bundle")
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
+                .buttonStyle(.borderless)
+                .help("Import media…")
+                .accessibilityLabel("Import media")
             }
 
             Divider()
 
-            if model.project.mediaItems.isEmpty {
-                ContentUnavailableView {
-                    Label("No Media", systemImage: "tray")
-                } description: {
-                    Text("Import video or audio to start editing.")
-                } actions: {
-                    Button("Import Media") {
-                        showImporter = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        ForEach(model.project.mediaItems) { item in
-                            MediaRow(item: item,
-                                     isSelected: model.selectedMediaID == item.id,
-                                     onSelect: { model.selectedMediaID = item.id },
-                                     onAdd: { model.addToTimeline(mediaID: item.id) },
-                                     onRemove: { model.removeMedia(itemID: item.id) })
-                                .contextMenu {
-                                    Button("Add to Timeline") { model.addToTimeline(mediaID: item.id) }
-                                    Divider()
-                                    Button("Remove from Project", role: .destructive) { model.removeMedia(itemID: item.id) }
-                                }
+            Group {
+                if model.project.mediaItems.isEmpty {
+                    ContentUnavailableView {
+                        Label("No media yet", systemImage: "film.stack")
+                    } description: {
+                        Text("Import video or audio to start editing.")
+                    } actions: {
+                        Button("Import Media") {
+                            showImporter = true
                         }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .padding(8)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 6) {
+                            ForEach(model.project.mediaItems) { item in
+                                MediaRow(item: item,
+                                         isSelected: model.selectedMediaID == item.id,
+                                         onSelect: { model.selectedMediaID = item.id },
+                                         onAdd: { model.addToTimeline(mediaID: item.id) },
+                                         onRemove: { model.removeMedia(itemID: item.id) })
+                                    .contextMenu {
+                                        Button("Add to Timeline") { model.addToTimeline(mediaID: item.id) }
+                                        Divider()
+                                        Button("Remove from Project", role: .destructive) { model.removeMedia(itemID: item.id) }
+                                    }
+                            }
+                        }
+                        .padding(8)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            // Import behaviour lives quietly at the foot of the panel rather than
+            // above the library — it's a save-time preference, not a primary action.
+            Toggle("Copy imports into bundle", isOn: $copyImportsIntoBundle)
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
+                .font(.caption)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help("Copy newly imported media into .lcbundle saves")
+                .accessibilityLabel("Copy imported media into bundle")
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
         }
         .fileImporter(
             isPresented: $showImporter,
