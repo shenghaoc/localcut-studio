@@ -1,4 +1,5 @@
 import AppIntents
+import Foundation
 
 /// Main-actor bridge from system-discovered App Intents into the live editor.
 /// App Intents may be invoked while the app is foregrounded by Shortcuts, Siri,
@@ -13,42 +14,63 @@ enum LocalCutAppIntentRouter {
         case showDiagnostics
     }
 
+    enum RouterError: LocalizedError, Equatable {
+        case modelUnavailable
+        case emptyTimeline
+
+        var errorDescription: String? {
+            switch self {
+            case .modelUnavailable:
+                "The editor is not ready. Please ensure LocalCut Studio is open."
+            case .emptyTimeline:
+                "Add media to the timeline before exporting."
+            }
+        }
+    }
+
     private static weak var model: EditorModel?
-    private static var pendingActions: [Action] = []
+    private static var actionChain: Task<Void, Never>?
 
     static func connect(model: EditorModel) {
         self.model = model
-        drainPendingActions()
     }
 
-    static func disconnect() {
+    static func resetForTesting() {
         model = nil
-        pendingActions.removeAll()
+        actionChain = nil
     }
 
-    static func perform(_ action: Action) {
+    static func perform(_ action: Action) async throws {
         guard let model else {
-            pendingActions.append(action)
-            return
+            throw RouterError.modelUnavailable
         }
+
+        let predecessor = actionChain
+        let actionTask = Task { @MainActor in
+            await predecessor?.value
+            try await perform(action, on: model)
+        }
+        actionChain = Task {
+            _ = await actionTask.result
+        }
+        try await actionTask.value
+    }
+
+    private static func perform(_ action: Action, on model: EditorModel) async throws {
         switch action {
         case .newProject:
-            model.requestNew()
+            await model.performNewProjectCommand()
         case .importMedia:
-            model.requestImport()
+            await model.performImportMediaCommand()
         case .exportProject:
-            model.requestExport()
+            guard model.totalDuration > 0 else {
+                model.statusMessage = RouterError.emptyTimeline.errorDescription ?? ""
+                throw RouterError.emptyTimeline
+            }
+            await model.performExportProjectCommand()
         case .showDiagnostics:
             model.isDiagnosticsVisible = true
             model.statusMessage = "Diagnostics opened from Shortcuts."
-        }
-    }
-
-    private static func drainPendingActions() {
-        let actions = pendingActions
-        pendingActions.removeAll()
-        for action in actions {
-            perform(action)
         }
     }
 }
@@ -60,7 +82,7 @@ struct NewLocalCutProjectIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        LocalCutAppIntentRouter.perform(.newProject)
+        try await LocalCutAppIntentRouter.perform(.newProject)
         return .result()
     }
 }
@@ -72,7 +94,7 @@ struct ImportMediaIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        LocalCutAppIntentRouter.perform(.importMedia)
+        try await LocalCutAppIntentRouter.perform(.importMedia)
         return .result()
     }
 }
@@ -84,7 +106,7 @@ struct ExportLocalCutProjectIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        LocalCutAppIntentRouter.perform(.exportProject)
+        try await LocalCutAppIntentRouter.perform(.exportProject)
         return .result()
     }
 }
@@ -96,7 +118,7 @@ struct ShowLocalCutDiagnosticsIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        LocalCutAppIntentRouter.perform(.showDiagnostics)
+        try await LocalCutAppIntentRouter.perform(.showDiagnostics)
         return .result()
     }
 }

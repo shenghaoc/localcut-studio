@@ -12,11 +12,7 @@ extension EditorModel {
 
     /// File ▸ New — offers to save first, then resets to an empty project.
     func requestNew() {
-        Task {
-            guard !blockDocumentCommandWhileRecording() else { return }
-            guard await confirmSaveIfNeeded() else { return }
-            newDocument()
-        }
+        Task { _ = await performNewProjectCommand() }
     }
 
     /// File ▸ Open — offers to save first, then presents an open panel that
@@ -58,25 +54,49 @@ extension EditorModel {
     /// menu home and a standard ⌘I shortcut. Uses the Media bin's default of
     /// copying imports into the bundle.
     func requestImport() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.movie, .video, .audiovisualContent,
-                                     .audio, .mpeg4Movie, .quickTimeMovie]
-        panel.allowsMultipleSelection = true
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.begin { @MainActor [weak self] response in
-            guard response == .OK, let self, !panel.urls.isEmpty else { return }
-            let urls = panel.urls
-            Task { await self.importMedia(urls: urls, wantsBundling: self.copyImportsIntoBundle) }
-        }
+        Task { _ = await performImportMediaCommand() }
     }
 
     /// File ▸ Export… — presents the same save panel the toolbar Export button
     /// uses and queues a render with the default preset, so the app's primary
     /// output action has a menu home and a ⇧⌘E shortcut.
     func requestExport() {
-        guard totalDuration > 0 else { return }
-        guard resolveChapterMarkersBeforeExport() else { return }
+        Task { _ = await performExportProjectCommand() }
+    }
+
+    @discardableResult
+    func performNewProjectCommand() async -> Bool {
+        guard !blockDocumentCommandWhileRecording() else { return false }
+        guard await confirmSaveIfNeeded() else { return false }
+        newDocument()
+        return true
+    }
+
+    @discardableResult
+    func performImportMediaCommand() async -> Bool {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.movie, .video, .audiovisualContent,
+                                     .audio, .mpeg4Movie, .quickTimeMovie]
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        let response = await withCheckedContinuation { continuation in
+            panel.begin { response in
+                continuation.resume(returning: response)
+            }
+        }
+        guard response == .OK, !panel.urls.isEmpty else { return false }
+        await importMedia(urls: panel.urls, wantsBundling: copyImportsIntoBundle)
+        return true
+    }
+
+    @discardableResult
+    func performExportProjectCommand() async -> Bool {
+        guard totalDuration > 0 else {
+            statusMessage = "Add media to the timeline before exporting."
+            return false
+        }
+        guard resolveChapterMarkersBeforeExport() else { return false }
         let preset = BuiltInExportPresets.defaultPreset
         let panel = NSSavePanel()
         if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
@@ -84,10 +104,20 @@ extension EditorModel {
         }
         panel.nameFieldStringValue = "\(project.name).\(preset.defaultFilenameExtension)"
         panel.canCreateDirectories = true
-        panel.begin { @MainActor [weak self] response in
-            guard response == .OK, let url = panel.url, let self else { return }
-            Task { await self.export(to: url) }
+        let response = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                panel.begin { response in
+                    continuation.resume(returning: response)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                panel.cancel(nil)
+            }
         }
+        guard response == .OK, let url = panel.url else { return false }
+        await export(to: url)
+        return true
     }
 
     /// File ▸ Export Timeline (.otio) — serializes the project to OpenTimelineIO
