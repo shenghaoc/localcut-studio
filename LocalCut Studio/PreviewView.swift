@@ -136,8 +136,8 @@ struct PreviewView: View {
             // VoiceOver would otherwise read the raw "1920×1080 · 30 fps" glyphs;
             // spell out the dimensions and frame rate instead.
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(String(localized: "Render format"))
-            .accessibilityValue(String(localized: "\(Int(model.project.renderSize.width)) by \(Int(model.project.renderSize.height)), \(Int(model.project.frameRate)) frames per second"))
+            .accessibilityLabel(Text("Render format"))
+            .accessibilityValue(Text("\(Int(model.project.renderSize.width)) by \(Int(model.project.renderSize.height)), \(Int(model.project.frameRate)) frames per second"))
     }
 
     private var previewAccessibilityValue: String {

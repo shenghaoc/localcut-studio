@@ -136,10 +136,10 @@ enum RailGroup: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .inspector: "Inspector"
-        case .audio: "Audio"
-        case .captions: "Captions"
-        case .tools: "Tools"
+        case .inspector: String(localized: "Inspector")
+        case .audio: String(localized: "Audio")
+        case .captions: String(localized: "Captions")
+        case .tools: String(localized: "Tools")
         }
     }
 }
@@ -159,9 +159,9 @@ enum ToolPanel: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .beats: "Beats"
-        case .renders: "Renders"
-        case .markers: "Markers"
+        case .beats: String(localized: "Beats")
+        case .renders: String(localized: "Renders")
+        case .markers: String(localized: "Markers")
         }
     }
 }

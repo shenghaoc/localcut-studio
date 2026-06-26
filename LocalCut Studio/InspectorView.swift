@@ -10,7 +10,10 @@ struct InspectorView: View {
     @State private var showLUTImporter = false
 
     var body: some View {
-        Form {
+        VStack(spacing: 0) {
+            EditorPanelHeader("Inspector")
+            Divider()
+            Form {
             if let transition = model.selectedTransition {
                 transitionSection(transition)
             } else if let clip = model.selectedClip {
@@ -41,6 +44,7 @@ struct InspectorView: View {
             if case .success(let urls) = result, let url = urls.first {
                 model.importLUT(url: url)
             }
+        }
         }
     }
 

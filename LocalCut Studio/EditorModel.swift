@@ -888,10 +888,18 @@ final class EditorModel {
     }
 
     func seek(toSeconds seconds: Double) {
+        seek(toSeconds: seconds, tolerance: .zero)
+    }
+
+    /// Seek with a caller-supplied tolerance. Use a non-zero tolerance during
+    /// interactive scrubbing for smooth 60 fps tracking, then call
+    /// `seek(toSeconds:)` (zero tolerance) on gesture end for frame-accurate
+    /// positioning.
+    func seek(toSeconds seconds: Double, tolerance: CMTime) {
         let clamped = max(0, min(seconds, totalDuration))
         currentTime = clamped
         player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600),
-                    toleranceBefore: .zero, toleranceAfter: .zero)
+                    toleranceBefore: tolerance, toleranceAfter: tolerance)
     }
 
     // MARK: - Audio metering

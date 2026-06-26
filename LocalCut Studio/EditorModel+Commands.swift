@@ -33,7 +33,12 @@ extension EditorModel {
             // would fail to open.
             panel.canChooseDirectories = false
             panel.canChooseFiles = true
-            guard panel.runModal() == .OK, let url = panel.url else { return }
+            let response = await withCheckedContinuation { continuation in
+                panel.begin { response in
+                    continuation.resume(returning: response)
+                }
+            }
+            guard response == .OK, let url = panel.url else { return }
             await open(url: url)
         }
     }
@@ -56,9 +61,11 @@ extension EditorModel {
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
-        let urls = panel.urls
-        Task { await importMedia(urls: urls, wantsBundling: true) }
+        panel.begin { [weak self] response in
+            guard response == .OK, let self, !panel.urls.isEmpty else { return }
+            let urls = panel.urls
+            Task { await self.importMedia(urls: urls, wantsBundling: true) }
+        }
     }
 
     /// File ▸ Export… — presents the same save panel the toolbar Export button
@@ -73,8 +80,10 @@ extension EditorModel {
         }
         panel.nameFieldStringValue = "\(project.name).\(preset.defaultFilenameExtension)"
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await export(to: url) }
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            Task { await self.export(to: url) }
+        }
     }
 
     /// File ▸ Save — writes to the current URL, or prompts for one if unsaved.
@@ -125,7 +134,12 @@ extension EditorModel {
                 panel.directoryURL = docURL.deletingLastPathComponent()
             }
             panel.canCreateDirectories = true
-            guard panel.runModal() == .OK, let url = panel.url else { return }
+            let response = await withCheckedContinuation { continuation in
+                panel.begin { response in
+                    continuation.resume(returning: response)
+                }
+            }
+            guard response == .OK, let url = panel.url else { return }
             await convertToBundle(to: url)
         }
     }

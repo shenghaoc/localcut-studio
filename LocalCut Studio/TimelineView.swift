@@ -59,8 +59,6 @@ struct TimelineView: View {
     // global NSCursor stack when the ruler rebuilds (zoom) or a marker is removed
     // from the ForEach while not hovered. Mirrors the trimHandle guard.
     @State private var isRulerCursorPushed = false
-    @State private var cursorMarkerID: TimelineMarker.ID?
-
     private struct CaptionLineDrag: Equatable {
         let lineID: CaptionLine.ID
         let trackID: CaptionTrack.ID
@@ -366,6 +364,12 @@ struct TimelineView: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 if model.selectedMarkerID != nil { model.selectedMarkerID = nil }
+                // Fast seek during drag; the playhead head's gesture handles
+                // the precise end-of-drag seek when the user scrubs there.
+                model.seek(toSeconds: Double(value.location.x / pps),
+                           tolerance: CMTime(seconds: 0.1, preferredTimescale: 600))
+            }
+            .onEnded { value in
                 model.seek(toSeconds: Double(value.location.x / pps))
             }
     }
@@ -398,26 +402,14 @@ struct TimelineView: View {
                         .fill(.regularMaterial.opacity(0.8)))
                 .frame(width: labelWidth)
                 .allowsHitTesting(false)
-            MarkerDiamond()
-                .fill(fill)
-                .overlay(MarkerDiamond().stroke(strokeColor, lineWidth: strokeWidth))
-                .frame(width: markerGlyphSize, height: markerGlyphSize)
-                .frame(width: 24, height: 24)
-                .contentShape(Rectangle())
-                // Per-marker cursor ownership so deleting/scrolling a non-hovered
-                // marker out of the ForEach doesn't pop a cursor it never pushed.
-                .onHover { hovering in
-                    if hovering {
-                        NSCursor.pointingHand.push()
-                        cursorMarkerID = marker.id
-                    } else if cursorMarkerID == marker.id {
-                        NSCursor.pop()
-                        cursorMarkerID = nil
-                    }
-                }
-                .onDisappear {
-                    if cursorMarkerID == marker.id { NSCursor.pop(); cursorMarkerID = nil }
-                }
+            MarkerHoverWrapper {
+                MarkerDiamond()
+                    .fill(fill)
+                    .overlay(MarkerDiamond().stroke(strokeColor, lineWidth: strokeWidth))
+                    .frame(width: markerGlyphSize, height: markerGlyphSize)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
                 .onTapGesture { model.selectMarker(id: marker.id) }
                 .popover(isPresented: Binding(
                     get: { renamingMarkerID == marker.id },
@@ -1011,9 +1003,17 @@ private struct PlayheadView: View {
                             let start = dragStartSeconds ?? model.currentTime
                             if dragStartSeconds == nil { dragStartSeconds = start }
                             if model.selectedMarkerID != nil { model.selectedMarkerID = nil }
-                            model.seek(toSeconds: start + Double(value.translation.width / pps))
+                            // Fast seek (non-zero tolerance) during drag keeps the
+                            // scrub at 60 fps; the precise frame-accurate seek
+                            // happens on gesture end below.
+                            model.seek(toSeconds: start + Double(value.translation.width / pps),
+                                       tolerance: CMTime(seconds: 0.1, preferredTimescale: 600))
                         }
-                        .onEnded { _ in dragStartSeconds = nil }
+                        .onEnded { value in
+                            let start = dragStartSeconds ?? model.currentTime
+                            model.seek(toSeconds: start + Double(value.translation.width / pps))
+                            dragStartSeconds = nil
+                        }
                 )
                 .help("Drag to scrub")
                 .accessibilityHidden(true)
@@ -1049,6 +1049,33 @@ private struct MarkerDiamond: Shape {
         p.addLine(to: CGPoint(x: rect.minX, y: midY))
         p.closeSubpath()
         return p
+    }
+}
+
+/// Per-marker hover cursor wrapper. Each instance owns its own `@State` so
+/// hover-enter/exit sequencing is local to the marker rather than shared via a
+/// parent-level `@State` that can be clobbered when the mouse races between
+/// adjacent markers (Gemini review — cursor stack corruption race).
+private struct MarkerHoverWrapper<Content: View>: View {
+    @ViewBuilder let content: Content
+    @State private var isHovering = false
+
+    var body: some View {
+        content
+            .onHover { hovering in
+                if hovering {
+                    if !isHovering {
+                        NSCursor.pointingHand.push()
+                        isHovering = true
+                    }
+                } else if isHovering {
+                    NSCursor.pop()
+                    isHovering = false
+                }
+            }
+            .onDisappear {
+                if isHovering { NSCursor.pop(); isHovering = false }
+            }
     }
 }
 
