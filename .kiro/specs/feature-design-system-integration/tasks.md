@@ -60,6 +60,9 @@
   footer; empty state reads "No media yet" with `film.stack`.
 - [x] **T7.6** `.labelsHidden()` on the side-rail segmented switchers so the
   "Side panel"/"Project tool" labels stop hyphenating.
+- [x] **T7.7** Add a scene-persisted side-rail collapse control, slim restore
+  rail, and matching toolbar toggle so the preview/timeline can reclaim width
+  when the inspector is not needed.
 
 ## Verification
 

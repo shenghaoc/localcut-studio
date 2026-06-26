@@ -127,6 +127,7 @@ struct DocumentCommands: Commands {
 /// browser editor's three-pane workspace.
 struct EditorView: View {
     @Bindable var model: EditorModel
+    @SceneStorage("editor.sideRailCollapsed") private var isSideRailCollapsed = false
 
     var body: some View {
         VSplitView {
@@ -138,8 +139,17 @@ struct EditorView: View {
                     .frame(minWidth: 380)
                     .layoutPriority(1)
 
-                EditorSideRailView(model: model)
+                if isSideRailCollapsed {
+                    CollapsedSideRailView {
+                        isSideRailCollapsed = false
+                    }
+                    .frame(width: 44)
+                } else {
+                    EditorSideRailView(model: model) {
+                        isSideRailCollapsed = true
+                    }
                     .frame(minWidth: 300, idealWidth: 340)
+                }
             }
             .frame(minHeight: 320)
 
@@ -198,6 +208,14 @@ struct EditorView: View {
             .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             .keyboardShortcut(.delete, modifiers: [])
             .help("Delete selected clip or transition")
+
+            Button {
+                isSideRailCollapsed.toggle()
+            } label: {
+                Label(isSideRailCollapsed ? "Show Inspector" : "Hide Inspector", systemImage: "sidebar.right")
+            }
+            .help(isSideRailCollapsed ? "Show inspector panel" : "Hide inspector panel")
+            .accessibilityLabel(isSideRailCollapsed ? "Show inspector panel" : "Hide inspector panel")
 
             Spacer()
 
@@ -268,6 +286,38 @@ struct EditorView: View {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         Task { await model.export(to: url) }
+    }
+}
+
+private struct CollapsedSideRailView: View {
+    let onExpand: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Button {
+                onExpand()
+            } label: {
+                Image(systemName: "sidebar.right")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("Show inspector panel")
+            .accessibilityLabel("Show inspector panel")
+
+            Text("Inspector")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+                .rotationEffect(.degrees(90))
+                .frame(width: 30, height: 88)
+                .accessibilityHidden(true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 10)
+        .frame(maxHeight: .infinity)
+        .background(.bar)
     }
 }
 

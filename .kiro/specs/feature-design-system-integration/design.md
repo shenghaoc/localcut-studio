@@ -98,6 +98,10 @@ all driven from a tiny `Theme.swift` token set:
   with a `film.stack` glyph.
 - **Side-rail label.** The segmented panel switcher takes `.labelsHidden()` so
   the redundant "Side panel" text no longer hyphenates into "Side / pan- / el".
+- **Collapsible side rail.** A scene-persisted hide/show control mirrors the
+  browser editor's collapsible right rail while staying native: the expanded
+  rail keeps its segmented tabs, the collapsed state becomes a slim restore
+  strip, and the toolbar exposes the same action for keyboard/pointer workflows.
 
 ## Non-goals
 

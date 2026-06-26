@@ -5,6 +5,7 @@ import SwiftUI
 /// project tools stay grouped behind a secondary segmented control.
 struct EditorSideRailView: View {
     @Bindable var model: EditorModel
+    let onCollapse: () -> Void
 
     // Fresh storage keys (the old "editor.sideRailPanel" flat key is abandoned
     // so any stale persisted value falls back to the Inspector group rather than
@@ -26,18 +27,30 @@ struct EditorSideRailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Side panel", selection: group) {
-                ForEach(RailGroup.allCases) { group in
-                    Text(group.title).tag(group)
+            HStack(spacing: 8) {
+                Picker("", selection: group) {
+                    ForEach(RailGroup.allCases) { group in
+                        Text(group.title).tag(group)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .accessibilityLabel("Side panel")
+                .accessibilityValue(group.wrappedValue.title)
+
+                Button {
+                    onCollapse()
+                } label: {
+                    Image(systemName: "sidebar.right")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .help("Hide inspector panel")
+                .accessibilityLabel("Hide inspector panel")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .accessibilityLabel("Side panel")
-            .accessibilityValue(group.wrappedValue.title)
 
             Divider()
 
@@ -63,7 +76,7 @@ struct EditorSideRailView: View {
     /// stay grouped under one primary tab instead of bloating the top strip.
     private var toolsGroup: some View {
         VStack(spacing: 0) {
-            Picker("Project tool", selection: tool) {
+            Picker("", selection: tool) {
                 ForEach(ToolPanel.allCases) { tool in
                     Text(tool.title).tag(tool)
                 }
