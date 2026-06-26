@@ -380,7 +380,7 @@ struct RenderQueueTests {
 
     @Test("Runner cleanup restarts when a job is enqueued after drain")
     func runnerCleanupRestartsAfterDrainEnqueue() async throws {
-        let queue = RenderQueue(persistsToDisk: false)
+        let queue = RenderQueue(persistsToDisk: false, outputBookmarkResolver: { _ in nil })
         let first = makeJob(name: "A")
         let second = makeJob(name: "B")
         var didInjectSecondJob = false
