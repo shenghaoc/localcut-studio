@@ -1,4 +1,5 @@
 import SwiftUI
+import AppIntents
 import AppKit
 import UniformTypeIdentifiers
 import LocalCutCore
@@ -7,9 +8,13 @@ import LocalCutCore
 struct LocalCutStudioApp: App {
     // The editor owns the single AVPlayer and is the document controller; it lives
     // at app scope so the menu commands and window can share it.
-    @State private var model = EditorModel()
+    @State private var model: EditorModel
 
     init() {
+        let model = EditorModel()
+        self._model = State(initialValue: model)
+        LocalCutAppIntentRouter.connect(model: model)
+        LocalCutAppShortcuts.updateAppShortcutParameters()
         // Activate memory pressure monitoring at app launch.
         MemoryPressureHandler.shared.activate()
     }
