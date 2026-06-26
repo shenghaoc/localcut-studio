@@ -20,6 +20,20 @@ Make live metering strictly opt-in and keep every failure recoverable.
    cannot recover from; letting `start()` do its own internal preparation keeps
    failures as ordinary thrown Swift errors that land in `lastStartError`.
 
+   > **Correction (B5).** Step 3's premise is false: `start()` calls
+   > `-[AVAudioEngine prepare]` internally, so dropping the *explicit* prepare
+   > does **not** avoid the raise — `AVAudioEngineGraph::Initialize` still raises
+   > the same uncatchable ObjC exception from inside `start()`. See *Pre-flight
+   > guard (B5)* below.
+
+4. **Pre-flight guard (B5).** Before calling `start()`, validate the output
+   device: `liveEngine.outputNode.inputFormat(forBus: 0)` and throw
+   `LiveMeterError.unavailableOutputFormat` when it reports a zero sample-rate /
+   channel count. This converts the no-device / not-yet-ready case (the raise
+   condition) into a catchable Swift error *before* `start()` runs, so the
+   `do/catch` actually handles it. It is the same error B2 throws from the
+   post-`start()` tap-install check, moved earlier so it can pre-empt the raise.
+
 ## Failure propagation
 
 The live graph is brought up in two steps, and both must be recoverable:
@@ -28,6 +42,12 @@ The live graph is brought up in two steps, and both must be recoverable:
 func prepareLive() {
     guard !isLiveRunning else { return }
     do {
+        // B5: pre-flight the output device so the no-format case throws a
+        // catchable Swift error before start()/prepare() can raise an ObjC one.
+        let deviceFormat = liveEngine.outputNode.inputFormat(forBus: 0)
+        guard deviceFormat.sampleRate > 0, deviceFormat.channelCount > 0 else {
+            throw LiveMeterError.unavailableOutputFormat
+        }
         try liveEngine.start()
         try installLiveTapIfNeeded()   // throws if no usable output format
         isLiveRunning = true

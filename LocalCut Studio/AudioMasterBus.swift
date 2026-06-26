@@ -123,6 +123,20 @@ final class AudioMasterBus {
     func prepareLive() {
         guard !isLiveRunning else { return }
         do {
+            // Pre-flight the output device. `AVAudioEngine.start()` lazily
+            // connects mainMixerNode → outputNode and calls
+            // `-[AVAudioEngine prepare]`, whose graph `Initialize` *raises an
+            // Objective-C exception* ("required condition is false:
+            // IsFormatSampleRateAndChannelCountValid") when the output device
+            // has no valid format — e.g. on a headless box, or during AppKit
+            // window state-restoration at launch before the audio HAL is ready.
+            // A Swift `do/catch` cannot intercept a raised ObjC exception, so
+            // that case crashes the whole app. Validating the format first lets
+            // us throw a Swift error (handled below) before reaching `prepare()`.
+            let deviceFormat = liveEngine.outputNode.inputFormat(forBus: 0)
+            guard deviceFormat.sampleRate > 0, deviceFormat.channelCount > 0 else {
+                throw LiveMeterError.unavailableOutputFormat
+            }
             try liveEngine.start()
             try installLiveTapIfNeeded()
             isLiveRunning = true

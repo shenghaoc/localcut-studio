@@ -1,6 +1,7 @@
 # Bugfix: Live Meter Launch Crash
 
-> Status: **Complete**.
+> Status: **Complete** — reopened and extended by **B5** (the original B1 fix
+> was incomplete: `start()` still raised the same uncatchable exception).
 
 Pre-existing launch-stability bug found while visually verifying PR #48. This
 is unrelated to PR #48's SwiftUI design/accessibility scope: the app could crash
@@ -71,3 +72,28 @@ exports unless the user had manually started the unrelated live graph first.
 - **Fix**: Add an observable `AudioMasterBus.isOfflineMetering` flag (mirrored on
   the main actor from `setOfflineMeteringActive(_:)`) and show the `MeterStrip`
   when `isLiveRunning || isOfflineMetering`.
+
+### B5 - `start()` still raised an ObjC exception the `do/catch` could not catch
+
+The B1 fix removed the explicit `prepare()` call on the assumption that letting
+`start()` self-prepare would keep failures as ordinary thrown Swift errors (see
+`design.md` → *No pre-`start()` prepare*). **That assumption was wrong.**
+`AVAudioEngine.start()` calls `-[AVAudioEngine prepare]` internally, and
+`AVAudioEngineGraph::Initialize` still *raises an Objective-C exception*
+("required condition is false: IsFormatSampleRateAndChannelCountValid") when the
+output device has no valid format — which a Swift `do/catch` cannot intercept.
+
+A debug build therefore still crashed (`EXC_BREAKPOINT` / `SIGTRAP`) — this time
+during AppKit window **state-restoration** at launch (a saved window restoring
+the panel that starts the live graph), before any media import. The B2 format
+check ran only *after* `start()`, so it could never prevent the raise.
+
+- **Fix**: Pre-flight the output device in `prepareLive()` —
+  `liveEngine.outputNode.inputFormat(forBus: 0)` — and throw the existing
+  `LiveMeterError.unavailableOutputFormat` (a catchable Swift error) **before**
+  reaching the raising `start()` / `prepare()`. The no-device / not-yet-ready
+  case now tears the engine down cleanly instead of trapping the whole app.
+- **Impact**: Closes the launch-crash path B1 only partially addressed. Live
+  metering start is safe on a headless box and during state-restoration.
+- **Repro note**: only surfaces on a state-restoration relaunch (saved window
+  restored), not on a cold `Run` from Xcode — reproduce via restoration.
