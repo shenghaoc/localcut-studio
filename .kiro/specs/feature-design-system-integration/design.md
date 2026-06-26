@@ -185,3 +185,35 @@ The medium-risk interaction items are done and manually verified with real media
 - **Clip-body move cursor** — declarative `.pointerStyle(.grabIdle/.grabActive)`
   on the clip body: region-based, so there's no `NSCursor` stack to unbalance,
   and it coexists with the trim handles' resize cursor.
+
+## Liquid Glass + colour-token de-hardcode
+
+macOS 26's Liquid Glass is adopted **only on the functional, floating layer**,
+per Apple's HIG ("don't use Liquid Glass in the content layer; use it
+sparingly"). Standard toolbars/sidebars already pick it up automatically, so the
+custom additions are limited to the two genuinely-floating controls:
+
+- **Preview transport** floats over the video as an interactive
+  `.glassEffect(.regular.interactive())` capsule (the canonical
+  controls-over-media case) instead of an opaque `.bar` strip; the
+  render-format readout stays a `.thinMaterial` badge, because a non-interactive
+  label is content, not a control.
+- **Diagnostics HUD** uses `.glassEffect(in: .rect(cornerRadius:))`, replacing a
+  hand-rolled `NSVisualEffectView` + clip + stroke.
+
+The same pass removes hard-coded colour literals (the project's own UI standards
+forbid colours that fight the system appearance):
+
+- The **brand accent** moves from a Swift `Color(red:…)` literal to an
+  `Assets.xcassets` `AccentColor` set (Display-P3, with room for light/dark and
+  high-contrast variants). `lcLane`/`lcRail` become semantic system colours
+  (`.underPageBackgroundColor` / `.windowBackgroundColor`) that adapt with the
+  appearance instead of pinning a fixed grey.
+- **Selection** is unified to the brand gold on bespoke affordances: the
+  `Color.accentColor` references in custom timeline / marker-diamond /
+  render-queue / diagnostics drawing now read `Color.lcAccent`, so selection
+  matches the tinted controls instead of falling back to system blue — while
+  standard list-row selection keeps the system colour (see *HIG tensions*).
+  Setting the target's *Global Accent Color Name* to `AccentColor` (a
+  project-file change, tracked as **T10.5**) would let these revert to plain
+  `Color.accentColor`.
