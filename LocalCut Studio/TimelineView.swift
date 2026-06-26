@@ -222,7 +222,7 @@ struct TimelineView: View {
                     line.addLine(to: CGPoint(x: x, y: rulerHeight))
                     context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
                     if isMajor {
-                        let text = Text(TimeFormatting.timecode(t)).font(.system(size: 9)).foregroundStyle(.secondary)
+                        let text = Text(TimeFormatting.timecode(t)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
                         context.draw(text, at: CGPoint(x: x + 2, y: tickTop), anchor: .topLeading)
                     }
                     t += step
@@ -242,6 +242,12 @@ struct TimelineView: View {
             }
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
+            // Horizontal-resize cursor + tooltip signal the ruler is scrubbable.
+            .onHover { hovering in
+                if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .onDisappear { NSCursor.pop() }
+            .help("Drag to scrub")
 
             ForEach(markers) { marker in
                 markerGlyph(marker, isSelected: marker.id == selectedMarkerID)
@@ -275,12 +281,14 @@ struct TimelineView: View {
     private func markerGlyph(_ marker: TimelineMarker, isSelected: Bool) -> some View {
         let x = CGFloat(marker.time.seconds) * pps
         let fill: Color = marker.colour.map { Color(cgColor: $0.cgColor) } ?? Color.lcAccent
-        let strokeColor: Color = isSelected ? .lcAccent : .black.opacity(0.4)
+        // Adaptive separator colour rather than a fixed translucent black so the
+        // outline tracks Dark Mode and Increase Contrast; selected stays on gold.
+        let strokeColor: Color = isSelected ? .lcAccent : Color(nsColor: .separatorColor)
         let strokeWidth: CGFloat = isSelected ? 2 : 1
         let labelWidth: CGFloat = 60
         VStack(spacing: 1) {
             Text(marker.name)
-                .font(.system(size: 9))
+                .font(.caption2)
                 .lineLimit(1)
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 3)
@@ -295,6 +303,8 @@ struct TimelineView: View {
                 .frame(width: markerGlyphSize, height: markerGlyphSize)
                 .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
+                .onHover { $0 ? NSCursor.pointingHand.push() : NSCursor.pop() }
+                .onDisappear { NSCursor.pop() }
                 .onTapGesture { model.selectMarker(id: marker.id) }
                 .popover(isPresented: Binding(
                     get: { renamingMarkerID == marker.id },
@@ -429,7 +439,7 @@ struct TimelineView: View {
                                       lineWidth: isSelected ? 2 : 1))
                 .overlay(
                     Image(systemName: type.symbolName)
-                        .font(.system(size: 10))
+                        .font(.caption2)
                         .foregroundStyle(.white))
                 .frame(width: width, height: laneHeight - 16)
                 .offset(x: x, y: 8)
@@ -468,11 +478,17 @@ struct TimelineView: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(baseColor.opacity(isDragging(clip.id) ? 0.2 : 0.35))
                 .overlay(alignment: .leading) {
-                    Text(clipName ?? "Clip")
-                        .font(.caption2)
-                        .lineLimit(1)
-                        .padding(.horizontal, 6)
-                        .foregroundStyle(.primary)
+                    // Lead with a kind glyph so video vs audio reads without
+                    // relying on the fill hue alone (Differentiate Without Color).
+                    HStack(spacing: 4) {
+                        Image(systemName: kind == .video ? "film" : "waveform")
+                            .imageScale(.small)
+                        Text(clipName ?? "Clip")
+                            .lineLimit(1)
+                    }
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .foregroundStyle(.primary)
                 }
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)

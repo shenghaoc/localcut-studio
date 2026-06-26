@@ -58,6 +58,14 @@ final class EditorModel {
     // Scopes panel (colour-management feature) — session-only UI flag, not persisted.
     var showScopes: Bool = false
 
+    /// Whether the inspector side rail is shown. Lifted off the view's
+    /// `@SceneStorage` so the View ▸ Show Inspector menu command, its ⌥⌘I
+    /// shortcut, the toolbar button, and the collapsed-rail restore strip all
+    /// share one source of truth. Persisted app-wide via `UserDefaults`.
+    var inspectorVisible: Bool = (UserDefaults.standard.object(forKey: "editor.inspectorVisible") as? Bool) ?? true {
+        didSet { UserDefaults.standard.set(inspectorVisible, forKey: "editor.inspectorVisible") }
+    }
+
     // Status / export
     var statusMessage = "Import media to begin."
 

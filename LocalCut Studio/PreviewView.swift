@@ -28,6 +28,7 @@ private struct TransportControls: View {
     let isPlaying: Bool
     let current: String
     let duration: String
+    let hasContent: Bool
     let skipToStart: () -> Void
     let togglePlayPause: () -> Void
 
@@ -43,7 +44,8 @@ private struct TransportControls: View {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .frame(width: 20)
             }
-            .keyboardShortcut(.space, modifiers: [])
+            // The spacebar shortcut lives on the View ▸ Play menu command (its
+            // single owner); this button is the on-canvas affordance.
             .help("Play / Pause")
             .accessibilityLabel(isPlaying ? Text("Pause") : Text("Play"))
 
@@ -59,12 +61,16 @@ private struct TransportControls: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .glassEffect(.regular.interactive())
+        // No content ⇒ the transport is a live-looking no-op; disable it so the
+        // controls give honest feedback.
+        .disabled(!hasContent)
     }
 }
 
 /// The preview pane: video canvas plus a transport bar with the playhead time.
 struct PreviewView: View {
     @Bindable var model: EditorModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 0) {
@@ -81,6 +87,7 @@ struct PreviewView: View {
                         isPlaying: model.isPlaying,
                         current: TimeFormatting.timecode(model.currentTime),
                         duration: TimeFormatting.timecode(model.totalDuration),
+                        hasContent: model.player.currentItem != nil,
                         skipToStart: { model.seek(toSeconds: 0) },
                         togglePlayPause: { model.togglePlayPause() })
                     .padding(.bottom, 16)
@@ -93,10 +100,10 @@ struct PreviewView: View {
             if model.showScopes {
                 ScopesView()
                     .frame(minWidth: 200, idealWidth: 240)
-                    .transition(.move(edge: .trailing))
+                    .transition(reduceMotion ? .opacity : .move(edge: .trailing))
             }
         }
-        .animation(.default, value: model.showScopes)
+        .animation(reduceMotion ? nil : .default, value: model.showScopes)
     }
 
     private var videoCanvas: some View {
@@ -108,7 +115,7 @@ struct PreviewView: View {
                 ContentUnavailableView(
                     "No Preview",
                     systemImage: "film.stack",
-                    description: Text("Add a clip to the timeline to see it here."))
+                    description: Text("Import media, then drag a clip to the timeline."))
                 .foregroundStyle(.secondary)
             }
         }
@@ -135,7 +142,7 @@ struct PreviewView: View {
 
     private var previewAccessibilityValue: String {
         if model.player.currentItem == nil {
-            return String(localized: "No preview. Add a clip to the timeline to see it here.")
+            return String(localized: "No preview. Import media, then drag a clip to the timeline.")
         }
         return String(localized: "Showing the current timeline frame.")
     }
@@ -153,6 +160,7 @@ struct PreviewView: View {
                 isPlaying: false,
                 current: "00:00:02:10",
                 duration: "00:01:23:00",
+                hasContent: true,
                 skipToStart: {},
                 togglePlayPause: {})
             .padding(.bottom, 16)

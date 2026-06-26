@@ -32,10 +32,27 @@ struct ViewCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
+            Toggle(isOn: $model.inspectorVisible) {
+                Text("Show Inspector")
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option])
+
             Toggle(isOn: $model.isDiagnosticsVisible) {
                 Text("Show Diagnostics")
             }
             .keyboardShortcut("d", modifiers: [.command, .option])
+
+            Divider()
+
+            // Transport in the menu bar so playback has a discoverable home and a
+            // standard shortcut, mirroring the on-canvas controls. This is the
+            // single owner of the spacebar shortcut (removed from the button).
+            Button(model.isPlaying ? "Pause" : "Play") { model.togglePlayPause() }
+                .keyboardShortcut(.space, modifiers: [])
+                .disabled(model.totalDuration <= 0)
+            Button("Go to Start") { model.seek(toSeconds: 0) }
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .disabled(model.totalDuration <= 0)
         }
     }
 }
@@ -66,6 +83,9 @@ struct DocumentCommands: Commands {
                     }
                 }
             }
+            Divider()
+            Button("Import…") { model.requestImport() }
+                .keyboardShortcut("i", modifiers: .command)
         }
         CommandGroup(replacing: .saveItem) {
             Button("Save") { model.requestSave() }
@@ -75,6 +95,12 @@ struct DocumentCommands: Commands {
             Divider()
             Button("Convert to Bundle…") { model.requestConvertToBundle() }
                 .disabled(!model.canConvertToBundle)
+            Divider()
+            // Mirror the toolbar's primary output action so Export has a menu home
+            // and a standard shortcut.
+            Button("Export…") { model.requestExport() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(model.totalDuration <= 0)
         }
         CommandGroup(replacing: .undoRedo) {
             Button(model.undoTitle) { model.undo() }
@@ -104,7 +130,19 @@ struct DocumentCommands: Commands {
                 .disabled(!model.canAddTransitionAtSelection)
             Button("Remove Transition") { model.removeSelectedTransition() }
                 .disabled(model.selectedTransitionClipID == nil)
+            // Mirror the destructive toolbar button so deleting a clip/transition
+            // has a menu home; the toolbar keeps the same ⌫ shortcut.
+            Button("Delete Selected Clip") {
+                if model.selectedTransitionClipID != nil {
+                    model.removeSelectedTransition()
+                } else {
+                    model.deleteSelectedClip()
+                }
+            }
+            .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             Divider()
+            Button("Add Marker") { model.addMarkerAtPlayhead() }
+                .keyboardShortcut("m", modifiers: [])
             Button("Previous Marker") { model.selectPreviousMarker() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
                 .disabled(model.project.markers.isEmpty)
@@ -127,7 +165,6 @@ struct DocumentCommands: Commands {
 /// browser editor's three-pane workspace.
 struct EditorView: View {
     @Bindable var model: EditorModel
-    @SceneStorage("editor.sideRailCollapsed") private var isSideRailCollapsed = false
 
     var body: some View {
         VSplitView {
@@ -139,16 +176,16 @@ struct EditorView: View {
                     .frame(minWidth: 380)
                     .layoutPriority(1)
 
-                if isSideRailCollapsed {
-                    CollapsedSideRailView {
-                        isSideRailCollapsed = false
-                    }
-                    .frame(width: 44)
-                } else {
+                if model.inspectorVisible {
                     EditorSideRailView(model: model) {
-                        isSideRailCollapsed = true
+                        model.inspectorVisible = false
                     }
                     .frame(minWidth: 300, idealWidth: 340)
+                } else {
+                    CollapsedSideRailView {
+                        model.inspectorVisible = true
+                    }
+                    .frame(width: 44)
                 }
             }
             .frame(minHeight: 320)
@@ -166,10 +203,10 @@ struct EditorView: View {
         .overlay(alignment: .topTrailing) {
             if model.isDiagnosticsVisible {
                 DiagnosticsView(agent: model.diagnostics)
-                    // Clear the unified toolbar (~52 pt on the .unified style)
-                    // plus a few points of breathing room so the panel doesn't
-                    // butt against the window chrome.
-                    .padding(.top, 60)
+                    // Overlay content already renders inside the unified toolbar's
+                    // reserved safe area, so a small fixed inset keeps the panel
+                    // off the chrome without hard-coding the toolbar's pixel height.
+                    .padding(.top, 8)
                     .padding(.trailing, 16)
                     .transition(.opacity)
             }
@@ -210,12 +247,12 @@ struct EditorView: View {
             .help("Delete selected clip or transition")
 
             Button {
-                isSideRailCollapsed.toggle()
+                model.inspectorVisible.toggle()
             } label: {
-                Label(isSideRailCollapsed ? "Show Inspector" : "Hide Inspector", systemImage: "sidebar.right")
+                Label(model.inspectorVisible ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.right")
             }
-            .help(isSideRailCollapsed ? "Show inspector panel" : "Hide inspector panel")
-            .accessibilityLabel(isSideRailCollapsed ? "Show inspector panel" : "Hide inspector panel")
+            .help(model.inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
+            .accessibilityLabel(model.inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
 
             Spacer()
 
@@ -226,7 +263,7 @@ struct EditorView: View {
             }
 
             Button {
-                exportTapped()
+                model.requestExport()
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
@@ -254,7 +291,7 @@ struct EditorView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .background(.ultraThinMaterial)
+        .background(.bar)
         // Announce status changes so background work and errors reach VoiceOver
         // (A11Y-CHECKLIST: status line is an announced live region).
         .onChange(of: model.statusMessage) { _, message in
@@ -272,20 +309,6 @@ struct EditorView: View {
             Button("Relink…") { Task { await model.relinkNextMissingMedia() } }
                 .controlSize(.small)
         }
-    }
-
-    private func exportTapped() {
-        // Match the default preset's container so the panel filter, suggested
-        // filename, and the actual encode line up.
-        let preset = BuiltInExportPresets.defaultPreset
-        let panel = NSSavePanel()
-        if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
-            panel.allowedContentTypes = [type]
-        }
-        panel.nameFieldStringValue = "\(model.project.name).\(preset.defaultFilenameExtension)"
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await model.export(to: url) }
     }
 }
 

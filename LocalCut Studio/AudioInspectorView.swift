@@ -40,30 +40,23 @@ struct AudioInspectorView: View {
 
     var body: some View {
         Section("Audio") {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Master Gain  \(formattedGain(model.project.masterGain))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Master gain \(formattedGain(model.project.masterGain))")
-                Slider(
-                    value: masterGainBinding,
-                    in: AudioGainMapping.minDecibels...AudioGainMapping.maxDecibels,
-                    step: AudioGainMapping.sliderStepDecibels,
-                    onEditingChanged: { editing in
-                        // Drag end commits the coalesced gesture so a quick
-                        // click→drag→release maps to exactly one undo step
-                        // instead of waiting on the 250 ms debounce timer.
-                        if !editing { model.commitCoalescedUndo() }
-                    })
-                    .accessibilityLabel("Master gain")
-                    .accessibilityValue(formattedGain(model.project.masterGain))
-            }
-            .contextMenu {
-                Button("Reset", systemImage: "arrow.uturn.backward") {
+            // Shared row (matches the per-track gain rows below): drag-end commits
+            // the coalesced gesture as one undo step; right-click resets to unity.
+            LabeledSliderRow(
+                label: "Master Gain",
+                spokenLabel: "Master gain",
+                display: formattedGain(model.project.masterGain),
+                value: masterGainBinding,
+                range: AudioGainMapping.minDecibels...AudioGainMapping.maxDecibels,
+                step: AudioGainMapping.sliderStepDecibels,
+                captionStyle: .leadingTrailing,
+                onEditingChanged: { editing in
+                    if !editing { model.commitCoalescedUndo() }
+                },
+                resetAction: {
                     model.setMasterGain(1, coalesced: true)
                     model.commitCoalescedUndo()
-                }
-            }
+                })
 
             // SwiftUI.TimelineView (fully qualified — the repo also defines
             // a `TimelineView` struct for the editor's timeline lane, which

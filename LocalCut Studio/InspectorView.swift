@@ -54,8 +54,12 @@ struct InspectorView: View {
             if let media = model.project.media(for: clip.mediaID) {
                 InspectorPosterView(media: media)
             }
-            LabeledContent("Start", value: TimeFormatting.timecode(clip.timelineStart.seconds))
-            LabeledContent("Duration", value: TimeFormatting.timecode(clip.duration.seconds))
+            LabeledContent("Start") {
+                Text(TimeFormatting.timecode(clip.timelineStart.seconds)).monospacedDigit()
+            }
+            LabeledContent("Duration") {
+                Text(TimeFormatting.timecode(clip.duration.seconds)).monospacedDigit()
+            }
 
             LabeledSliderRow(
                 label: "Opacity",
@@ -336,7 +340,6 @@ struct InspectorView: View {
                         smooth.bypass = newValue
                     }
                 }))
-            .toggleStyle(.switch)
 
             Toggle("Show Mask", isOn: Binding(
                 get: { model.showSkinMask },
@@ -344,7 +347,6 @@ struct InspectorView: View {
                     model.showSkinMask = newValue
                     model.scheduleRebuild()
                 }))
-            .toggleStyle(.switch)
 
             HStack {
                 Button("Reset") { model.resetClipSkinSmooth() }
@@ -397,7 +399,9 @@ struct InspectorView: View {
         Section("Media") {
             InspectorPosterView(media: media)
             LabeledContent("Name", value: media.name)
-            LabeledContent("Duration", value: TimeFormatting.timecode(media.durationSeconds))
+            LabeledContent("Duration") {
+                Text(TimeFormatting.timecode(media.durationSeconds)).monospacedDigit()
+            }
             if media.hasVideo {
                 LabeledContent("Size", value: "\(Int(media.naturalSize.width))×\(Int(media.naturalSize.height))")
             }

@@ -80,6 +80,28 @@
   in-memory flag so repeated `attach(to:)` calls don't enqueue the deferred
   frame block more than once.
 
+## HIG conformance pass (Design Principles + Designing for macOS)
+
+- [x] **T9.1** Menu-bar completeness: `requestImport()`/`requestExport()` on the
+  model; File ▸ Import… (⌘I) / Export… (⇧⌘E); Edit ▸ Delete Selected Clip /
+  Add Marker (M); View ▸ Show Inspector (⌥⌘I) / Play (Space) / Go to Start (⌘↑);
+  spacebar owned solely by the Play command. Remove dead `exportTapped()`.
+- [x] **T9.2** Lift `isSideRailCollapsed` → `EditorModel.inspectorVisible`
+  (UserDefaults-persisted); update toolbar, layout, collapsed-rail, and menu.
+- [x] **T9.3** Honor Reduce Motion on the scopes transition/animation; adaptive
+  marker stroke (`separatorColor`); clip-kind glyph; format-badge VoiceOver
+  label; scopes `accessibilityValue`; secondary tool picker `.isHeader`.
+- [x] **T9.4** Standard controls/materials: status bar `.bar`; Beauty toggles →
+  checkbox; inspector timecodes `monospacedDigit`; render-queue
+  `ContentUnavailableView`; Master Gain via `LabeledSliderRow`; scopes on
+  `lcLane`; timeline fonts → text styles; Align-Window reset.
+- [x] **T9.5** Pointer feedback: ruler resize cursor + scrub tooltip; marker
+  pointing-hand cursor.
+- [x] **T9.6** Unify list-row selection on the system selection colour (media
+  bin + markers).
+- [ ] **T9.7** (deferred, medium-risk) Split-view divider autosave, draggable
+  playhead head, clip-body move cursor, media-bin arrow-key navigation.
+
 ## Verification
 
 - [x] **T6.1** `xcodebuild test` (Debug, macOS) compiles with zero warnings and

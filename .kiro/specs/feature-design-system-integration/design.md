@@ -116,3 +116,57 @@ surfaces already exist in the app and are untouched. The standalone `app/`
 prototype is **not** merged. No new model fields, no schema bump, no test-count
 regression. The accent and dark scheme are presentation-only (`.tint` /
 `.preferredColorScheme`); they introduce no custom-drawn control styles.
+
+## HIG conformance pass
+
+A 10-dimension audit against Apple's Human Interface Guidelines (Design
+Principles + Designing for macOS), each finding adversarially verified against
+the source, drove this pass. The dominant theme was **menu-bar completeness**:
+primary commands existed only on the toolbar or as bare key handlers. Changes
+are all standard SwiftUI/AppKit (no new paradigms):
+
+- **Menu bar mirrors the toolbar.** `EditorModel.requestImport()` /
+  `requestExport()` back new **File ▸ Import… (⌘I)** and **File ▸ Export…
+  (⇧⌘E)**; **Edit ▸ Delete Selected Clip** and **Edit ▸ Add Marker (M)** mirror
+  the timeline; **View ▸ Show Inspector (⌥⌘I)**, **Play (Space)**, and **Go to
+  Start (⌘↑)** join Show Diagnostics. The spacebar shortcut now has a single
+  owner (the Play command; removed from the transport button).
+- **Single source of truth for the inspector.** `isSideRailCollapsed`
+  (`@SceneStorage`) is lifted to `EditorModel.inspectorVisible` (UserDefaults-
+  persisted) so the menu toggle, toolbar button, and collapsed-rail restore
+  strip can't disagree.
+- **Appearance & accessibility settings honored** (orthogonal to the deliberate
+  forced-dark chrome): Reduce Motion gates the scopes-panel transition/animation;
+  the marker stroke uses the adaptive `separatorColor`; clip blocks gain a
+  film/waveform glyph so kind isn't hue-only (Differentiate Without Color); the
+  format badge gets a spelled-out VoiceOver label; the scopes Canvas gains a
+  live/empty accessibility value.
+- **Standard controls & materials.** The status bar uses `.bar`; the Beauty
+  toggles drop `.switch` for the Form-default checkbox; inspector timecodes use
+  `monospacedDigit`; the render-queue empty state uses `ContentUnavailableView`;
+  Master Gain uses the shared `LabeledSliderRow`; the scopes pane sits on the
+  recessed content surface (`lcLane`) rather than a chrome material; timeline
+  fonts use `caption2`/monospaced text styles instead of raw point sizes.
+- **Pointer feedback.** The ruler shows a resize cursor + "Drag to scrub"
+  tooltip; marker diamonds show the pointing-hand cursor (the trim handles
+  already used `resizeLeftRight`, matching the macOS 27 pointer set).
+- **List selection unified** on the system selection colour across the media bin
+  and marker rows (honoring the user's system accent for standard list rows
+  while the bespoke timeline keeps the brand gold).
+
+### HIG tensions (deliberate product choices, kept)
+
+- **Forced dark mode** overrides the user's Appearance, which strict HIG
+  discourages — but a fixed low-luminance UI is the near-universal pro-NLE
+  convention (Final Cut, Premiere, Resolve, Logic) so colour judgement isn't
+  biased by surrounding chrome. Kept; the orthogonal accessibility settings
+  above are honored instead.
+- **Brand accent** vs the user's system accent: kept for bespoke timeline /
+  transition / marker / render affordances that have no system-control
+  equivalent, while standard list-row selection uses the system colour.
+
+### Deferred (medium-risk interaction work — documented, not yet done)
+
+Split-view divider autosave, a draggable playhead head, a clip-body move cursor,
+and media-bin arrow-key navigation are additive conveniences that need manual
+interaction testing to land safely; tracked for a follow-up.

@@ -45,6 +45,38 @@ extension EditorModel {
         }
     }
 
+    /// File ▸ Import… — presents an open panel for media and appends the picks to
+    /// the library. Mirrors the Media bin's `+` affordance so importing has a
+    /// menu home and a standard ⌘I shortcut. Uses the Media bin's default of
+    /// copying imports into the bundle.
+    func requestImport() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.movie, .video, .audiovisualContent,
+                                     .audio, .mpeg4Movie, .quickTimeMovie]
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        let urls = panel.urls
+        Task { await importMedia(urls: urls, wantsBundling: true) }
+    }
+
+    /// File ▸ Export… — presents the same save panel the toolbar Export button
+    /// uses and queues a render with the default preset, so the app's primary
+    /// output action has a menu home and a ⇧⌘E shortcut.
+    func requestExport() {
+        guard totalDuration > 0 else { return }
+        let preset = BuiltInExportPresets.defaultPreset
+        let panel = NSSavePanel()
+        if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
+            panel.allowedContentTypes = [type]
+        }
+        panel.nameFieldStringValue = "\(project.name).\(preset.defaultFilenameExtension)"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await export(to: url) }
+    }
+
     /// File ▸ Save — writes to the current URL, or prompts for one if unsaved.
     func requestSave() {
         Task {

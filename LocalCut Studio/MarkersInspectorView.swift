@@ -63,8 +63,10 @@ struct MarkersInspectorView: View {
         }
         .padding(.vertical, 2)
         .background(
-            // Subtle row highlight when this marker is the timeline selection.
-            (model.selectedMarkerID == marker.id ? Color.lcAccent.opacity(0.08) : Color.clear)
+            // Use the system selection colour for standard list-row selection
+            // (matches the media bin and honours the user's system accent),
+            // reserving the brand gold for the bespoke timeline affordances.
+            (model.selectedMarkerID == marker.id ? Color(.selectedContentBackgroundColor) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 4)))
         .contentShape(Rectangle())
         // Funnel through `selectMarker(id:)` so the row tap honours the same
