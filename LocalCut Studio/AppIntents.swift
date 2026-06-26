@@ -1,5 +1,4 @@
 import AppIntents
-import Foundation
 
 /// Main-actor bridge from system-discovered App Intents into the live editor.
 /// App Intents may be invoked while the app is foregrounded by Shortcuts, Siri,
@@ -15,13 +14,23 @@ enum LocalCutAppIntentRouter {
     }
 
     private static weak var model: EditorModel?
+    private static var pendingActions: [Action] = []
 
     static func connect(model: EditorModel) {
         self.model = model
+        drainPendingActions()
+    }
+
+    static func disconnect() {
+        model = nil
+        pendingActions.removeAll()
     }
 
     static func perform(_ action: Action) {
-        guard let model else { return }
+        guard let model else {
+            pendingActions.append(action)
+            return
+        }
         switch action {
         case .newProject:
             model.requestNew()
@@ -32,6 +41,14 @@ enum LocalCutAppIntentRouter {
         case .showDiagnostics:
             model.isDiagnosticsVisible = true
             model.statusMessage = "Diagnostics opened from Shortcuts."
+        }
+    }
+
+    private static func drainPendingActions() {
+        let actions = pendingActions
+        pendingActions.removeAll()
+        for action in actions {
+            perform(action)
         }
     }
 }
@@ -85,6 +102,8 @@ struct ShowLocalCutDiagnosticsIntent: AppIntent {
 }
 
 struct LocalCutAppShortcuts: AppShortcutsProvider {
+    static var shortcutTileColor: ShortcutTileColor { .navy }
+
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
             intent: NewLocalCutProjectIntent(),

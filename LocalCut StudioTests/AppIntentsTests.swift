@@ -8,6 +8,17 @@ struct AppIntentsTests {
         #expect(LocalCutAppIntentRouter.Action.allCases.count == LocalCutAppShortcuts.appShortcuts.count)
     }
 
+    @Test func queuedIntentRunsWhenEditorConnects() {
+        LocalCutAppIntentRouter.disconnect()
+        LocalCutAppIntentRouter.perform(.showDiagnostics)
+
+        let model = EditorModel()
+        LocalCutAppIntentRouter.connect(model: model)
+
+        #expect(model.isDiagnosticsVisible)
+        #expect(model.statusMessage == "Diagnostics opened from Shortcuts.")
+    }
+
     @Test func diagnosticsIntentRoutesToEditorModel() {
         let model = EditorModel()
         LocalCutAppIntentRouter.connect(model: model)
