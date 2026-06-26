@@ -15,13 +15,13 @@ struct EditorSideRailView: View {
 
     private var group: Binding<RailGroup> {
         Binding(
-            get: { RailGroup(rawValue: groupID) ?? .inspector },
+            get: { RailGroup.resolve(groupID) },
             set: { groupID = $0.rawValue })
     }
 
     private var tool: Binding<ToolPanel> {
         Binding(
-            get: { ToolPanel(rawValue: toolID) ?? .beats },
+            get: { ToolPanel.resolve(toolID) },
             set: { toolID = $0.rawValue })
     }
 
@@ -93,6 +93,7 @@ struct EditorSideRailView: View {
             .padding(.vertical, 8)
             .accessibilityLabel("Project tool")
             .accessibilityValue(tool.wrappedValue.title)
+            .accessibilityAddTraits(.isHeader)
 
             Divider()
 
@@ -116,13 +117,22 @@ struct EditorSideRailView: View {
 }
 
 /// Primary side-rail groups, mirroring browser-editor's top-level rail tabs.
-private enum RailGroup: String, CaseIterable, Identifiable {
+/// `internal` (not `private`) so the stale-value fallback in `resolve` can be
+/// unit-tested.
+enum RailGroup: String, CaseIterable, Identifiable {
     case inspector
     case audio
     case captions
     case tools
 
     var id: String { rawValue }
+
+    /// Maps a persisted `@SceneStorage` raw value to a group, falling back to
+    /// `.inspector` when the stored string is unknown (e.g. a key written by an
+    /// older layout). Keeps a corrupt/stale scene value from dropping the rail.
+    static func resolve(_ rawValue: String) -> RailGroup {
+        RailGroup(rawValue: rawValue) ?? .inspector
+    }
 
     var title: String {
         switch self {
@@ -135,12 +145,17 @@ private enum RailGroup: String, CaseIterable, Identifiable {
 }
 
 /// Secondary panels grouped under the Tools tab.
-private enum ToolPanel: String, CaseIterable, Identifiable {
+enum ToolPanel: String, CaseIterable, Identifiable {
     case beats
     case renders
     case markers
 
     var id: String { rawValue }
+
+    /// Falls back to `.beats` for an unknown stored value (see `RailGroup.resolve`).
+    static func resolve(_ rawValue: String) -> ToolPanel {
+        ToolPanel(rawValue: rawValue) ?? .beats
+    }
 
     var title: String {
         switch self {
