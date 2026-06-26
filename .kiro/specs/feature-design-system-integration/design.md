@@ -213,7 +213,8 @@ forbid colours that fight the system appearance):
   `Color.accentColor` references in custom timeline / marker-diamond /
   render-queue / diagnostics drawing now read `Color.lcAccent`, so selection
   matches the tinted controls instead of falling back to system blue — while
-  standard list-row selection keeps the system colour (see *HIG tensions*).
-  Setting the target's *Global Accent Color Name* to `AccentColor` (a
-  project-file change, tracked as **T10.5**) would let these revert to plain
-  `Color.accentColor`.
+  standard list-row selection keeps the system colour (see *HIG tensions*). The
+  target now sets *Global Accent Color Name* = `AccentColor` (**T10.5**), so
+  `Color.accentColor` resolves to the gold app-wide (system focus rings
+  included); the explicit `lcAccent` references are therefore equivalent and
+  could later be simplified back to `Color.accentColor`.

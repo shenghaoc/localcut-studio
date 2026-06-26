@@ -132,10 +132,11 @@
   sparkline) read brand-gold rather than system blue. Standard list-row
   selection (media bin, markers inspector) intentionally stays on the system
   selection colour per **T9.6**.
-- [ ] **T10.5** (delegated — project-file change) Set the app target's
-  `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor` so
-  `Color.accentColor` and system focus rings inherit the gold app-wide; the
-  explicit `lcAccent` references in T10.4 then become equivalent.
+- [x] **T10.5** The app target sets
+  `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor` (both configs),
+  so `Color.accentColor` and system focus rings inherit the gold app-wide; the
+  explicit `lcAccent` references in T10.4 are now equivalent (they could later be
+  simplified back to `Color.accentColor`).
 
 ## Verification
 
