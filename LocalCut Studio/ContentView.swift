@@ -177,7 +177,7 @@ struct EditorView: View {
             Button {
                 model.addTransitionToSelectedClip()
             } label: {
-                Label("Transition", systemImage: "square.filled.and.line.vertical.and.square.filled")
+                Label("Transition", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
             }
             .disabled(!model.canAddTransitionAtSelection)
             .help("Add a transition at the selected clip's cut")
