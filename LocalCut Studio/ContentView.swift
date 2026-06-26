@@ -141,8 +141,11 @@ struct DocumentCommands: Commands {
             }
             .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             Divider()
+            // No key equivalent here: the timeline's MarkerKeyHandler already owns
+            // the bare "m" key and correctly yields it to focused text fields. A
+            // bare-letter menu shortcut would instead hijack "m" while the user is
+            // typing (rename popover, captions). The menu item stays for discovery.
             Button("Add Marker") { model.addMarkerAtPlayhead() }
-                .keyboardShortcut("m", modifiers: [])
             Button("Previous Marker") { model.selectPreviousMarker() }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
                 .disabled(model.project.markers.isEmpty)

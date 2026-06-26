@@ -51,6 +51,12 @@ struct TimelineView: View {
     @State private var dragMode: DragMode?
     @State private var captionDrag: CaptionLineDrag?
     @State private var hoverEdge: HoverEdge?
+    // Track which hover-cursor we currently own so `onDisappear` only pops a
+    // cursor this view actually pushed — an unconditional pop would unbalance the
+    // global NSCursor stack when the ruler rebuilds (zoom) or a marker is removed
+    // from the ForEach while not hovered. Mirrors the trimHandle guard.
+    @State private var isRulerCursorPushed = false
+    @State private var cursorMarkerID: TimelineMarker.ID?
 
     private struct CaptionLineDrag: Equatable {
         let lineID: CaptionLine.ID
@@ -243,10 +249,21 @@ struct TimelineView: View {
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
             // Horizontal-resize cursor + tooltip signal the ruler is scrubbable.
+            // Guard the pops with `isRulerCursorPushed` so a teardown while not
+            // hovered (zoom rebuilds the Canvas) doesn't pop a cursor we never
+            // pushed and corrupt the shared stack.
             .onHover { hovering in
-                if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                    isRulerCursorPushed = true
+                } else if isRulerCursorPushed {
+                    NSCursor.pop()
+                    isRulerCursorPushed = false
+                }
             }
-            .onDisappear { NSCursor.pop() }
+            .onDisappear {
+                if isRulerCursorPushed { NSCursor.pop(); isRulerCursorPushed = false }
+            }
             .help("Drag to scrub")
 
             ForEach(markers) { marker in
@@ -303,8 +320,20 @@ struct TimelineView: View {
                 .frame(width: markerGlyphSize, height: markerGlyphSize)
                 .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
-                .onHover { $0 ? NSCursor.pointingHand.push() : NSCursor.pop() }
-                .onDisappear { NSCursor.pop() }
+                // Per-marker cursor ownership so deleting/scrolling a non-hovered
+                // marker out of the ForEach doesn't pop a cursor it never pushed.
+                .onHover { hovering in
+                    if hovering {
+                        NSCursor.pointingHand.push()
+                        cursorMarkerID = marker.id
+                    } else if cursorMarkerID == marker.id {
+                        NSCursor.pop()
+                        cursorMarkerID = nil
+                    }
+                }
+                .onDisappear {
+                    if cursorMarkerID == marker.id { NSCursor.pop(); cursorMarkerID = nil }
+                }
                 .onTapGesture { model.selectMarker(id: marker.id) }
                 .popover(isPresented: Binding(
                     get: { renamingMarkerID == marker.id },
