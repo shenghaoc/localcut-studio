@@ -187,7 +187,7 @@ struct TimelineView: View {
                         captionLane(for: track)
                     }
                 }
-                PlayheadView(model: model, pps: pps)
+                PlayheadView(model: model, pps: pps, rulerHeight: rulerHeight)
             }
             .frame(width: contentWidth, alignment: .topLeading)
         }
@@ -721,14 +721,27 @@ struct TimelineView: View {
 private struct PlayheadView: View {
     var model: EditorModel
     var pps: CGFloat
+    var rulerHeight: CGFloat
+
+    private let headWidth: CGFloat = 11
+    private let headHeight: CGFloat = 7
 
     var body: some View {
-        Rectangle()
-            .fill(.red)
-            .frame(width: 1.5)
-            .frame(maxHeight: .infinity)
-            .offset(x: CGFloat(model.currentTime) * pps)
-            .allowsHitTesting(false)
+        let x = CGFloat(model.currentTime) * pps
+        ZStack(alignment: .topLeading) {
+            // Small downward head pinned to the ruler/lane boundary.
+            PlayheadHead()
+                .fill(.red)
+                .frame(width: headWidth, height: headHeight)
+                .offset(x: x - headWidth / 2, y: rulerHeight - headHeight)
+            // Precise scrub line spanning the full timeline height.
+            Rectangle()
+                .fill(.red)
+                .frame(width: 1.5)
+                .frame(maxHeight: .infinity)
+                .offset(x: x)
+        }
+        .allowsHitTesting(false)
     }
 }
 

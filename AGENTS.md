@@ -48,6 +48,8 @@ Each spec has `design.md`, `requirements.md`, and `tasks.md` (bugfix specs use `
 
 **Project & infra** — [Project persistence](.kiro/specs/feature-project-persistence/tasks.md) · [Project bundles](.kiro/specs/feature-project-bundles/tasks.md) · [Render cache](.kiro/specs/feature-render-cache/tasks.md) · [Export presets + render queue](.kiro/specs/feature-export-queue/tasks.md) · [Timeline markers](.kiro/specs/feature-markers/tasks.md) · [Capability tiers](.kiro/specs/feature-capability-tiers/tasks.md) · [LocalCutCore package](.kiro/specs/feature-localcutcore-package/tasks.md) · [Diagnostics panel](.kiro/specs/feature-diagnostics/tasks.md)
 
+**UI & shell** — [Design-system integration polish](.kiro/specs/feature-design-system-integration/tasks.md) (shared `EditorPanelHeader`, timeline playhead head, inspector posters, VoiceOver labelling)
+
 **Bugfix specs** — [v0.1.0 consolidation](.kiro/specs/bugfix-v0.1.0-consolidation/tasks.md) · [build warnings & Swift 6 modernization](.kiro/specs/bugfix-build-warnings-and-modernization/tasks.md) · [CMTimeCode timescale guard](.kiro/specs/bugfix-cmtimecode-timescale/tasks.md) · [FingerprintIndex JSON determinism](.kiro/specs/bugfix-fingerprint-index-determinism/tasks.md) · [implemented-spec polish](.kiro/specs/bugfix-implemented-spec-polish/tasks.md)
 
 ### Proposed (ready — not blocked)
