@@ -44,8 +44,8 @@ func prepareLive() {
     do {
         // B5: pre-flight the output device so the no-format case throws a
         // catchable Swift error before start()/prepare() can raise an ObjC one.
-        let outputFormat = liveEngine.outputNode.inputFormat(forBus: 0)
-        guard outputFormat.sampleRate > 0, outputFormat.channelCount > 0 else {
+        let deviceFormat = liveEngine.outputNode.inputFormat(forBus: 0)
+        guard deviceFormat.sampleRate > 0, deviceFormat.channelCount > 0 else {
             throw LiveMeterError.unavailableOutputFormat
         }
         try liveEngine.start()
