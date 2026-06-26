@@ -38,6 +38,11 @@ final class EditorModel {
     // Timeline view state
     var pixelsPerSecond: Double = 80
 
+    /// Whether newly imported media should be copied into `.lcbundle` saves.
+    /// Shared between the Media Bin toggle and the File ▸ Import… menu command
+    /// so the user's preference is respected from either entry point.
+    var copyImportsIntoBundle: Bool = true
+
     // Beat tools (Phase 34)
     var showBeatMarkers = false
     var snapToBeats = false

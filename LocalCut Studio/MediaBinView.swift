@@ -8,7 +8,6 @@ import LocalCutCore
 struct MediaBinView: View {
     @Bindable var model: EditorModel
     @State private var showImporter = false
-    @State private var copyImportsIntoBundle = true
     @FocusState private var focusedMediaID: MediaItem.ID?
 
     var body: some View {
@@ -79,7 +78,7 @@ struct MediaBinView: View {
 
             // Import behaviour lives quietly at the foot of the panel rather than
             // above the library — it's a save-time preference, not a primary action.
-            Toggle("Copy imports into bundle", isOn: $copyImportsIntoBundle)
+            Toggle("Copy imports into bundle", isOn: $model.copyImportsIntoBundle)
                 .toggleStyle(.checkbox)
                 .controlSize(.small)
                 .font(.caption)
@@ -95,7 +94,7 @@ struct MediaBinView: View {
             allowsMultipleSelection: true
         ) { result in
             if case .success(let urls) = result {
-                let wantsBundling = copyImportsIntoBundle
+                let wantsBundling = model.copyImportsIntoBundle
                 Task { await model.importMedia(urls: urls, wantsBundling: wantsBundling) }
             }
         }

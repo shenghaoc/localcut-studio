@@ -64,7 +64,7 @@ extension EditorModel {
         panel.begin { [weak self] response in
             guard response == .OK, let self, !panel.urls.isEmpty else { return }
             let urls = panel.urls
-            Task { await self.importMedia(urls: urls, wantsBundling: true) }
+            Task { await self.importMedia(urls: urls, wantsBundling: self.copyImportsIntoBundle) }
         }
     }
 

@@ -17,6 +17,9 @@ struct TimelineView: View {
     @State private var renameDraft: String = ""
     @State private var timelineScrollTargetSeconds: Double = 0
     @State private var timelineScrollRequest = 0
+    /// Viewport width captured via GeometryReader so the center-playhead
+    /// action can offset the scroll anchor by half the visible area.
+    @State private var timelineViewportWidth: CGFloat = 0
     @FocusState private var focusedClipID: Clip.ID?
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
@@ -258,6 +261,13 @@ struct TimelineView: View {
                 }
                 .frame(width: contentWidth, alignment: .topLeading)
             }
+            .background {
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { timelineViewportWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, new in timelineViewportWidth = new }
+                }
+            }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Timeline viewport")
             .accessibilityValue("Around \(TimeFormatting.timecode(timelineScrollTargetSeconds))")
@@ -282,7 +292,11 @@ struct TimelineView: View {
     private var timelineScrollAnchor: some View {
         Color.clear
             .frame(width: 1, height: 1)
-            .offset(x: CGFloat(timelineScrollTargetSeconds) * pps, y: 0)
+            // Offset by negative half the viewport so the scroll-to anchor
+            // lands at the viewport centre rather than the leading edge,
+            // keeping the playhead centred when using the "Center playhead"
+            // button or keyboard-focus scroll.
+            .offset(x: CGFloat(timelineScrollTargetSeconds) * pps - timelineViewportWidth / 2, y: 0)
             .id(TimelineScrollAnchor.viewportTarget)
             .accessibilityHidden(true)
     }
@@ -848,9 +862,14 @@ struct TimelineView: View {
 
     private var clipFocusCandidates: [ClipFocusCandidate] {
         tracks.enumerated().flatMap { trackIndex, track in
-            track.clips.map {
+            // Use rippled (effective) start positions so keyboard-focus
+            // scroll targets match the drawn clip positions when upstream
+            // transitions shift later clips rightward.
+            let placements = TransitionLayout.placements(for: track.clips, cuts: transitionCuts)
+            let effectiveStarts = Dictionary(uniqueKeysWithValues: placements.map { ($0.clip.id, $0.effectiveStart) })
+            return track.clips.map {
                 ClipFocusCandidate(id: $0.id,
-                                   startSeconds: $0.timelineStart.seconds,
+                                   startSeconds: (effectiveStarts[$0.id] ?? $0.timelineStart).seconds,
                                    trackIndex: trackIndex)
             }
         }
