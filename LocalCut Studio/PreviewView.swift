@@ -44,8 +44,11 @@ private struct TransportControls: View {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .frame(width: 20)
             }
-            // The spacebar shortcut lives on the View ▸ Play menu command (its
-            // single owner); this button is the on-canvas affordance.
+            // Spacebar toggles playback, scoped to this view rather than a menu
+            // key-equivalent: a bare `.space` in the menu bar is global in AppKit
+            // and would swallow spaces typed into text fields. This button is the
+            // single owner of the shortcut.
+            .keyboardShortcut(.space, modifiers: [])
             .help("Play / Pause")
             .accessibilityLabel(isPlaying ? Text("Pause") : Text("Play"))
 

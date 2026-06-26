@@ -44,11 +44,11 @@ struct ViewCommands: Commands {
 
             Divider()
 
-            // Transport in the menu bar so playback has a discoverable home and a
-            // standard shortcut, mirroring the on-canvas controls. This is the
-            // single owner of the spacebar shortcut (removed from the button).
+            // Transport in the menu bar so playback has a discoverable home. The
+            // spacebar shortcut lives on the on-canvas Play button instead: a bare
+            // `.space` menu key-equivalent is global in AppKit and would swallow
+            // spaces typed into text fields (e.g. the marker-rename popover).
             Button(model.isPlaying ? "Pause" : "Play") { model.togglePlayPause() }
-                .keyboardShortcut(.space, modifiers: [])
                 .disabled(model.totalDuration <= 0)
             Button("Go to Start") { model.seek(toSeconds: 0) }
                 .keyboardShortcut(.upArrow, modifiers: .command)
