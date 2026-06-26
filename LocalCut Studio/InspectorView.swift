@@ -10,39 +10,29 @@ struct InspectorView: View {
     @State private var showLUTImporter = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            EditorPanelHeader("Inspector")
-            Divider()
-
-            Form {
-                if let transition = model.selectedTransition {
-                    transitionSection(transition)
-                } else if let clip = model.selectedClip {
-                    clipSection(clip)
-                    if clipIsVideo(clip) {
-                        colourSection
-                        beautySection
-                    } else {
-                        AudioClipFadesInspectorView(model: model, clip: clip)
-                    }
-                } else if let media = model.selectedMedia {
-                    mediaSection(media)
+        Form {
+            if let transition = model.selectedTransition {
+                transitionSection(transition)
+            } else if let clip = model.selectedClip {
+                clipSection(clip)
+                if clipIsVideo(clip) {
+                    colourSection
+                    beautySection
                 } else {
-                    Section {
-                        Text("Select a clip or media item.")
-                            .foregroundStyle(.secondary)
-                    }
+                    AudioClipFadesInspectorView(model: model, clip: clip)
                 }
-
-                AudioInspectorView(model: model)
-                BeatToolsInspectorView(model: model)
-                CaptionsInspectorView(model: model)
-                RenderQueueInspectorView(model: model)
-                MarkersInspectorView(model: model)
-                projectSection
+            } else if let media = model.selectedMedia {
+                mediaSection(media)
+            } else {
+                Section {
+                    Text("Select a clip or media item.")
+                        .foregroundStyle(.secondary)
+                }
             }
-            .formStyle(.grouped)
+
+            projectSection
         }
+        .formStyle(.grouped)
         .fileImporter(
             isPresented: $showLUTImporter,
             allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data],

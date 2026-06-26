@@ -137,8 +137,8 @@ struct EditorView: View {
                     .frame(minWidth: 380)
                     .layoutPriority(1)
 
-                InspectorView(model: model)
-                    .frame(minWidth: 240, idealWidth: 280)
+                EditorSideRailView(model: model)
+                    .frame(minWidth: 288, idealWidth: 320)
             }
             .frame(minHeight: 320)
 
@@ -177,10 +177,11 @@ struct EditorView: View {
             Button {
                 model.addTransitionToSelectedClip()
             } label: {
-                Label("Transition", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                Label("Add Transition", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
             }
             .disabled(!model.canAddTransitionAtSelection)
-            .help("Add a transition at the selected clip's cut")
+            .help("Add transition at selected cut")
+            .accessibilityLabel("Add transition at selected cut")
 
             Button(role: .destructive) {
                 if model.selectedTransitionClipID != nil {
