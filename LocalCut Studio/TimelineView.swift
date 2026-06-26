@@ -57,11 +57,10 @@ struct TimelineView: View {
     @State private var dragMode: DragMode?
     @State private var captionDrag: CaptionLineDrag?
     @State private var hoverEdge: HoverEdge?
-    // Track which hover-cursor we currently own so `onDisappear` only pops a
-    // cursor this view actually pushed — an unconditional pop would unbalance the
-    // global NSCursor stack when the ruler rebuilds (zoom) or a marker is removed
-    // from the ForEach while not hovered. Mirrors the trimHandle guard.
-    @State private var isRulerCursorPushed = false
+    // Track which trim-edge hover-cursor we currently own so `onDisappear` only
+    // pops a cursor this view actually pushed — an unconditional pop would
+    // unbalance the global NSCursor stack when a clip leaves the ForEach while
+    // not hovered. (The ruler and markers use declarative `.pointerStyle`.)
     private struct CaptionLineDrag: Equatable {
         let lineID: CaptionLine.ID
         let trackID: CaptionTrack.ID
@@ -344,22 +343,10 @@ struct TimelineView: View {
             }
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
-            // Horizontal-resize cursor + tooltip signal the ruler is scrubbable.
-            // Guard the pops with `isRulerCursorPushed` so a teardown while not
-            // hovered (zoom rebuilds the Canvas) doesn't pop a cursor we never
-            // pushed and corrupt the shared stack.
-            .onHover { hovering in
-                if hovering {
-                    NSCursor.resizeLeftRight.push()
-                    isRulerCursorPushed = true
-                } else if isRulerCursorPushed {
-                    NSCursor.pop()
-                    isRulerCursorPushed = false
-                }
-            }
-            .onDisappear {
-                if isRulerCursorPushed { NSCursor.pop(); isRulerCursorPushed = false }
-            }
+            // Declarative resize cursor signals the ruler is scrubbable. Region-
+            // based, so there's no shared NSCursor push/pop stack to unbalance
+            // when the ruler Canvas rebuilds on zoom.
+            .pointerStyle(.columnResize)
             .help("Drag to scrub")
 
             ForEach(markers) { marker in
@@ -416,14 +403,15 @@ struct TimelineView: View {
                         .fill(.regularMaterial.opacity(0.8)))
                 .frame(width: labelWidth)
                 .allowsHitTesting(false)
-            MarkerHoverWrapper {
-                MarkerDiamond()
-                    .fill(fill)
-                    .overlay(MarkerDiamond().stroke(strokeColor, lineWidth: strokeWidth))
-                    .frame(width: markerGlyphSize, height: markerGlyphSize)
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-            }
+            MarkerDiamond()
+                .fill(fill)
+                .overlay(MarkerDiamond().stroke(strokeColor, lineWidth: strokeWidth))
+                .frame(width: markerGlyphSize, height: markerGlyphSize)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+                // Pointing-hand cursor over the marker (declarative; replaces a
+                // manual NSCursor push/pop hover wrapper).
+                .pointerStyle(.link)
                 .onTapGesture { model.selectMarker(id: marker.id) }
                 .popover(isPresented: Binding(
                     get: { renamingMarkerID == marker.id },
@@ -1075,29 +1063,6 @@ private struct MarkerDiamond: Shape {
 /// hover-enter/exit sequencing is local to the marker rather than shared via a
 /// parent-level `@State` that can be clobbered when the mouse races between
 /// adjacent markers (Gemini review — cursor stack corruption race).
-private struct MarkerHoverWrapper<Content: View>: View {
-    @ViewBuilder let content: Content
-    @State private var isHovering = false
-
-    var body: some View {
-        content
-            .onHover { hovering in
-                if hovering {
-                    if !isHovering {
-                        NSCursor.pointingHand.push()
-                        isHovering = true
-                    }
-                } else if isHovering {
-                    NSCursor.pop()
-                    isHovering = false
-                }
-            }
-            .onDisappear {
-                if isHovering { NSCursor.pop(); isHovering = false }
-            }
-    }
-}
-
 /// AppKit local-event monitor that adds / renames / deletes markers from the
 /// timeline keyboard shortcuts. The monitor lives for the lifetime of the
 /// timeline view but is scoped two ways: it only fires for events targeted at
