@@ -61,7 +61,7 @@ extension EditorModel {
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        panel.begin { [weak self] response in
+        panel.begin { @MainActor [weak self] response in
             guard response == .OK, let self, !panel.urls.isEmpty else { return }
             let urls = panel.urls
             Task { await self.importMedia(urls: urls, wantsBundling: self.copyImportsIntoBundle) }
@@ -80,7 +80,7 @@ extension EditorModel {
         }
         panel.nameFieldStringValue = "\(project.name).\(preset.defaultFilenameExtension)"
         panel.canCreateDirectories = true
-        panel.begin { [weak self] response in
+        panel.begin { @MainActor [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
             Task { await self.export(to: url) }
         }

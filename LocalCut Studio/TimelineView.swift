@@ -1065,10 +1065,6 @@ private struct MarkerDiamond: Shape {
     }
 }
 
-/// Per-marker hover cursor wrapper. Each instance owns its own `@State` so
-/// hover-enter/exit sequencing is local to the marker rather than shared via a
-/// parent-level `@State` that can be clobbered when the mouse races between
-/// adjacent markers (Gemini review — cursor stack corruption race).
 /// AppKit local-event monitor that adds / renames / deletes markers from the
 /// timeline keyboard shortcuts. The monitor lives for the lifetime of the
 /// timeline view but is scoped two ways: it only fires for events targeted at

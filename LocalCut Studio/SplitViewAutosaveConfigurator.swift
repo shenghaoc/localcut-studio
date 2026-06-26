@@ -50,7 +50,7 @@ struct SplitViewAutosaveConfigurator: NSViewRepresentable {
             // Suspend autosave while disabled so a transient collapsed divider
             // position isn't written over the saved expanded layout; the last
             // saved positions stay in defaults and restore when re-enabled.
-            splitView.autosaveName = isEnabled ? NSSplitView.AutosaveName(autosaveName) : ""
+            splitView.autosaveName = isEnabled ? NSSplitView.AutosaveName(autosaveName) : nil
         }
 
         private func nearestSplitView(matchingVertical vertical: Bool) -> NSSplitView? {
