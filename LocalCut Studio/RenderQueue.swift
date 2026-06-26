@@ -252,7 +252,7 @@ final class RenderQueue {
     init(
         jobs: [QueueJob] = [],
         persistsToDisk: Bool = true,
-        outputBookmarkResolver: @escaping (Data) -> BookmarkResolution? = RenderQueue.resolveSecurityScopedBookmark
+        outputBookmarkResolver: ((Data) -> BookmarkResolution?)? = nil
     ) {
         self.jobs = jobs
         self.currentJobID = nil
@@ -260,7 +260,7 @@ final class RenderQueue {
         self.isRunning = false
         self.statusMessage = nil
         self.persistsToDisk = persistsToDisk
-        self.outputBookmarkResolver = outputBookmarkResolver
+        self.outputBookmarkResolver = outputBookmarkResolver ?? Self.resolveSecurityScopedBookmark
     }
 
     func setOfflineMeterSink(_ sink: (@Sendable (AudioMeterSnapshot) -> Void)?,
