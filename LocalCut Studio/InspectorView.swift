@@ -10,10 +10,11 @@ struct InspectorView: View {
     @State private var showLUTImporter = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            EditorPanelHeader("Inspector")
-            Divider()
-            Form {
+        // The side rail's segmented switcher (EditorSideRailView) is the sole
+        // heading for the Inspector pane — adding an EditorPanelHeader here
+        // would duplicate the tab label and create a VoiceOver header echo.
+        // Sibling Audio/Captions panes already comply (audit P2).
+        Form {
             if let transition = model.selectedTransition {
                 transitionSection(transition)
             } else if let clip = model.selectedClip {
@@ -44,7 +45,6 @@ struct InspectorView: View {
             if case .success(let urls) = result, let url = urls.first {
                 model.importLUT(url: url)
             }
-        }
         }
     }
 

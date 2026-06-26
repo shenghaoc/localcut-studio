@@ -37,7 +37,10 @@ struct EditorSideRailView: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .accessibilityLabel("\(group.wrappedValue.title) panel")
-                .accessibilityValue("Selected")
+                // Report the active pane title — a bare "Selected" is implicit
+                // in any segmented control and carries no extra information.
+                // Mirrors the secondary picker below.
+                .accessibilityValue(group.wrappedValue.title)
                 // The segmented switcher stands in for a per-pane EditorPanelHeader:
                 // marking it a header keeps the rail reachable from the VoiceOver
                 // rotor's Headings list, announcing the active pane, without a

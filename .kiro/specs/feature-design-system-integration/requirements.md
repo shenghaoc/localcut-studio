@@ -16,12 +16,18 @@
 
 ## R2 — Timeline chrome
 
-- **R2.1** The timeline header shows a compact title plus the zoom slider in the
-  trailing slot; no per-frame summary string is computed during view updates.
+- **R2.1** The timeline header shows a compact title plus, in the trailing
+  slot, the page-left / center-playhead / page-right buttons and the zoom
+  slider; the scroll viewport also exposes an `accessibilityAdjustableAction`
+  so VoiceOver rotor "Adjust value" pages left/right. No per-frame summary
+  string is computed during view updates.
 - **R2.2** A `PlayheadHead` triangle is drawn at the ruler/lane boundary,
   centred on the playhead `x`, alongside the full-height scrub line.
-- **R2.3** The playhead head and line live in the isolated `PlayheadView` and
-  are non-interactive (`allowsHitTesting(false)`).
+- **R2.3** The playhead head is an interactive grab target with a `DragGesture`
+  (tolerant seek while dragging, precise seek on end). The full-height scrub
+  line stays non-interactive (`allowsHitTesting(false)`) so clicks fall
+  through to clips and the ruler; the head carries `accessibilityHidden(true)`
+  and assistive scrubbing happens via the keyboard / adjustable action.
 
 ## R3 — Inspector media imagery
 

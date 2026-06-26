@@ -13,6 +13,9 @@ struct TimelineView: View {
     private let gutterWidth: CGFloat = 56
     private let edgeZoneWidth: CGFloat = 8
     private let markerGlyphSize: CGFloat = 12
+    /// Cached system separator colour for the marker stroke. Computed once
+    /// (per type) rather than allocated per glyph per ruler tick (audit P3).
+    private static let markerSeparatorStroke: Color = Color(nsColor: .separatorColor)
     @State private var renamingMarkerID: TimelineMarker.ID?
     @State private var renameDraft: String = ""
     @State private var timelineScrollTargetSeconds: Double = 0
@@ -20,6 +23,12 @@ struct TimelineView: View {
     /// Viewport width captured via GeometryReader so the center-playhead
     /// action can offset the scroll anchor by half the visible area.
     @State private var timelineViewportWidth: CGFloat = 0
+    /// Live leading-edge of the visible timeline window, in seconds, fed by
+    /// `onScrollGeometryChange`. Lets the page-scroll buttons and the
+    /// accessibilityAdjustableAction base their delta on the *current* viewport
+    /// — including manual trackpad / scrollbar scrolls — instead of the stale
+    /// last programmatic target (Codex P2 on d8c7ee2).
+    @State private var timelineCurrentScrollSeconds: Double = 0
     @FocusState private var focusedClipID: Clip.ID?
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
@@ -244,12 +253,17 @@ struct TimelineView: View {
     private var timelineScroller: some View {
         ScrollViewReader { proxy in
             ScrollView([.horizontal]) {
+                // Compute transition cuts once per body invalidation — every
+                // video lane shares the same set, so reading the computed var
+                // per-lane would otherwise re-sort/-merge all video clips for
+                // each lane on every currentTime tick (audit P3).
+                let cuts = transitionCuts
                 ZStack(alignment: .topLeading) {
                     VStack(spacing: 0) {
                         ruler
                         ForEach(Array(tracks.enumerated()), id: \.element.id) { trackIndex, track in
                             Divider()
-                            lane(for: track, trackIndex: trackIndex)
+                            lane(for: track, trackIndex: trackIndex, cuts: cuts)
                         }
                         ForEach(captionTracks) { track in
                             Divider()
@@ -260,6 +274,15 @@ struct TimelineView: View {
                     PlayheadView(model: model, pps: pps, rulerHeight: rulerHeight)
                 }
                 .frame(width: contentWidth, alignment: .topLeading)
+            }
+            // Mirror the live viewport leading-edge into state so page-scroll
+            // buttons + the adjustable a11y action use the *current* offset
+            // (including manual trackpad / scrollbar scrolls), not a stale
+            // programmatic target (Codex P2 on d8c7ee2).
+            .onScrollGeometryChange(for: Double.self) { geo in
+                Double(geo.contentOffset.x) / max(Double(pps), 1)
+            } action: { _, newSeconds in
+                timelineCurrentScrollSeconds = newSeconds
             }
             .background {
                 GeometryReader { geo in
@@ -401,7 +424,7 @@ struct TimelineView: View {
         let fill: Color = marker.colour.map { Color(cgColor: $0.cgColor) } ?? Color.lcAccent
         // Adaptive separator colour rather than a fixed translucent black so the
         // outline tracks Dark Mode and Increase Contrast; selected stays on gold.
-        let strokeColor: Color = isSelected ? .lcAccent : Color(nsColor: .separatorColor)
+        let strokeColor: Color = isSelected ? .lcAccent : Self.markerSeparatorStroke
         let strokeWidth: CGFloat = isSelected ? 2 : 1
         let labelWidth: CGFloat = 60
         VStack(spacing: 1) {
@@ -460,8 +483,8 @@ struct TimelineView: View {
         model.renameMarker(id: id, to: renameDraft)
     }
 
-    private func lane(for track: Track, trackIndex: Int) -> some View {
-        let placements = TransitionLayout.placements(for: track.clips, cuts: transitionCuts)
+    private func lane(for track: Track, trackIndex: Int, cuts: [TransitionLayout.Cut]) -> some View {
+        let placements = TransitionLayout.placements(for: track.clips, cuts: cuts)
         let effectiveStarts = Dictionary(uniqueKeysWithValues: placements.map { ($0.clip.id, $0.effectiveStart) })
         return ZStack(alignment: .topLeading) {
             Color.lcLane
@@ -671,25 +694,19 @@ struct TimelineView: View {
             .fill(isHovered ? Color.white.opacity(0.15) : Color.clear)
             .frame(width: edgeZoneWidth)
             .contentShape(Rectangle())
+            // Region-based cursor: no NSCursor push/pop stack to unbalance.
+            // Previously this used onHover { push() / pop() } + commitDrag's
+            // pop(), which had two reproducible imbalance paths (drag bypassed
+            // onHover-out → trailing pop ran twice; click-anchored handles
+            // skipped onHover entirely on commit). `.pointerStyle` is the
+            // declarative replacement that already shipped for ruler/marker
+            // cursors (audit P2).
+            .pointerStyle(.columnResize)
             .onHover { hovering in
-                let inTrimDrag: Bool = switch dragMode {
-                case .trimmingLeft, .trimmingRight: true
-                default: false
-                }
                 if hovering {
                     hoverEdge = activeEdge
-                    if !inTrimDrag { NSCursor.resizeLeftRight.push() }
-                } else {
-                    if hoverEdge == activeEdge {
-                        hoverEdge = nil
-                    }
-                    if !inTrimDrag { NSCursor.pop() }
-                }
-            }
-            .onDisappear {
-                if hoverEdge == activeEdge {
+                } else if hoverEdge == activeEdge {
                     hoverEdge = nil
-                    NSCursor.pop()
                 }
             }
             .gesture(trimDragGesture(clip: clip, edge: edge, shift: shift))
@@ -828,13 +845,14 @@ struct TimelineView: View {
         guard let mode = dragMode else { return }
         dragMode = nil
 
+        // Cursor management was moved to declarative `.pointerStyle` on the
+        // trim handles, so no NSCursor.pop() is needed here (the old paired
+        // pops created two reproducible imbalance paths — see trimHandle).
         switch mode {
         case .trimmingLeft(let id, let candidate):
-            NSCursor.pop()
             model.trimClip(id: id, edge: .left, to: candidate)
 
         case .trimmingRight(let id, let candidate):
-            NSCursor.pop()
             model.trimClip(id: id, edge: .right, to: candidate)
 
         case .moving(let id, let candidateStart, _, let targetIndex):
@@ -882,13 +900,16 @@ struct TimelineView: View {
     }
 
     private var timelinePageSeconds: Double {
-        max(5, 640 / max(Double(pps), 1))
+        TimelineScrollMath.pageSeconds(pps: pps)
     }
 
     private func selectTimelineClip(_ clip: Clip) {
         model.selectClip(id: clip.id)
         focusedClipID = clip.id
-        requestTimelineScroll(to: clip.timelineStart.seconds)
+        // Use the rippled (effective) start so projects with upstream
+        // transitions don't scroll to the authored position — matches the
+        // drawn clip location and keyboard-nav behaviour (Codex P2 on e5cae6b).
+        scrollTimelineToClip(id: clip.id)
     }
 
     private func moveTimelineSelection(_ direction: MoveCommandDirection) {
@@ -919,12 +940,55 @@ struct TimelineView: View {
     }
 
     private func scrollTimelinePage(_ direction: Int) {
-        requestTimelineScroll(to: timelineScrollTargetSeconds + Double(direction) * timelinePageSeconds)
+        // Page from the live viewport centre, not from the last programmatic
+        // target — manual trackpad / scrollbar scrolls don't update the target,
+        // so this would otherwise jump back to wherever the user last clicked
+        // (Codex P2 on d8c7ee2). Math lives in `TimelineScrollMath` so it can
+        // be unit-tested without a View context.
+        let currentCentre = TimelineScrollMath.viewportCentreSeconds(
+            scrollLeadingSeconds: timelineCurrentScrollSeconds,
+            viewportWidth: timelineViewportWidth,
+            pps: pps)
+        requestTimelineScroll(to: currentCentre + Double(direction) * timelinePageSeconds)
     }
 
     private func requestTimelineScroll(to seconds: Double) {
-        timelineScrollTargetSeconds = min(max(seconds, 0), max(model.totalDuration, 0))
+        timelineScrollTargetSeconds = TimelineScrollMath.clampedTarget(
+            seconds, totalDuration: model.totalDuration)
         timelineScrollRequest += 1
+    }
+}
+
+/// Pure scroll-math helpers extracted from `TimelineView` so the page-scroll,
+/// viewport-centre, and target-clamp formulas can be unit-tested without a
+/// View context (audit P3). Holding them in a top-level enum keeps the View
+/// methods one-liners that just delegate.
+enum TimelineScrollMath {
+    /// How many seconds of timeline a single page button advances. Floored at
+    /// 5 s so the page step still feels useful when the user is zoomed in.
+    static func pageSeconds(pps: CGFloat) -> Double {
+        max(5, 640 / max(Double(pps), 1))
+    }
+
+    /// Visible duration of the timeline viewport in seconds.
+    static func viewportSeconds(viewportWidth: CGFloat, pps: CGFloat) -> Double {
+        Double(viewportWidth) / max(Double(pps), 1)
+    }
+
+    /// Time at the centre of the visible viewport — `scrollLeadingSeconds`
+    /// comes straight from `onScrollGeometryChange` (the leading edge in
+    /// seconds), so this is the live position the user actually sees.
+    static func viewportCentreSeconds(scrollLeadingSeconds: Double,
+                                      viewportWidth: CGFloat,
+                                      pps: CGFloat) -> Double {
+        scrollLeadingSeconds + viewportSeconds(viewportWidth: viewportWidth, pps: pps) / 2
+    }
+
+    /// Clamps a requested target to the project range — negative requests pin
+    /// to 0, requests past `totalDuration` pin to the end (or 0 when there is
+    /// no content yet).
+    static func clampedTarget(_ seconds: Double, totalDuration: Double) -> Double {
+        min(max(seconds, 0), max(totalDuration, 0))
     }
 }
 
@@ -1175,37 +1239,106 @@ private struct EditorKeyHandler: NSViewRepresentable {
                   ObjectIdentifier(hostWindow) == eventWindowID else {
                 return false
             }
-            // Anything other than plain or Shift modifiers (Command/Option/etc.)
-            // belongs to a different command; never swallow those.
-            let stripped = modifiers
-                .intersection(.deviceIndependentFlagsMask)
-                .subtracting([.shift, .capsLock, .numericPad, .function])
-            guard stripped.isEmpty else { return false }
-            // Don't steal keys from any first responder that owns a text input
-            // (rename popovers, inspector fields, the caption editor).
-            if let responder = hostWindow.firstResponder,
-               responder is NSText || responder is NSTextField || responder is NSTextView {
+            // Snapshot responder identity to pure booleans so the policy
+            // decision lives in a free function we can unit-test (audit P1
+            // testability extraction). The Space-trap fix and its NSControl
+            // / SwiftUI-hosted exemptions are all encoded in the policy enum.
+            let responder = hostWindow.firstResponder
+            let textInput = responder is NSText
+                || responder is NSTextField
+                || responder is NSTextView
+            let nonTimelineFocus = responder != nil
+                && responder !== view
+                && responder !== hostWindow
+            let action = EditorKeyHandlerPolicy.action(
+                keyCode: keyCode,
+                chars: chars,
+                modifiers: modifiers,
+                firstResponderIsTextInput: textInput,
+                firstResponderIsNonTimelineFocus: nonTimelineFocus)
+            switch action {
+            case .ignore:
                 return false
-            }
-
-            let shift = modifiers.contains(.shift)
-            // Delete / Backspace: only consume when a marker is selected so
-            // the existing clip / transition delete shortcut keeps firing.
-            let isDelete = (keyCode == 0x33 || keyCode == 0x75)
-
-            // Space → play/pause. The text-input first-responder guard above
-            // already let spaces through while the user is typing.
-            if keyCode == 0x31, !shift {
+            case .togglePlay:
                 onTogglePlay?()
                 return true
-            }
-
-            if chars == "m" || chars == "M" {
-                if shift { onRename?() } else { onAdd?() }
+            case .addMarker:
+                onAdd?()
                 return true
+            case .renameMarker:
+                onRename?()
+                return true
+            case .maybeDeleteMarker:
+                // Only consume when a marker is selected so the existing clip /
+                // transition delete shortcut keeps firing.
+                return onDelete?() == true
             }
-            if isDelete, onDelete?() == true { return true }
-            return false
         }
+    }
+}
+
+/// Pure decision layer for the editor's window-scoped key handler.
+///
+/// Extracting the policy lets us regression-test all the carve-outs that the
+/// Space-trap fix introduced (Codex P1 on d8c7ee2 + verifier strengthening
+/// for the SwiftUI-hosted control path) without standing up an `NSWindow`.
+/// The Coordinator only has to translate live responder state into the four
+/// booleans the policy takes; the rest is deterministic.
+enum EditorKeyHandlerPolicy {
+    enum Action: Equatable {
+        /// Pass the event through unchanged. Used for any event we don't own
+        /// (foreign window, modifier-laden chord, focused text input, etc.).
+        case ignore
+        /// Space — toggle play/pause.
+        case togglePlay
+        /// `m` — add a marker at the playhead.
+        case addMarker
+        /// `Shift+m` — open the rename popover on the selected marker.
+        case renameMarker
+        /// Backspace/Forward-Delete — try to delete the selected marker; the
+        /// Coordinator's `onDelete` callback returns whether a marker was
+        /// actually selected and consumed the key, so the toolbar's clip
+        /// delete shortcut keeps firing when no marker is selected.
+        case maybeDeleteMarker
+    }
+
+    /// Decide what to do with a key event delivered to the host window.
+    ///
+    /// - `firstResponderIsTextInput`: true when the focused responder is an
+    ///   `NSText`/`NSTextField`/`NSTextView` (rename popovers, inspector
+    ///   fields, caption editor) — never steal keys while the user is typing.
+    /// - `firstResponderIsNonTimelineFocus`: true when the focused responder
+    ///   is neither the timeline view itself nor the bare window — i.e. some
+    ///   AppKit `NSControl` or a SwiftUI Toggle/Button bridged through an
+    ///   `NSHostingView`. Space yields to those so a Tab-focused widget
+    ///   receives Space normally (HIG keyboard-trap fix).
+    static func action(keyCode: UInt16,
+                       chars: String,
+                       modifiers: NSEvent.ModifierFlags,
+                       firstResponderIsTextInput: Bool,
+                       firstResponderIsNonTimelineFocus: Bool) -> Action {
+        // Anything other than plain or Shift modifiers (Command/Option/etc.)
+        // belongs to a different command — never swallow those.
+        let stripped = modifiers
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.shift, .capsLock, .numericPad, .function])
+        guard stripped.isEmpty else { return .ignore }
+        // While the user is typing, every key passes through unchanged.
+        if firstResponderIsTextInput { return .ignore }
+
+        let shift = modifiers.contains(.shift)
+        // Space → play/pause. Yield when some other control owns focus so it
+        // can receive Space normally — keeps Tab-focused checkboxes/buttons
+        // out of the keyboard trap.
+        if keyCode == 0x31, !shift {
+            if firstResponderIsNonTimelineFocus { return .ignore }
+            return .togglePlay
+        }
+        if chars == "m" || chars == "M" {
+            return shift ? .renameMarker : .addMarker
+        }
+        // Backspace (0x33) / Forward-Delete (0x75) — try to delete a marker.
+        if keyCode == 0x33 || keyCode == 0x75 { return .maybeDeleteMarker }
+        return .ignore
     }
 }

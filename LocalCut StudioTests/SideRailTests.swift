@@ -35,4 +35,22 @@ struct SideRailFallbackTests {
         #expect(ToolPanel.resolve("") == .beats)
         #expect(ToolPanel.resolve("inspector") == .beats)           // a RailGroup raw, not a tool
     }
+
+    // Lock the property the segmented picker depends on: every case must
+    // produce a non-empty, unique localized title — no duplicate keys (which
+    // would collapse cases in the rotor), no future `default:` arm returning
+    // "". Catches the regression cheaply with no UI required (audit P3).
+    @Test("RailGroup titles are unique and non-empty")
+    func railGroupTitlesAreUniqueAndNonEmpty() {
+        let titles = RailGroup.allCases.map(\.title)
+        #expect(titles.allSatisfy { !$0.isEmpty })
+        #expect(Set(titles).count == titles.count)
+    }
+
+    @Test("ToolPanel titles are unique and non-empty")
+    func toolPanelTitlesAreUniqueAndNonEmpty() {
+        let titles = ToolPanel.allCases.map(\.title)
+        #expect(titles.allSatisfy { !$0.isEmpty })
+        #expect(Set(titles).count == titles.count)
+    }
 }

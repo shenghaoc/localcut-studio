@@ -84,8 +84,13 @@
 
 - [x] **T9.1** Menu-bar completeness: `requestImport()`/`requestExport()` on the
   model; File ▸ Import… (⌘I) / Export… (⇧⌘E); Edit ▸ Delete Selected Clip /
-  Add Marker (M); View ▸ Show Inspector (⌥⌘I) / Play (Space) / Go to Start (⌘↑);
-  spacebar owned solely by the Play command. Remove dead `exportTapped()`.
+  Add Marker (M); View ▸ Show Inspector (⌥⌘I) / Go to Start (⌘↑). Spacebar
+  play/pause is handled by the window-scoped `EditorKeyHandler` NSEvent local
+  monitor (in `TimelineView.swift`) rather than a menu key-equivalent — a bare
+  `.space` menu shortcut is global in AppKit and would swallow spaces typed into
+  text inputs. The monitor also exempts focused non-text first responders
+  (NSControl + SwiftUI-hosted controls) so a Tab-focused checkbox/button
+  receives Space normally. Remove dead `exportTapped()`.
 - [x] **T9.2** Lift `isSideRailCollapsed` → `EditorModel.inspectorVisible`
   (UserDefaults-persisted); update toolbar, layout, collapsed-rail, and menu.
 - [x] **T9.3** Honor Reduce Motion on the scopes transition/animation; adaptive

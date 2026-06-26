@@ -38,14 +38,22 @@ the VoiceOver rotor's Headings list without a title that would duplicate the tab
 
 ### Timeline chrome
 
-- The timeline header collapses to the design-system shape: compact title plus
-  the zoom slider in the trailing slot (no summary line).
+- The timeline header collapses to the design-system shape: a compact title and,
+  in the trailing slot, page-left / center-playhead / page-right scroll buttons
+  + the zoom slider (no summary line). Page-scroll math reads the live viewport
+  leading-edge via `onScrollGeometryChange`, so it pages from where the user
+  actually is even after a manual trackpad/scrollbar scroll. The scroll
+  viewport also carries an `accessibilityAdjustableAction` so VoiceOver rotor
+  "Adjust value" performs the same page-left/right action.
 - `PlayheadHead` — a small downward triangle pinned to the ruler/lane boundary,
   centred on the scrub `x`. The precise 1.5 pt red line still spans the full
-  height; the head is the design-system grab affordance. Both live in the
-  isolated `PlayheadView` so they re-evaluate per `currentTime` tick without
-  invalidating the rest of the timeline. The head is decorative
-  (`allowsHitTesting(false)`).
+  height; the head is the design-system grab affordance and is **interactive**
+  (its `DragGesture` does a tolerant seek while dragging, precise on end). The
+  scrub line itself stays `allowsHitTesting(false)` so clicks fall through to
+  clips and the ruler. Both live in the isolated `PlayheadView` so they
+  re-evaluate per `currentTime` tick without invalidating the rest of the
+  timeline. The head carries `accessibilityHidden(true)` because the
+  adjustable action and the ruler scrub gesture cover the assistive path.
 
 ### Inspector media imagery — `InspectorPosterView`
 
@@ -128,9 +136,13 @@ are all standard SwiftUI/AppKit (no new paradigms):
 - **Menu bar mirrors the toolbar.** `EditorModel.requestImport()` /
   `requestExport()` back new **File ▸ Import… (⌘I)** and **File ▸ Export…
   (⇧⌘E)**; **Edit ▸ Delete Selected Clip** and **Edit ▸ Add Marker (M)** mirror
-  the timeline; **View ▸ Show Inspector (⌥⌘I)**, **Play (Space)**, and **Go to
-  Start (⌘↑)** join Show Diagnostics. The spacebar shortcut now has a single
-  owner (the Play command; removed from the transport button).
+  the timeline; **View ▸ Show Inspector (⌥⌘I)** and **Go to Start (⌘↑)** join
+  Show Diagnostics. The **Space** shortcut for play/pause is intentionally not
+  a menu key-equivalent (those fire globally, swallowing spaces typed into text
+  fields) — it lives on a window-scoped `NSEvent` local monitor
+  (`EditorKeyHandler` in `TimelineView.swift`) that yields to focused text
+  inputs *and* any focused non-text control (so a Tab-focused checkbox /
+  button receives Space normally).
 - **Single source of truth for the inspector.** `isSideRailCollapsed`
   (`@SceneStorage`) is lifted to `EditorModel.inspectorVisible` (UserDefaults-
   persisted) so the menu toggle, toolbar button, and collapsed-rail restore

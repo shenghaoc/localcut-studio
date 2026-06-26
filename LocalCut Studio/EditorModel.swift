@@ -66,10 +66,21 @@ final class EditorModel {
     /// Whether the inspector side rail is shown. Lifted off the view's
     /// `@SceneStorage` so the View ▸ Show Inspector menu command, its ⌥⌘I
     /// shortcut, the toolbar button, and the collapsed-rail restore strip all
-    /// share one source of truth. Persisted app-wide via `UserDefaults`.
-    var inspectorVisible: Bool = (UserDefaults.standard.object(forKey: "editor.inspectorVisible") as? Bool) ?? true {
-        didSet { UserDefaults.standard.set(inspectorVisible, forKey: "editor.inspectorVisible") }
+    /// share one source of truth. Persisted app-wide via the injectable
+    /// `defaultsStore` (defaults to `UserDefaults.standard`; tests pass a
+    /// scratch suite so they don't write to the user's preferences).
+    var inspectorVisible: Bool = true {
+        didSet { defaultsStore.set(inspectorVisible, forKey: Self.inspectorVisibleKey) }
     }
+
+    @ObservationIgnored
+    static let inspectorVisibleKey = "editor.inspectorVisible"
+
+    /// Backing store for persisted UI flags (`inspectorVisible` today; could
+    /// be extended). Holds the injected `UserDefaults` so tests can verify the
+    /// round-trip without polluting the user's defaults database.
+    @ObservationIgnored
+    private let defaultsStore: UserDefaults
 
     // Status / export
     var statusMessage = "Import media to begin."
@@ -166,7 +177,15 @@ final class EditorModel {
     /// document can neither leak security-scoped access nor land clips in another.
     @ObservationIgnored var sessionGeneration = 0
 
-    init() {
+    init(defaultsStore: UserDefaults = .standard) {
+        // Capture the injected defaults BEFORE setting any property whose
+        // didSet writes through it (currently `inspectorVisible`). The custom
+        // suite path is the test seam.
+        self.defaultsStore = defaultsStore
+        // Seed inspectorVisible from the store *after* the property is in
+        // place, so a true round-trip reads what tests wrote.
+        self.inspectorVisible = (defaultsStore.object(forKey: Self.inspectorVisibleKey) as? Bool) ?? true
+
         // Initialise the render queue first — it's the one `let` without an
         // inline default, so it must be set before any other access on self.
         self.renderQueue = RenderQueue()

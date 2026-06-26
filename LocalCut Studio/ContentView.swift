@@ -44,8 +44,9 @@ struct ViewCommands: Commands {
 
             Divider()
 
-            // Transport in the menu bar so playback has a discoverable home. The
-            // spacebar shortcut lives on the on-canvas Play button instead: a bare
+            // Transport in the menu bar so playback has a discoverable home.
+            // The Space shortcut for play/pause is handled by `EditorKeyHandler`
+            // (a window-scoped NSEvent monitor in TimelineView.swift) — a bare
             // `.space` menu key-equivalent is global in AppKit and would swallow
             // spaces typed into text fields (e.g. the marker-rename popover).
             Button(model.isPlaying ? "Pause" : "Play") { model.togglePlayPause() }
@@ -355,7 +356,12 @@ private struct CollapsedSideRailView: View {
 /// Bridges the SwiftUI window to AppKit so the title-bar edited dot, the
 /// represented document URL, and the save-on-close prompt reflect the model.
 /// The previous (SwiftUI) window delegate is preserved and forwarded to.
-private struct WindowConfigurator: NSViewRepresentable {
+/// Bridges the SwiftUI editor view to its hosting `NSWindow` so the title-bar
+/// edited dot, the represented document URL, and the save-on-close prompt all
+/// reflect the model. `internal` (not `private`) so tests can reach the
+/// `Coordinator.looksLikeSwiftUIDefaultSize` predicate that gates the first-
+/// launch frame override.
+struct WindowConfigurator: NSViewRepresentable {
     let model: EditorModel
 
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
@@ -406,6 +412,14 @@ private struct WindowConfigurator: NSViewRepresentable {
                 return
             }
             if window !== self.window {
+                // Symmetric teardown for the prior window (future-proofs the
+                // moment a second editor scene or window rebuild lands — today
+                // teardown happens through viewDidMoveToWindow(nil), but this
+                // closes the asymmetry cheaply; audit P3).
+                if let previous = self.window, previous !== window,
+                   previous.delegate === self {
+                    previous.delegate = previousDelegate
+                }
                 self.window = window
                 if window.delegate !== self {
                     previousDelegate = window.delegate
@@ -432,16 +446,38 @@ private struct WindowConfigurator: NSViewRepresentable {
             // clobbers a frame set synchronously during attach. Only record the
             // one-shot once the frame actually lands.
             DispatchQueue.main.async {
+                // Upgrade safety (Codex P3 on d8c7ee2): if the window already
+                // has a non-default frame, AppKit/SwiftUI has restored a saved
+                // layout from a previous app version that pre-dates this
+                // one-shot marker. Honor that frame and just record the marker
+                // so future launches skip this branch entirely. Predicate is
+                // pulled into a pure helper so the gating is unit-testable.
+                let defaultSize = CGSize(width: 1360, height: 860)
+                guard looksLikeSwiftUIDefaultSize(window.frame.size, defaultSize: defaultSize) else {
+                    UserDefaults.standard.set(true, forKey: key)
+                    return
+                }
                 guard let screen = window.screen ?? NSScreen.main else { return }
                 let visible = screen.visibleFrame
-                let width = min(1360, visible.width - 80)
-                let height = min(860, visible.height - 80)
+                let width = min(defaultSize.width, visible.width - 80)
+                let height = min(defaultSize.height, visible.height - 80)
                 let frame = NSRect(x: visible.midX - width / 2,
                                    y: visible.midY - height / 2,
                                    width: width, height: height)
                 window.setFrame(frame, display: true, animate: false)
                 UserDefaults.standard.set(true, forKey: key)
             }
+        }
+
+        /// Pure helper that decides whether the window's current size matches
+        /// the SwiftUI `defaultSize` (within a 1 pt tolerance) — i.e. SwiftUI
+        /// has not yet been overridden by a restored frame. `nonisolated` so
+        /// tests can call it without main-actor ceremony, and so the
+        /// `applyInitialFrameIfNeeded` deferred block reaches it from the
+        /// `DispatchQueue.main.async` closure (audit P3).
+        nonisolated static func looksLikeSwiftUIDefaultSize(_ current: CGSize, defaultSize: CGSize) -> Bool {
+            abs(current.width - defaultSize.width) < 1
+                && abs(current.height - defaultSize.height) < 1
         }
 
         /// Mirrors the model's edited/URL state onto the window chrome.
