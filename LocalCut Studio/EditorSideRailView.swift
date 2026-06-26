@@ -1,12 +1,8 @@
 import SwiftUI
 
-/// Native counterpart to browser-editor's side rail. Mirrors its **grouped,
-/// always-visible tab strip** instead of hiding panels behind a dropdown: a
-/// primary segmented control switches between Inspector · Audio · Text · Tools,
-/// and the heavier project tools (Beats/Renders/Markers) sit behind a secondary
-/// segmented control under the Tools group. This keeps every panel one visible
-/// click away — the dropdown crammed six flat panels behind a menu that gave no
-/// hint of what was inside.
+/// Native counterpart to browser-editor's side rail. A primary segmented
+/// control keeps Inspector, Audio, Captions, and Tools visible, while heavier
+/// project tools stay grouped behind a secondary segmented control.
 struct EditorSideRailView: View {
     @Bindable var model: EditorModel
 
@@ -40,6 +36,7 @@ struct EditorSideRailView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .accessibilityLabel("Side panel")
+            .accessibilityValue(group.wrappedValue.title)
 
             Divider()
 
@@ -54,7 +51,7 @@ struct EditorSideRailView: View {
             InspectorView(model: model)
         case .audio:
             toolForm { AudioInspectorView(model: model) }
-        case .text:
+        case .captions:
             toolForm { CaptionsInspectorView(model: model) }
         case .tools:
             toolsGroup
@@ -75,6 +72,7 @@ struct EditorSideRailView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .accessibilityLabel("Project tool")
+            .accessibilityValue(tool.wrappedValue.title)
 
             Divider()
 
@@ -101,7 +99,7 @@ struct EditorSideRailView: View {
 private enum RailGroup: String, CaseIterable, Identifiable {
     case inspector
     case audio
-    case text
+    case captions
     case tools
 
     var id: String { rawValue }
@@ -110,7 +108,7 @@ private enum RailGroup: String, CaseIterable, Identifiable {
         switch self {
         case .inspector: "Inspector"
         case .audio: "Audio"
-        case .text: "Text"
+        case .captions: "Captions"
         case .tools: "Tools"
         }
     }
