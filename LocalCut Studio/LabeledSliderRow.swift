@@ -5,8 +5,9 @@ enum SliderCaptionStyle {
     /// `Label  value` on one secondary line, hidden from VoiceOver (the slider
     /// carries the spoken label + value). Used by colour, beauty, transitions.
     case inline
-    /// Bold leading label with the value trailing on the same line, read by
-    /// VoiceOver as part of the row. Used by the audio gain / fade rows.
+    /// Bold leading label with the value trailing on the same line, hidden
+    /// from VoiceOver (the slider carries the spoken label + value). Used by
+    /// the audio gain / fade rows.
     case leadingTrailing
 }
 
