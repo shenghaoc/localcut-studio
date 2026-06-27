@@ -235,7 +235,7 @@ final class RenderQueue {
     @ObservationIgnored private let persistsToDisk: Bool
 
     @ObservationIgnored
-    private let outputBookmarkResolver: (Data) -> BookmarkResolution?
+    private let outputBookmarkResolver: @Sendable (Data) -> BookmarkResolution?
 
     @ObservationIgnored
     private var offlineMeterSink: (@Sendable (AudioMeterSnapshot) -> Void)?
@@ -252,7 +252,7 @@ final class RenderQueue {
     init(
         jobs: [QueueJob] = [],
         persistsToDisk: Bool = true,
-        outputBookmarkResolver: ((Data) -> BookmarkResolution?)? = nil
+        outputBookmarkResolver: (@Sendable (Data) -> BookmarkResolution?)? = nil
     ) {
         self.jobs = jobs
         self.currentJobID = nil

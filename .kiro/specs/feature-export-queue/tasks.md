@@ -70,6 +70,7 @@
 - [x] **T5.6** Unit test: stale-but-resolvable output bookmark reconciliation
   replaces the stored bookmark (R5.6).
 - [x] **T5.7** Unit test: a job enqueued during runner drain is processed after
-  cleanup (R5.7).
+  cleanup using an injected deterministic output-bookmark resolver, so the
+  assertion is not coupled to macOS security-scoped bookmark timing (R5.7).
 - [x] **T5.8** `xcodebuild` (Debug, macOS) green; no test count regression
   (R5.8).
