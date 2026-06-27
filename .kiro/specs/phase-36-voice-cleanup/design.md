@@ -1,6 +1,6 @@
 # Design: Phase 36 — Voice Cleanup
 
-> Status: **In progress**. Target tag: **v0.1.5**.
+> Status: **Complete**. Target tag: **v0.1.5**.
 
 ## Implementation status
 
@@ -11,15 +11,18 @@ through the cleanup chain. The live engine routes audio through the same
 
 **Completed tasks:**
 - T1.1-T1.6: Settings, DSP, persistence, export path, loudness measurement
-- T1.7: Live preview cleanup chain using VoiceCleanupDSP
+- T1.7: Live preview cleanup chain using VoiceCleanupDSP (tap-based processing
+  on the audio bus, replacing the original custom AVAudioUnit plan)
 - T1.8: Live preview routing through AudioMasterBus
 - T1.9: Volume-ramped bypass switching (~5 ms transitions)
 - T2.1-T2.3: Inspector UI with gain reduction meters
 - T3.1-T3.6: Tests including latency budget and export smoke fixture
 
-**Remaining tasks:**
-- T1.7 (original): Custom vDSP spectral-subtraction AVAudioUnit (replaced with
-  tap-based processing that uses the same DSP code path)
+**Implementation note:** The original T1.7 design called for a custom
+`AVAudioUnit` subclass. That was replaced with a tap-based approach on
+`AudioMasterBus` that calls the same `VoiceCleanupDSP.processInterleaved` code
+path — this avoids the complexity of a full AU subclass while preserving sample
+parity between live preview and offline export.
 
 ## Goal
 
