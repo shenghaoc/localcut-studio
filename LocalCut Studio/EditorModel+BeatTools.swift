@@ -427,8 +427,8 @@ extension EditorModel {
         -> Keyframed<Float> {
         guard track.isAnimated else { return track }
         let endOffset = sourceOffset + duration
-        let startValue = TimeRemapping.speedValue(in: track, at: sourceOffset)
-        let endValue = TimeRemapping.speedValue(in: track, at: endOffset)
+        let startValue = track.bezierValue(at: sourceOffset)
+        let endValue = track.bezierValue(at: endOffset)
         var keyframes: [Keyframe<Float>] = []
 
         if let exactStart = track.keyframes.first(where: { $0.time == sourceOffset }) {

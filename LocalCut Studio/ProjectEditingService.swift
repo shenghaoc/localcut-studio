@@ -351,7 +351,7 @@ final class ProjectEditingService {
     private static func splitKeyframeTrack(_ track: Keyframed<Float>, at cut: CMTime)
         -> (left: Keyframed<Float>, right: Keyframed<Float>) {
         guard track.isAnimated else { return (track, track) }
-        let boundary = TimeRemapping.speedValue(in: track, at: cut)
+        let boundary = track.bezierValue(at: cut)
         // Preserve the original keyframe's ID when it sits exactly at the cut.
         let exactMatch = track.keyframes.first { $0.time == cut }
         var leftKeys = track.keyframes.filter { $0.time < cut }
@@ -403,7 +403,7 @@ final class ProjectEditingService {
         }
 
         if sourceDelta > .zero {
-            let boundary = TimeRemapping.speedValue(in: track, at: sourceDelta)
+            let boundary = track.bezierValue(at: sourceDelta)
             if let zeroIndex = keyframes.firstIndex(where: { $0.time == .zero }) {
                 keyframes[zeroIndex].value = boundary
             } else {
