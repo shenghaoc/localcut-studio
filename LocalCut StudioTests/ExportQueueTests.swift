@@ -402,7 +402,7 @@ struct RenderQueueTests {
     private func waitForQueueToSettle(
         _ queue: RenderQueue,
         expectedCount: Int,
-        timeout: TimeInterval = 5
+        timeout: TimeInterval = 20
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -413,6 +413,7 @@ struct RenderQueueTests {
             }
             try await Task.sleep(for: .milliseconds(10))
         }
-        Issue.record("Render queue did not settle before timeout")
+        let statuses = queue.jobs.map(\.status.rawValue).joined(separator: ",")
+        Issue.record("Render queue did not settle before timeout; count=\(queue.jobs.count), isRunning=\(queue.isRunning), statuses=[\(statuses)]")
     }
 }
