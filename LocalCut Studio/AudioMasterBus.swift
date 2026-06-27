@@ -85,6 +85,7 @@ final class AudioMasterBus {
     /// the meter strip while an export publishes offline snapshots — even when
     /// the live engine is stopped (the common case now that live metering is
     /// opt-in). The lock copy stays the source of truth for the audio thread.
+    @MainActor
     private(set) var isOfflineMetering = false
 
     /// Audio-thread-published meter snapshot. `nonisolated` because the lock

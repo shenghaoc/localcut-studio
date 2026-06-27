@@ -30,13 +30,13 @@ public nonisolated enum TimePitchAlgorithm: String, Codable, Hashable, CaseItera
 /// One piecewise-constant segment in a clip's source-to-output retime plan.
 public nonisolated struct TimeRemapSegment: Hashable, Sendable {
     /// Absolute source-media range to insert.
-    public var sourceRange: CMTimeRange
+    public let sourceRange: CMTimeRange
     /// Clip-local output offset where this source range begins.
-    public var outputOffset: CMTime
+    public let outputOffset: CMTime
     /// Timeline duration after retiming this source range.
-    public var outputDuration: CMTime
+    public let outputDuration: CMTime
     /// Constant speed approximation for this segment.
-    public var speed: Float
+    public let speed: Float
 
     public var outputRange: CMTimeRange {
         CMTimeRange(start: outputOffset, duration: outputDuration)
@@ -235,7 +235,7 @@ public nonisolated enum TimeRemapping {
         return plan.reduce(CMTime.zero) { $0 + $1.outputDuration }
     }
 
-    static func multiplied(_ time: CMTime, by multiplier: Double) -> CMTime {
+    public static func multiplied(_ time: CMTime, by multiplier: Double) -> CMTime {
         guard time.isNumeric, time.seconds.isFinite, multiplier.isFinite else { return .zero }
         // Preserve the input's timescale so retimed high-rate audio times
         // (44.1k/48k) don't quantise to a coarse 600 grid, while keeping 600 as a

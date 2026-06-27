@@ -482,14 +482,14 @@ final class EditorModel {
     }
 
     var selectedClipSpeedAtPlayhead: Float {
-        guard let time = selectedClipTimeRemapLocalSourceTime else {
+        guard let time = selectedClipSourceLocalPlayheadTime else {
             return selectedClip?.speedCurve.defaultValue ?? TimeRemapping.identitySpeed
         }
         return selectedClip?.speedCurve.value(at: time) ?? TimeRemapping.identitySpeed
     }
 
     var selectedClipSpeedKeyframeAtPlayhead: Keyframe<Float>? {
-        guard let time = selectedClipTimeRemapLocalSourceTime else { return nil }
+        guard let time = selectedClipSourceLocalPlayheadTime else { return nil }
         return nearestSpeedKeyframe(to: time)
     }
 
@@ -497,7 +497,7 @@ final class EditorModel {
     /// playhead falls outside the clip's authored range. Maps the output-domain
     /// playhead back through the speed curve to clip-source time. Shared by the
     /// speed and skin-smooth keyframe authoring paths so the two can't drift.
-    private var selectedClipSourceLocalPlayheadTime: CMTime? {
+    var selectedClipSourceLocalPlayheadTime: CMTime? {
         guard let clip = selectedClip else { return nil }
         // `currentTime` is effective (rippled) time; convert it to authored time
         // via the layout's authored-times mapping. Using `shift(at:)` with the
@@ -512,10 +512,6 @@ final class EditorModel {
         guard let playhead = candidates.first(where: { $0 >= clip.timelineStart && $0 <= clip.timelineEnd }) else { return nil }
         let outputOffset = CMTimeMaximum(.zero, CMTimeMinimum(playhead - clip.timelineStart, clip.outputDuration))
         return clip.sourceOffset(forOutputOffset: outputOffset)
-    }
-
-    var selectedClipTimeRemapLocalSourceTime: CMTime? {
-        selectedClipSourceLocalPlayheadTime
     }
 
     func updateSelectedClipTimeRemap(_ actionName: String = "Adjust Speed",
@@ -539,7 +535,7 @@ final class EditorModel {
 
     func addOrUpdateSelectedClipSpeedKeyframe() {
         guard let id = selectedClipID,
-              let localTime = selectedClipTimeRemapLocalSourceTime,
+              let localTime = selectedClipSourceLocalPlayheadTime,
               let clip = selectedClip else {
             statusMessage = "Move the playhead over the selected clip to add a speed keyframe."
             return
@@ -575,7 +571,7 @@ final class EditorModel {
 
     func seekToPreviousSelectedClipSpeedKeyframe() {
         guard let clip = selectedClip,
-              let localTime = selectedClipTimeRemapLocalSourceTime else { return }
+              let localTime = selectedClipSourceLocalPlayheadTime else { return }
         let tolerance = speedKeyframeHitToleranceSeconds
         guard let previous = clip.speedCurve.keyframes.last(where: {
             $0.time.seconds < localTime.seconds - tolerance
@@ -586,7 +582,7 @@ final class EditorModel {
 
     func seekToNextSelectedClipSpeedKeyframe() {
         guard let clip = selectedClip,
-              let localTime = selectedClipTimeRemapLocalSourceTime else { return }
+              let localTime = selectedClipSourceLocalPlayheadTime else { return }
         let tolerance = speedKeyframeHitToleranceSeconds
         guard let next = clip.speedCurve.keyframes.first(where: {
             $0.time.seconds > localTime.seconds + tolerance
@@ -646,7 +642,7 @@ final class EditorModel {
         transform(&track.clips[index])
         track.clips[index].clampTimeRemap()
         let outputAfter = track.clips[index].outputDuration
-        if outputAfter != outputBefore {
+        if fabs(outputAfter.seconds - outputBefore.seconds) > 0.0001 {
             rippleDownstream(on: track, after: track.clips[index], by: outputAfter - outputBefore)
             sanitizeTransitions()
         }
@@ -756,28 +752,21 @@ final class EditorModel {
         }
     }
 
-    /// Clip-local playhead time used by the skin-smooth compositor. Returns
-    /// nil when the effective playhead is outside the selected clip's authored
-    /// range, because authoring a clip-local keyframe there would be ambiguous.
-    var selectedClipSkinSmoothLocalPlayheadTime: CMTime? {
-        selectedClipSourceLocalPlayheadTime
-    }
-
     var selectedClipSkinSmoothStrengthAtPlayhead: Float {
-        guard let time = selectedClipSkinSmoothLocalPlayheadTime else {
+        guard let time = selectedClipSourceLocalPlayheadTime else {
             return selectedClipSkinSmooth.strength.defaultValue
         }
         return selectedClipSkinSmooth.strength.value(at: time)
     }
 
     var selectedClipSkinSmoothStrengthKeyframeAtPlayhead: Keyframe<Float>? {
-        guard let time = selectedClipSkinSmoothLocalPlayheadTime else { return nil }
+        guard let time = selectedClipSourceLocalPlayheadTime else { return nil }
         return nearestSkinSmoothStrengthKeyframe(to: time)
     }
 
     func addOrUpdateSelectedClipSkinSmoothStrengthKeyframe() {
         guard let id = selectedClipID,
-              let localTime = selectedClipSkinSmoothLocalPlayheadTime else {
+              let localTime = selectedClipSourceLocalPlayheadTime else {
             statusMessage = "Move the playhead over the selected clip to add a keyframe."
             return
         }
@@ -813,7 +802,7 @@ final class EditorModel {
 
     func seekToPreviousSelectedClipSkinSmoothStrengthKeyframe() {
         guard let clip = selectedClip,
-              let localTime = selectedClipSkinSmoothLocalPlayheadTime else { return }
+              let localTime = selectedClipSourceLocalPlayheadTime else { return }
         let tolerance = skinSmoothKeyframeHitToleranceSeconds
         guard let previous = selectedClipSkinSmooth.strength.keyframes.last(where: {
             $0.time.seconds < localTime.seconds - tolerance
@@ -826,7 +815,7 @@ final class EditorModel {
 
     func seekToNextSelectedClipSkinSmoothStrengthKeyframe() {
         guard let clip = selectedClip,
-              let localTime = selectedClipSkinSmoothLocalPlayheadTime else { return }
+              let localTime = selectedClipSourceLocalPlayheadTime else { return }
         let tolerance = skinSmoothKeyframeHitToleranceSeconds
         guard let next = selectedClipSkinSmooth.strength.keyframes.first(where: {
             $0.time.seconds > localTime.seconds + tolerance

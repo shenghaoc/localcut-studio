@@ -166,8 +166,7 @@ final class ProjectEditingService {
                     // The head can extend earlier only until the unused source
                     // before `sourceStart` runs out; that span plays at the
                     // start-edge speed, so convert it to output time.
-                    let maxExtendOutput = CMTime(seconds: clip.sourceStart.seconds / max(startSpeed, 0.0001),
-                                                 preferredTimescale: 600)
+                    let maxExtendOutput = TimeRemapping.multiplied(clip.sourceStart, by: 1.0 / max(startSpeed, 0.0001))
                     let minTimelineStart = clip.timelineStart - maxExtendOutput
                     newTimelineStart = max(newTimelineStart, minTimelineStart)
                     let maxTimelineStart = originalEnd - minDur
@@ -353,9 +352,20 @@ final class ProjectEditingService {
         -> (left: Keyframed<Float>, right: Keyframed<Float>) {
         guard track.isAnimated else { return (track, track) }
         let boundary = track.value(at: cut)
+        // Preserve the original keyframe's ID when it sits exactly at the cut.
+        let exactMatch = track.keyframes.first { $0.time == cut }
         var leftKeys = track.keyframes.filter { $0.time < cut }
-        leftKeys.append(Keyframe<Float>(time: cut, value: boundary))
-        var rightKeys = [Keyframe<Float>(time: .zero, value: boundary)]
+        if let exactMatch {
+            leftKeys.append(exactMatch)
+        } else {
+            leftKeys.append(Keyframe<Float>(time: cut, value: boundary))
+        }
+        var rightKeys: [Keyframe<Float>]
+        if let exactMatch {
+            rightKeys = [Keyframe<Float>(id: exactMatch.id, time: .zero, value: boundary)]
+        } else {
+            rightKeys = [Keyframe<Float>(time: .zero, value: boundary)]
+        }
         rightKeys.append(contentsOf: track.keyframes.compactMap { kf in
             let newTime = kf.time - cut
             guard newTime > .zero else { return nil }

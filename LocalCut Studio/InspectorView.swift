@@ -143,7 +143,7 @@ struct InspectorView: View {
                     } label: {
                         Label(speedKeyframeActionTitle, systemImage: speedKeyframeActionIcon)
                     }
-                    .disabled(model.selectedClipTimeRemapLocalSourceTime == nil)
+                    .disabled(model.selectedClipSourceLocalPlayheadTime == nil)
 
                     Button(role: .destructive) {
                         model.removeSelectedClipSpeedKeyframe()
@@ -207,7 +207,7 @@ struct InspectorView: View {
     }
 
     private var speedKeyframePlayheadLabel: String {
-        guard let localTime = model.selectedClipTimeRemapLocalSourceTime else { return "Outside clip" }
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return "Outside clip" }
         return TimeFormatting.timecode(localTime.seconds)
     }
 
@@ -220,7 +220,7 @@ struct InspectorView: View {
     }
 
     private var hasPreviousSpeedKeyframe: Bool {
-        guard let localTime = model.selectedClipTimeRemapLocalSourceTime,
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime,
               let clip = model.selectedClip else { return false }
         return clip.speedCurve.keyframes.contains {
             $0.time.seconds < localTime.seconds
@@ -228,7 +228,7 @@ struct InspectorView: View {
     }
 
     private var hasNextSpeedKeyframe: Bool {
-        guard let localTime = model.selectedClipTimeRemapLocalSourceTime,
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime,
               let clip = model.selectedClip else { return false }
         return clip.speedCurve.keyframes.contains {
             $0.time.seconds > localTime.seconds
@@ -452,7 +452,7 @@ struct InspectorView: View {
                     } label: {
                         Label(skinSmoothKeyframeActionTitle, systemImage: skinSmoothKeyframeActionIcon)
                     }
-                    .disabled(model.selectedClipSkinSmoothLocalPlayheadTime == nil)
+                    .disabled(model.selectedClipSourceLocalPlayheadTime == nil)
 
                     Button(role: .destructive) {
                         model.removeSelectedClipSkinSmoothStrengthKeyframe()
@@ -500,6 +500,7 @@ struct InspectorView: View {
                         smooth.bypass = newValue
                     }
                 }))
+                .toggleStyle(.switch)
 
             Toggle("Show Mask", isOn: Binding(
                 get: { model.showSkinMask },
@@ -507,6 +508,7 @@ struct InspectorView: View {
                     model.showSkinMask = newValue
                     model.scheduleRebuild()
                 }))
+                .toggleStyle(.switch)
 
             HStack {
                 Button("Reset") { model.resetClipSkinSmooth() }
@@ -517,7 +519,7 @@ struct InspectorView: View {
     }
 
     private var skinSmoothKeyframePlayheadLabel: String {
-        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return "Outside clip" }
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return "Outside clip" }
         return TimeFormatting.timecode(localTime.seconds)
     }
 
@@ -530,14 +532,14 @@ struct InspectorView: View {
     }
 
     private var hasPreviousSkinSmoothKeyframe: Bool {
-        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return false }
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return false }
         return model.selectedClipSkinSmooth.strength.keyframes.contains {
             $0.time.seconds < localTime.seconds
         }
     }
 
     private var hasNextSkinSmoothKeyframe: Bool {
-        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return false }
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return false }
         return model.selectedClipSkinSmooth.strength.keyframes.contains {
             $0.time.seconds > localTime.seconds
         }

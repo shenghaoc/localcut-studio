@@ -217,5 +217,6 @@ private struct MediaRow: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityAction(named: "Select") { onSelect() }
         .accessibilityAction(named: "Add to Timeline") { onAdd() }
+        .accessibilityAction(named: "Remove from Project") { onRemove() }
     }
 }

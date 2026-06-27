@@ -28,7 +28,7 @@ struct CompositorLayer {
     let timeRange: CMTimeRange
 
     nonisolated func sourceTime(at compositionTime: CMTime) -> CMTime {
-        let rel = compositionTime - timeRange.start
+        let rel = CMTimeMaximum(.zero, compositionTime - timeRange.start)
         let tDur = timeRange.duration.seconds
         let sDur = sourceRange.duration.seconds
         let srcSec = sourceRange.start.seconds + (tDur > 0 ? rel.seconds * sDur / tDur : 0)
