@@ -84,11 +84,11 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
         self.units = units
         self.captions = captions
         self.workingColourSpace = workingColourSpace
-        // A transition tweens its layers across the interval. Captions also tween
-        // (per-frame animation transform), so any caption forces tweening too.
-        containsTweening = !captions.isEmpty || units.contains {
-            if case .transition = $0 { return true }; return false
-        }
+        // Always report true so AVPlayer calls our custom compositor for every
+        // frame. When containsTweening is false, AVFoundation may bypass the
+        // custom compositor and fall back to default rendering, which does not
+        // understand our EffectCompositionInstruction and produces no video.
+        containsTweening = true
         let trackIDs = units.flatMap(\.trackIDs)
         requiredSourceTrackIDs = trackIDs.isEmpty ? [] : trackIDs.map { NSNumber(value: $0) as NSValue }
     }
@@ -170,6 +170,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     }
 
     nonisolated func renderContextChanged(_: AVVideoCompositionRenderContext) {}
+
+    nonisolated func cancelAllPendingVideoCompositionRequests() {}
 
     nonisolated func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
         guard let instruction = request.videoCompositionInstruction as? EffectCompositionInstruction else {
