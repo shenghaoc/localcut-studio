@@ -9,16 +9,18 @@ import CoreGraphics
 public struct VisibleSegment: Sendable {
     public let compTrackID: Int32
     public let start: Double
+    public let orderingStart: Double
     public let transitionStart: Double?
     public let transitionEnd: Double?
     public let transitionType: TransitionType?
     public let transitionWipeAngle: Double?
 
-    public init(compTrackID: Int32, start: Double,
+    public init(compTrackID: Int32, start: Double, orderingStart: Double? = nil,
                 transitionStart: Double?, transitionEnd: Double?,
                 transitionType: TransitionType?, transitionWipeAngle: Double?) {
         self.compTrackID = compTrackID
         self.start = start
+        self.orderingStart = orderingStart ?? start
         self.transitionStart = transitionStart
         self.transitionEnd = transitionEnd
         self.transitionType = transitionType
@@ -43,7 +45,8 @@ public func planUnits(visible: [VisibleSegment], midpoint: Double) -> [PlannedUn
 
     if let incoming = visible.last(where: transitionActive),
        let type = incoming.transitionType,
-       let outgoing = visible.filter({ $0.start < incoming.start }).max(by: { $0.start < $1.start }) {
+       let outgoing = visible.filter({ $0.orderingStart < incoming.orderingStart })
+        .max(by: { $0.orderingStart < $1.orderingStart }) {
         var result: [PlannedUnit] = []
         for seg in visible where seg.compTrackID != incoming.compTrackID && seg.compTrackID != outgoing.compTrackID {
             result.append(.layer(seg.compTrackID))

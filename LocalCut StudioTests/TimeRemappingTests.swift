@@ -336,7 +336,7 @@ struct TimeRemappingKeyframeRebaseTests {
         model.project.mediaItems.append(media)
 
         // Right half of a split: 2 s of source already trimmed off the head.
-        var clip = Clip(mediaID: media.id, sourceStart: trTime(2),
+        let clip = Clip(mediaID: media.id, sourceStart: trTime(2),
                         duration: trTime(4), timelineStart: trTime(5))
         model.project.videoTracks[0].clips = [clip]
         let originalEnd = clip.timelineEnd
@@ -394,6 +394,85 @@ struct TimeRemappingKeyframeRebaseTests {
         #expect(model.project.audioTracks[0].clips[0].speedCurve.defaultValue == 2)
     }
 
+    @Test("Linked A/V speed keyframes update and remove by source time")
+    func linkedAudioVideoSpeedKeyframesSyncByTime() {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        media.duration = trTime(10)
+        media.hasVideo = true
+        media.hasAudio = true
+        model.project.mediaItems.append(media)
+
+        let videoClip = Clip(mediaID: media.id, sourceStart: .zero,
+                             duration: trTime(10), timelineStart: .zero)
+        let audioClip = Clip(mediaID: media.id, sourceStart: .zero,
+                             duration: trTime(10), timelineStart: .zero)
+        model.project.videoTracks[0].clips = [videoClip]
+        model.project.audioTracks[0].clips = [audioClip]
+        model.selectedClipID = videoClip.id
+
+        model.currentTime = 2
+        model.addOrUpdateSelectedClipSpeedKeyframe()
+        model.updateSelectedClipTimeRemap { $0.speedCurve.defaultValue = 3 }
+        model.commitCoalescedUndo()
+
+        model.currentTime = 2
+        model.addOrUpdateSelectedClipSpeedKeyframe()
+
+        let videoKeyframes = model.project.videoTracks[0].clips[0].speedCurve.keyframes
+        let audioKeyframes = model.project.audioTracks[0].clips[0].speedCurve.keyframes
+        #expect(videoKeyframes.map(\.time) == [trTime(2)])
+        #expect(audioKeyframes.map(\.time) == [trTime(2)])
+        #expect(videoKeyframes.map(\.value) == [3])
+        #expect(audioKeyframes.map(\.value) == [3])
+
+        let updatedVideo = model.project.videoTracks[0].clips[0]
+        model.currentTime = updatedVideo.outputOffset(forSourceOffset: trTime(2)).seconds
+        model.removeSelectedClipSpeedKeyframe()
+
+        #expect(model.project.videoTracks[0].clips[0].speedCurve.keyframes.isEmpty)
+        #expect(model.project.audioTracks[0].clips[0].speedCurve.keyframes.isEmpty)
+    }
+
+    @Test("Speed keyframe seek uses effective time after transition ripple")
+    func speedKeyframeSeekUsesEffectiveTime() {
+        let model = EditorModel()
+        let media = UUID()
+        let a = Clip(mediaID: media, sourceStart: .zero, duration: trTime(5), timelineStart: .zero)
+        var b = Clip(mediaID: media, sourceStart: .zero, duration: trTime(5), timelineStart: trTime(5))
+        b.transition = Transition(duration: trTime(1))
+        b.speedCurve = Keyframed<Float>(
+            keyframes: [Keyframe<Float>(time: trTime(1), value: 1),
+                        Keyframe<Float>(time: trTime(3), value: 1)],
+            defaultValue: 1)
+        model.project.videoTracks[0].clips = [a, b]
+        model.selectedClipID = b.id
+        model.totalDuration = model.project.duration.seconds
+
+        model.currentTime = 4.2
+        model.seekToNextSelectedClipSpeedKeyframe()
+
+        #expect(approx(trTime(model.currentTime), trTime(5)))
+    }
+
+    @Test("Moving a retimed clip resolves collisions using output duration")
+    func moveRetimedClipUsesOutputDurationForOverlap() {
+        let model = EditorModel()
+        var retimed = Clip(mediaID: UUID(), sourceStart: .zero,
+                           duration: trTime(4), timelineStart: .zero)
+        retimed.speedCurve.defaultValue = 0.5
+        let blocker = Clip(mediaID: UUID(), sourceStart: .zero,
+                           duration: trTime(2), timelineStart: trTime(9))
+        let track = model.project.videoTracks[0]
+        track.clips = [retimed, blocker]
+
+        model.moveClip(id: retimed.id, toTrack: track.id, start: trTime(2))
+
+        let moved = track.clips.first { $0.id == retimed.id }!
+        #expect(approx(moved.timelineStart, trTime(1)))
+        #expect(approx(moved.timelineEnd, blocker.timelineStart))
+    }
+
     @Test("Trim rebases skin-smooth strength keyframes alongside speed")
     func trimRebasesSkinSmoothKeyframes() {
         let model = EditorModel()
@@ -421,8 +500,9 @@ struct TimeRemappingKeyframeRebaseTests {
             #expect(Bool(false), "skin-smooth effect missing")
             return
         }
-        // Origin advanced 3 s: the 2 s keyframe drops, the 5 s one becomes 2 s.
-        #expect(s.strength.keyframes.map { $0.time } == [trTime(2)])
+        // Origin advanced 3 s: an evaluated boundary pins the trim frame at the
+        // new origin, and the 5 s keyframe becomes 2 s.
+        #expect(s.strength.keyframes.map { $0.time } == [trTime(0), trTime(2)])
     }
 
     @Test("Trim left rebases speed keyframes onto the new source origin")
@@ -442,8 +522,34 @@ struct TimeRemappingKeyframeRebaseTests {
 
         let trimmed = model.project.videoTracks[0].clips[0]
         #expect(trimmed.sourceStart == trTime(3))
-        // Origin advanced 3 s: the 2 s keyframe drops, the 5 s one becomes 2 s.
-        #expect(trimmed.speedCurve.keyframes.map { $0.time } == [trTime(2)])
+        // Origin advanced 3 s: an evaluated boundary pins the trim frame at the
+        // new origin, and the 5 s keyframe becomes 2 s.
+        #expect(trimmed.speedCurve.keyframes.map { $0.time } == [trTime(0), trTime(2)])
+    }
+
+    @Test("Trim left inside a speed ramp preserves the evaluated boundary value")
+    func trimLeftInsideRampPreservesBoundaryValue() throws {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        media.duration = trTime(10)
+        media.hasVideo = true
+        model.project.mediaItems.append(media)
+
+        var clip = Clip(mediaID: media.id, sourceStart: .zero,
+                        duration: trTime(10), timelineStart: .zero)
+        clip.speedCurve = Keyframed<Float>(
+            keyframes: [Keyframe<Float>(time: .zero, value: 1),
+                        Keyframe<Float>(time: trTime(10), value: 3)],
+            defaultValue: 1)
+        let trimTime = clip.outputOffset(forSourceOffset: trTime(5))
+        model.project.videoTracks[0].clips = [clip]
+
+        model.trimClip(id: clip.id, edge: .left, to: trimTime)
+
+        let trimmed = model.project.videoTracks[0].clips[0]
+        let first = try #require(trimmed.speedCurve.keyframes.first)
+        #expect(first.time == .zero)
+        #expect(abs(first.value - 2) < 0.01)
     }
 
     @Test("Trim right drops speed keyframes past the new source duration")

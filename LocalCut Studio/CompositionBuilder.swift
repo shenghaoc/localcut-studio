@@ -45,6 +45,7 @@ enum CompositionBuilder {
         let showSkinMask: Bool
         let clipSourceStart: CMTime
         let sourceRange: CMTimeRange
+        let orderingStart: CMTime
 
         var layer: CompositorLayer {
             CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipSourceStart: clipSourceStart, sourceRange: sourceRange, timeRange: timeRange)
@@ -58,6 +59,7 @@ enum CompositionBuilder {
             VisibleSegment(
                 compTrackID: compTrackID,
                 start: timeRange.start.seconds,
+                orderingStart: orderingStart.seconds,
                 transitionStart: transitionRange?.start.seconds,
                 transitionEnd: transitionRange?.end.seconds,
                 transitionType: transitionType,
@@ -143,7 +145,8 @@ enum CompositionBuilder {
                             transitionWipeAngle: piece.overlap > .zero ? clip.transition?.wipeAngle : nil,
                             showSkinMask: showSkinMask,
                             clipSourceStart: clip.sourceStart,
-                            sourceRange: remapSegment.sourceRange))
+                            sourceRange: remapSegment.sourceRange,
+                            orderingStart: piece.effectiveStart))
                     }
                 }
             }

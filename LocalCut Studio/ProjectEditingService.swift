@@ -380,13 +380,23 @@ final class ProjectEditingService {
     /// earlier). Keyframes that fall before the new origin are dropped.
     private static func rebaseKeyframeTrack(_ track: Keyframed<Float>, originShiftedBy sourceDelta: CMTime)
         -> Keyframed<Float> {
-        Keyframed<Float>(
-            keyframes: track.keyframes.compactMap { kf in
-                let newTime = kf.time - sourceDelta
-                guard newTime >= .zero else { return nil }
-                return Keyframe<Float>(id: kf.id, time: newTime, value: kf.value)
-            },
-            defaultValue: track.defaultValue)
+        guard track.isAnimated else { return track }
+        var keyframes = track.keyframes.compactMap { kf -> Keyframe<Float>? in
+            let newTime = kf.time - sourceDelta
+            guard newTime >= .zero else { return nil }
+            return Keyframe<Float>(id: kf.id, time: newTime, value: kf.value)
+        }
+
+        if sourceDelta > .zero {
+            let boundary = track.value(at: sourceDelta)
+            if let zeroIndex = keyframes.firstIndex(where: { $0.time == .zero }) {
+                keyframes[zeroIndex].value = boundary
+            } else {
+                keyframes.insert(Keyframe<Float>(time: .zero, value: boundary), at: 0)
+            }
+        }
+
+        return Keyframed<Float>(keyframes: keyframes, defaultValue: track.defaultValue)
     }
 
     /// Drops keyframes past `newDuration` from a clip-source-relative track.
@@ -441,7 +451,7 @@ final class ProjectEditingService {
 
     private func resolveOverlap(clip: Clip, on track: Track) -> CMTime {
         let requested = clip.timelineStart
-        let duration = clip.duration
+        let duration = clip.outputDuration
         let others = track.clips.sorted { $0.timelineStart < $1.timelineStart }
 
         let requestedEnd = requested + duration

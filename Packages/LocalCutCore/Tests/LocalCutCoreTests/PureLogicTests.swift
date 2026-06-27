@@ -22,11 +22,13 @@ private func clip(start: Double,
 
 private func segment(track id: Int32,
                      start: Double,
+                     orderingStart: Double? = nil,
                      transitionStart: Double? = nil,
                      transitionEnd: Double? = nil,
                      type: TransitionType? = nil) -> VisibleSegment {
     VisibleSegment(compTrackID: id,
                    start: start,
+                   orderingStart: orderingStart,
                    transitionStart: transitionStart,
                    transitionEnd: transitionEnd,
                    transitionType: type,
@@ -80,6 +82,18 @@ func renderPlanningPromotesTransitionUnit() {
         .transition(outgoing: 1, incoming: 2, type: .crossDissolve, wipeAngle: 0),
     ])
     #expect(planUnits(visible: visible, midpoint: 5.1) == [.layer(1), .layer(2)])
+}
+
+@Test("RenderPlanning: retimed outgoing subsegments keep transition ordering")
+func renderPlanningUsesOrderingStartForRetimedSubsegments() {
+    let visible = [
+        segment(track: 1, start: 4.6, orderingStart: 0),
+        segment(track: 2, start: 4, transitionStart: 4, transitionEnd: 5, type: .crossDissolve),
+    ]
+
+    #expect(planUnits(visible: visible, midpoint: 4.75) == [
+        .transition(outgoing: 1, incoming: 2, type: .crossDissolve, wipeAngle: 0),
+    ])
 }
 
 @Test("RenderPlanning: sub-ramp volumes map a slice onto the full ramp")

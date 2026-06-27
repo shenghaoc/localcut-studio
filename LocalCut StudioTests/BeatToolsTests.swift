@@ -122,6 +122,18 @@ struct BeatToolsEditorTests {
         #expect(times.map(\.seconds) == [1.05, 2.05, 3.05, 4.05])
     }
 
+    @Test("Beat projection maps source beats through clip speed ramps")
+    func projectedBeatsUseRetimedClipMapping() {
+        let (model, _, _, videoClip) = makeModel()
+        model.project.audioTracks.first!.clips = []
+        model.project.videoTracks.first!.clips[0].speedCurve.defaultValue = 0.5
+
+        let times = model.projectedBeatTimes()
+
+        #expect(times.map(\.seconds) == [2, 4, 6, 8])
+        #expect(model.project.videoTracks.first!.clips[0].id == videoClip.id)
+    }
+
     @Test("Changing the beat offset re-projects beats (memo is invalidated)")
     func offsetChangeReprojectsBeats() {
         let (model, _, _, _) = makeModel()
@@ -219,6 +231,27 @@ struct BeatToolsEditorTests {
         let clips = model.project.videoTracks.first!.clips
         #expect(clips.count > 1) // it did cut
         #expect(clips.allSatisfy { $0.duration >= oneFrame })
+    }
+
+    @Test("Cut at beats preserves retime fields and slices in source time")
+    func cutAtBeatsPreservesRetimedPieces() {
+        let (model, _, _, videoClip) = makeModel()
+        model.project.audioTracks.first!.clips = []
+        model.project.videoTracks.first!.clips[0].speedCurve.defaultValue = 0.5
+        model.project.videoTracks.first!.clips[0].preservePitch = false
+        model.project.videoTracks.first!.clips[0].pitchAlgorithm = .spectral
+        model.selectedClipID = videoClip.id
+
+        model.cutSelectedClipAtBeats()
+
+        let clips = model.project.videoTracks.first!.clips
+        #expect(clips.count == 5)
+        #expect(clips.map(\.timelineStart) == [time(0), time(2), time(4), time(6), time(8)])
+        #expect(clips.map(\.duration) == [time(1), time(1), time(1), time(1), time(1)])
+        #expect(clips.allSatisfy { $0.speedCurve.defaultValue == 0.5 })
+        #expect(clips.allSatisfy { !$0.preservePitch })
+        #expect(clips.allSatisfy { $0.pitchAlgorithm == .spectral })
+        #expect(clips.allSatisfy { $0.outputDuration == time(2) })
     }
 
     @Test("Align to beat moves the selected clip to the nearest projected beat")

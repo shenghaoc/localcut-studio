@@ -82,9 +82,8 @@ public nonisolated enum TimeRemapping {
     }
 
     public static func hasNonIdentitySpeed(_ curve: Keyframed<Float>) -> Bool {
-        let curve = clampedCurve(curve)
-        if abs(curve.defaultValue - identitySpeed) > 0.0001 { return true }
-        return curve.keyframes.contains { abs($0.value - identitySpeed) > 0.0001 }
+        if abs(clampedSpeed(curve.defaultValue) - identitySpeed) > 0.0001 { return true }
+        return curve.keyframes.contains { abs(clampedSpeed($0.value) - identitySpeed) > 0.0001 }
     }
 
     /// Builds a local source-domain plan from source offset 0 through `sourceDuration`.

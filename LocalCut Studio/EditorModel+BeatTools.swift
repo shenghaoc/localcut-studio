@@ -165,24 +165,25 @@ extension EditorModel {
         performUndoable("Cut at Beats") {
             var pieces: [Clip] = []
             var segmentTimelineStart = clip.timelineStart
-            var segmentSourceStart = clip.sourceStart
+            var segmentOutputOffset = CMTime.zero
 
             for cut in cutTimes {
-                let duration = cut - segmentTimelineStart
+                let outputOffset = CMTimeMaximum(.zero, CMTimeMinimum(cut - clip.timelineStart, clip.outputDuration))
+                let outputDuration = outputOffset - segmentOutputOffset
                 pieces.append(piece(from: clip,
                                     timelineStart: segmentTimelineStart,
-                                    sourceStart: segmentSourceStart,
-                                    duration: duration,
+                                    outputOffset: segmentOutputOffset,
+                                    outputDuration: outputDuration,
                                     preservesIDAndTransition: pieces.isEmpty))
-                segmentSourceStart = segmentSourceStart + duration
+                segmentOutputOffset = outputOffset
                 segmentTimelineStart = cut
             }
 
-            let tailDuration = clip.timelineEnd - segmentTimelineStart
+            let tailOutputDuration = clip.outputDuration - segmentOutputOffset
             pieces.append(piece(from: clip,
                                 timelineStart: segmentTimelineStart,
-                                sourceStart: segmentSourceStart,
-                                duration: tailDuration,
+                                outputOffset: segmentOutputOffset,
+                                outputDuration: tailOutputDuration,
                                 preservesIDAndTransition: pieces.isEmpty))
 
             context.track.clips.replaceSubrange(context.index...context.index, with: pieces)
@@ -325,7 +326,8 @@ extension EditorModel {
         let sourceEnd = clip.sourceStart + clip.duration
         return analysis.beatTimes.compactMap { beat in
             guard beat >= clip.sourceStart, beat <= sourceEnd else { return nil }
-            let timelineTime = clip.timelineStart + (beat - clip.sourceStart) + offset
+            let outputOffset = clip.outputOffset(forSourceOffset: beat - clip.sourceStart)
+            let timelineTime = clip.timelineStart + outputOffset + offset
             return timelineTime >= .zero ? timelineTime : nil
         }
     }
@@ -388,14 +390,25 @@ extension EditorModel {
 
     private func piece(from clip: Clip,
                        timelineStart: CMTime,
-                       sourceStart: CMTime,
-                       duration: CMTime,
+                       outputOffset: CMTime,
+                       outputDuration: CMTime,
                        preservesIDAndTransition: Bool) -> Clip {
+        let sourceOffset = clip.sourceOffset(forOutputOffset: outputOffset)
+        let sourceEndOffset = clip.sourceOffset(forOutputOffset: outputOffset + outputDuration)
+        let sourceStart = clip.sourceStart + sourceOffset
+        let duration = CMTimeMaximum(sourceEndOffset - sourceOffset, .zero)
+        let speedCurve = slicedKeyframeTrack(clip.speedCurve, from: sourceOffset, duration: duration)
+        let effects = mapSkinSmoothStrength(in: clip.effects) {
+            slicedKeyframeTrack($0, from: sourceOffset, duration: duration)
+        }
+
         if preservesIDAndTransition {
             var first = clip
             first.timelineStart = timelineStart
             first.sourceStart = sourceStart
             first.duration = duration
+            first.speedCurve = speedCurve
+            first.effects = effects
             return first
         }
         return Clip(mediaID: clip.mediaID,
@@ -403,8 +416,50 @@ extension EditorModel {
                     duration: duration,
                     timelineStart: timelineStart,
                     opacity: clip.opacity,
-                    effects: clip.effects,
-                    volumeEnvelope: clip.volumeEnvelope)
+                    effects: effects,
+                    volumeEnvelope: clip.volumeEnvelope,
+                    speedCurve: speedCurve,
+                    preservePitch: clip.preservePitch,
+                    pitchAlgorithm: clip.pitchAlgorithm)
+    }
+
+    private func slicedKeyframeTrack(_ track: Keyframed<Float>, from sourceOffset: CMTime, duration: CMTime)
+        -> Keyframed<Float> {
+        guard track.isAnimated else { return track }
+        let endOffset = sourceOffset + duration
+        let startValue = track.value(at: sourceOffset)
+        let endValue = track.value(at: endOffset)
+        var keyframes: [Keyframe<Float>] = []
+
+        if let exactStart = track.keyframes.first(where: { $0.time == sourceOffset }) {
+            keyframes.append(Keyframe<Float>(id: exactStart.id, time: .zero, value: startValue))
+        } else {
+            keyframes.append(Keyframe<Float>(time: .zero, value: startValue))
+        }
+
+        keyframes.append(contentsOf: track.keyframes.compactMap { keyframe in
+            guard keyframe.time > sourceOffset, keyframe.time < endOffset else { return nil }
+            return Keyframe<Float>(id: keyframe.id, time: keyframe.time - sourceOffset, value: keyframe.value)
+        })
+
+        if duration > .zero {
+            if let exactEnd = track.keyframes.first(where: { $0.time == endOffset }) {
+                keyframes.append(Keyframe<Float>(id: exactEnd.id, time: duration, value: endValue))
+            } else if keyframes.last?.time != duration {
+                keyframes.append(Keyframe<Float>(time: duration, value: endValue))
+            }
+        }
+
+        return Keyframed<Float>(keyframes: keyframes, defaultValue: track.defaultValue)
+    }
+
+    private func mapSkinSmoothStrength(in effects: [Effect],
+                                       _ transform: (Keyframed<Float>) -> Keyframed<Float>) -> [Effect] {
+        effects.map { effect in
+            guard case .skinSmooth(var smooth) = effect else { return effect }
+            smooth.strength = transform(smooth.strength)
+            return .skinSmooth(smooth)
+        }
     }
 
     private func nearestBeat(to time: CMTime, targets: [CMTime], window: Double) -> CMTime? {
@@ -417,7 +472,7 @@ extension EditorModel {
 
     private func nonOverlappingStart(for clip: Clip, on track: Track, requested: CMTime,
                                      excluding clipID: Clip.ID? = nil) -> CMTime {
-        let duration = clip.duration
+        let duration = clip.outputDuration
         let others = track.clips
             .filter { $0.id != clipID }
             .sorted { $0.timelineStart < $1.timelineStart }

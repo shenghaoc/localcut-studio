@@ -541,16 +541,11 @@ final class EditorModel {
             return
         }
 
-        let existingID = selectedClipSpeedKeyframeAtPlayhead?.id
+        let isUpdating = selectedClipSpeedKeyframeAtPlayhead != nil
         let value = clip.speedCurve.defaultValue
         updateSelectedClipTimeRemapDiscrete(
-            existingID == nil ? "Add Speed Keyframe" : "Update Speed Keyframe") { clip in
-                if let existingID {
-                    clip.speedCurve.updateKeyframe(id: existingID, time: localTime, value: value)
-                } else {
-                    clip.speedCurve.addKeyframe(at: localTime, value: value)
-                }
-                clip.clampTimeRemap()
+            isUpdating ? "Update Speed Keyframe" : "Add Speed Keyframe") { clip in
+                upsertSpeedKeyframe(on: &clip, at: localTime, value: value)
             }
         statusMessage = "Speed keyframe set at \(TimeFormatting.timecode(localTime.seconds))."
         selectedClipID = id
@@ -563,8 +558,7 @@ final class EditorModel {
         }
 
         updateSelectedClipTimeRemapDiscrete("Remove Speed Keyframe") { clip in
-            clip.speedCurve.removeKeyframe(id: keyframe.id)
-            clip.clampTimeRemap()
+            removeSpeedKeyframe(on: &clip, near: keyframe.time)
         }
         statusMessage = "Removed speed keyframe."
     }
@@ -577,7 +571,7 @@ final class EditorModel {
             $0.time.seconds < localTime.seconds - tolerance
         }) else { return }
         let outputOffset = clip.outputOffset(forSourceOffset: previous.time)
-        seek(toSeconds: (clip.timelineStart + outputOffset).seconds)
+        seek(toSeconds: effectiveTimelineTime(forAuthored: clip.timelineStart + outputOffset).seconds)
     }
 
     func seekToNextSelectedClipSpeedKeyframe() {
@@ -588,7 +582,7 @@ final class EditorModel {
             $0.time.seconds > localTime.seconds + tolerance
         }) else { return }
         let outputOffset = clip.outputOffset(forSourceOffset: next.time)
-        seek(toSeconds: (clip.timelineStart + outputOffset).seconds)
+        seek(toSeconds: effectiveTimelineTime(forAuthored: clip.timelineStart + outputOffset).seconds)
     }
 
     func resetSelectedClipSpeed() {
@@ -604,12 +598,37 @@ final class EditorModel {
     }
 
     private func nearestSpeedKeyframe(to time: CMTime) -> Keyframe<Float>? {
+        guard let curve = selectedClip?.speedCurve else { return nil }
+        return nearestSpeedKeyframe(in: curve, to: time)
+    }
+
+    private func nearestSpeedKeyframe(in curve: Keyframed<Float>, to time: CMTime) -> Keyframe<Float>? {
         let tolerance = speedKeyframeHitToleranceSeconds
-        return selectedClip?.speedCurve.keyframes
+        return curve.keyframes
             .map { keyframe in (keyframe, abs((keyframe.time - time).seconds)) }
             .filter { $0.1 <= tolerance }
             .min { $0.1 < $1.1 }?
             .0
+    }
+
+    private func upsertSpeedKeyframe(on clip: inout Clip, at time: CMTime, value: Float) {
+        if let existing = nearestSpeedKeyframe(in: clip.speedCurve, to: time) {
+            clip.speedCurve.updateKeyframe(id: existing.id, time: time, value: value)
+        } else {
+            clip.speedCurve.addKeyframe(at: time, value: value)
+        }
+        clip.clampTimeRemap()
+    }
+
+    private func removeSpeedKeyframe(on clip: inout Clip, near time: CMTime) {
+        guard let existing = nearestSpeedKeyframe(in: clip.speedCurve, to: time) else { return }
+        clip.speedCurve.removeKeyframe(id: existing.id)
+        clip.clampTimeRemap()
+    }
+
+    private func effectiveTimelineTime(forAuthored authored: CMTime) -> CMTime {
+        let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks.map(\.clips))
+        return authored - TransitionLayout.shift(at: authored, cuts: cuts)
     }
 
     private func mutateClip(id: Clip.ID,
@@ -810,7 +829,7 @@ final class EditorModel {
         // Keyframe times are clip-source-relative; map back to the output domain
         // so the seek lands on the right frame for retimed clips.
         let outputOffset = clip.outputOffset(forSourceOffset: previous.time)
-        seek(toSeconds: (clip.timelineStart + outputOffset).seconds)
+        seek(toSeconds: effectiveTimelineTime(forAuthored: clip.timelineStart + outputOffset).seconds)
     }
 
     func seekToNextSelectedClipSkinSmoothStrengthKeyframe() {
@@ -823,7 +842,7 @@ final class EditorModel {
         // Keyframe times are clip-source-relative; map back to the output domain
         // so the seek lands on the right frame for retimed clips.
         let outputOffset = clip.outputOffset(forSourceOffset: next.time)
-        seek(toSeconds: (clip.timelineStart + outputOffset).seconds)
+        seek(toSeconds: effectiveTimelineTime(forAuthored: clip.timelineStart + outputOffset).seconds)
     }
 
     private var skinSmoothKeyframeHitToleranceSeconds: Double {
