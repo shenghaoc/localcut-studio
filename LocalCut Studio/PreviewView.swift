@@ -107,7 +107,7 @@ struct PreviewView: View {
     private var videoCanvas: some View {
         ZStack {
             Color.black
-            if model.player.currentItem != nil {
+            if model.hasPreviewItem {
                 PreviewPlayerView(player: model.player)
             } else {
                 ContentUnavailableView(
@@ -150,14 +150,14 @@ struct PreviewView: View {
                 isPlaying: model.isPlaying,
                 current: TimeFormatting.timecode(model.currentTime),
                 duration: TimeFormatting.timecode(model.totalDuration),
-                hasContent: model.player.currentItem != nil,
+                hasContent: model.hasPreviewItem,
                 skipToStart: { model.seek(toSeconds: 0) },
                 togglePlayPause: { model.togglePlayPause() })
         }
     }
 
     private var previewAccessibilityValue: String {
-        if model.player.currentItem == nil {
+        if !model.hasPreviewItem {
             return String(localized: "No preview. Import media, then drag a clip to the timeline.")
         }
         return String(localized: "Showing the current timeline frame.")
@@ -184,4 +184,3 @@ struct PreviewView: View {
     }
     .frame(width: 560, height: 320)
 }
-
