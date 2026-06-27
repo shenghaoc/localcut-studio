@@ -141,6 +141,7 @@ struct PreviewView: View {
     /// Extracted view to isolate `@Observable` high-frequency updates (like `model.currentTime`)
     /// from the main `PreviewView.body`, preventing unnecessary re-renders of the large
     /// canvas component during playback.
+    @MainActor
     private struct TransportOverlay: View {
         var model: EditorModel
 
