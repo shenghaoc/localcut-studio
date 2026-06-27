@@ -482,6 +482,17 @@ final class RenderCache: Sendable {
         removeEntries { $0.clipID == clipID }
     }
 
+    /// Drop entries for a clip whose cached source-media time falls inside
+    /// `timeRange`. Speed-ramp edits use this narrower path because the cache
+    /// key is source-time based even though the UI edit is authored on the
+    /// clip's output curve.
+    nonisolated func invalidate(clipID: UUID, timeRange: CMTimeRange) {
+        guard timeRange.duration > .zero else { return }
+        removeEntries { key in
+            key.clipID == clipID && CMTimeRangeContainsTime(timeRange, time: key.time)
+        }
+    }
+
     /// Drop every entry whose render size differs from `size`. Called after a
     /// project render-size change so stale-canvas frames release their bytes.
     nonisolated func invalidate(notMatchingRenderSize size: CGSize) {

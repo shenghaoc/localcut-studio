@@ -485,7 +485,8 @@ final class EditorModel {
         guard let time = selectedClipSourceLocalPlayheadTime else {
             return selectedClip?.speedCurve.defaultValue ?? TimeRemapping.identitySpeed
         }
-        return selectedClip?.speedCurve.value(at: time) ?? TimeRemapping.identitySpeed
+        guard let curve = selectedClip?.speedCurve else { return TimeRemapping.identitySpeed }
+        return TimeRemapping.speedValue(in: curve, at: time)
     }
 
     var selectedClipSpeedKeyframeAtPlayhead: Keyframe<Float>? {
@@ -657,6 +658,8 @@ final class EditorModel {
                              invalidateVideo: Bool,
                              _ transform: (inout Clip) -> Void) {
         let speedBefore = track.clips[index].speedCurve
+        let sourceStartBefore = track.clips[index].sourceStart
+        let sourceDurationBefore = track.clips[index].duration
         let outputBefore = track.clips[index].outputDuration
         transform(&track.clips[index])
         track.clips[index].clampTimeRemap()
@@ -666,7 +669,21 @@ final class EditorModel {
             sanitizeTransitions()
         }
         if invalidateVideo, track.clips[index].speedCurve != speedBefore {
-            RenderCache.shared.invalidate(clipID: track.clips[index].id)
+            let edited = track.clips[index]
+            if edited.sourceStart == sourceStartBefore,
+               edited.duration == sourceDurationBefore,
+               let localRange = TimeRemapping.affectedSourceRange(
+                before: speedBefore,
+                after: edited.speedCurve,
+                sourceDuration: edited.duration) {
+                RenderCache.shared.invalidate(
+                    clipID: edited.id,
+                    timeRange: CMTimeRange(
+                        start: edited.sourceStart + localRange.start,
+                        duration: localRange.duration))
+            } else {
+                RenderCache.shared.invalidate(clipID: edited.id)
+            }
         }
     }
 

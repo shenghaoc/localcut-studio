@@ -59,15 +59,172 @@ private func makeTimeRemapVideoFixture(seconds: Double,
     return url
 }
 
+@MainActor
+private func makeTimeRemapAudioFixture(seconds: Double,
+                                       sampleRate: Double = 48_000) throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("time-remap-audio-\(UUID().uuidString).caf")
+    try? FileManager.default.removeItem(at: url)
+
+    guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                     sampleRate: sampleRate,
+                                     channels: 1,
+                                     interleaved: false) else {
+        throw NSError(domain: "TimeRemappingTests", code: -1)
+    }
+    let file = try AVAudioFile(forWriting: url,
+                               settings: format.settings,
+                               commonFormat: format.commonFormat,
+                               interleaved: format.isInterleaved)
+    let frameCount = AVAudioFrameCount(sampleRate * seconds)
+    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+        throw NSError(domain: "TimeRemappingTests", code: -2)
+    }
+    buffer.frameLength = frameCount
+    try file.write(from: buffer)
+    return url
+}
+
+@MainActor
+private func makeTimeRemapAVFixture(seconds: Double) async throws -> URL {
+    let videoURL = try await makeTimeRemapVideoFixture(seconds: seconds)
+    let audioURL = try makeTimeRemapAudioFixture(seconds: seconds)
+    defer {
+        try? FileManager.default.removeItem(at: videoURL)
+        try? FileManager.default.removeItem(at: audioURL)
+    }
+
+    let outputURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("time-remap-av-\(UUID().uuidString).mov")
+    try? FileManager.default.removeItem(at: outputURL)
+
+    let composition = AVMutableComposition()
+    let videoAsset = AVURLAsset(url: videoURL)
+    let audioAsset = AVURLAsset(url: audioURL)
+    let duration = try await videoAsset.load(.duration)
+
+    let videoTracks = try await videoAsset.loadTracks(withMediaType: .video)
+    let audioTracks = try await audioAsset.loadTracks(withMediaType: .audio)
+    let videoSource = try #require(videoTracks.first)
+    let audioSource = try #require(audioTracks.first)
+
+    let videoTrack = try #require(composition.addMutableTrack(
+        withMediaType: .video,
+        preferredTrackID: kCMPersistentTrackID_Invalid))
+    try videoTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration),
+                                   of: videoSource,
+                                   at: .zero)
+
+    let audioTrack = try #require(composition.addMutableTrack(
+        withMediaType: .audio,
+        preferredTrackID: kCMPersistentTrackID_Invalid))
+    try audioTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration),
+                                   of: audioSource,
+                                   at: .zero)
+
+    let session = try #require(AVAssetExportSession(
+        asset: composition,
+        presetName: AVAssetExportPresetHighestQuality))
+    try await session.export(to: outputURL, as: .mov)
+    return outputURL
+}
+
 private func loadedTimeRemapMedia(from url: URL) async throws -> MediaItem {
     let item = MediaItem(url: url)
     item.duration = try await item.asset.load(.duration)
     let videoTracks = try await item.asset.loadTracks(withMediaType: .video)
     let track = try #require(videoTracks.first)
+    let audioTracks = try await item.asset.loadTracks(withMediaType: .audio)
     item.hasVideo = true
+    item.hasAudio = !audioTracks.isEmpty
     item.naturalSize = try await track.load(.naturalSize)
     item.preferredTransform = try await track.load(.preferredTransform)
     return item
+}
+
+nonisolated private func sampledLuma(asset: AVAsset,
+                                     videoComposition: AVVideoComposition?,
+                                     at time: CMTime) async throws -> Double {
+    let generator = AVAssetImageGenerator(asset: asset)
+    generator.videoComposition = videoComposition
+    generator.appliesPreferredTrackTransform = true
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = .zero
+    let image = try await withCheckedThrowingContinuation { continuation in
+        generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: time)]) { _, image, _, result, error in
+            if let image, result == .succeeded {
+                continuation.resume(returning: image)
+            } else {
+                continuation.resume(
+                    throwing: error ?? NSError(domain: "TimeRemappingTests", code: -3))
+            }
+        }
+    }
+    return try meanLuma(image)
+}
+
+nonisolated private func meanLuma(_ image: CGImage) throws -> Double {
+    var pixel = [UInt8](repeating: 0, count: 4)
+    let context = CGContext(data: &pixel,
+                            width: 1,
+                            height: 1,
+                            bitsPerComponent: 8,
+                            bytesPerRow: 4,
+                            space: CGColorSpaceCreateDeviceRGB(),
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    let cgContext = try #require(context)
+    cgContext.interpolationQuality = .none
+    cgContext.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+    return 0.2126 * Double(pixel[0]) + 0.7152 * Double(pixel[1]) + 0.0722 * Double(pixel[2])
+}
+
+private func audioSignature(asset: AVAsset,
+                            audioMix: AVAudioMix?,
+                            at time: CMTime) async throws -> (samples: Int, peak: Float) {
+    let tracks = try await asset.loadTracks(withMediaType: .audio)
+    guard !tracks.isEmpty else { return (0, 0) }
+
+    let reader = try AVAssetReader(asset: asset)
+    reader.timeRange = CMTimeRange(start: time, duration: CMTime(seconds: 0.05, preferredTimescale: 600))
+    let settings: [String: Any] = [
+        AVFormatIDKey: Int(kAudioFormatLinearPCM),
+        AVLinearPCMBitDepthKey: 16,
+        AVLinearPCMIsFloatKey: false,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+    ]
+    let output: AVAssetReaderOutput
+    if let audioMix {
+        let mixOutput = AVAssetReaderAudioMixOutput(audioTracks: tracks, audioSettings: settings)
+        mixOutput.audioMix = audioMix
+        output = mixOutput
+    } else {
+        output = AVAssetReaderTrackOutput(track: tracks[0], outputSettings: settings)
+    }
+    guard reader.canAdd(output) else { return (0, 0) }
+    reader.add(output)
+    guard reader.startReading() else { return (0, 0) }
+
+    var sampleCount = 0
+    var peak: Float = 0
+    while let sampleBuffer = output.copyNextSampleBuffer(), sampleCount < 8_192 {
+        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
+        let byteCount = CMBlockBufferGetDataLength(blockBuffer)
+        var samples = [Int16](repeating: 0, count: byteCount / MemoryLayout<Int16>.size)
+        let status = samples.withUnsafeMutableBytes { rawBuffer -> OSStatus in
+            guard let destination = rawBuffer.baseAddress else { return -1 }
+            return CMBlockBufferCopyDataBytes(blockBuffer,
+                                              atOffset: 0,
+                                              dataLength: byteCount,
+                                              destination: destination)
+        }
+        guard status == noErr else { continue }
+        for sample in samples {
+            peak = max(peak, abs(Float(sample) / Float(Int16.max)))
+        }
+        sampleCount += samples.count
+    }
+    return (sampleCount, peak)
 }
 
 @Test("TimeRemapping: default clip is identity and preserves pitch")
@@ -127,6 +284,98 @@ func timeRemapAnimatedPairBuildsDeterministicSegments() {
     #expect(first.allSatisfy { $0.speed >= TimeRemapping.minSpeed && $0.speed <= TimeRemapping.maxSpeed })
 }
 
+@Test("TimeRemapping: bezier handles shape continuous speed evaluation")
+func timeRemapBezierHandlesShapeSpeedEvaluation() {
+    let linear = Keyframed<Float>(
+        keyframes: [
+            Keyframe(time: trTime(0), value: 1),
+            Keyframe(time: trTime(10), value: 2),
+        ],
+        defaultValue: 1)
+    let eased = Keyframed<Float>(
+        keyframes: [
+            Keyframe(time: trTime(0), value: 1,
+                     outgoingHandle: KeyframeHandle(x: 0.2, y: 4)),
+            Keyframe(time: trTime(10), value: 2,
+                     incomingHandle: KeyframeHandle(x: 0.2, y: 4)),
+        ],
+        defaultValue: 1)
+
+    let linearMid = TimeRemapping.speedValue(in: linear, at: trTime(5))
+    let easedMid = TimeRemapping.speedValue(in: eased, at: trTime(5))
+    let plan = TimeRemapping.segmentPlan(sourceDuration: trTime(10), speedCurve: eased)
+
+    #expect(abs(linearMid - 1.5) < 0.01)
+    #expect(easedMid > linearMid)
+    #expect(plan.count == TimeRemapping.defaultSegmentsPerKeyframePair)
+    #expect(plan.contains { $0.speed > 2 })
+}
+
+@Test("TimeRemapping: bezier handles subdivide even when endpoint speeds match")
+func timeRemapBezierHandlesSubdivideEqualEndpointSpeeds() {
+    let curve = Keyframed<Float>(
+        keyframes: [
+            Keyframe(time: trTime(0), value: 1,
+                     outgoingHandle: KeyframeHandle(x: 0.25, y: 3)),
+            Keyframe(time: trTime(10), value: 1,
+                     incomingHandle: KeyframeHandle(x: 0.25, y: 3)),
+        ],
+        defaultValue: 1)
+
+    let plan = TimeRemapping.segmentPlan(sourceDuration: trTime(10), speedCurve: curve)
+
+    #expect(plan.count == TimeRemapping.defaultSegmentsPerKeyframePair)
+    #expect(plan.contains { abs($0.speed - 1) > 0.01 })
+}
+
+@Test("TimeRemapping: segment boundaries snap to source sample times")
+func timeRemapSegmentsSnapToSourceSamples() {
+    let plan = [
+        TimeRemapSegment(
+            sourceRange: CMTimeRange(start: trTime(0), duration: trTime(0.51)),
+            outputOffset: trTime(0),
+            outputDuration: trTime(0.51),
+            speed: 1),
+        TimeRemapSegment(
+            sourceRange: CMTimeRange(start: trTime(0.51), duration: trTime(0.49)),
+            outputOffset: trTime(0.51),
+            outputDuration: trTime(0.49),
+            speed: 1),
+    ]
+
+    let snapped = TimeRemapping.snapSegmentPlan(
+        plan,
+        toSourceSampleDuration: CMTime(value: 1, timescale: 30))
+
+    #expect(snapped.count == 2)
+    #expect(approx(snapped[0].sourceRange.end, trTime(0.5), tolerance: 1.0 / 600.0))
+    #expect(approx(snapped[1].sourceRange.start, snapped[0].sourceRange.end))
+    #expect(approx(snapped[0].outputDuration, plan[0].outputDuration))
+    #expect(approx(snapped[1].outputDuration, plan[1].outputDuration))
+}
+
+@Test("TimeRemapping: affected source range expands to neighbouring speed keyframes")
+func timeRemapAffectedSourceRangeUsesAdjacentKeyframes() throws {
+    let middleID = UUID()
+    let before = Keyframed<Float>(
+        keyframes: [
+            Keyframe(time: trTime(0), value: 1),
+            Keyframe(id: middleID, time: trTime(4), value: 1),
+            Keyframe(time: trTime(8), value: 1),
+        ],
+        defaultValue: 1)
+    var after = before
+    after.updateKeyframe(id: middleID, value: 2)
+
+    let range = try #require(TimeRemapping.affectedSourceRange(
+        before: before,
+        after: after,
+        sourceDuration: trTime(10)))
+
+    #expect(range.start == trTime(0))
+    #expect(range.end == trTime(8))
+}
+
 @Test("TimeRemapping: output and source offsets map through the speed plan")
 func timeRemapSourceOutputMapping() {
     var clip = Clip(mediaID: UUID(), sourceStart: .zero,
@@ -161,14 +410,82 @@ func timeRemapCompositionBuilderScalesVideo() async throws {
     #expect(built.videoComposition != nil)
 }
 
+@MainActor
+@Test("TimeRemapping: ramped A/V preview samples match exported samples")
+func timeRemapPreviewExportAVParitySmoke() async throws {
+    let url = try await makeTimeRemapAVFixture(seconds: 2)
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let project = Project()
+    project.renderSize = CGSize(width: 64, height: 64)
+    let media = try await loadedTimeRemapMedia(from: url)
+    project.mediaItems.append(media)
+
+    var videoClip = Clip(mediaID: media.id, sourceStart: .zero,
+                         duration: trTime(2), timelineStart: .zero)
+    videoClip.speedCurve = Keyframed<Float>(
+        keyframes: [
+            Keyframe(time: .zero, value: 1,
+                     outgoingHandle: KeyframeHandle(x: 0.25, y: 0.75)),
+            Keyframe(time: trTime(2), value: 2,
+                     incomingHandle: KeyframeHandle(x: 0.25, y: 1.75)),
+        ],
+        defaultValue: 1)
+    var audioClip = Clip(mediaID: media.id, sourceStart: .zero,
+                         duration: trTime(2), timelineStart: .zero)
+    audioClip.speedCurve = videoClip.speedCurve
+    project.videoTracks[0].clips = [videoClip]
+    project.audioTracks[0].clips = [audioClip]
+
+    let built = try #require(try await CompositionBuilder.build(project: project))
+    let videoComposition = try #require(built.videoComposition)
+    let audioMix = try #require(built.audioMix)
+
+    let exportURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("time-remap-export-\(UUID().uuidString).mov")
+    defer { try? FileManager.default.removeItem(at: exportURL) }
+
+    let session = try #require(AVAssetExportSession(
+        asset: built.composition,
+        presetName: AVAssetExportPresetHighestQuality))
+    session.videoComposition = videoComposition
+    session.audioMix = audioMix
+    try await session.export(to: exportURL, as: .mov)
+
+    let exported = AVURLAsset(url: exportURL)
+    let sampleTimes = [trTime(0.1), trTime(min(0.85, max(0.15, built.duration - 0.1)))]
+    for sampleTime in sampleTimes {
+        let previewLuma = try await sampledLuma(
+            asset: built.composition,
+            videoComposition: videoComposition,
+            at: sampleTime)
+        let exportedLuma = try await sampledLuma(asset: exported,
+                                                 videoComposition: nil,
+                                                 at: sampleTime)
+        #expect(abs(previewLuma - exportedLuma) <= 3.0)
+
+        let previewAudio = try await audioSignature(asset: built.composition,
+                                                    audioMix: audioMix,
+                                                    at: sampleTime)
+        let exportedAudio = try await audioSignature(asset: exported,
+                                                     audioMix: nil,
+                                                     at: sampleTime)
+        #expect(previewAudio.samples > 0)
+        #expect(exportedAudio.samples > 0)
+        #expect(abs(previewAudio.peak - exportedAudio.peak) < 0.001)
+    }
+}
+
 @Test("TimeRemapping: ClipDoc round-trips speed and pitch settings")
 func timeRemapClipDocRoundTrip() throws {
     var clip = Clip(mediaID: UUID(), sourceStart: trTime(1),
                     duration: trTime(6), timelineStart: trTime(2))
     clip.speedCurve = Keyframed<Float>(
         keyframes: [
-            Keyframe(time: trTime(0), value: 0.5),
-            Keyframe(time: trTime(6), value: 2),
+            Keyframe(time: trTime(0), value: 0.5,
+                     outgoingHandle: KeyframeHandle(x: 0.25, y: 1.5)),
+            Keyframe(time: trTime(6), value: 2,
+                     incomingHandle: KeyframeHandle(x: 0.25, y: 1.25)),
         ],
         defaultValue: 1.25)
     clip.preservePitch = false
@@ -180,6 +497,8 @@ func timeRemapClipDocRoundTrip() throws {
 
     #expect(runtime.speedCurve.defaultValue == 1.25)
     #expect(runtime.speedCurve.keyframes.count == 2)
+    #expect(runtime.speedCurve.keyframes[0].outgoingHandle == KeyframeHandle(x: 0.25, y: 1.5))
+    #expect(runtime.speedCurve.keyframes[1].incomingHandle == KeyframeHandle(x: 0.25, y: 1.25))
     #expect(runtime.preservePitch == false)
     #expect(runtime.pitchAlgorithm == .spectral)
 }
@@ -229,6 +548,41 @@ struct TimeRemappingEditorCacheTests {
         model.commitCoalescedUndo()
 
         #expect(RenderCache.shared.image(for: key) == nil)
+        RenderCache.shared.purge()
+    }
+
+    @MainActor
+    @Test("Speed keyframe edits keep cache entries outside the affected source range")
+    func speedKeyframeEditInvalidatesOnlyAffectedRange() {
+        let model = EditorModel()
+        var clip = Clip(mediaID: UUID(), sourceStart: .zero,
+                        duration: trTime(6), timelineStart: .zero)
+        let middleID = UUID()
+        clip.speedCurve = Keyframed<Float>(
+            keyframes: [
+                Keyframe(time: .zero, value: 1),
+                Keyframe(id: middleID, time: trTime(2), value: 1),
+                Keyframe(time: trTime(4), value: 1),
+            ],
+            defaultValue: 1)
+        model.project.videoTracks[0].clips = [clip]
+        model.selectedClipID = clip.id
+
+        let affected = RenderCacheKey(clipID: clip.id, effectChainHash: 1,
+                                      time: trTime(1), renderSize: CGSize(width: 1920, height: 1080))
+        let unaffected = RenderCacheKey(clipID: clip.id, effectChainHash: 1,
+                                        time: trTime(5), renderSize: CGSize(width: 1920, height: 1080))
+        RenderCache.shared.purge()
+        RenderCache.shared.setImage(cachedImage(), for: affected)
+        RenderCache.shared.setImage(cachedImage(), for: unaffected)
+
+        model.updateSelectedClipTimeRemap {
+            $0.speedCurve.updateKeyframe(id: middleID, value: 2)
+        }
+        model.commitCoalescedUndo()
+
+        #expect(RenderCache.shared.image(for: affected) == nil)
+        #expect(RenderCache.shared.image(for: unaffected) != nil)
         RenderCache.shared.purge()
     }
 

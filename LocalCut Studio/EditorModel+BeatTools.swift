@@ -427,24 +427,39 @@ extension EditorModel {
         -> Keyframed<Float> {
         guard track.isAnimated else { return track }
         let endOffset = sourceOffset + duration
-        let startValue = track.value(at: sourceOffset)
-        let endValue = track.value(at: endOffset)
+        let startValue = TimeRemapping.speedValue(in: track, at: sourceOffset)
+        let endValue = TimeRemapping.speedValue(in: track, at: endOffset)
         var keyframes: [Keyframe<Float>] = []
 
         if let exactStart = track.keyframes.first(where: { $0.time == sourceOffset }) {
-            keyframes.append(Keyframe<Float>(id: exactStart.id, time: .zero, value: startValue))
+            keyframes.append(Keyframe<Float>(
+                id: exactStart.id,
+                time: .zero,
+                value: startValue,
+                incomingHandle: exactStart.incomingHandle,
+                outgoingHandle: exactStart.outgoingHandle))
         } else {
             keyframes.append(Keyframe<Float>(time: .zero, value: startValue))
         }
 
         keyframes.append(contentsOf: track.keyframes.compactMap { keyframe in
             guard keyframe.time > sourceOffset, keyframe.time < endOffset else { return nil }
-            return Keyframe<Float>(id: keyframe.id, time: keyframe.time - sourceOffset, value: keyframe.value)
+            return Keyframe<Float>(
+                id: keyframe.id,
+                time: keyframe.time - sourceOffset,
+                value: keyframe.value,
+                incomingHandle: keyframe.incomingHandle,
+                outgoingHandle: keyframe.outgoingHandle)
         })
 
         if duration > .zero {
             if let exactEnd = track.keyframes.first(where: { $0.time == endOffset }) {
-                keyframes.append(Keyframe<Float>(id: exactEnd.id, time: duration, value: endValue))
+                keyframes.append(Keyframe<Float>(
+                    id: exactEnd.id,
+                    time: duration,
+                    value: endValue,
+                    incomingHandle: exactEnd.incomingHandle,
+                    outgoingHandle: exactEnd.outgoingHandle))
             } else if keyframes.last?.time != duration {
                 keyframes.append(Keyframe<Float>(time: duration, value: endValue))
             }

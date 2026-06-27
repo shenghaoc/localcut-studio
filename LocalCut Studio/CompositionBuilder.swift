@@ -98,6 +98,7 @@ enum CompositionBuilder {
                 guard let media = project.media(for: clip.mediaID), media.hasVideo else { continue }
                 let sourceTracks = try await media.asset.loadTracks(withMediaType: .video)
                 guard let sourceTrack = sourceTracks.first else { continue }
+                let sourceSampleDuration = try? await sourceTrack.load(.minFrameDuration)
 
                 let transform = fitTransform(
                     naturalSize: media.naturalSize,
@@ -129,6 +130,7 @@ enum CompositionBuilder {
                         clip: clip,
                         piece: piece,
                         sourceTrack: sourceTrack,
+                        sourceSampleDuration: sourceSampleDuration,
                         into: compTrack)
                     for remapSegment in remapSegments {
                         let segmentStart = start + (remapSegment.outputOffset - piece.outputOffset)
@@ -180,6 +182,16 @@ enum CompositionBuilder {
                 guard let media = project.media(for: clip.mediaID), media.hasAudio else { continue }
                 let sourceTracks = try await media.asset.loadTracks(withMediaType: .audio)
                 guard let sourceTrack = sourceTracks.first else { continue }
+                let audioSampleDuration = try? await sourceTrack.load(.minFrameDuration)
+                let sourceSampleDuration: CMTime?
+                if media.hasVideo,
+                   let videoSourceTracks = try? await media.asset.loadTracks(withMediaType: .video),
+                   let videoSourceTrack = videoSourceTracks.first {
+                    sourceSampleDuration = (try? await videoSourceTrack.load(.minFrameDuration))
+                        ?? audioSampleDuration
+                } else {
+                    sourceSampleDuration = audioSampleDuration
+                }
                 if !clip.volumeEnvelope.isEmpty { hasBusContribution = true }
                 for piece in TransitionLayout.pieces(for: clip, overlap: .zero, cuts: cuts) {
                     guard let compTrack = composition.addMutableTrack(
@@ -189,6 +201,7 @@ enum CompositionBuilder {
                         clip: clip,
                         piece: piece,
                         sourceTrack: sourceTrack,
+                        sourceSampleDuration: sourceSampleDuration,
                         into: compTrack)
                     placed.append((compTrack, clip, piece))
                 }
@@ -371,9 +384,18 @@ enum CompositionBuilder {
     private static func insertRetimedPiece(clip: Clip,
                                            piece: TransitionLayout.Piece,
                                            sourceTrack: AVAssetTrack,
+                                           sourceSampleDuration: CMTime?,
                                            into compTrack: AVMutableCompositionTrack)
         throws -> [TimeRemapSegment] {
-        let remapSegments = TimeRemapping.segmentPlan(for: clip, sourceRange: piece.sourceRange)
+        let rawSegments = TimeRemapping.segmentPlan(for: clip, sourceRange: piece.sourceRange)
+        let remapSegments: [TimeRemapSegment]
+        if let sourceSampleDuration, sourceSampleDuration.isNumeric, sourceSampleDuration > .zero {
+            remapSegments = TimeRemapping.snapSegmentPlan(
+                rawSegments,
+                toSourceSampleDuration: sourceSampleDuration)
+        } else {
+            remapSegments = rawSegments
+        }
         for segment in remapSegments {
             let start = piece.effectiveStart + (segment.outputOffset - piece.outputOffset)
             try compTrack.insertTimeRange(segment.sourceRange, of: sourceTrack, at: start)

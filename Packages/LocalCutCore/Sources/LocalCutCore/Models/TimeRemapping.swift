@@ -74,7 +74,9 @@ public nonisolated enum TimeRemapping {
             Keyframe<Float>(
                 id: keyframe.id,
                 time: CMTimeMaximum(.zero, keyframe.time.sanitized),
-                value: clampedSpeed(keyframe.value))
+                value: clampedSpeed(keyframe.value),
+                incomingHandle: clampedHandle(keyframe.incomingHandle),
+                outgoingHandle: clampedHandle(keyframe.outgoingHandle))
         }
         return Keyframed<Float>(
             keyframes: keyframes,
@@ -83,7 +85,15 @@ public nonisolated enum TimeRemapping {
 
     public static func hasNonIdentitySpeed(_ curve: Keyframed<Float>) -> Bool {
         if abs(clampedSpeed(curve.defaultValue) - identitySpeed) > 0.0001 { return true }
-        return curve.keyframes.contains { abs(clampedSpeed($0.value) - identitySpeed) > 0.0001 }
+        return curve.keyframes.contains { keyframe in
+            abs(clampedSpeed(keyframe.value) - identitySpeed) > 0.0001
+                || handleIsNonIdentity(keyframe.incomingHandle)
+                || handleIsNonIdentity(keyframe.outgoingHandle)
+        }
+    }
+
+    public static func speedValue(in curve: Keyframed<Float>, at time: CMTime) -> Float {
+        clampedSpeed(clampedCurve(curve).bezierValue(at: time.sanitized))
     }
 
     /// Builds a local source-domain plan from source offset 0 through `sourceDuration`.
@@ -120,9 +130,14 @@ public nonisolated enum TimeRemapping {
             // An interval whose endpoint speeds match is constant and needs
             // just one segment. Evaluating at the endpoints (rather than
             // filtering keyframes by time) avoids CMTime comparison edge cases.
-            let speedAtLower = clampedSpeed(curve.value(at: lower))
-            let speedAtUpper = clampedSpeed(curve.value(at: upper))
-            let speedsVary = abs(speedAtLower - speedAtUpper) > 0.0001
+            let speedAtLower = clampedSpeed(curve.bezierValue(at: lower))
+            let speedAtUpper = clampedSpeed(curve.bezierValue(at: upper))
+            let speedsVary = segmentNeedsSubdivisions(
+                curve: curve,
+                lower: lower,
+                upper: upper,
+                speedAtLower: speedAtLower,
+                speedAtUpper: speedAtUpper)
             let subdivisions = speedsVary ? segmentsPerPair : 1
             for subIndex in 0..<subdivisions {
                 let startFraction = Double(subIndex) / Double(subdivisions)
@@ -133,7 +148,7 @@ public nonisolated enum TimeRemapping {
                 guard sourceRange.duration > .zero else { continue }
 
                 let midpoint = sourceRange.start + multiplied(sourceRange.duration, by: 0.5)
-                let speed = clampedSpeed(curve.value(at: midpoint))
+                let speed = clampedSpeed(curve.bezierValue(at: midpoint))
                 let outputDuration = multiplied(sourceRange.duration, by: 1.0 / Double(speed))
                 plan.append(TimeRemapSegment(
                     sourceRange: sourceRange,
@@ -182,6 +197,53 @@ public nonisolated enum TimeRemapping {
                 speed: local.speed))
         }
         return result
+    }
+
+    /// Snaps internal segment boundaries to the nearest source sample time while
+    /// preserving the original output ranges. The source span remains exact at
+    /// the outer boundaries; only internal cuts move, bounded by the caller's
+    /// source sample duration.
+    public static func snapSegmentPlan(_ plan: [TimeRemapSegment],
+                                       toSourceSampleDuration sampleDuration: CMTime)
+        -> [TimeRemapSegment] {
+        guard plan.count > 1,
+              sampleDuration.isNumeric,
+              sampleDuration > .zero,
+              sampleDuration.seconds.isFinite else { return plan }
+
+        var boundaries: [CMTime] = [plan[0].sourceRange.start]
+        for index in 0..<(plan.count - 1) {
+            let original = plan[index].sourceRange.end
+            let previous = boundaries.last ?? plan[index].sourceRange.start
+            let nextOriginal = plan[index + 1].sourceRange.end
+            let snapped = nearestSampleTime(original, sampleDuration: sampleDuration)
+            if snapped > previous, snapped < nextOriginal {
+                boundaries.append(snapped)
+            } else {
+                boundaries.append(original)
+            }
+        }
+        boundaries.append(plan[plan.count - 1].sourceRange.end)
+
+        var snappedPlan: [TimeRemapSegment] = []
+        snappedPlan.reserveCapacity(plan.count)
+        for index in plan.indices {
+            let sourceRange = CMTimeRange(start: boundaries[index], end: boundaries[index + 1])
+            guard sourceRange.duration > .zero else { continue }
+            let outputDuration = plan[index].outputDuration
+            let speed: Float
+            if outputDuration > .zero {
+                speed = clampedSpeed(Float(sourceRange.duration.seconds / outputDuration.seconds))
+            } else {
+                speed = plan[index].speed
+            }
+            snappedPlan.append(TimeRemapSegment(
+                sourceRange: sourceRange,
+                outputOffset: plan[index].outputOffset,
+                outputDuration: outputDuration,
+                speed: speed))
+        }
+        return snappedPlan
     }
 
     public static func outputDuration(sourceDuration: CMTime,
@@ -234,6 +296,47 @@ public nonisolated enum TimeRemapping {
         return plan.reduce(CMTime.zero) { $0 + $1.outputDuration }
     }
 
+    public static func affectedSourceRange(before oldCurve: Keyframed<Float>,
+                                           after newCurve: Keyframed<Float>,
+                                           sourceDuration: CMTime) -> CMTimeRange? {
+        let duration = sourceDuration.sanitized
+        guard duration > .zero else { return nil }
+        let old = clampedCurve(oldCurve)
+        let new = clampedCurve(newCurve)
+        guard old != new else { return nil }
+
+        if old.keyframes.isEmpty || new.keyframes.isEmpty {
+            return CMTimeRange(start: .zero, duration: duration)
+        }
+
+        let count = max(old.keyframes.count, new.keyframes.count)
+        var changedTimes: [CMTime] = []
+        for index in 0..<count {
+            if index >= old.keyframes.count {
+                changedTimes.append(new.keyframes[index].time)
+            } else if index >= new.keyframes.count {
+                changedTimes.append(old.keyframes[index].time)
+            } else if old.keyframes[index] != new.keyframes[index] {
+                changedTimes.append(old.keyframes[index].time)
+                changedTimes.append(new.keyframes[index].time)
+            }
+        }
+
+        guard let minChanged = changedTimes.min(),
+              let maxChanged = changedTimes.max() else { return nil }
+        let boundaries = ([CMTime.zero, duration]
+            + old.keyframes.map(\.time)
+            + new.keyframes.map(\.time))
+            .map { CMTimeMinimum(CMTimeMaximum(.zero, $0.sanitized), duration) }
+            .sorted()
+        let lower = boundaries.last(where: { $0 < minChanged }) ?? .zero
+        let upper = boundaries.first(where: { $0 > maxChanged }) ?? duration
+        guard upper > lower else {
+            return CMTimeRange(start: .zero, duration: duration)
+        }
+        return CMTimeRange(start: lower, end: upper)
+    }
+
     public static func multiplied(_ time: CMTime, by multiplier: Double) -> CMTime {
         guard time.isNumeric, time.seconds.isFinite, multiplier.isFinite else { return .zero }
         // Preserve the input's timescale so retimed high-rate audio times
@@ -246,5 +349,59 @@ public nonisolated enum TimeRemapping {
     private static func fraction(_ time: CMTime, of duration: CMTime) -> Double {
         guard duration > .zero, duration.seconds.isFinite else { return 0 }
         return min(1, max(0, time.seconds / duration.seconds))
+    }
+
+    private static func clampedHandle(_ handle: KeyframeHandle?) -> KeyframeHandle? {
+        guard let handle,
+              handle.x.isFinite,
+              handle.y.isFinite else { return nil }
+        return KeyframeHandle(
+            x: min(1, max(0, handle.x)),
+            y: clampedSpeed(handle.y))
+    }
+
+    private static func handleIsNonIdentity(_ handle: KeyframeHandle?) -> Bool {
+        guard let handle else { return false }
+        return abs(clampedSpeed(handle.y) - identitySpeed) > 0.0001
+    }
+
+    private static func segmentNeedsSubdivisions(curve: Keyframed<Float>,
+                                                 lower: CMTime,
+                                                 upper: CMTime,
+                                                 speedAtLower: Float,
+                                                 speedAtUpper: Float) -> Bool {
+        if abs(speedAtLower - speedAtUpper) > 0.0001 { return true }
+        guard let lowerKeyframe = curve.keyframes.first(where: { $0.time == lower }),
+              let upperKeyframe = curve.keyframes.first(where: { $0.time == upper }) else {
+            return false
+        }
+        let lowerSpeed = clampedSpeed(lowerKeyframe.value)
+        let upperSpeed = clampedSpeed(upperKeyframe.value)
+        if let outgoing = lowerKeyframe.outgoingHandle {
+            let expected = lowerSpeed + (upperSpeed - lowerSpeed) * clampedUnit(outgoing.x)
+            if abs(clampedSpeed(outgoing.y) - expected) > 0.0001 { return true }
+        }
+        if let incoming = upperKeyframe.incomingHandle {
+            let expected = upperSpeed - (upperSpeed - lowerSpeed) * clampedUnit(incoming.x)
+            if abs(clampedSpeed(incoming.y) - expected) > 0.0001 { return true }
+        }
+        return false
+    }
+
+    private static func clampedUnit(_ value: Float) -> Float {
+        guard value.isFinite else { return 1.0 / 3.0 }
+        return min(1, max(0, value))
+    }
+
+    private static func nearestSampleTime(_ time: CMTime,
+                                          sampleDuration: CMTime) -> CMTime {
+        guard time.isNumeric,
+              sampleDuration.isNumeric,
+              sampleDuration > .zero else { return time }
+        let sampleSeconds = sampleDuration.seconds
+        guard sampleSeconds.isFinite, sampleSeconds > 0 else { return time }
+        let snappedSeconds = (time.seconds / sampleSeconds).rounded() * sampleSeconds
+        let timescale = max(max(time.timescale, sampleDuration.timescale), CMTimeScale(600))
+        return CMTime(seconds: max(0, snappedSeconds), preferredTimescale: timescale)
     }
 }

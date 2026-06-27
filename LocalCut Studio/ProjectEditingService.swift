@@ -160,7 +160,7 @@ final class ProjectEditingService {
 
                 switch edge {
                 case .left:
-                    let startSpeed = Double(TimeRemapping.clampedSpeed(clip.speedCurve.value(at: .zero)))
+                    let startSpeed = Double(TimeRemapping.speedValue(in: clip.speedCurve, at: .zero))
                     let originalEnd = clip.timelineEnd
                     var newTimelineStart = max(time, .zero)
                     // The head can extend earlier only until the unused source
@@ -351,7 +351,7 @@ final class ProjectEditingService {
     private static func splitKeyframeTrack(_ track: Keyframed<Float>, at cut: CMTime)
         -> (left: Keyframed<Float>, right: Keyframed<Float>) {
         guard track.isAnimated else { return (track, track) }
-        let boundary = track.value(at: cut)
+        let boundary = TimeRemapping.speedValue(in: track, at: cut)
         // Preserve the original keyframe's ID when it sits exactly at the cut.
         let exactMatch = track.keyframes.first { $0.time == cut }
         var leftKeys = track.keyframes.filter { $0.time < cut }
@@ -362,14 +362,24 @@ final class ProjectEditingService {
         }
         var rightKeys: [Keyframe<Float>]
         if let exactMatch {
-            rightKeys = [Keyframe<Float>(id: exactMatch.id, time: .zero, value: boundary)]
+            rightKeys = [Keyframe<Float>(
+                id: exactMatch.id,
+                time: .zero,
+                value: boundary,
+                incomingHandle: exactMatch.incomingHandle,
+                outgoingHandle: exactMatch.outgoingHandle)]
         } else {
             rightKeys = [Keyframe<Float>(time: .zero, value: boundary)]
         }
         rightKeys.append(contentsOf: track.keyframes.compactMap { kf in
             let newTime = kf.time - cut
             guard newTime > .zero else { return nil }
-            return Keyframe<Float>(id: kf.id, time: newTime, value: kf.value)
+            return Keyframe<Float>(
+                id: kf.id,
+                time: newTime,
+                value: kf.value,
+                incomingHandle: kf.incomingHandle,
+                outgoingHandle: kf.outgoingHandle)
         })
         return (Keyframed<Float>(keyframes: leftKeys, defaultValue: track.defaultValue),
                 Keyframed<Float>(keyframes: rightKeys, defaultValue: track.defaultValue))
@@ -384,11 +394,16 @@ final class ProjectEditingService {
         var keyframes = track.keyframes.compactMap { kf -> Keyframe<Float>? in
             let newTime = kf.time - sourceDelta
             guard newTime >= .zero else { return nil }
-            return Keyframe<Float>(id: kf.id, time: newTime, value: kf.value)
+            return Keyframe<Float>(
+                id: kf.id,
+                time: newTime,
+                value: kf.value,
+                incomingHandle: kf.incomingHandle,
+                outgoingHandle: kf.outgoingHandle)
         }
 
         if sourceDelta > .zero {
-            let boundary = track.value(at: sourceDelta)
+            let boundary = TimeRemapping.speedValue(in: track, at: sourceDelta)
             if let zeroIndex = keyframes.firstIndex(where: { $0.time == .zero }) {
                 keyframes[zeroIndex].value = boundary
             } else {

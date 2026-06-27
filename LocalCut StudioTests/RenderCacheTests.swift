@@ -319,6 +319,28 @@ func invalidateClipID() {
     #expect(cache.currentBytes == RenderCache.estimatedBytes(width: 100, height: 100))
 }
 
+@Test("RenderCache: invalidate(clipID:timeRange:) drops only matching source times")
+func invalidateClipIDTimeRange() {
+    let cache = RenderCache()
+    let editedClip = UUID()
+    let inside = key(clipID: editedClip, time: CMTime(seconds: 2, preferredTimescale: 600))
+    let outside = key(clipID: editedClip, time: CMTime(seconds: 4, preferredTimescale: 600))
+    let otherClip = key(clipID: UUID(), time: CMTime(seconds: 2, preferredTimescale: 600))
+
+    cache.setImage(tinyImage(), for: inside)
+    cache.setImage(tinyImage(), for: outside)
+    cache.setImage(tinyImage(), for: otherClip)
+
+    cache.invalidate(
+        clipID: editedClip,
+        timeRange: CMTimeRange(start: CMTime(seconds: 1, preferredTimescale: 600),
+                               duration: CMTime(seconds: 2, preferredTimescale: 600)))
+
+    #expect(cache.image(for: inside) == nil)
+    #expect(cache.image(for: outside) != nil)
+    #expect(cache.image(for: otherClip) != nil)
+}
+
 @Test("RenderCache: invalidate(notMatchingRenderSize:) drops stale-canvas entries")
 func invalidateRenderSize() {
     let cache = RenderCache()

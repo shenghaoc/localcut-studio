@@ -119,7 +119,9 @@ public struct SkinSmoothEffect: Hashable, Codable, Sendable {
         maskWarmthBias = max(-1, min(1, maskWarmthBias))
         maskLuminanceGate = max(0, min(1, maskLuminanceGate))
         let clampedKeyframes = strength.keyframes.map { kf in
-            Keyframe(id: kf.id, time: kf.time, value: max(0, min(1, kf.value)))
+            Keyframe(id: kf.id, time: kf.time, value: max(0, min(1, kf.value)),
+                     incomingHandle: kf.incomingHandle,
+                     outgoingHandle: kf.outgoingHandle)
         }
         let clampedDefault = max(0, min(1, strength.defaultValue))
         strength = Keyframed<Float>(keyframes: clampedKeyframes, defaultValue: clampedDefault)
