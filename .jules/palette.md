@@ -27,6 +27,6 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 ## 2026-06-25 — Replace Plain Text Empty States with ContentUnavailableView
 **Learning:** Using simple `Text` elements for empty states in inspector panels lacks affordance and feels like a dead end. Users shouldn't have to seek out buttons located elsewhere (like header controls) just to begin an interaction when an area is blank.
 **Action:** Transition all plain text empty states to `ContentUnavailableView`, and leverage the `actions` parameter to include prominent buttons that map directly to the primary ways to populate that content (e.g., "Add at Playhead" for markers, "Import SRT/VTT" or "Add Empty Track" for captions).
-## 2023-11-20 - Prevent Duplicate VoiceOver Reads on Sliders
+## 2023-11-20 — Prevent Duplicate VoiceOver Reads on Sliders
 **Learning:** Visual text labels (e.g. `HStack` with text and value) paired with `Slider`s in SwiftUI can cause VoiceOver to announce the label and value twice if the slider itself already sets `.accessibilityLabel` and `.accessibilityValue`.
 **Action:** Always add `.accessibilityHidden(true)` to the visible text views when a neighboring accessible control already carries the full context.
