@@ -10,6 +10,7 @@ import LocalCutCore
 /// Frames are decoded on demand and cached in a sliding window to bound memory.
 nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize: CGSize
+    private let url: URL
     private let source: CGImageSource
     private let frameCount: Int
     private let totalDuration: TimeInterval
@@ -23,6 +24,9 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
     private let maxCachedFrames = 8
 
     init?(url: URL) {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         let count = CGImageSourceGetCount(src)
         guard count > 0 else { return nil }
@@ -46,6 +50,7 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
               let h = firstProps[kCGImagePropertyPixelHeight as String] as? Double,
               w > 0, h > 0 else { return nil }
 
+        self.url = url
         self.source = src
         self.frameCount = count
         self.naturalSize = CGSize(width: w, height: h)
@@ -78,22 +83,21 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
         // Binary search for the frame index.
         let index = frameStarts.lastIndex(where: { $0 <= effectiveTime }) ?? 0
 
-        // Check cache.
         lock.lock()
+        defer { lock.unlock() }
+
         if let cached = cache[index] {
-            lock.unlock()
             return cached
         }
-        lock.unlock()
 
-        // Decode.
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
         guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil) else {
             return nil
         }
         let ciImage = CIImage(cgImage: cgImage)
 
-        // Update cache with sliding window eviction.
-        lock.lock()
         cache[index] = ciImage
         if cache.count > maxCachedFrames {
             // Evict frames farthest from the current index.
@@ -102,7 +106,6 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
                 cache.removeValue(forKey: key)
             }
         }
-        lock.unlock()
 
         return ciImage
     }

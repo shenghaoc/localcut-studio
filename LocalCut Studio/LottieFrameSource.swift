@@ -43,9 +43,10 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
         rendered.reserveCapacity(frameCount)
         for offset in 0..<frameCount {
             let frame = animation.startFrame + CGFloat(offset)
-            guard let image = Self.renderFrame(view: view, frame: frame, size: size) else {
-                return nil
+            let image = autoreleasepool {
+                Self.renderFrame(view: view, frame: frame, size: size)
             }
+            guard let image else { return nil }
             rendered.append(image)
         }
 

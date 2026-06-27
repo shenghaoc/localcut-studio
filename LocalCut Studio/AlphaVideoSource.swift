@@ -10,20 +10,29 @@ import LocalCutCore
 nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize: CGSize
     private let frames: [CIImage]
-    private let frameRate: Double
+    private let frameStarts: [TimeInterval]
     private let duration: TimeInterval
 
     private init(naturalSize: CGSize,
                  frames: [CIImage],
-                 frameRate: Double,
+                 frameStarts: [TimeInterval],
                  duration: TimeInterval) {
         self.naturalSize = naturalSize
         self.frames = frames
-        self.frameRate = frameRate
+        self.frameStarts = frameStarts
         self.duration = duration
     }
 
     static func make(url: URL) async -> AlphaVideoSource? {
+        await Task.detached(priority: .userInitiated) {
+            await makeWithScopedAccess(url: url)
+        }.value
+    }
+
+    private static func makeWithScopedAccess(url: URL) async -> AlphaVideoSource? {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
         let asset = AVURLAsset(url: url)
         guard let duration = try? await asset.load(.duration).sanitized,
               duration.isValid,
@@ -34,31 +43,58 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
 
         let size = (try? await track.load(.naturalSize).sanitized) ?? .zero
         guard size.width > 0, size.height > 0 else { return nil }
+        let transform = (try? await track.load(.preferredTransform).sanitized) ?? .identity
+        let orientedRect = CGRect(origin: .zero, size: size).applying(transform)
+        let orientedSize = CGSize(width: abs(orientedRect.width),
+                                  height: abs(orientedRect.height)).sanitized
+        let displaySize = orientedSize == .zero ? size : orientedSize
 
-        let nominal = (try? await track.load(.nominalFrameRate)) ?? 30
-        let frameRate = Double(max(1, min(60, nominal)))
-        let frameCount = max(1, Int(ceil(duration.seconds * frameRate)))
-
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
+        guard let reader = try? AVAssetReader(asset: asset) else { return nil }
+        let settings: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+        ]
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: settings)
+        output.alwaysCopiesSampleData = false
+        guard reader.canAdd(output) else { return nil }
+        reader.add(output)
+        guard reader.startReading() else { return nil }
 
         var frames: [CIImage] = []
-        frames.reserveCapacity(frameCount)
-        for index in 0..<frameCount {
-            let seconds = Double(index) / frameRate
-            let requested = CMTime(seconds: seconds, preferredTimescale: 600)
-            guard let result = try? await generator.image(at: requested) else { continue }
-            frames.append(CIImage(cgImage: result.image))
+        var frameStarts: [TimeInterval] = []
+        while let sampleBuffer = output.copyNextSampleBuffer() {
+            autoreleasepool {
+                guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+                let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).sanitized.seconds
+                let image = orientedImage(CIImage(cvImageBuffer: imageBuffer), transform: transform)
+                frames.append(image)
+                frameStarts.append(timestamp)
+            }
         }
 
-        guard !frames.isEmpty else { return nil }
+        guard !frames.isEmpty,
+              reader.status != .failed,
+              reader.status != .cancelled else {
+            return nil
+        }
+        let firstStart = frameStarts.first ?? 0
+        let normalizedStarts = frameStarts.map { max(0, $0 - firstStart) }
         return AlphaVideoSource(
-            naturalSize: size,
+            naturalSize: displaySize,
             frames: frames,
-            frameRate: frameRate,
+            frameStarts: normalizedStarts,
             duration: duration.seconds)
+    }
+
+    private static func orientedImage(_ image: CIImage,
+                                      transform: CGAffineTransform) -> CIImage {
+        guard transform != .identity else { return image }
+        let transformed = image.transformed(by: transform)
+        let extent = transformed.extent
+        guard extent.origin != .zero else { return transformed }
+        return transformed.transformed(by: CGAffineTransform(
+            translationX: -extent.origin.x,
+            y: -extent.origin.y))
     }
 
     nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) -> CIImage? {
@@ -72,14 +108,14 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
             guard t < duration else { return nil }
             effectiveTime = t
         case .freeze:
-            effectiveTime = min(t, max(0, duration - (1 / frameRate)))
+            effectiveTime = min(t, duration)
         case .loop:
             effectiveTime = duration > 0
                 ? t.truncatingRemainder(dividingBy: duration)
                 : 0
         }
 
-        let index = min(frames.count - 1, max(0, Int(floor(effectiveTime * frameRate))))
+        let index = frameStarts.lastIndex(where: { $0 <= effectiveTime }) ?? 0
         return frames[index]
     }
 }

@@ -326,15 +326,18 @@ func exportedLookPresetCopiesLUTUnderAssetsLuts() async throws {
     model._testCacheLUTDisplayName("warm.cube", for: lutBookmark)
 
     let presetURL = tmp.appendingPathComponent("Warm Look.lclook")
+    let copiedLUT = tmp.appendingPathComponent("assets/luts/Warm Look.cube")
     model.exportLookPreset(to: presetURL)
-    for _ in 0..<100 {
-        if FileManager.default.fileExists(atPath: presetURL.path) { break }
+    for _ in 0..<300 {
+        if FileManager.default.fileExists(atPath: presetURL.path),
+           FileManager.default.fileExists(atPath: copiedLUT.path) {
+            break
+        }
         try await Task.sleep(for: .milliseconds(10))
     }
 
     let preset = try LookPresetV1(data: Data(contentsOf: presetURL))
     #expect(preset.lut?.relativePath == "assets/luts/Warm Look.cube")
-    let copiedLUT = tmp.appendingPathComponent("assets/luts/Warm Look.cube")
     #expect(try Data(contentsOf: copiedLUT) == lutData)
 }
 
