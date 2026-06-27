@@ -39,7 +39,7 @@ final class PreviewRebuildCoordinator {
             let result = try await CompositionBuilder.build(project: model.project, showSkinMask: model.showSkinMask)
             guard !Task.isCancelled else { return }
             guard let built = result else {
-                model.player.replaceCurrentItem(with: nil)
+                model.replacePreviewItem(with: nil)
                 model.totalDuration = 0
                 model.isPlaying = false
                 DiagnosticsBridge.shared.setDecoderCount(0)
@@ -49,7 +49,7 @@ final class PreviewRebuildCoordinator {
             let item = AVPlayerItem(asset: built.composition)
             item.videoComposition = built.videoComposition
             item.audioMix = built.audioMix
-            model.player.replaceCurrentItem(with: item)
+            model.replacePreviewItem(with: item)
             model.totalDuration = built.duration
             DiagnosticsBridge.shared.setDecoderCount(
                 built.composition.tracks(withMediaType: .video).count)

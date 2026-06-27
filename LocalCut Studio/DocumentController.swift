@@ -28,7 +28,7 @@ final class DocumentController {
         model.unresolvedMedia = []
         model.totalDuration = 0
         model.currentTime = 0
-        model.player.replaceCurrentItem(with: nil)
+        model.replacePreviewItem(with: nil)
         model.refreshUndoFlags()
         model.statusMessage = "New project."
     }
@@ -37,6 +37,7 @@ final class DocumentController {
         model.sessionGeneration &+= 1
         model.player.pause()
         model.isPlaying = false
+        model.replacePreviewItem(with: nil)
         for url in model.accessedURLs { url.stopAccessingSecurityScopedResource() }
         model.accessedURLs.removeAll()
         RenderCache.shared.purge()

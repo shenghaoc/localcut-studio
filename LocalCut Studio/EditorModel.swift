@@ -31,6 +31,7 @@ final class EditorModel {
     // Playback
     let player = AVPlayer()
     var isPlaying = false
+    var hasPreviewItem = false
     /// Playhead position in seconds.
     var currentTime: Double = 0
     var totalDuration: Double = 0
@@ -1149,8 +1150,13 @@ final class EditorModel {
         await previewRebuildCoordinator.rebuild(model: self)
     }
 
+    func replacePreviewItem(with item: AVPlayerItem?) {
+        player.replaceCurrentItem(with: item)
+        hasPreviewItem = item != nil
+    }
+
     func togglePlayPause() {
-        guard player.currentItem != nil else { return }
+        guard hasPreviewItem else { return }
         if isPlaying {
             player.pause()
             isPlaying = false

@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 import AVFoundation
 import CoreImage
 import LocalCutCore
@@ -197,6 +198,35 @@ struct PreviewVideoDiagnosticsTests {
                                                   videoComposition: nil,
                                                   at: CMTime(seconds: 0.5, preferredTimescale: 600))
         #expect(exportedLuma > 50, "Exported frame should not be black; got luma \(exportedLuma)")
+    }
+
+    @Test("Editor model publishes preview item state after adding video to timeline")
+    func editorModelPublishesPreviewItemState() async throws {
+        let url = try await makeVideoFixture(seconds: 2)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let suiteName = "PreviewVideoDiagnosticsTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let model = EditorModel(defaultsStore: defaults)
+        let media = try await loadedMedia(from: url)
+        model.project.mediaItems.append(media)
+
+        #expect(!model.hasPreviewItem)
+        #expect(model.player.currentItem == nil)
+
+        model.addToTimeline(mediaID: media.id)
+        await model.rebuild()
+
+        #expect(model.hasPreviewItem)
+        #expect(model.player.currentItem != nil)
+        #expect(model.totalDuration > 0)
+
+        model.documentController.newDocument(model: model)
+
+        #expect(!model.hasPreviewItem)
+        #expect(model.player.currentItem == nil)
     }
 
     // MARK: - Helpers
