@@ -33,7 +33,8 @@ extension ProjectDocument {
             audioTracks: project.audioTracks.map(TrackDoc.init(track:)),
             captionTracks: project.captionTracks.map(CaptionTrackDoc.init(track:)),
             markers: project.markers,
-            audioBus: AudioBusDoc(project: project))
+            audioBus: AudioBusDoc(project: project),
+            overlays: project.overlayDocs)
     }
 }
 

@@ -46,6 +46,12 @@ struct ProjectState: Equatable {
     var trackInputs: [TrackInput]
     /// Phase 36 bus insert settings.
     var voiceCleanup: VoiceCleanupSettings
+    /// Animated overlay clips.
+    var overlays: [OverlayClip]
+    /// Overlay source bookmarks keyed by overlay ID.
+    var overlayBookmarks: [UUID: Data]
+    /// Overlay bundle-relative paths keyed by overlay ID.
+    var overlayBundlePaths: [UUID: String]
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
@@ -65,6 +71,8 @@ struct ProjectState: Equatable {
             && lhs.masterGain == rhs.masterGain
             && lhs.trackInputs == rhs.trackInputs
             && lhs.voiceCleanup == rhs.voiceCleanup
+            && lhs.overlays.map(\.id) == rhs.overlays.map(\.id)
+            && lhs.overlayBookmarks == rhs.overlayBookmarks
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
@@ -105,6 +113,9 @@ extension EditorModel {
             masterGain: project.masterGain,
             trackInputs: project.trackInputs,
             voiceCleanup: project.voiceCleanup,
+            overlays: project.overlays,
+            overlayBookmarks: project.overlayBookmarks,
+            overlayBundlePaths: project.overlayBundlePaths,
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID,
             selectedMarkerID: selectedMarkerID)
@@ -178,6 +189,9 @@ extension EditorModel {
         project.masterGain = state.masterGain
         project.trackInputs = state.trackInputs
         project.voiceCleanup = state.voiceCleanup
+        project.overlays = state.overlays
+        project.overlayBookmarks = state.overlayBookmarks
+        project.overlayBundlePaths = state.overlayBundlePaths
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID

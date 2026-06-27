@@ -174,6 +174,17 @@ final class DocumentController {
         model.project.trackInputs = document.audioBus.trackInputs.map(\.trackInput)
         model.project.voiceCleanup = document.audioBus.voiceCleanup
 
+        // Load overlays from the document.
+        model.project.overlays = document.overlays.map { $0.makeOverlayClip() }
+        model.project.overlayBookmarks = [:]
+        model.project.overlayBundlePaths = [:]
+        for doc in document.overlays {
+            model.project.overlayBookmarks[doc.id] = doc.bookmark
+            if let path = doc.bundleRelativePath {
+                model.project.overlayBundlePaths[doc.id] = path
+            }
+        }
+
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         model.documentURL = isNewerSchema ? nil : url
         model.unresolvedMedia = unresolved
