@@ -350,39 +350,7 @@ final class ProjectEditingService {
     /// sides — there is no ramp to preserve.
     private static func splitKeyframeTrack(_ track: Keyframed<Float>, at cut: CMTime)
         -> (left: Keyframed<Float>, right: Keyframed<Float>) {
-        guard track.isAnimated else { return (track, track) }
-        let boundary = track.bezierValue(at: cut)
-        // Preserve the original keyframe's ID when it sits exactly at the cut.
-        let exactMatch = track.keyframes.first { $0.time == cut }
-        var leftKeys = track.keyframes.filter { $0.time < cut }
-        if let exactMatch {
-            leftKeys.append(exactMatch)
-        } else {
-            leftKeys.append(Keyframe<Float>(time: cut, value: boundary))
-        }
-        var rightKeys: [Keyframe<Float>]
-        if let exactMatch {
-            rightKeys = [Keyframe<Float>(
-                id: exactMatch.id,
-                time: .zero,
-                value: boundary,
-                incomingHandle: exactMatch.incomingHandle,
-                outgoingHandle: exactMatch.outgoingHandle)]
-        } else {
-            rightKeys = [Keyframe<Float>(time: .zero, value: boundary)]
-        }
-        rightKeys.append(contentsOf: track.keyframes.compactMap { kf in
-            let newTime = kf.time - cut
-            guard newTime > .zero else { return nil }
-            return Keyframe<Float>(
-                id: kf.id,
-                time: newTime,
-                value: kf.value,
-                incomingHandle: kf.incomingHandle,
-                outgoingHandle: kf.outgoingHandle)
-        })
-        return (Keyframed<Float>(keyframes: leftKeys, defaultValue: track.defaultValue),
-                Keyframed<Float>(keyframes: rightKeys, defaultValue: track.defaultValue))
+        track.splitPreservingBezier(at: cut)
     }
 
     /// Re-bases a clip-source-relative keyframe track when the source origin moves

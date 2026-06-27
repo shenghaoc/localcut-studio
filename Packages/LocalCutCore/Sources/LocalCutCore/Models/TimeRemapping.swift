@@ -252,6 +252,10 @@ public nonisolated enum TimeRemapping {
             .reduce(CMTime.zero) { $0 + $1.outputDuration }
     }
 
+    public static func outputDuration(for plan: [TimeRemapSegment]) -> CMTime {
+        plan.reduce(CMTime.zero) { $0 + $1.outputDuration }
+    }
+
     public static func sourceOffset(forOutputOffset outputOffset: CMTime,
                                     sourceDuration: CMTime,
                                     speedCurve: Keyframed<Float>) -> CMTime {
@@ -279,11 +283,18 @@ public nonisolated enum TimeRemapping {
                                     sourceDuration: CMTime,
                                     speedCurve: Keyframed<Float>) -> CMTime {
         let plan = segmentPlan(sourceDuration: sourceDuration, speedCurve: speedCurve)
-        guard !plan.isEmpty else { return .zero }
-        let target = CMTimeMinimum(CMTimeMaximum(.zero, sourceOffset.sanitized), sourceDuration.sanitized)
+        return outputOffset(forSourceOffset: sourceOffset, in: plan)
+    }
 
-        // `target` is clamped to `sourceDuration`, which equals the last
-        // segment's source end exactly, so `target <= end` always matches there.
+    public static func outputOffset(forSourceOffset sourceOffset: CMTime,
+                                    in plan: [TimeRemapSegment]) -> CMTime {
+        guard let first = plan.first, let last = plan.last else { return .zero }
+        let target = CMTimeMinimum(
+            CMTimeMaximum(first.sourceRange.start, sourceOffset.sanitized),
+            last.sourceRange.end)
+
+        // `target` is clamped to the plan's source bounds, so the last segment's
+        // source end always matches exactly.
         // No tolerance band — it would snap a target just past an intermediate
         // boundary back onto the previous segment.
         for segment in plan {
@@ -293,7 +304,7 @@ public nonisolated enum TimeRemapping {
                 return segment.outputOffset + multiplied(segment.outputDuration, by: progress)
             }
         }
-        return plan.reduce(CMTime.zero) { $0 + $1.outputDuration }
+        return outputDuration(for: plan)
     }
 
     public static func affectedSourceRange(before oldCurve: Keyframed<Float>,

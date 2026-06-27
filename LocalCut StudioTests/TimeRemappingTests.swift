@@ -328,6 +328,38 @@ func timeRemapBezierHandlesSubdivideEqualEndpointSpeeds() {
     #expect(plan.contains { abs($0.speed - 1) > 0.01 })
 }
 
+@Test("TimeRemapping: splitting Bezier ramps preserves handles and timing")
+func timeRemapSplitPreservesBezierHandlesAndTiming() throws {
+    let curve = Keyframed<Float>(
+        keyframes: [
+            Keyframe(time: trTime(0), value: 1,
+                     outgoingHandle: KeyframeHandle(x: 0.2, y: 4)),
+            Keyframe(time: trTime(10), value: 2,
+                     incomingHandle: KeyframeHandle(x: 0.2, y: 0.4)),
+        ],
+        defaultValue: 1)
+
+    let originalPlan = TimeRemapping.segmentPlan(sourceDuration: trTime(10), speedCurve: curve)
+    let originalCutOutput = TimeRemapping.outputOffset(forSourceOffset: trTime(5), in: originalPlan)
+    let originalTotalOutput = TimeRemapping.outputDuration(for: originalPlan)
+    let split = curve.splitPreservingBezier(at: trTime(5))
+
+    let leftMid = split.left.bezierValue(at: trTime(2.5))
+    let rightMid = split.right.bezierValue(at: trTime(2.5))
+    #expect(abs(leftMid - curve.bezierValue(at: trTime(2.5))) < 0.01)
+    #expect(abs(rightMid - curve.bezierValue(at: trTime(7.5))) < 0.01)
+
+    #expect(split.left.keyframes.first?.outgoingHandle != nil)
+    #expect(split.left.keyframes.last?.incomingHandle != nil)
+    #expect(split.right.keyframes.first?.outgoingHandle != nil)
+    #expect(split.right.keyframes.last?.incomingHandle != nil)
+
+    let leftOutput = TimeRemapping.outputDuration(sourceDuration: trTime(5), speedCurve: split.left)
+    let rightOutput = TimeRemapping.outputDuration(sourceDuration: trTime(5), speedCurve: split.right)
+    #expect(approx(leftOutput, originalCutOutput, tolerance: 0.08))
+    #expect(approx(rightOutput, originalTotalOutput - originalCutOutput, tolerance: 0.08))
+}
+
 @Test("TimeRemapping: segment boundaries snap to source sample times")
 func timeRemapSegmentsSnapToSourceSamples() {
     let plan = [
