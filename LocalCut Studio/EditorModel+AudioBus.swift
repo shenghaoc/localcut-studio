@@ -108,6 +108,9 @@ extension EditorModel {
     }
 
     func measureCurrentProjectLoudness() {
+        // Cancel any prior measurement before handling the new request, including
+        // the short-duration path below.
+        invalidateLoudnessMeasurement()
         let duration = project.duration.seconds
         guard duration >= 3 else {
             applyLoudnessAnalysis(LoudnessAnalysisResult(
@@ -119,9 +122,8 @@ extension EditorModel {
             return
         }
 
-        // Supersede any prior measurement and remember which generation this run
-        // belongs to; stale results are dropped at the apply site below.
-        invalidateLoudnessMeasurement()
+        // Remember which generation this run belongs to; stale results are
+        // dropped at the apply site below.
         let token = loudnessMeasurementToken
         statusMessage = "Measuring loudness…"
         loudnessTask = Task { [weak self] in
@@ -147,13 +149,18 @@ extension EditorModel {
                 let duration = built.duration
                 nonisolated(unsafe) let composition = built.composition
                 nonisolated(unsafe) let audioMix = built.audioMix
-                let result = try await Task.detached(priority: .userInitiated) {
+                let worker = Task.detached(priority: .userInitiated) {
                     try VoiceCleanupAudioProcessing.measureLoudness(
                         composition: composition,
                         audioMix: audioMix,
                         duration: duration,
                         settings: settings)
-                }.value
+                }
+                let result = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
                 // Drop the result if the project moved on while we measured.
                 guard token == loudnessMeasurementToken else { return }
                 loudnessTask = nil
