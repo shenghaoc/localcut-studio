@@ -40,7 +40,7 @@ Each spec has `design.md`, `requirements.md`, and `tasks.md` (bugfix specs use `
 
 ### Completed
 
-**Editing core** — [Phase 1 Foundation](.kiro/specs/phase-1-foundation/tasks.md) (multi-track timeline, media bin, live `AVPlayer` preview, split/delete/opacity, `.mov` export) · [Timeline trim & drag](.kiro/specs/feature-timeline-trim-and-drag/tasks.md) · [Transitions](.kiro/specs/feature-transitions/tasks.md) · [Keyframe system](.kiro/specs/feature-keyframes/tasks.md)
+**Editing core** — [Phase 1 Foundation](.kiro/specs/phase-1-foundation/tasks.md) (multi-track timeline, media bin, live `AVPlayer` preview, split/delete/opacity, `.mov` export) · [Timeline trim & drag](.kiro/specs/feature-timeline-trim-and-drag/tasks.md) · [Transitions](.kiro/specs/feature-transitions/tasks.md) · [Keyframe system](.kiro/specs/feature-keyframes/tasks.md) · [Time remapping (Phase 35)](.kiro/specs/phase-35-speed-ramps/tasks.md)
 
 **Effects & grade** — [Colour grading](.kiro/specs/feature-colour-grading/tasks.md) (custom `AVVideoCompositing`, shared preview/export path) · [Colour management + scopes](.kiro/specs/feature-colour-management/tasks.md) · [Title raster path](.kiro/specs/feature-title-raster/tasks.md) · [Skin smoothing (Phase 32a, no ML)](.kiro/specs/phase-32a-skin-smoothing/tasks.md)
 
@@ -54,11 +54,10 @@ Each spec has `design.md`, `requirements.md`, and `tasks.md` (bugfix specs use `
 
 ### Proposed (ready — not blocked)
 
-In ship order. **Phase 35 is next.**
+In ship order. **Phase 36 is next.**
 
 | Tag | Spec | Scope |
 | --- | --- | --- |
-| v0.1.4 | [Phase 35 — Time remapping](.kiro/specs/phase-35-speed-ramps/tasks.md) | Keyframed speed ramps (0.25×–4×) with pitch-preserving audio time-stretch. |
 | v0.1.5 | [Phase 36 — Voice cleanup](.kiro/specs/phase-36-voice-cleanup/tasks.md) | Master-bus denoise/gate, EBU R128 loudness normalisation, limiter — live and offline. |
 | v0.1.6 | [Phase 38 — Look packs & overlays](.kiro/specs/phase-38-look-packs/tasks.md) | Film-emulation nodes + JSON look presets; animated overlays (WebP/Lottie/alpha video). |
 | v0.1.7 | [Phase 39 — Vertical & platform finishing](.kiro/specs/phase-39-vertical-finishing/tasks.md) | Aspect modes (9:16/1:1/4:5), safe-zone overlays, cover-frame picker, per-platform presets. |

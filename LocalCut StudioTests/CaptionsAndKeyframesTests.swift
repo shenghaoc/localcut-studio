@@ -229,7 +229,7 @@ func skinSmoothStrengthKeyframeAuthoringAtPlayhead() {
     model.commitCoalescedUndo()
     model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe()
 
-    #expect(model.selectedClipSkinSmoothLocalPlayheadTime?.seconds == 3)
+    #expect(model.selectedClipSourceLocalPlayheadTime?.seconds == 3)
     #expect(model.selectedClipSkinSmooth.strength.keyframes.count == 1)
     #expect(model.selectedClipSkinSmooth.strength.keyframes[0].time.seconds == 3)
     #expect(model.selectedClipSkinSmooth.strength.keyframes[0].value == 0.4)

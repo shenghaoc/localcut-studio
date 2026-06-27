@@ -119,7 +119,9 @@ public struct SkinSmoothEffect: Hashable, Codable, Sendable {
         maskWarmthBias = max(-1, min(1, maskWarmthBias))
         maskLuminanceGate = max(0, min(1, maskLuminanceGate))
         let clampedKeyframes = strength.keyframes.map { kf in
-            Keyframe(id: kf.id, time: kf.time, value: max(0, min(1, kf.value)))
+            Keyframe(id: kf.id, time: kf.time, value: max(0, min(1, kf.value)),
+                     incomingHandle: kf.incomingHandle,
+                     outgoingHandle: kf.outgoingHandle)
         }
         let clampedDefault = max(0, min(1, strength.defaultValue))
         strength = Keyframed<Float>(keyframes: clampedKeyframes, defaultValue: clampedDefault)
@@ -245,8 +247,47 @@ public struct Clip: Identifiable, Hashable, Sendable {
     public var transition: Transition?
     public var volumeEnvelope: VolumeEnvelope = VolumeEnvelope()
 
-    public var timelineEnd: CMTime { timelineStart + duration }
+    /// Per-clip speed curve for source-to-output retiming. The curve is authored
+    /// in clip-source-local time: a source timestamp maps onto the timeline by
+    /// integrating `1 / speed` from the clip in-point to that timestamp.
+    public var speedCurve: Keyframed<Float> = TimeRemapping.identitySpeedCurve
+
+    /// When true, AVFoundation keeps audio pitch stable while the clip is
+    /// stretched. When false, audio follows the speed change as a varispeed effect.
+    public var preservePitch = true
+
+    /// Stretch quality used when `preservePitch` is true.
+    public var pitchAlgorithm: TimePitchAlgorithm = .timeDomain
+
+    /// Timeline duration after applying the speed curve to the selected source span.
+    public var outputDuration: CMTime {
+        TimeRemapping.outputDuration(sourceDuration: duration, speedCurve: speedCurve)
+    }
+
+    public var timelineEnd: CMTime { timelineStart + outputDuration }
     public var timeRangeInSource: CMTimeRange { CMTimeRange(start: sourceStart, duration: duration) }
+
+    public var hasTimeRemap: Bool {
+        TimeRemapping.hasNonIdentitySpeed(speedCurve)
+    }
+
+    public mutating func clampTimeRemap() {
+        speedCurve = TimeRemapping.clampedCurve(speedCurve)
+    }
+
+    public func sourceOffset(forOutputOffset outputOffset: CMTime) -> CMTime {
+        TimeRemapping.sourceOffset(
+            forOutputOffset: outputOffset,
+            sourceDuration: duration,
+            speedCurve: speedCurve)
+    }
+
+    public func outputOffset(forSourceOffset sourceOffset: CMTime) -> CMTime {
+        TimeRemapping.outputOffset(
+            forSourceOffset: sourceOffset,
+            sourceDuration: duration,
+            speedCurve: speedCurve)
+    }
 
     public init(mediaID: UUID,
                 sourceStart: CMTime,
@@ -255,7 +296,10 @@ public struct Clip: Identifiable, Hashable, Sendable {
                 opacity: Float = 1,
                 effects: [Effect] = [],
                 transition: Transition? = nil,
-                volumeEnvelope: VolumeEnvelope = VolumeEnvelope()) {
+                volumeEnvelope: VolumeEnvelope = VolumeEnvelope(),
+                speedCurve: Keyframed<Float> = TimeRemapping.identitySpeedCurve,
+                preservePitch: Bool = true,
+                pitchAlgorithm: TimePitchAlgorithm = .timeDomain) {
         self.mediaID = mediaID
         self.sourceStart = sourceStart
         self.duration = duration
@@ -264,6 +308,9 @@ public struct Clip: Identifiable, Hashable, Sendable {
         self.effects = effects
         self.transition = transition
         self.volumeEnvelope = volumeEnvelope
+        self.speedCurve = speedCurve
+        self.preservePitch = preservePitch
+        self.pitchAlgorithm = pitchAlgorithm
     }
 }
 

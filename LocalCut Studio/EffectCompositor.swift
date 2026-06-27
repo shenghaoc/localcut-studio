@@ -18,14 +18,22 @@ struct CompositorLayer {
     let opacity: Float
     let effects: [Effect]
     let showSkinMask: Bool
-    /// The clip's start time on the timeline, used to compute clip-local time for keyframe evaluation.
-    let clipStartTime: CMTime
+    /// The clip's source in-point, used to compute source-local time for keyframe evaluation.
+    let clipSourceStart: CMTime
     /// The piece's range within the source media, used to compute source time
     /// for the render cache key so repeated source frames hit the same entry.
     let sourceRange: CMTimeRange
     /// The piece's range on the composition timeline, paired with `sourceRange`
     /// to map composition time → source time.
     let timeRange: CMTimeRange
+
+    nonisolated func sourceTime(at compositionTime: CMTime) -> CMTime {
+        let rel = CMTimeMaximum(.zero, compositionTime - timeRange.start)
+        let tDur = timeRange.duration.seconds
+        let sDur = sourceRange.duration.seconds
+        let srcSec = sourceRange.start.seconds + (tDur > 0 ? rel.seconds * sDur / tDur : 0)
+        return CMTime(seconds: srcSec, preferredTimescale: RenderCacheKey.normalisedTimescale)
+    }
 }
 
 /// One caption line scheduled inside a composition instruction. Carries everything
@@ -267,8 +275,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         var image = CIImage(cvPixelBuffer: sourceBuffer)
 
-        // Skin-smooth strength is keyframed in clip-local time.
-        let clipLocalTime = request.compositionTime - layer.clipStartTime
+        // Per-clip effect keyframes are authored in source-local time so retimed
+        // segments still evaluate the effect at the frame's real media timestamp.
+        let sourceTime = layer.sourceTime(at: request.compositionTime)
+        let clipLocalTime = sourceTime - layer.clipSourceStart
 
         if layer.showSkinMask,
            let skinSmooth = layer.effects.first(where: {
@@ -289,11 +299,6 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             // interpolation) and unique per source frame (no collisions
             // across pieces of the same clip).
             let cacheKey: RenderCacheKey? = layer.effects.isEmpty ? nil : {
-                let rel = (request.compositionTime - layer.timeRange.start).seconds
-                let tDur = layer.timeRange.duration.seconds
-                let sDur = layer.sourceRange.duration.seconds
-                let srcSec = layer.sourceRange.start.seconds + (tDur > 0 ? rel * sDur / tDur : 0)
-                let sourceTime = CMTime(seconds: srcSec, preferredTimescale: RenderCacheKey.normalisedTimescale)
                 return RenderCacheKey(
                     clipID: layer.clipID,
                     effectChainHash: layer.effects.renderCacheHash,

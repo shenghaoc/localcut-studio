@@ -86,17 +86,39 @@ final class ProjectEditingService {
         guard playhead > clip.timelineStart, playhead < clip.timelineEnd else { return }
 
         model.performUndoable("Split Clip") {
-            let offset = playhead - clip.timelineStart
-            var left = clip
-            left.duration = offset
+            let outputOffset = playhead - clip.timelineStart
+            let sourceOffset = clip.sourceOffset(forOutputOffset: outputOffset)
 
+            // Speed and skin-smooth keyframes are clip-source-relative. Split each
+            // track at the cut with an evaluated boundary keyframe so both halves
+            // preserve the original ramp; without it a lone surviving keyframe
+            // would flatten the ramp and the left half would no longer end exactly
+            // at the playhead.
+            let (leftSpeed, rightSpeed) = Self.splitKeyframeTrack(clip.speedCurve, at: sourceOffset)
+
+            var left = clip
+            left.duration = sourceOffset
+            left.speedCurve = leftSpeed
+            left.effects = Self.mapSkinSmoothStrength(in: clip.effects) {
+                Self.splitKeyframeTrack($0, at: sourceOffset).left
+            }
+
+            // Carry the authored envelope to the right half so a split doesn't
+            // silently drop volume automation. The render-time fade clamp already
+            // trims fades that no longer fit either side's duration.
+            let rightEffects = Self.mapSkinSmoothStrength(in: clip.effects) {
+                Self.splitKeyframeTrack($0, at: sourceOffset).right
+            }
             let right = Clip(mediaID: clip.mediaID,
-                             sourceStart: clip.sourceStart + offset,
-                             duration: clip.duration - offset,
+                             sourceStart: clip.sourceStart + sourceOffset,
+                             duration: clip.duration - sourceOffset,
                              timelineStart: playhead,
                              opacity: clip.opacity,
-                             effects: clip.effects,
-                             volumeEnvelope: clip.volumeEnvelope)
+                             effects: rightEffects,
+                             volumeEnvelope: clip.volumeEnvelope,
+                             speedCurve: rightSpeed,
+                             preservePitch: clip.preservePitch,
+                             pitchAlgorithm: clip.pitchAlgorithm)
 
             track.clips.replaceSubrange(index...index, with: [left, right])
             model.selectedClipID = left.id
@@ -138,9 +160,14 @@ final class ProjectEditingService {
 
                 switch edge {
                 case .left:
+                    let startSpeed = Double(TimeRemapping.speedValue(in: clip.speedCurve, at: .zero))
                     let originalEnd = clip.timelineEnd
                     var newTimelineStart = max(time, .zero)
-                    let minTimelineStart = clip.timelineStart - clip.sourceStart
+                    // The head can extend earlier only until the unused source
+                    // before `sourceStart` runs out; that span plays at the
+                    // start-edge speed, so convert it to output time.
+                    let maxExtendOutput = TimeRemapping.multiplied(clip.sourceStart, by: 1.0 / max(startSpeed, 0.0001))
+                    let minTimelineStart = clip.timelineStart - maxExtendOutput
                     newTimelineStart = max(newTimelineStart, minTimelineStart)
                     let maxTimelineStart = originalEnd - minDur
                     newTimelineStart = min(newTimelineStart, maxTimelineStart)
@@ -148,21 +175,53 @@ final class ProjectEditingService {
                         newTimelineStart = max(newTimelineStart, prev.timelineEnd)
                     }
 
-                    let delta = newTimelineStart - clip.timelineStart
-                    clip.sourceStart = clip.sourceStart + delta
+                    let outputDelta = newTimelineStart - clip.timelineStart
+                    let sourceDelta: CMTime
+                    if outputDelta < .zero {
+                        // Extending the head earlier: the prepended span sits before
+                        // the speed curve's first keyframe (constant start-edge
+                        // speed), and `sourceOffset(forOutputOffset:)` clamps
+                        // negatives to zero, so map output→source directly here.
+                        sourceDelta = CMTime(seconds: outputDelta.seconds * startSpeed, preferredTimescale: 600)
+                    } else {
+                        sourceDelta = clip.sourceOffset(forOutputOffset: outputDelta)
+                    }
+                    let newSourceStart = CMTimeMaximum(.zero, clip.sourceStart + sourceDelta)
+                    let actualSourceDelta = newSourceStart - clip.sourceStart
+                    clip.sourceStart = newSourceStart
                     clip.timelineStart = newTimelineStart
-                    clip.duration = originalEnd - newTimelineStart
+                    clip.duration = CMTimeMaximum(clip.duration - actualSourceDelta, .zero)
+                    // Source origin moved by `actualSourceDelta`; rebase the
+                    // clip-source-relative speed and skin-smooth keyframes so the
+                    // ramps stay pinned to the same media frames after the trim.
+                    clip.speedCurve = Self.rebaseKeyframeTrack(clip.speedCurve, originShiftedBy: actualSourceDelta)
+                    clip.effects = Self.mapSkinSmoothStrength(in: clip.effects) {
+                        Self.rebaseKeyframeTrack($0, originShiftedBy: actualSourceDelta)
+                    }
 
                 case .right:
                     let maxSourceRemaining = sourceDuration - clip.sourceStart
-                    var newDuration = time - clip.timelineStart
-                    newDuration = max(newDuration, minDur)
-                    newDuration = min(newDuration, maxSourceRemaining)
+                    let maxOutputDuration = TimeRemapping.outputDuration(
+                        sourceDuration: maxSourceRemaining,
+                        speedCurve: clip.speedCurve)
+                    var newOutputDuration = time - clip.timelineStart
+                    newOutputDuration = max(newOutputDuration, minDur)
+                    newOutputDuration = min(newOutputDuration, maxOutputDuration)
                     if let next = nextClip {
                         let maxDuration = next.timelineStart - clip.timelineStart
-                        newDuration = min(newDuration, maxDuration)
+                        newOutputDuration = min(newOutputDuration, maxDuration)
                     }
+                    let newDuration = TimeRemapping.sourceOffset(
+                        forOutputOffset: newOutputDuration,
+                        sourceDuration: maxSourceRemaining,
+                        speedCurve: clip.speedCurve)
                     clip.duration = newDuration
+                    // Drop speed and skin-smooth keyframes past the new source
+                    // duration so stale out-of-range entries don't linger.
+                    clip.speedCurve = Self.clampKeyframeTrack(clip.speedCurve, toDuration: newDuration)
+                    clip.effects = Self.mapSkinSmoothStrength(in: clip.effects) {
+                        Self.clampKeyframeTrack($0, toDuration: newDuration)
+                    }
                 }
 
                 track.clips[index] = clip
@@ -283,6 +342,73 @@ final class ProjectEditingService {
         }
     }
 
+    // MARK: - Keyframe rebasing for source edits
+
+    /// Splits a clip-source-relative keyframe track at `cut`, returning halves
+    /// that each preserve the original ramp via an evaluated boundary keyframe at
+    /// the cut. A constant (un-keyframed) track is returned unchanged on both
+    /// sides — there is no ramp to preserve.
+    private static func splitKeyframeTrack(_ track: Keyframed<Float>, at cut: CMTime)
+        -> (left: Keyframed<Float>, right: Keyframed<Float>) {
+        track.splitPreservingBezier(at: cut)
+    }
+
+    /// Re-bases a clip-source-relative keyframe track when the source origin moves
+    /// by `sourceDelta` (positive = trimmed in from the head, negative = extended
+    /// earlier). Keyframes that fall before the new origin are dropped.
+    private static func rebaseKeyframeTrack(_ track: Keyframed<Float>, originShiftedBy sourceDelta: CMTime)
+        -> Keyframed<Float> {
+        guard track.isAnimated else { return track }
+        var keyframes = track.keyframes.compactMap { kf -> Keyframe<Float>? in
+            let newTime = kf.time - sourceDelta
+            guard newTime >= .zero else { return nil }
+            return Keyframe<Float>(
+                id: kf.id,
+                time: newTime,
+                value: kf.value,
+                incomingHandle: kf.incomingHandle,
+                outgoingHandle: kf.outgoingHandle)
+        }
+
+        if sourceDelta > .zero {
+            let boundary = track.bezierValue(at: sourceDelta)
+            if let zeroIndex = keyframes.firstIndex(where: { $0.time == .zero }) {
+                keyframes[zeroIndex].value = boundary
+            } else {
+                keyframes.insert(Keyframe<Float>(time: .zero, value: boundary), at: 0)
+            }
+        }
+
+        return Keyframed<Float>(keyframes: keyframes, defaultValue: track.defaultValue)
+    }
+
+    /// Drops keyframes past `newDuration` from a clip-source-relative track,
+    /// inserting a boundary keyframe at `newDuration` to preserve the ramp shape.
+    private static func clampKeyframeTrack(_ track: Keyframed<Float>, toDuration newDuration: CMTime)
+        -> Keyframed<Float> {
+        guard track.isAnimated else { return track }
+        let boundary = track.bezierValue(at: newDuration)
+        var keys = track.keyframes.filter { $0.time <= newDuration }
+        // Insert boundary at the new end if no keyframe sits there already.
+        if keys.last?.time != newDuration {
+            keys.append(Keyframe<Float>(time: newDuration, value: boundary))
+        }
+        return Keyframed<Float>(keyframes: keys, defaultValue: track.defaultValue)
+    }
+
+    /// Applies `transform` to every skin-smooth effect's strength track in
+    /// `effects`, leaving other effects untouched. Skin-smooth strength keyframes
+    /// are evaluated in clip-source-local time, so they must be rebased alongside
+    /// `speedCurve` whenever a source edit moves the clip's origin or duration.
+    private static func mapSkinSmoothStrength(in effects: [Effect],
+                                             _ transform: (Keyframed<Float>) -> Keyframed<Float>) -> [Effect] {
+        effects.map { effect in
+            guard case .skinSmooth(var smooth) = effect else { return effect }
+            smooth.strength = transform(smooth.strength)
+            return .skinSmooth(smooth)
+        }
+    }
+
     private func allTracks(in model: EditorModel) -> [Track] {
         model.project.videoTracks + model.project.audioTracks
     }
@@ -314,7 +440,7 @@ final class ProjectEditingService {
 
     private func resolveOverlap(clip: Clip, on track: Track) -> CMTime {
         let requested = clip.timelineStart
-        let duration = clip.duration
+        let duration = clip.outputDuration
         let others = track.clips.sorted { $0.timelineStart < $1.timelineStart }
 
         let requestedEnd = requested + duration

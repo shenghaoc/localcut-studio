@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
 import LocalCutCore
@@ -19,6 +20,7 @@ struct InspectorView: View {
                 transitionSection(transition)
             } else if let clip = model.selectedClip {
                 clipSection(clip)
+                speedSection(clip)
                 if clipIsVideo(clip) {
                     colourSection
                     beautySection
@@ -76,6 +78,178 @@ struct InspectorView: View {
                     model.updateSelectedClipCoalesced("Adjust Opacity") { $0.opacity = 1 }
                     model.commitCoalescedUndo()
                 })
+        }
+    }
+
+    // MARK: - Speed
+
+    @ViewBuilder
+    private func speedSection(_ clip: Clip) -> some View {
+        Section("Speed") {
+            SpeedCurveEditor(
+                clip: clip,
+                frameRate: model.project.frameRate,
+                onChange: { curve in
+                    model.updateSelectedClipTimeRemap { clip in
+                        clip.speedCurve = curve
+                    }
+                },
+                onCommit: {
+                    model.commitCoalescedUndo()
+                },
+                onReset: {
+                    model.updateSelectedClipTimeRemapDiscrete("Reset Speed Curve") { clip in
+                        clip.speedCurve = TimeRemapping.identitySpeedCurve
+                    }
+                })
+
+            LabeledSliderRow(
+                label: "Speed",
+                spokenLabel: "Clip Speed",
+                display: String(format: "%.2fx", clip.speedCurve.defaultValue),
+                spokenValue: String(format: "%.2f times", clip.speedCurve.defaultValue),
+                value: speedDefaultBinding,
+                range: Double(TimeRemapping.minSpeed)...Double(TimeRemapping.maxSpeed),
+                step: 0.05,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    speedDefaultBinding.wrappedValue = Double(TimeRemapping.identitySpeed)
+                    model.commitCoalescedUndo()
+                })
+
+            LabeledContent("Output", value: TimeFormatting.timecode(model.selectedClipOutputDuration.seconds))
+
+            Toggle("Preserve Pitch", isOn: preservePitchBinding)
+                .toggleStyle(.switch)
+
+            Picker("Algorithm", selection: pitchAlgorithmBinding) {
+                ForEach(TimePitchAlgorithm.allCases) { algorithm in
+                    Text(algorithm.displayName).tag(algorithm)
+                }
+            }
+            .disabled(!clip.preservePitch)
+
+            DisclosureGroup("Speed Keyframes") {
+                LabeledContent("Source Time") {
+                    Text(speedKeyframePlayheadLabel)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                LabeledContent("Value") {
+                    Text(String(format: "%.2fx", model.selectedClipSpeedAtPlayhead))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                LabeledContent("Count") {
+                    Text("\(clip.speedCurve.keyframes.count)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        model.seekToPreviousSelectedClipSpeedKeyframe()
+                    } label: {
+                        Image(systemName: "backward.end.fill")
+                    }
+                    .help("Previous keyframe")
+                    .accessibilityLabel("Previous speed keyframe")
+                    .disabled(!hasPreviousSpeedKeyframe)
+
+                    Button {
+                        model.addOrUpdateSelectedClipSpeedKeyframe()
+                    } label: {
+                        Label(speedKeyframeActionTitle, systemImage: speedKeyframeActionIcon)
+                    }
+                    .disabled(model.selectedClipSourceLocalPlayheadTime == nil)
+
+                    Button(role: .destructive) {
+                        model.removeSelectedClipSpeedKeyframe()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .help("Remove keyframe")
+                    .accessibilityLabel("Remove speed keyframe")
+                    .disabled(model.selectedClipSpeedKeyframeAtPlayhead == nil)
+
+                    Button {
+                        model.seekToNextSelectedClipSpeedKeyframe()
+                    } label: {
+                        Image(systemName: "forward.end.fill")
+                    }
+                    .help("Next keyframe")
+                    .accessibilityLabel("Next speed keyframe")
+                    .disabled(!hasNextSpeedKeyframe)
+                }
+                .controlSize(.small)
+            }
+
+            HStack {
+                Button("Reset") { model.resetSelectedClipSpeed() }
+                    .controlSize(.small)
+                Spacer()
+            }
+        }
+    }
+
+    private var speedDefaultBinding: Binding<Double> {
+        Binding(
+            get: { Double(model.selectedClip?.speedCurve.defaultValue ?? TimeRemapping.identitySpeed) },
+            set: { newValue in
+                model.updateSelectedClipTimeRemap { clip in
+                    clip.speedCurve.defaultValue = Float(newValue)
+                }
+            })
+    }
+
+    private var preservePitchBinding: Binding<Bool> {
+        Binding(
+            get: { model.selectedClip?.preservePitch ?? true },
+            set: { newValue in
+                model.updateSelectedClipTimeRemap("Change Pitch Preservation", invalidateVideo: false) {
+                    $0.preservePitch = newValue
+                }
+                model.commitCoalescedUndo()
+            })
+    }
+
+    private var pitchAlgorithmBinding: Binding<TimePitchAlgorithm> {
+        Binding(
+            get: { model.selectedClip?.pitchAlgorithm ?? .timeDomain },
+            set: { newValue in
+                model.updateSelectedClipTimeRemap("Change Pitch Algorithm", invalidateVideo: false) {
+                    $0.pitchAlgorithm = newValue
+                }
+                model.commitCoalescedUndo()
+            })
+    }
+
+    private var speedKeyframePlayheadLabel: String {
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return "Outside clip" }
+        return TimeFormatting.timecode(localTime.seconds)
+    }
+
+    private var speedKeyframeActionTitle: String {
+        model.selectedClipSpeedKeyframeAtPlayhead == nil ? "Add" : "Update"
+    }
+
+    private var speedKeyframeActionIcon: String {
+        model.selectedClipSpeedKeyframeAtPlayhead == nil ? "plus.diamond.fill" : "diamond.fill"
+    }
+
+    private var hasPreviousSpeedKeyframe: Bool {
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime,
+              let clip = model.selectedClip else { return false }
+        return clip.speedCurve.keyframes.contains {
+            $0.time.seconds < localTime.seconds
+        }
+    }
+
+    private var hasNextSpeedKeyframe: Bool {
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime,
+              let clip = model.selectedClip else { return false }
+        return clip.speedCurve.keyframes.contains {
+            $0.time.seconds > localTime.seconds
         }
     }
 
@@ -296,7 +470,7 @@ struct InspectorView: View {
                     } label: {
                         Label(skinSmoothKeyframeActionTitle, systemImage: skinSmoothKeyframeActionIcon)
                     }
-                    .disabled(model.selectedClipSkinSmoothLocalPlayheadTime == nil)
+                    .disabled(model.selectedClipSourceLocalPlayheadTime == nil)
 
                     Button(role: .destructive) {
                         model.removeSelectedClipSkinSmoothStrengthKeyframe()
@@ -344,6 +518,7 @@ struct InspectorView: View {
                         smooth.bypass = newValue
                     }
                 }))
+                .toggleStyle(.switch)
 
             Toggle("Show Mask", isOn: Binding(
                 get: { model.showSkinMask },
@@ -351,6 +526,7 @@ struct InspectorView: View {
                     model.showSkinMask = newValue
                     model.scheduleRebuild()
                 }))
+                .toggleStyle(.switch)
 
             HStack {
                 Button("Reset") { model.resetClipSkinSmooth() }
@@ -361,7 +537,7 @@ struct InspectorView: View {
     }
 
     private var skinSmoothKeyframePlayheadLabel: String {
-        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return "Outside clip" }
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return "Outside clip" }
         return TimeFormatting.timecode(localTime.seconds)
     }
 
@@ -374,14 +550,14 @@ struct InspectorView: View {
     }
 
     private var hasPreviousSkinSmoothKeyframe: Bool {
-        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return false }
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return false }
         return model.selectedClipSkinSmooth.strength.keyframes.contains {
             $0.time.seconds < localTime.seconds
         }
     }
 
     private var hasNextSkinSmoothKeyframe: Bool {
-        guard let localTime = model.selectedClipSkinSmoothLocalPlayheadTime else { return false }
+        guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return false }
         return model.selectedClipSkinSmooth.strength.keyframes.contains {
             $0.time.seconds > localTime.seconds
         }

@@ -285,6 +285,9 @@ public struct ClipDoc: Codable, Equatable, Sendable {
     public var effects: [Effect]
     public var transition: TransitionDoc?
     public var volumeEnvelope: VolumeEnvelope
+    public var speedCurve: Keyframed<Float>?
+    public var preservePitch: Bool?
+    public var pitchAlgorithm: TimePitchAlgorithm?
 
     public init(mediaID: UUID,
                 sourceStart: CMTimeCode,
@@ -293,7 +296,10 @@ public struct ClipDoc: Codable, Equatable, Sendable {
                 opacity: Float,
                 effects: [Effect],
                 transition: TransitionDoc?,
-                volumeEnvelope: VolumeEnvelope = VolumeEnvelope()) {
+                volumeEnvelope: VolumeEnvelope = VolumeEnvelope(),
+                speedCurve: Keyframed<Float>? = nil,
+                preservePitch: Bool? = nil,
+                pitchAlgorithm: TimePitchAlgorithm? = nil) {
         self.mediaID = mediaID
         self.sourceStart = sourceStart
         self.duration = duration
@@ -302,10 +308,14 @@ public struct ClipDoc: Codable, Equatable, Sendable {
         self.effects = effects
         self.transition = transition
         self.volumeEnvelope = volumeEnvelope
+        self.speedCurve = speedCurve
+        self.preservePitch = preservePitch
+        self.pitchAlgorithm = pitchAlgorithm
     }
 
     private enum CodingKeys: String, CodingKey {
-        case mediaID, sourceStart, duration, timelineStart, opacity, effects, transition, volumeEnvelope
+        case mediaID, sourceStart, duration, timelineStart, opacity, effects,
+             transition, volumeEnvelope, speedCurve, preservePitch, pitchAlgorithm
     }
 
     public init(from decoder: any Decoder) throws {
@@ -318,6 +328,9 @@ public struct ClipDoc: Codable, Equatable, Sendable {
         effects = try c.decodeIfPresent([Effect].self, forKey: .effects) ?? []
         transition = try c.decodeIfPresent(TransitionDoc.self, forKey: .transition)
         volumeEnvelope = try c.decodeIfPresent(VolumeEnvelope.self, forKey: .volumeEnvelope) ?? VolumeEnvelope()
+        speedCurve = try c.decodeIfPresent(Keyframed<Float>.self, forKey: .speedCurve)
+        preservePitch = try c.decodeIfPresent(Bool.self, forKey: .preservePitch)
+        pitchAlgorithm = try c.decodeIfPresent(TimePitchAlgorithm.self, forKey: .pitchAlgorithm)
     }
 
     public func makeClip() -> Clip {
@@ -328,7 +341,10 @@ public struct ClipDoc: Codable, Equatable, Sendable {
              opacity: opacity,
              effects: effects,
              transition: transition?.makeTransition(),
-             volumeEnvelope: volumeEnvelope)
+             volumeEnvelope: volumeEnvelope,
+             speedCurve: speedCurve ?? TimeRemapping.identitySpeedCurve,
+             preservePitch: preservePitch ?? true,
+             pitchAlgorithm: pitchAlgorithm ?? .timeDomain)
     }
 }
 
@@ -395,7 +411,10 @@ extension ClipDoc {
             opacity: clip.opacity,
             effects: clip.effects,
             transition: clip.transition.map(TransitionDoc.init(transition:)),
-            volumeEnvelope: clip.volumeEnvelope)
+            volumeEnvelope: clip.volumeEnvelope,
+            speedCurve: clip.speedCurve,
+            preservePitch: clip.preservePitch,
+            pitchAlgorithm: clip.pitchAlgorithm)
     }
 }
 
