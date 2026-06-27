@@ -38,28 +38,59 @@ struct PreviewVideoDiagnosticsTests {
                 kCVPixelBufferHeightKey as String: Int(size.height),
             ])
         writer.add(input)
-        #expect(writer.startWriting())
+        try #require(writer.startWriting())
         writer.startSession(atSourceTime: .zero)
 
         let frameCount = Int(seconds * Double(fps))
         for frame in 0..<frameCount {
-            while !input.isReadyForMoreMediaData { await Task.yield() }
-            guard let pool = adaptor.pixelBufferPool else { break }
-            var pixelBuffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
-            guard let buffer = pixelBuffer else { break }
-            CVPixelBufferLockBaseAddress(buffer, [])
-            if let base = CVPixelBufferGetBaseAddress(buffer) {
-                memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
+            while !input.isReadyForMoreMediaData {
+                guard writer.status == .writing else {
+                    throw writer.error ?? NSError(domain: "PreviewVideoDiagnosticsTests", code: -4)
+                }
+                await Task.yield()
             }
-            CVPixelBufferUnlockBaseAddress(buffer, [])
-            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps))
+
+            let buffer = try makePixelBuffer(size: size, adaptor: adaptor)
+            let lockStatus = CVPixelBufferLockBaseAddress(buffer, [])
+            guard lockStatus == kCVReturnSuccess else {
+                throw NSError(domain: "PreviewVideoDiagnosticsTests", code: Int(lockStatus))
+            }
+            defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+
+            guard let base = CVPixelBufferGetBaseAddress(buffer) else {
+                throw NSError(domain: "PreviewVideoDiagnosticsTests", code: -5)
+            }
+            memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
+
+            guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else {
+                throw writer.error ?? NSError(domain: "PreviewVideoDiagnosticsTests", code: -6)
+            }
         }
 
         input.markAsFinished()
         await writer.finishWriting()
-        #expect(writer.status == .completed)
+        try #require(writer.status == .completed)
         return url
+    }
+
+    private func makePixelBuffer(size: CGSize,
+                                 adaptor: AVAssetWriterInputPixelBufferAdaptor) throws -> CVPixelBuffer {
+        var pixelBuffer: CVPixelBuffer?
+        if let pool = adaptor.pixelBufferPool {
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+        }
+        if pixelBuffer == nil {
+            let attributes = [
+                kCVPixelBufferCGImageCompatibilityKey as String: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
+            ] as CFDictionary
+            CVPixelBufferCreate(kCFAllocatorDefault, Int(size.width), Int(size.height),
+                                kCVPixelFormatType_32ARGB, attributes, &pixelBuffer)
+        }
+        guard let pixelBuffer else {
+            throw NSError(domain: "PreviewVideoDiagnosticsTests", code: -7)
+        }
+        return pixelBuffer
     }
 
     private func loadedMedia(from url: URL) async throws -> MediaItem {
@@ -257,13 +288,16 @@ struct PreviewVideoDiagnosticsTests {
     }
 
     private func meanLuma(_ image: CGImage) throws -> Double {
-        var pixel = [UInt8](repeating: 0, count: 4)
-        let context = CGContext(data: &pixel, width: 1, height: 1,
+        let context = CGContext(data: nil, width: 1, height: 1,
                                 bitsPerComponent: 8, bytesPerRow: 4,
-                                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                space: CGColorSpaceCreateDeviceRGB(),
                                 bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
-        guard let ctx = context else { throw NSError(domain: "Test", code: -2) }
+        guard let ctx = context, let data = ctx.data else { throw NSError(domain: "Test", code: -2) }
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-        return Double(pixel[0]) * 0.299 + Double(pixel[1]) * 0.587 + Double(pixel[2]) * 0.114
+
+        let red = data.load(fromByteOffset: 0, as: UInt8.self)
+        let green = data.load(fromByteOffset: 1, as: UInt8.self)
+        let blue = data.load(fromByteOffset: 2, as: UInt8.self)
+        return Double(red) * 0.299 + Double(green) * 0.587 + Double(blue) * 0.114
     }
 }
