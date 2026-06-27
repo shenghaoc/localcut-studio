@@ -414,12 +414,18 @@ final class ProjectEditingService {
         return Keyframed<Float>(keyframes: keyframes, defaultValue: track.defaultValue)
     }
 
-    /// Drops keyframes past `newDuration` from a clip-source-relative track.
+    /// Drops keyframes past `newDuration` from a clip-source-relative track,
+    /// inserting a boundary keyframe at `newDuration` to preserve the ramp shape.
     private static func clampKeyframeTrack(_ track: Keyframed<Float>, toDuration newDuration: CMTime)
         -> Keyframed<Float> {
-        Keyframed<Float>(
-            keyframes: track.keyframes.filter { $0.time <= newDuration },
-            defaultValue: track.defaultValue)
+        guard track.isAnimated else { return track }
+        let boundary = track.bezierValue(at: newDuration)
+        var keys = track.keyframes.filter { $0.time <= newDuration }
+        // Insert boundary at the new end if no keyframe sits there already.
+        if keys.last?.time != newDuration {
+            keys.append(Keyframe<Float>(time: newDuration, value: boundary))
+        }
+        return Keyframed<Float>(keyframes: keys, defaultValue: track.defaultValue)
     }
 
     /// Applies `transform` to every skin-smooth effect's strength track in

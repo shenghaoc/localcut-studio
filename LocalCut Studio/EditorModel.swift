@@ -521,6 +521,7 @@ final class EditorModel {
         guard let id = selectedClipID else { return }
         performCoalescedUndoable(actionName, target: id, rebuild: .debounced) {
             mutateClip(id: id, invalidateVideo: invalidateVideo, transform)
+            self.invalidateProjectedBeatTimesCache()
         }
     }
 
@@ -530,6 +531,7 @@ final class EditorModel {
         guard let id = selectedClipID else { return }
         performUndoable(actionName) {
             mutateClip(id: id, invalidateVideo: invalidateVideo, transform)
+            self.invalidateProjectedBeatTimesCache()
             scheduleRebuild()
         }
     }

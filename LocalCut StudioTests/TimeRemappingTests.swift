@@ -924,6 +924,10 @@ struct TimeRemappingKeyframeRebaseTests {
         let trimmed = model.project.videoTracks[0].clips[0]
         #expect(trimmed.duration == trTime(5))
         // Source span shrank to 5 s, so the 8 s keyframe no longer fits.
-        #expect(trimmed.speedCurve.keyframes.map { $0.time } == [trTime(2)])
+        // A boundary keyframe is inserted at the new duration to preserve the
+        // ramp shape at the trim point.
+        #expect(trimmed.speedCurve.keyframes.map { $0.time } == [trTime(2), trTime(5)])
+        // Boundary value matches the interpolated value at the trim point.
+        #expect(trimmed.speedCurve.keyframes.last?.value == 1)
     }
 }

@@ -184,10 +184,11 @@ struct AudioClipFadesInspectorView: View {
     @Bindable var model: EditorModel
     let clip: Clip
 
-    /// Cap fades at the clip's duration; sub-frame durations would round to
-    /// zero on most clip lengths anyway, so 0…clipDuration is the useful range.
+    /// Cap fades at the clip's output duration (retimed); sub-frame durations
+    /// would round to zero on most clip lengths anyway, so 0…clipDuration is
+    /// the useful range.
     private var maxFadeSeconds: Double {
-        max(0.01, clip.duration.seconds)
+        max(0.01, clip.outputDuration.seconds)
     }
 
     var body: some View {
