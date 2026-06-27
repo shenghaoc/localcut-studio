@@ -5,10 +5,10 @@ import CoreImage
 import LocalCutCore
 @testable import LocalCut_Studio
 
-/// Diagnostic tests for the "preview video black" bug.
-/// These tests narrow down where the compositor / AVPlayer pipeline breaks.
+/// Preview composition smoke tests plus the observable player-item state
+/// regression that keeps the SwiftUI preview canvas in sync with rebuilds.
 @MainActor
-@Suite("Preview video — diagnostics")
+@Suite("Preview composition and state")
 struct PreviewVideoDiagnosticsTests {
 
     private func time(_ seconds: Double) -> CMTime {
@@ -103,6 +103,11 @@ struct PreviewVideoDiagnosticsTests {
             $0 as? EffectCompositionInstruction
         }
         #expect(!customInstructions.isEmpty, "Instructions must be EffectCompositionInstruction instances")
+        let simpleClipInstruction = try #require(customInstructions.first {
+            !$0.units.isEmpty && $0.captions.isEmpty
+        })
+        #expect(simpleClipInstruction.containsTweening == false,
+                "A plain clip interval should not force tweening")
         #expect(videoComp.renderSize.width > 0 && videoComp.renderSize.height > 0,
                 "videoComposition.renderSize must be non-zero")
         #expect(videoComp.frameDuration.seconds > 0,
