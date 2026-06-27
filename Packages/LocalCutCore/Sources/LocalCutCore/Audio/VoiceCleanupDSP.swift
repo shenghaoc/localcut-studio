@@ -343,10 +343,11 @@ public enum VoiceCleanupDSP {
     }
 
     private static func detectorFrameRate(sampleRate: Double, channels: Int) -> Double {
-        // AVFoundation sample rates are audio frame rates. The detector advances
-        // once per interleaved frame, so dividing by channel count would make the
-        // configured attack/release times too fast for stereo and surround input.
-        sampleRate
+        // The detector advances once per interleaved frame (every `channels`
+        // samples), so the effective frame rate is sampleRate / channels.
+        // For stereo at 48 kHz this is 24 kHz, making configured attack/release
+        // times match wall-clock duration correctly.
+        sampleRate / Double(max(1, channels))
     }
 
     private static func smoothingCoefficient(milliseconds: Float, sampleRate: Double) -> Float {

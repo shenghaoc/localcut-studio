@@ -242,13 +242,14 @@ final class AudioMasterBus {
         schedulingTask = nil
 
         if let player = livePlayerNode {
+            // Remove cleanup tap from player before detaching.
+            if liveCleanupTapInstalled {
+                player.removeTap(onBus: 0)
+                liveCleanupTapInstalled = false
+            }
             player.stop()
             liveEngine.detach(player)
             livePlayerNode = nil
-        }
-        if liveCleanupTapInstalled {
-            liveEngine.mainMixerNode.removeTap(onBus: 0)
-            liveCleanupTapInstalled = false
         }
         if liveTapInstalled {
             liveEngine.mainMixerNode.removeTap(onBus: 0)
@@ -389,9 +390,7 @@ final class AudioMasterBus {
         currentLiveComposition = composition
         currentLiveAudioMix = audioMix
 
-        // Sync cleanup settings from the project (lock-protected).
-        // The didSet on liveCleanupSettings already syncs to the lock,
-        // but we also sync here in case settings changed without triggering didSet.
+        // Sync cleanup settings to the lock for the render callback.
         let currentSettings = liveCleanupSettings
         liveCleanupSettingsLock.withLock { $0 = currentSettings }
 
@@ -511,7 +510,7 @@ final class AudioMasterBus {
         guard frameCount > 0 else { return nil }
 
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format,
-                                            frameCapacity: min(frameCapacity, AVAudioFrameCount(frameCount))) else {
+                                            frameCapacity: AVAudioFrameCount(frameCount)) else {
             return nil
         }
         buffer.frameLength = AVAudioFrameCount(frameCount)

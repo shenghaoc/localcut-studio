@@ -69,6 +69,8 @@ extension EditorModel {
             mutate(&settings)
             settings.clamp()
             project.voiceCleanup = settings
+            // Sync to live audio chain so inspector edits reach the DSP.
+            audioBus.updateLiveCleanupSettings(settings)
         }
         if coalesced {
             performCoalescedUndoable(name, target: target, rebuild: .skip, mutate: apply)
@@ -112,12 +114,14 @@ extension EditorModel {
             return
         }
 
+        // Cancel any in-flight measurement to prevent concurrent operations.
+        loudnessTask?.cancel()
         // Supersede any prior measurement and remember which generation this run
         // belongs to; stale results are dropped at the apply site below.
         invalidateLoudnessMeasurement()
         let token = loudnessMeasurementToken
         statusMessage = "Measuring loudness…"
-        Task { [weak self] in
+        loudnessTask = Task { [weak self] in
             guard let self else { return }
             do {
                 guard let built = try await CompositionBuilder.build(project: project, showSkinMask: showSkinMask) else {

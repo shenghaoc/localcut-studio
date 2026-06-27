@@ -108,6 +108,10 @@ final class EditorModel {
     /// writing a stale gain into the current project and undo stack.
     @ObservationIgnored var loudnessMeasurementToken = 0
 
+    /// In-flight loudness measurement task. Cancelled on the next invocation
+    /// to prevent concurrent full-composition decode + DSP operations.
+    @ObservationIgnored nonisolated(unsafe) var loudnessTask: Task<Void, Never>?
+
     /// Session cache of imported LUT filenames keyed by their bookmark, so the
     /// inspector can show a LUT's name without resolving the security-scoped
     /// bookmark on the main actor on every render. Not persisted; a LUT from a
