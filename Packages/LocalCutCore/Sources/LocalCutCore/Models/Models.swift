@@ -1480,3 +1480,91 @@ public struct AudioMeterSnapshot: Hashable, Sendable {
             sampledAt: ContinuousClock.now)
     }
 }
+
+// MARK: - Animated Overlays (Phase 38b)
+
+/// The source type for an animated overlay clip.
+public enum OverlaySourceType: String, Hashable, Codable, Sendable, CaseIterable, Identifiable {
+    /// Animated image (WebP, GIF, APNG) decoded frame-by-frame via ImageIO.
+    case animatedImage
+    /// Lottie JSON animation rendered off-screen to CIImage per frame.
+    case lottie
+    /// Video file with a premultiplied alpha channel.
+    case alphaVideo
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .animatedImage: "Animated Image"
+        case .lottie: "Lottie"
+        case .alphaVideo: "Alpha Video"
+        }
+    }
+}
+
+/// Playback behaviour when an overlay clip reaches the end of its source media.
+public enum OverlayEndAction: String, Hashable, Codable, Sendable, CaseIterable, Identifiable {
+    /// Hide the overlay (render nothing past the end).
+    case hide
+    /// Freeze on the last frame.
+    case freeze
+    /// Loop back to the first frame.
+    case loop
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .hide: "Hide"
+        case .freeze: "Freeze"
+        case .loop: "Loop"
+        }
+    }
+}
+
+/// An animated overlay clip placed on the timeline. Overlays sit above the
+/// video track stack and composite in order. Each clip references an overlay
+/// source file and carries its own timing, transform, and opacity.
+public struct OverlayClip: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    /// The type of source media.
+    public var sourceType: OverlaySourceType
+    /// Timeline start time.
+    public var timelineStart: CMTime
+    /// Timeline duration (how long the overlay is visible).
+    public var duration: CMTime
+    /// 2D position offset from the render canvas centre, in normalised
+    /// coordinates (−1…1 where 1 = canvas width/height).
+    public var positionOffset: CGSize
+    /// Uniform scale factor (1 = original size).
+    public var scale: CGFloat
+    /// Rotation in radians.
+    public var rotation: CGFloat
+    /// Per-overlay opacity (0…1).
+    public var opacity: Float
+    /// What to do when the source animation reaches its end.
+    public var endAction: OverlayEndAction
+
+    public var timelineEnd: CMTime { timelineStart + duration }
+
+    public init(id: UUID = UUID(),
+                sourceType: OverlaySourceType,
+                timelineStart: CMTime,
+                duration: CMTime,
+                positionOffset: CGSize = .zero,
+                scale: CGFloat = 1,
+                rotation: CGFloat = 0,
+                opacity: Float = 1,
+                endAction: OverlayEndAction = .loop) {
+        self.id = id
+        self.sourceType = sourceType
+        self.timelineStart = timelineStart
+        self.duration = duration
+        self.positionOffset = positionOffset
+        self.scale = scale
+        self.rotation = rotation
+        self.opacity = opacity
+        self.endAction = endAction
+    }
+}

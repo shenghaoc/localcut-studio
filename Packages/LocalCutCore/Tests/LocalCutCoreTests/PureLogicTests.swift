@@ -327,3 +327,71 @@ func projectDocumentPureRoundTrip() throws {
     #expect(decoded.videoTracks[0].clips[0].makeClip().transition?.type == .wipe)
     #expect(decoded.audioBus.trackInputs[0].trackInput.gain == 1.2)
 }
+
+// MARK: - Overlay model tests (Phase 38b)
+
+@Test("OverlayClip model round-trips through OverlayClipDoc")
+func overlayClipDocRoundTrip() {
+    let overlay = OverlayClip(
+        id: UUID(uuidString: "AAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+        sourceType: .animatedImage,
+        timelineStart: time(2),
+        duration: time(5),
+        positionOffset: CGSize(width: 0.3, height: -0.1),
+        scale: 1.5,
+        rotation: 0.785,
+        opacity: 0.8,
+        endAction: .freeze)
+    let doc = OverlayClipDoc(
+        overlay: overlay,
+        bookmark: Data([0xDE, 0xAD]))
+    let restored = doc.makeOverlayClip()
+
+    #expect(restored.id == overlay.id)
+    #expect(restored.sourceType == .animatedImage)
+    #expect(restored.timelineStart == overlay.timelineStart)
+    #expect(restored.duration == overlay.duration)
+    #expect(restored.positionOffset.width == overlay.positionOffset.width)
+    #expect(restored.positionOffset.height == overlay.positionOffset.height)
+    #expect(restored.scale == overlay.scale)
+    #expect(restored.rotation == overlay.rotation)
+    #expect(restored.opacity == overlay.opacity)
+    #expect(restored.endAction == .freeze)
+}
+
+@Test("OverlayClipDoc round-trips through JSON encoding")
+func overlayClipDocJSONRoundTrip() throws {
+    let doc = OverlayClipDoc(
+        sourceType: .lottie,
+        bookmark: Data([0xCA, 0xFE]),
+        timelineStart: CMTimeCode(time(1)),
+        duration: CMTimeCode(time(3)),
+        positionOffsetX: 0.5,
+        positionOffsetY: -0.25,
+        scale: 2.0,
+        rotation: 1.57,
+        opacity: 0.6,
+        endAction: .hide)
+    let encoded = try JSONEncoder().encode(doc)
+    let decoded = try JSONDecoder().decode(OverlayClipDoc.self, from: encoded)
+
+    #expect(decoded.sourceType == .lottie)
+    #expect(decoded.timelineStart == doc.timelineStart)
+    #expect(decoded.duration == doc.duration)
+    #expect(decoded.positionOffsetX == 0.5)
+    #expect(decoded.endAction == .hide)
+}
+
+@Test("OverlaySourceType display names are non-empty")
+func overlaySourceTypeDisplayNames() {
+    for type in OverlaySourceType.allCases {
+        #expect(!type.displayName.isEmpty)
+    }
+}
+
+@Test("OverlayEndAction display names are non-empty")
+func overlayEndActionDisplayNames() {
+    for action in OverlayEndAction.allCases {
+        #expect(!action.displayName.isEmpty)
+    }
+}

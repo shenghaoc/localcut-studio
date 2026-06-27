@@ -82,6 +82,9 @@ final class Project {
     var videoTracks: [Track]
     var audioTracks: [Track]
     var captionTracks: [CaptionTrack] = []
+    /// Animated overlay clips. Ordered bottom-to-top; later entries render above
+    /// earlier ones, matching the video-track stacking convention.
+    var overlays: [OverlayClip] = []
     /// Timeline markers sorted by `time`. Mutation paths on `EditorModel`
     /// preserve the invariant so draw / lookup code can treat the list as
     /// ordered without re-sorting per frame.
