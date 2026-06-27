@@ -143,7 +143,7 @@ struct PreviewView: View {
     /// canvas component during playback.
     @MainActor
     private struct TransportOverlay: View {
-        var model: EditorModel
+        let model: EditorModel
 
         var body: some View {
             TransportControls(
