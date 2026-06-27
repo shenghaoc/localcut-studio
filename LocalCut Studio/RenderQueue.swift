@@ -244,6 +244,9 @@ final class RenderQueue {
     @ObservationIgnored private let persistsToDisk: Bool
 
     @ObservationIgnored
+    private let outputBookmarkResolver: @Sendable (Data) -> BookmarkResolution?
+
+    @ObservationIgnored
     private var offlineMeterSink: (@Sendable (AudioMeterSnapshot) -> Void)?
 
     @ObservationIgnored
@@ -255,13 +258,18 @@ final class RenderQueue {
     /// (R3.6, codex P1).
     @ObservationIgnored private var refusingPersist: Bool = false
 
-    init(jobs: [QueueJob] = [], persistsToDisk: Bool = true) {
+    init(
+        jobs: [QueueJob] = [],
+        persistsToDisk: Bool = true,
+        outputBookmarkResolver: (@Sendable (Data) -> BookmarkResolution?)? = nil
+    ) {
         self.jobs = jobs
         self.currentJobID = nil
         self.totalProgress = 0
         self.isRunning = false
         self.statusMessage = nil
         self.persistsToDisk = persistsToDisk
+        self.outputBookmarkResolver = outputBookmarkResolver ?? Self.resolveSecurityScopedBookmark
     }
 
     func setOfflineMeterSink(_ sink: (@Sendable (AudioMeterSnapshot) -> Void)?,
@@ -1224,7 +1232,7 @@ final class RenderQueue {
     }
 
     private func resolveBookmark(_ data: Data) -> BookmarkResolution? {
-        Self.resolveSecurityScopedBookmark(data)
+        outputBookmarkResolver(data)
     }
 
     private func refreshOutputBookmark(jobID: UUID, bookmark: Data) {

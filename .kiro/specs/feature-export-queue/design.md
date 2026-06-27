@@ -199,6 +199,12 @@ the per-job `defer`). A stale-but-resolvable output bookmark is refreshed in
 place during reveal, load reconciliation, or job start, then persisted with the
 next queue write.
 
+`RenderQueue` keeps production bookmark resolution private but lets tests inject
+an `@Sendable` output-bookmark resolver through the initializer. Production
+queues use the real security-scoped bookmark APIs by default; deterministic
+tests can return a known resolution result without depending on macOS bookmark
+timing or parallel test load.
+
 **Resume.** On `RenderQueue.load()`:
 
 - `.queued` jobs stay queued and start when `start()` runs.

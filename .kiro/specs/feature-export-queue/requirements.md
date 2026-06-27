@@ -107,6 +107,8 @@
 - **R5.6** Reconciliation refreshes a stale output bookmark when resolution
   succeeds and supplies replacement bookmark data.
 - **R5.7** A job enqueued in the runner-drain / cleanup window still runs after
-  cleanup instead of remaining queued behind a false `isRunning` state.
+  cleanup instead of remaining queued behind a false `isRunning` state. The
+  regression test must avoid real security-scoped bookmark resolution by
+  injecting a deterministic output-bookmark resolver.
 - **R5.8** `xcodebuild` (Debug, macOS) compiles cleanly; the existing test
   count does not regress.
