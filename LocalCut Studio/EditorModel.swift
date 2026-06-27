@@ -27,6 +27,7 @@ final class EditorModel {
     /// `Delete` only removes a marker when this is set, so the existing
     /// clip / transition delete shortcut keeps working unchanged.
     var selectedMarkerID: TimelineMarker.ID?
+    var selectedOverlayID: OverlayClip.ID?
 
     // Playback
     let player = AVPlayer()
@@ -962,6 +963,21 @@ final class EditorModel {
     var selectedTransition: Transition? {
         guard let id = selectedTransitionClipID else { return nil }
         return clip(for: id)?.transition
+    }
+
+    /// The selected overlay clip, or `nil` if none is selected.
+    var selectedOverlay: OverlayClip? {
+        guard let id = selectedOverlayID else { return nil }
+        return project.overlays.first(where: { $0.id == id })
+    }
+
+    /// Selects an overlay by ID, clearing other selections.
+    func selectOverlay(_ id: OverlayClip.ID?) {
+        selectedOverlayID = id
+        selectedClipID = nil
+        selectedMediaID = nil
+        selectedMarkerID = nil
+        selectedTransitionClipID = nil
     }
 
     /// The adjacent predecessor of `clipID` on the same track, if the two clips

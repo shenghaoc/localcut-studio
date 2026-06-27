@@ -19,6 +19,8 @@ struct InspectorView: View {
         Form {
             if let transition = model.selectedTransition {
                 transitionSection(transition)
+            } else if let overlay = model.selectedOverlay {
+                overlaySection(overlay)
             } else if let clip = model.selectedClip {
                 clipSection(clip)
                 speedSection(clip)
@@ -39,6 +41,7 @@ struct InspectorView: View {
             }
 
             projectSection
+            overlayListSection
         }
         .formStyle(.grouped)
         .fileImporter(
@@ -900,6 +903,125 @@ struct InspectorView: View {
         Binding(
             get: { model.project.workingColourSpace },
             set: { model.setWorkingColourSpace($0) })
+    }
+
+    // MARK: - Overlay inspector
+
+    @ViewBuilder
+    private func overlaySection(_ overlay: OverlayClip) -> some View {
+        Section("Overlay") {
+            LabeledContent("Type") {
+                Text(overlay.sourceType.displayName)
+            }
+            LabeledContent("Start") {
+                Text(TimeFormatting.timecode(overlay.timelineStart.seconds)).monospacedDigit()
+            }
+            LabeledContent("Duration") {
+                Text(TimeFormatting.timecode(overlay.duration.seconds)).monospacedDigit()
+            }
+
+            LabeledSliderRow(
+                label: "Opacity",
+                display: "\(Int(overlay.opacity * 100))%",
+                value: Binding(
+                    get: { Double(overlay.opacity) },
+                    set: { model.setOverlayOpacity(overlay.id, to: Float($0)) }),
+                range: 0...1,
+                resetAction: { model.setOverlayOpacity(overlay.id, to: 1) })
+
+            LabeledSliderRow(
+                label: "Scale",
+                display: String(format: "%.1f×", overlay.scale),
+                value: Binding(
+                    get: { overlay.scale },
+                    set: { model.setOverlayScale(overlay.id, to: $0) }),
+                range: 0.1...4.0,
+                resetAction: { model.setOverlayScale(overlay.id, to: 1) })
+
+            LabeledSliderRow(
+                label: "Rotation",
+                display: String(format: "%.0f°", overlay.rotation * 180 / .pi),
+                value: Binding(
+                    get: { overlay.rotation },
+                    set: { model.setOverlayRotation(overlay.id, to: $0) }),
+                range: -CGFloat.pi...CGFloat.pi,
+                resetAction: { model.setOverlayRotation(overlay.id, to: 0) })
+
+            Picker("End Action", selection: Binding(
+                get: { overlay.endAction },
+                set: { model.setOverlayEndAction(overlay.id, to: $0) })) {
+                ForEach(OverlayEndAction.allCases) { action in
+                    Text(action.displayName).tag(action)
+                }
+            }
+
+            Button("Remove Overlay", role: .destructive) {
+                model.removeOverlay(id: overlay.id)
+            }
+        }
+    }
+
+    // MARK: - Overlay list
+
+    @State private var showOverlayImporter = false
+    @State private var pendingOverlayType: OverlaySourceType = .animatedImage
+
+    @ViewBuilder
+    private var overlayListSection: some View {
+        Section("Overlays") {
+            if model.project.overlays.isEmpty {
+                Text("No overlays added.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(model.project.overlays) { overlay in
+                    HStack {
+                        Circle()
+                            .fill(model.selectedOverlayID == overlay.id ? Color.accentColor : Color.clear)
+                            .frame(width: 8, height: 8)
+                        Text(overlay.sourceType.displayName)
+                        Spacer()
+                        Text(TimeFormatting.timecode(overlay.timelineStart.seconds))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        model.selectOverlay(overlay.id)
+                    }
+                }
+                .onDelete { indexSet in
+                    for index in indexSet {
+                        model.removeOverlay(id: model.project.overlays[index].id)
+                    }
+                }
+            }
+
+            Menu {
+                Button("Animated Image (WebP/GIF)") {
+                    pendingOverlayType = .animatedImage
+                    showOverlayImporter = true
+                }
+                Button("Alpha Video") {
+                    pendingOverlayType = .alphaVideo
+                    showOverlayImporter = true
+                }
+                Button("Lottie (coming soon)") { }
+                    .disabled(true)
+            } label: {
+                Label("Add Overlay", systemImage: "plus")
+            }
+        }
+        .fileImporter(
+            isPresented: $showOverlayImporter,
+            allowedContentTypes: [.image, .movie, .video, .data],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task {
+                    await model.importOverlay(from: url, sourceType: pendingOverlayType)
+                }
+            }
+        }
     }
 }
 
