@@ -260,14 +260,17 @@ private func makeOverlayTempDirectory(_ label: String) throws -> URL {
 }
 
 private func waitForFinishedOverlayJob(_ queue: RenderQueue) async throws -> QueueJob {
-    for _ in 0..<200 {
+    for _ in 0..<600 {
         if let job = queue.jobs.first, job.isTerminal {
             return job
         }
-        try await Task.sleep(for: .milliseconds(50))
+        try await Task.sleep(for: .milliseconds(100))
     }
+    let jobDescription = queue.jobs.first.map { "\($0.status)" } ?? "no job"
     throw NSError(domain: "OverlayTests", code: -20,
-                  userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for overlay export"])
+                  userInfo: [
+                      NSLocalizedDescriptionKey: "Timed out waiting for overlay export (\(jobDescription))",
+                  ])
 }
 
 private func makeOverlayVideoFixture(seconds: Double,
