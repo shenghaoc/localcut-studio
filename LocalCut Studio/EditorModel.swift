@@ -16,8 +16,8 @@ final class EditorModel {
     /// Runtime audio master bus (P16). Owns the live + offline `AVAudioEngine`
     /// graphs and the peak/RMS meter snapshot; persistent parameters live on
     /// `project`. Created here so the inspector can bind to a stable instance
-    /// for the editor's lifetime; engine startup is deferred to Phase 36 so
-    /// landing the bus does not regress the current `AVPlayer` preview path.
+    /// for the editor's lifetime; live graph startup stays lazy so opening a
+    /// project does not start audio hardware until metering or cleanup needs it.
     let audioBus = AudioMasterBus()
 
     // Selection
@@ -100,6 +100,17 @@ final class EditorModel {
 
     // Skin smoothing debug
     var showSkinMask = false
+
+    /// Monotonic token guarding asynchronous loudness measurements. Bumped on any
+    /// project mutation or document load (see `invalidateLoudnessMeasurement`), so
+    /// a measurement that finishes after the project it measured has changed — an
+    /// edit, a new target, or a different document — is discarded rather than
+    /// writing a stale gain into the current project and undo stack.
+    @ObservationIgnored var loudnessMeasurementToken = 0
+
+    /// In-flight loudness measurement task. Cancelled on the next invocation
+    /// to prevent concurrent full-composition decode + DSP operations.
+    @ObservationIgnored nonisolated(unsafe) var loudnessTask: Task<Void, Never>?
 
     /// Session cache of imported LUT filenames keyed by their bookmark, so the
     /// inspector can show a LUT's name without resolving the security-scoped
@@ -231,6 +242,7 @@ final class EditorModel {
             guard notification.object as? AVPlayerItem == self?.player.currentItem else { return }
             MainActor.assumeIsolated {
                 self?.isPlaying = false
+                self?.audioBus.pauseLivePreview()
             }
         }
 
@@ -1159,12 +1171,23 @@ final class EditorModel {
         guard hasPreviewItem else { return }
         if isPlaying {
             player.pause()
+            if project.voiceCleanup.requiresOfflineProcessing {
+                audioBus.pauseLivePreview()
+            }
             isPlaying = false
         } else {
             if currentTime >= totalDuration - 0.05 {
                 player.seek(to: .zero)
+                if project.voiceCleanup.requiresOfflineProcessing {
+                    audioBus.seekLivePreview(to: .zero) { [weak self] message in
+                        self?.statusMessage = "Live voice cleanup unavailable: \(message)"
+                    }
+                }
             }
             player.play()
+            if project.voiceCleanup.requiresOfflineProcessing {
+                audioBus.resumeLivePreview()
+            }
             isPlaying = true
         }
     }
@@ -1180,20 +1203,29 @@ final class EditorModel {
     func seek(toSeconds seconds: Double, tolerance: CMTime) {
         let clamped = max(0, min(seconds, totalDuration))
         currentTime = clamped
-        player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600),
-                    toleranceBefore: tolerance, toleranceAfter: tolerance)
+        let time = CMTime(seconds: clamped, preferredTimescale: 600)
+        player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
+        if project.voiceCleanup.requiresOfflineProcessing {
+            audioBus.seekLivePreview(to: time) { [weak self] message in
+                self?.statusMessage = "Live voice cleanup unavailable: \(message)"
+            }
+            if isPlaying {
+                audioBus.resumeLivePreview()
+            }
+        }
     }
 
     // MARK: - Audio metering
 
     func prepareAudioMetering() {
-        audioBus.prepareLive()
+        if project.voiceCleanup.requiresOfflineProcessing {
+            rebuildDebounced(after: .milliseconds(0))
+        } else {
+            audioBus.prepareLive()
+        }
         if let error = audioBus.lastStartError {
             statusMessage = "Live metering unavailable: \(error)"
         } else if audioBus.isLiveRunning {
-            // A successful (re)start clears `lastStartError`; drop the stale
-            // failure message so the status bar / VoiceOver live region don't
-            // keep announcing "Live metering unavailable" after recovery.
             statusMessage = "Live metering started."
         }
     }

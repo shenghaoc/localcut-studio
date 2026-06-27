@@ -827,6 +827,296 @@ public struct TrackInput: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public enum VoiceCleanupInsertID: String, Hashable, Codable, CaseIterable, Sendable {
+    case denoiser
+    case gate
+    case compressor
+    case limiter
+
+    public var displayName: String {
+        switch self {
+        case .denoiser: "Denoiser"
+        case .gate: "Gate"
+        case .compressor: "Compressor"
+        case .limiter: "Limiter"
+        }
+    }
+}
+
+public enum LoudnessPreset: String, Hashable, Codable, CaseIterable, Identifiable, Sendable {
+    case streaming
+    case voice
+    case broadcast
+    case custom
+
+    public var id: String { rawValue }
+
+    public var targetLUFS: Float {
+        switch self {
+        case .streaming: -14
+        case .voice: -16
+        case .broadcast: -19
+        case .custom: -14
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .streaming: "-14 LUFS"
+        case .voice: "-16 LUFS"
+        case .broadcast: "-19 LUFS"
+        case .custom: "Custom"
+        }
+    }
+}
+
+public struct DenoiserSettings: Hashable, Codable, Sendable {
+    public var bypass: Bool
+    public var reduction: Float
+    public var noiseFloorDB: Float
+
+    public init(bypass: Bool = true, reduction: Float = 0.45, noiseFloorDB: Float = -55) {
+        self.bypass = bypass
+        self.reduction = reduction
+        self.noiseFloorDB = noiseFloorDB
+        clamp()
+    }
+
+    // Lenient decode so adding fields in a later schema doesn't break loading
+    // projects saved by this build (matches TrackDoc / ClipDoc / VolumeEnvelope).
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bypass = try c.decodeIfPresent(Bool.self, forKey: .bypass) ?? true
+        reduction = try c.decodeIfPresent(Float.self, forKey: .reduction) ?? 0.45
+        noiseFloorDB = try c.decodeIfPresent(Float.self, forKey: .noiseFloorDB) ?? -55
+        clamp()
+    }
+
+    public mutating func clamp() {
+        reduction = max(0, min(1, reduction))
+        noiseFloorDB = max(-90, min(-20, noiseFloorDB))
+    }
+}
+
+public struct GateSettings: Hashable, Codable, Sendable {
+    public var bypass: Bool
+    public var thresholdDB: Float
+    public var attackMS: Float
+    public var releaseMS: Float
+    public var rangeDB: Float
+
+    public init(bypass: Bool = true,
+                thresholdDB: Float = -40,
+                attackMS: Float = 1,
+                releaseMS: Float = 50,
+                rangeDB: Float = -24) {
+        self.bypass = bypass
+        self.thresholdDB = thresholdDB
+        self.attackMS = attackMS
+        self.releaseMS = releaseMS
+        self.rangeDB = rangeDB
+        clamp()
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bypass = try c.decodeIfPresent(Bool.self, forKey: .bypass) ?? true
+        thresholdDB = try c.decodeIfPresent(Float.self, forKey: .thresholdDB) ?? -40
+        attackMS = try c.decodeIfPresent(Float.self, forKey: .attackMS) ?? 1
+        releaseMS = try c.decodeIfPresent(Float.self, forKey: .releaseMS) ?? 50
+        rangeDB = try c.decodeIfPresent(Float.self, forKey: .rangeDB) ?? -24
+        clamp()
+    }
+
+    public mutating func clamp() {
+        thresholdDB = max(-80, min(0, thresholdDB))
+        attackMS = max(0.1, min(100, attackMS))
+        releaseMS = max(1, min(1000, releaseMS))
+        rangeDB = max(-80, min(0, rangeDB))
+    }
+}
+
+public struct CompressorSettings: Hashable, Codable, Sendable {
+    public var bypass: Bool
+    public var thresholdDB: Float
+    public var ratio: Float
+    public var attackMS: Float
+    public var releaseMS: Float
+    public var makeupGainDB: Float
+
+    public init(bypass: Bool = true,
+                thresholdDB: Float = -18,
+                ratio: Float = 3,
+                attackMS: Float = 5,
+                releaseMS: Float = 120,
+                makeupGainDB: Float = 0) {
+        self.bypass = bypass
+        self.thresholdDB = thresholdDB
+        self.ratio = ratio
+        self.attackMS = attackMS
+        self.releaseMS = releaseMS
+        self.makeupGainDB = makeupGainDB
+        clamp()
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bypass = try c.decodeIfPresent(Bool.self, forKey: .bypass) ?? true
+        thresholdDB = try c.decodeIfPresent(Float.self, forKey: .thresholdDB) ?? -18
+        ratio = try c.decodeIfPresent(Float.self, forKey: .ratio) ?? 3
+        attackMS = try c.decodeIfPresent(Float.self, forKey: .attackMS) ?? 5
+        releaseMS = try c.decodeIfPresent(Float.self, forKey: .releaseMS) ?? 120
+        makeupGainDB = try c.decodeIfPresent(Float.self, forKey: .makeupGainDB) ?? 0
+        clamp()
+    }
+
+    public mutating func clamp() {
+        thresholdDB = max(-60, min(0, thresholdDB))
+        ratio = max(1, min(20, ratio))
+        attackMS = max(0.1, min(200, attackMS))
+        releaseMS = max(1, min(2000, releaseMS))
+        makeupGainDB = max(-24, min(24, makeupGainDB))
+    }
+}
+
+public struct LimiterSettings: Hashable, Codable, Sendable {
+    public var bypass: Bool
+    public var ceilingDB: Float
+    public var releaseMS: Float
+
+    public init(bypass: Bool = true, ceilingDB: Float = -1, releaseMS: Float = 50) {
+        self.bypass = bypass
+        self.ceilingDB = ceilingDB
+        self.releaseMS = releaseMS
+        clamp()
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bypass = try c.decodeIfPresent(Bool.self, forKey: .bypass) ?? true
+        ceilingDB = try c.decodeIfPresent(Float.self, forKey: .ceilingDB) ?? -1
+        releaseMS = try c.decodeIfPresent(Float.self, forKey: .releaseMS) ?? 50
+        clamp()
+    }
+
+    public mutating func clamp() {
+        ceilingDB = max(-9, min(-0.1, ceilingDB))
+        releaseMS = max(1, min(2000, releaseMS))
+    }
+}
+
+public struct LoudnessNormalisationSettings: Hashable, Codable, Sendable {
+    public var enabled: Bool
+    public var preset: LoudnessPreset
+    public var customTargetLUFS: Float
+    public var measuredLUFS: Float?
+    public var appliedGainDB: Float
+    public var statusNote: String?
+
+    public init(enabled: Bool = false,
+                preset: LoudnessPreset = .streaming,
+                customTargetLUFS: Float = -14,
+                measuredLUFS: Float? = nil,
+                appliedGainDB: Float = 0,
+                statusNote: String? = nil) {
+        self.enabled = enabled
+        self.preset = preset
+        self.customTargetLUFS = customTargetLUFS
+        self.measuredLUFS = measuredLUFS
+        self.appliedGainDB = appliedGainDB
+        self.statusNote = statusNote
+        clamp()
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        preset = try c.decodeIfPresent(LoudnessPreset.self, forKey: .preset) ?? .streaming
+        customTargetLUFS = try c.decodeIfPresent(Float.self, forKey: .customTargetLUFS) ?? -14
+        measuredLUFS = try c.decodeIfPresent(Float.self, forKey: .measuredLUFS)
+        appliedGainDB = try c.decodeIfPresent(Float.self, forKey: .appliedGainDB) ?? 0
+        statusNote = try c.decodeIfPresent(String.self, forKey: .statusNote)
+        clamp()
+    }
+
+    public var targetLUFS: Float {
+        preset == .custom ? customTargetLUFS : preset.targetLUFS
+    }
+
+    /// Recomputes `appliedGainDB` from a previously measured loudness against the
+    /// current `targetLUFS`. The measurement (program loudness) is independent of
+    /// the target, so changing the preset/target should re-derive the gain rather
+    /// than leave a stale value that renders to the old target. No-op when nothing
+    /// has been measured, so a manually dialled-in gain is preserved.
+    public mutating func refreshAppliedGainFromMeasurement() {
+        guard let measuredLUFS, measuredLUFS.isFinite else { return }
+        appliedGainDB = VoiceCleanupDSP.normalisationGain(
+            measuredLUFS: measuredLUFS, targetLUFS: targetLUFS)
+        enabled = appliedGainDB != 0
+        clamp()
+    }
+
+    public mutating func clamp() {
+        customTargetLUFS = max(-36, min(-6, customTargetLUFS))
+        if let measuredLUFS, !measuredLUFS.isFinite {
+            self.measuredLUFS = nil
+        }
+        appliedGainDB = max(-30, min(30, appliedGainDB))
+        if let statusNote, statusNote.isEmpty {
+            self.statusNote = nil
+        }
+    }
+}
+
+public struct VoiceCleanupSettings: Hashable, Codable, Sendable {
+    public var denoiser: DenoiserSettings
+    public var gate: GateSettings
+    public var compressor: CompressorSettings
+    public var limiter: LimiterSettings
+    public var loudness: LoudnessNormalisationSettings
+
+    public init(denoiser: DenoiserSettings = DenoiserSettings(),
+                gate: GateSettings = GateSettings(),
+                compressor: CompressorSettings = CompressorSettings(),
+                limiter: LimiterSettings = LimiterSettings(),
+                loudness: LoudnessNormalisationSettings = LoudnessNormalisationSettings()) {
+        self.denoiser = denoiser
+        self.gate = gate
+        self.compressor = compressor
+        self.limiter = limiter
+        self.loudness = loudness
+        clamp()
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        denoiser = try c.decodeIfPresent(DenoiserSettings.self, forKey: .denoiser) ?? DenoiserSettings()
+        gate = try c.decodeIfPresent(GateSettings.self, forKey: .gate) ?? GateSettings()
+        compressor = try c.decodeIfPresent(CompressorSettings.self, forKey: .compressor) ?? CompressorSettings()
+        limiter = try c.decodeIfPresent(LimiterSettings.self, forKey: .limiter) ?? LimiterSettings()
+        loudness = try c.decodeIfPresent(LoudnessNormalisationSettings.self, forKey: .loudness) ?? LoudnessNormalisationSettings()
+        clamp()
+    }
+
+    public static let insertOrder: [VoiceCleanupInsertID] = [.denoiser, .gate, .compressor, .limiter]
+
+    public var requiresOfflineProcessing: Bool {
+        !denoiser.bypass
+            || !gate.bypass
+            || !compressor.bypass
+            || !limiter.bypass
+            || (loudness.enabled && abs(loudness.appliedGainDB) > 0.0001)
+    }
+
+    public mutating func clamp() {
+        denoiser.clamp()
+        gate.clamp()
+        compressor.clamp()
+        limiter.clamp()
+        loudness.clamp()
+    }
+}
+
 public struct VolumeEnvelope: Hashable, Codable, Sendable {
     public struct Ramp: Hashable, Codable, Sendable {
         public var range: CMTimeRange

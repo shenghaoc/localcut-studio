@@ -18,6 +18,7 @@ final class DocumentController {
         model.project.markers = []
         model.project.masterGain = 1
         model.project.trackInputs = []
+        model.project.voiceCleanup = VoiceCleanupSettings()
         model.beatAnalyses = [:]
         model.beatAnalysisKeys = [:]
         model.showBeatMarkers = false
@@ -46,6 +47,7 @@ final class DocumentController {
         model.project.markers.removeAll()
         model.project.masterGain = 1
         model.project.trackInputs = []
+        model.project.voiceCleanup = VoiceCleanupSettings()
         model.selectedClipID = nil
         model.selectedMediaID = nil
         model.selectedTransitionClipID = nil
@@ -170,6 +172,7 @@ final class DocumentController {
         model.project.markers = document.markers.sorted { $0.time < $1.time }
         model.project.masterGain = document.audioBus.masterGain
         model.project.trackInputs = document.audioBus.trackInputs.map(\.trackInput)
+        model.project.voiceCleanup = document.audioBus.voiceCleanup
 
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         model.documentURL = isNewerSchema ? nil : url

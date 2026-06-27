@@ -46,22 +46,61 @@ final class PreviewRebuildCoordinator {
                 DiagnosticsBridge.shared.clearRenderSamples()
                 return
             }
+            let cleanupPreviewActive = built.audioCleanup.requiresOfflineProcessing
+                && !built.composition.tracks(withMediaType: .audio).isEmpty
+            var cleanupPreviewRunning = false
+            if cleanupPreviewActive {
+                do {
+                    model.audioBus.updateLiveCleanupSettings(model.project.voiceCleanup)
+                    try model.audioBus.prepareLiveForPreview()
+                    model.audioBus.scheduleLiveComposition(
+                        built.composition,
+                        audioMix: built.audioMix,
+                        startTime: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600),
+                        onFailure: { [weak model] message in
+                            model?.statusMessage = "Live voice cleanup unavailable: \(message)"
+                        })
+                    cleanupPreviewRunning = true
+                } catch {
+                    model.statusMessage = "Live voice cleanup unavailable: \(error.localizedDescription)"
+                    model.audioBus.stopLivePreviewAudio()
+                }
+            } else {
+                model.audioBus.stopLivePreviewAudio()
+            }
+
             let item = AVPlayerItem(asset: built.composition)
             item.videoComposition = built.videoComposition
-            item.audioMix = built.audioMix
+            item.audioMix = cleanupPreviewRunning
+                ? Self.mutedAudioMix(for: built.composition)
+                : built.audioMix
             model.replacePreviewItem(with: item)
             model.totalDuration = built.duration
             DiagnosticsBridge.shared.setDecoderCount(
                 built.composition.tracks(withMediaType: .video).count)
+
             await model.player.seek(
                 to: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600),
                 toleranceBefore: .zero,
                 toleranceAfter: .zero)
             if model.isPlaying {
                 model.player.play()
+                if cleanupPreviewRunning {
+                    model.audioBus.resumeLivePreview()
+                }
             }
         } catch {
             model.statusMessage = "Preview build failed: \(error.localizedDescription)"
         }
+    }
+
+    private static func mutedAudioMix(for composition: AVComposition) -> AVAudioMix {
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = composition.tracks(withMediaType: .audio).map { track in
+            let parameters = AVMutableAudioMixInputParameters(track: track)
+            parameters.setVolume(0, at: .zero)
+            return parameters
+        }
+        return mix
     }
 }

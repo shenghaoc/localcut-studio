@@ -555,7 +555,7 @@ struct ProjectBundleTests {
 
     // MARK: - Single-file path remains backwards-compatible
 
-    @Test("Single-file save downconverts to schemaVersion = 2 with no bundleFormat")
+    @Test("Single-file save downconverts to the single-file schema version with no bundleFormat")
     func singleFileSaveDownconvertsSchemaVersion() async {
         let tmp = try? makeTempDirectory("downconvert")
         guard let tmp else {

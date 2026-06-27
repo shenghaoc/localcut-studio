@@ -105,6 +105,11 @@ final class Project {
     /// a missing entry implies defaults (pan 0, gain 1).
     var trackInputs: [TrackInput] = []
 
+    /// Phase 36 voice-cleanup insert settings. Defaults are fully bypassed so
+    /// legacy projects and exports remain bit-identical until a user enables an
+    /// insert or applies loudness normalisation.
+    var voiceCleanup = VoiceCleanupSettings()
+
     init() {
         videoTracks = [Track(name: "V1", kind: .video)]
         audioTracks = [Track(name: "A1", kind: .audio)]

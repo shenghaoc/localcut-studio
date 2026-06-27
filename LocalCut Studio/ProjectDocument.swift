@@ -41,7 +41,8 @@ extension AudioBusDoc {
     init(project: Project) {
         self.init(
             masterGain: project.masterGain,
-            trackInputs: project.trackInputs.map { TrackInputDoc(trackID: $0.id, pan: $0.pan, gain: $0.gain) })
+            trackInputs: project.trackInputs.map { TrackInputDoc(trackID: $0.id, pan: $0.pan, gain: $0.gain) },
+            voiceCleanup: project.voiceCleanup)
     }
 }
 

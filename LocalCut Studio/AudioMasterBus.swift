@@ -4,34 +4,22 @@ import Accelerate
 import os
 import LocalCutCore
 
-/// The native macOS port's audio master bus (P16). Owns two parallel
-/// `AVAudioEngine` graphs built from one shared description:
+/// The native macOS port's audio master bus (P16). Owns live and offline
+/// `AVAudioEngine` graphs for metering, processed preview audio, and export
+/// support:
 ///
-/// - **liveEngine** runs in `.realTime` for preview / monitoring.
+/// - **liveEngine** runs in `.realTime` for preview / monitoring. When voice
+///   cleanup is active, decoded composition audio is processed through
+///   `VoiceCleanupDSP` before being scheduled into the live player node; the
+///   `AVPlayerItem` audio path is muted so preview has one audio renderer.
 /// - **offlineEngine** runs in `.offline` (`enableManualRenderingMode`) for
 ///   export and tests.
-///
-/// The split is deliberate: per the ROADMAP's Apple API spot-checks,
-/// `AVAudioInputNode.setVoiceProcessingEnabled(_:)` (used by Phase 36 / 41 on
-/// the input side) **refuses** `manualRenderingMode = .offline`, so the bus
-/// cannot share one engine instance across both modes. This file lays the
-/// plumbing; Phase 36 attaches its denoiser to both graphs through different
-/// code paths (voice-processing on live, vDSP AU on offline) so preview and
-/// export stay sample-identical.
 ///
 /// The class is `@MainActor @Observable` because parameter edits flow from the
 /// inspector and route through the existing undo machinery; sample-rate state
 /// lives inside the audio nodes themselves. The peak/RMS meter snapshot is
 /// updated on the audio thread under an `OSAllocatedUnfairLock` and read on
 /// the main actor through the `@Observable` accessor.
-///
-/// **Preview wiring status.** The live engine is *not* yet wired into the
-/// `AVPlayer` preview path — that's Phase 36's job, where the bus replaces
-/// `AVPlayer`'s internal AU graph with an `AVAudioPlayerNode` chain. Until
-/// then, `prepareLive()` exists for opt-in monitoring (e.g. mic capture in
-/// Phase 41) and the inspector meter reflects whatever the live graph happens
-/// to be rendering — `silent` for an unwired bus. The offline engine **is**
-/// fully wired for tests and is the path Phase 36's export pipeline will use.
 @MainActor
 @Observable
 final class AudioMasterBus {
@@ -104,6 +92,16 @@ final class AudioMasterBus {
     /// schedule buffers and assert the meter publishes a non-silent snapshot.
     @ObservationIgnored private var offlinePlayers: [UUID: AVAudioPlayerNode] = [:]
 
+    // MARK: - Live voice-cleanup preview routing (T1.7 / T1.8 / T1.9)
+
+    @ObservationIgnored private var livePlayerNode: AVAudioPlayerNode?
+    @ObservationIgnored nonisolated(unsafe) private var liveSchedulingTask: Task<Void, Never>?
+    @ObservationIgnored private var currentLiveComposition: AVComposition?
+    @ObservationIgnored private var currentLiveAudioMix: AVAudioMix?
+    @ObservationIgnored private let liveCleanupSettingsStore = LiveVoiceCleanupSettingsStore()
+    @ObservationIgnored private let liveQueuedFrames = LiveQueuedFrameCounter()
+    @ObservationIgnored private let liveGainReductionStore = LiveGainReductionStore()
+
     /// Standard bus format: 48 kHz, stereo, interleaved-free Float32. Phase 36
     /// DSP normalises around this format so denoise / loudness see one
     /// canonical layout.
@@ -114,6 +112,38 @@ final class AudioMasterBus {
     init() {}
 
     // MARK: - Live engine lifecycle
+
+    /// Starts a live preview graph where processed buffers are scheduled into
+    /// a player node and routed through the main mixer. The cleanup DSP is
+    /// applied before scheduling, so the node emits processed audio rather than
+    /// observing and mutating a tap buffer.
+    func prepareLiveForPreview() throws {
+        if isLiveRunning, livePlayerNode != nil { return }
+        if isLiveRunning { teardownLive() }
+
+        do {
+            let format = AudioMasterBus.canonicalFormat
+            let player = AVAudioPlayerNode()
+            liveEngine.attach(player)
+            liveEngine.connect(player, to: liveEngine.mainMixerNode, format: format)
+            livePlayerNode = player
+
+            let deviceFormat = liveEngine.outputNode.inputFormat(forBus: 0)
+            guard deviceFormat.sampleRate > 0, deviceFormat.channelCount > 0 else {
+                throw LiveMeterError.unavailableOutputFormat
+            }
+            try liveEngine.start()
+            installMeterTap(on: liveEngine.mainMixerNode, format: deviceFormat,
+                            suspendsForOfflineMeter: true)
+            liveTapInstalled = true
+            isLiveRunning = true
+            lastStartError = nil
+        } catch {
+            lastStartError = error.localizedDescription
+            teardownLive()
+            throw error
+        }
+    }
 
     /// Starts the live engine, installs the master mixer tap **after** the
     /// engine is running so the tap reads the actual hardware-matched output
@@ -155,6 +185,15 @@ final class AudioMasterBus {
 
     /// Stops the live engine and removes the mixer tap. Idempotent.
     func teardownLive() {
+        liveSchedulingTask?.cancel()
+        liveSchedulingTask = nil
+        liveQueuedFrames.reset()
+        if let player = livePlayerNode {
+            player.stop()
+            player.reset()
+            liveEngine.detach(player)
+            livePlayerNode = nil
+        }
         if liveTapInstalled {
             liveEngine.mainMixerNode.removeTap(onBus: 0)
             liveTapInstalled = false
@@ -181,6 +220,111 @@ final class AudioMasterBus {
         liveTapInstalled = true
     }
 
+    // MARK: - Live voice-cleanup scheduling
+
+    func updateLiveCleanupSettings(_ settings: VoiceCleanupSettings) {
+        liveCleanupSettingsStore.update(settings)
+    }
+
+    func scheduleLiveComposition(_ composition: AVComposition,
+                                 audioMix: AVAudioMix?,
+                                 startTime: CMTime = .zero,
+                                 onFailure: (@MainActor @Sendable (String) -> Void)? = nil) {
+        liveSchedulingTask?.cancel()
+        liveSchedulingTask = nil
+        liveQueuedFrames.reset()
+        currentLiveComposition = composition
+        currentLiveAudioMix = audioMix
+        guard isLiveRunning, let player = livePlayerNode else { return }
+
+        player.stop()
+        player.reset()
+        liveGainReductionStore.update(LiveGainReduction())
+
+        nonisolated(unsafe) let comp = composition
+        nonisolated(unsafe) let mix = audioMix
+        let settingsStore = liveCleanupSettingsStore
+        let queuedFrames = liveQueuedFrames
+        let gainReductionStore = liveGainReductionStore
+        liveSchedulingTask = Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                try await LiveVoiceCleanupPreviewPipeline.decodeProcessAndSchedule(
+                    composition: comp,
+                    audioMix: mix,
+                    startTime: startTime,
+                    settingsStore: settingsStore,
+                    queuedFrames: queuedFrames,
+                    gainReductionStore: gainReductionStore
+                ) { buffer, frames in
+                    await self?.scheduleLiveBuffer(LiveAudioPCMBufferBox(buffer: buffer),
+                                                   frameCount: frames)
+                }
+            } catch is CancellationError {
+                queuedFrames.reset()
+            } catch {
+                queuedFrames.reset()
+                let message = error.localizedDescription
+                await MainActor.run { [weak self] in
+                    self?.lastStartError = message
+                    onFailure?(message)
+                }
+            }
+        }
+    }
+
+    func stopLivePreviewAudio() {
+        liveSchedulingTask?.cancel()
+        liveSchedulingTask = nil
+        liveQueuedFrames.reset()
+        currentLiveComposition = nil
+        currentLiveAudioMix = nil
+        livePlayerNode?.stop()
+        livePlayerNode?.reset()
+        liveGainReductionStore.update(LiveGainReduction())
+    }
+
+    @MainActor
+    private func scheduleLiveBuffer(_ box: LiveAudioPCMBufferBox, frameCount: Int) {
+        guard let player = livePlayerNode else {
+            liveQueuedFrames.remove(frameCount)
+            return
+        }
+        liveQueuedFrames.add(frameCount)
+        let queuedFrames = liveQueuedFrames
+        player.scheduleBuffer(box.buffer) {
+            queuedFrames.remove(frameCount)
+        }
+    }
+
+    func seekLivePreview(to time: CMTime,
+                         composition: AVComposition,
+                         audioMix: AVAudioMix?,
+                         onFailure: (@MainActor @Sendable (String) -> Void)? = nil) {
+        livePlayerNode?.pause()
+        scheduleLiveComposition(composition, audioMix: audioMix, startTime: time, onFailure: onFailure)
+    }
+
+    func seekLivePreview(to time: CMTime,
+                         onFailure: (@MainActor @Sendable (String) -> Void)? = nil) {
+        guard let composition = currentLiveComposition else { return }
+        seekLivePreview(to: time,
+                        composition: composition,
+                        audioMix: currentLiveAudioMix,
+                        onFailure: onFailure)
+    }
+
+    func pauseLivePreview() {
+        livePlayerNode?.pause()
+    }
+
+    func resumeLivePreview() {
+        livePlayerNode?.play()
+    }
+
+    func readLiveGainReduction() -> LiveGainReduction {
+        liveGainReductionStore.read()
+    }
+
     /// Failures raised while bringing the live metering graph up.
     private enum LiveMeterError: LocalizedError {
         /// The live engine started but its main mixer reported no usable output
@@ -202,9 +346,9 @@ final class AudioMasterBus {
     /// format and frame count, attaches a meter tap, and starts the engine so
     /// `renderOfflineBlock(into:)` can pull data through it.
     ///
-    /// `setVoiceProcessingEnabled(_:)` is **never** called on this engine —
-    /// the API refuses `.offline`. Phase 36's denoiser will attach a vDSP
-    /// `AVAudioUnit` here instead.
+    /// `setVoiceProcessingEnabled(_:)` is **never** called on this engine:
+    /// Phase 36's cleanup is a master-bus/export concern for existing media,
+    /// not the input-node microphone processing used by capture phases.
     ///
     /// Setup is wrapped so a failure (manual-rendering enable, start) tears
     /// down the partially-attached graph before rethrowing — a later retry
@@ -314,8 +458,8 @@ final class AudioMasterBus {
         guard frameCount > 0,
               let channelData = buffer.floatChannelData else {
             return AudioMeterSnapshot(peakLeft: 0, peakRight: 0,
-                                      rmsLeft: 0, rmsRight: 0,
-                                      sampledAt: ContinuousClock.now)
+                                       rmsLeft: 0, rmsRight: 0,
+                                       sampledAt: ContinuousClock.now)
         }
         let channelCount = Int(buffer.format.channelCount)
         let length = vDSP_Length(frameCount)
@@ -331,9 +475,10 @@ final class AudioMasterBus {
         let l = reduce(channelData[0])
         let r = channelCount > 1 ? reduce(channelData[1]) : l
         return AudioMeterSnapshot(peakLeft: l.peak, peakRight: r.peak,
-                                  rmsLeft: l.rms, rmsRight: r.rms,
-                                  sampledAt: ContinuousClock.now)
+                                   rmsLeft: l.rms, rmsRight: r.rms,
+                                   sampledAt: ContinuousClock.now)
     }
+
 }
 
 // MARK: - Audio-mix parameter helpers (composition integration, R2.1 / R2.3)
@@ -345,8 +490,8 @@ final class AudioMasterBus {
 ///
 /// **Pan is not applied here.** `TrackInput.pan` is stored and persisted, but
 /// applying it requires an `AVAudioMixerNode.pan` write on the live graph and
-/// a panner node on the offline graph — both deferred to Phase 36 where the
-/// bus actually owns the audio rendering path. Until then, the UI does not
+/// a panner node on the offline graph — both deferred until the bus actually
+/// owns the live audio rendering path. Until then, the UI does not
 /// expose a pan control, so a project's pan field stays at its default.
 enum AudioBusMixing {
 

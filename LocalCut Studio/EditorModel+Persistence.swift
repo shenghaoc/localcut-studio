@@ -44,6 +44,8 @@ struct ProjectState: Equatable {
     var masterGain: Float
     /// Per-audio-track pan + gain on the bus.
     var trackInputs: [TrackInput]
+    /// Phase 36 bus insert settings.
+    var voiceCleanup: VoiceCleanupSettings
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
@@ -62,6 +64,7 @@ struct ProjectState: Equatable {
             && lhs.lutDisplayNames == rhs.lutDisplayNames
             && lhs.masterGain == rhs.masterGain
             && lhs.trackInputs == rhs.trackInputs
+            && lhs.voiceCleanup == rhs.voiceCleanup
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
@@ -101,6 +104,7 @@ extension EditorModel {
             lutDisplayNames: lutDisplayNames,
             masterGain: project.masterGain,
             trackInputs: project.trackInputs,
+            voiceCleanup: project.voiceCleanup,
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID,
             selectedMarkerID: selectedMarkerID)
@@ -173,6 +177,7 @@ extension EditorModel {
         project.markers = state.markers
         project.masterGain = state.masterGain
         project.trackInputs = state.trackInputs
+        project.voiceCleanup = state.voiceCleanup
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID
@@ -197,6 +202,7 @@ extension EditorModel {
 
     /// Performs a discrete, immediately-committed mutation as one undo step.
     func performUndoable(_ name: String, mutate: () -> Void) {
+        invalidateLoudnessMeasurement()
         commitCoalescedUndo()
         let before = captureState()
         mutate()
@@ -221,6 +227,7 @@ extension EditorModel {
     /// adjacent gestures never fold into one undo step.
     func performCoalescedUndoable(_ name: String, target: AnyHashable?,
                                   rebuild mode: RebuildMode, mutate: () -> Void) {
+        invalidateLoudnessMeasurement()
         if coalescedUndoBefore != nil,
            coalescedUndoName != name || coalescedUndoTarget != target {
             commitCoalescedUndo()
@@ -327,6 +334,7 @@ extension EditorModel {
 extension EditorModel {
     /// Replaces the current project with an empty one (File ▸ New).
     func newDocument() {
+        invalidateLoudnessMeasurement()
         documentController.newDocument(model: self)
     }
 
@@ -353,6 +361,7 @@ extension EditorModel {
               bundleAccessDidStart: Bool = false,
               bundleFingerprints: FingerprintIndex = FingerprintIndex(),
               externallyEditedAssets: [String] = []) async {
+        invalidateLoudnessMeasurement()
         await documentController.load(document: document,
                                       from: url,
                                       bundleURL: bundleURL,

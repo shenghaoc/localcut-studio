@@ -57,6 +57,125 @@ extension EditorModel {
         }
     }
 
+    /// Updates the Phase 36 voice-cleanup insert settings. Continuous slider
+    /// gestures use the coalesced path; toggles and preset changes use the
+    /// discrete path.
+    func updateVoiceCleanup(_ name: String = "Adjust Voice Cleanup",
+                            coalesced: Bool = false,
+                            target: AnyHashable = AnyHashable("audio.voiceCleanup"),
+                            mutate: (inout VoiceCleanupSettings) -> Void) {
+        let apply: () -> Void = { [self] in
+            let wasPreviewActive = project.voiceCleanup.requiresOfflineProcessing
+            var settings = project.voiceCleanup
+            mutate(&settings)
+            settings.clamp()
+            project.voiceCleanup = settings
+            audioBus.updateLiveCleanupSettings(settings)
+            if wasPreviewActive != settings.requiresOfflineProcessing {
+                scheduleRebuild()
+            }
+        }
+        if coalesced {
+            performCoalescedUndoable(name, target: target, rebuild: .skip, mutate: apply)
+        } else {
+            performUndoable(name, mutate: apply)
+        }
+    }
+
+    func applyLoudnessAnalysis(_ result: LoudnessAnalysisResult) {
+        updateVoiceCleanup("Apply Loudness Normalisation") { settings in
+            settings.loudness.enabled = result.gainDB != 0
+            settings.loudness.measuredLUFS = result.measuredLUFS.isFinite ? result.measuredLUFS : nil
+            settings.loudness.appliedGainDB = result.gainDB
+            settings.loudness.statusNote = result.note
+        }
+        if let note = result.note {
+            statusMessage = note
+        } else if result.measuredLUFS.isFinite {
+            statusMessage = "Measured \(String(format: "%.1f", result.measuredLUFS)) LUFS; applying \(String(format: "%+.1f", result.gainDB)) dB."
+        } else {
+            statusMessage = "Loudness could not be measured."
+        }
+    }
+
+    /// Discards any in-flight loudness measurement by advancing the token, so a
+    /// result computed against a now-changed project is ignored before it can be
+    /// applied. Called from the central edit and document-load paths.
+    func invalidateLoudnessMeasurement() {
+        loudnessTask?.cancel()
+        loudnessTask = nil
+        loudnessMeasurementToken &+= 1
+    }
+
+    func measureCurrentProjectLoudness() {
+        // Cancel any prior measurement before handling the new request, including
+        // the short-duration path below.
+        invalidateLoudnessMeasurement()
+        let duration = project.duration.seconds
+        guard duration >= 3 else {
+            applyLoudnessAnalysis(LoudnessAnalysisResult(
+                measuredLUFS: -.infinity,
+                targetLUFS: project.voiceCleanup.loudness.targetLUFS,
+                gainDB: 0,
+                durationSeconds: max(0, duration),
+                note: "Normalisation skipped: selection is shorter than 3 seconds."))
+            return
+        }
+
+        // Remember which generation this run belongs to; stale results are
+        // dropped at the apply site below.
+        let token = loudnessMeasurementToken
+        statusMessage = "Measuring loudness…"
+        loudnessTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                guard let built = try await CompositionBuilder.build(project: project, showSkinMask: showSkinMask) else {
+                    guard token == loudnessMeasurementToken else { return }
+                    applyLoudnessAnalysis(LoudnessAnalysisResult(
+                        measuredLUFS: -.infinity,
+                        targetLUFS: project.voiceCleanup.loudness.targetLUFS,
+                        gainDB: 0,
+                        durationSeconds: 0,
+                        note: "Normalisation skipped: project has no renderable audio."))
+                    return
+                }
+                // `measureLoudness` decodes and DSP-processes the whole project
+                // synchronously, so keep it off the main actor to avoid freezing
+                // the UI during measurement. The composition is a freshly-built
+                // local value consumed only by this detached task, so confining
+                // it with `nonisolated(unsafe)` is sound under Swift 6 (mirrors
+                // the writer path in RenderQueue).
+                let settings = project.voiceCleanup
+                let duration = built.duration
+                nonisolated(unsafe) let composition = built.composition
+                nonisolated(unsafe) let audioMix = built.audioMix
+                let worker = Task.detached(priority: .userInitiated) {
+                    try VoiceCleanupAudioProcessing.measureLoudness(
+                        composition: composition,
+                        audioMix: audioMix,
+                        duration: duration,
+                        settings: settings)
+                }
+                let result = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+                // Drop the result if the project moved on while we measured.
+                guard token == loudnessMeasurementToken else { return }
+                loudnessTask = nil
+                applyLoudnessAnalysis(result)
+            } catch is CancellationError {
+                guard token == loudnessMeasurementToken else { return }
+                loudnessTask = nil
+            } catch {
+                guard token == loudnessMeasurementToken else { return }
+                loudnessTask = nil
+                statusMessage = "Loudness measurement failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
     /// Replaces the volume envelope on a clip. Drag gestures fold via the
     /// coalesced path; discrete edits (preset / reset) take the immediate path.
     func setClipVolumeEnvelope(_ envelope: VolumeEnvelope, clipID: Clip.ID,
