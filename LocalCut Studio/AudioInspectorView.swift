@@ -112,6 +112,12 @@ struct AudioInspectorView: View {
                 }
                 .accessibilityLabel("Insert order: denoiser, gate, compressor, limiter")
             }
+            if model.audioBus.isLiveRunning && model.project.voiceCleanup.requiresOfflineProcessing {
+                SwiftUI.TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { _ in
+                    gainReductionRows(model.audioBus.readLiveGainReduction())
+                }
+                .accessibilityLabel("Voice cleanup gain reduction meters")
+            }
 
             Toggle("Denoiser", isOn: insertEnabledBinding(\.denoiser.bypass, target: "audio.voiceCleanup.denoiser.bypass"))
                 .accessibilityLabel("Denoiser enabled")
@@ -228,6 +234,16 @@ struct AudioInspectorView: View {
                                  value: voiceCleanupBinding(\.compressor.makeupGainDB, target: "audio.voiceCleanup.compressor.makeup"),
                                  range: -24 ... 24, step: 0.5,
                                  onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+                LabeledSliderRow(label: "Attack",
+                                 display: String(format: "%.1f ms", model.project.voiceCleanup.compressor.attackMS),
+                                 value: voiceCleanupBinding(\.compressor.attackMS, target: "audio.voiceCleanup.compressor.attack"),
+                                 range: 0.1 ... 100, step: 0.1,
+                                 onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+                LabeledSliderRow(label: "Release",
+                                 display: String(format: "%.0f ms", model.project.voiceCleanup.compressor.releaseMS),
+                                 value: voiceCleanupBinding(\.compressor.releaseMS, target: "audio.voiceCleanup.compressor.release"),
+                                 range: 1 ... 1000, step: 1,
+                                 onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
             }
 
             Toggle("Limiter", isOn: insertEnabledBinding(\.limiter.bypass, target: "audio.voiceCleanup.limiter.bypass"))
@@ -238,17 +254,40 @@ struct AudioInspectorView: View {
                                  value: voiceCleanupBinding(\.limiter.ceilingDB, target: "audio.voiceCleanup.limiter.ceiling"),
                                  range: -9 ... -0.1, step: 0.1,
                                  onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
-                // The limiter is currently a hard clipper (`applyLimiter`), so
-                // `LimiterSettings.releaseMS` has no audible effect yet. The
-                // Release control is deferred until the look-ahead limiter lands
-                // (tracked in the Phase 36 tasks) to avoid exposing a no-op knob.
+                LabeledSliderRow(label: "Release",
+                                 display: String(format: "%.0f ms", model.project.voiceCleanup.limiter.releaseMS),
+                                 value: voiceCleanupBinding(\.limiter.releaseMS, target: "audio.voiceCleanup.limiter.release"),
+                                 range: 1 ... 1000, step: 1,
+                                 onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
             }
+        }
+    }
 
-            LabeledContent("Latency Budget") {
-                Text("≤25 ms")
+    @ViewBuilder
+    private func gainReductionRows(_ reduction: LiveGainReduction) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent("Denoiser") {
+                Text("\(Int(reduction.denoiserReduction * 100))%")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent("Gate") {
+                Text(String(format: "%+.1f dB", reduction.gateReductionDB))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent("Compressor") {
+                Text(String(format: "%+.1f dB", reduction.compressorReductionDB))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent("Limiter") {
+                Text(String(format: "%+.1f dB", reduction.limiterReductionDB))
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
         }
+        .font(.caption)
     }
 
     @ViewBuilder

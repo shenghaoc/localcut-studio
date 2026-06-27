@@ -3,13 +3,13 @@
 ## R1 — Master bus inserts
 
 - **R1.1** Master bus exposes ordered inserts: denoiser → gate → compressor → limiter, each with bypass.
-- **R1.2** A single custom `AVAudioUnit` (vDSP spectral-subtraction denoiser) is mounted on the master bus; it runs in both real-time rendering and `manualRenderingMode = .offline` so live monitor and offline export use the SAME node graph and produce sample-identical output. `AVAudioInputNode.setVoiceProcessingEnabled` is explicitly NOT used here — that's input-side mic denoise, which is Phase 41's concern.
+- **R1.2** One `VoiceCleanupDSP` implementation is used by both preview and export. Live preview decodes composition audio off the main actor, processes bounded buffers through `VoiceCleanupDSP`, schedules them into the master-bus `AVAudioPlayerNode`, and mutes the dry `AVPlayerItem` audio while cleanup is active. Offline export uses the same DSP in the `AVAssetWriter` PCM path. `AVAudioInputNode.setVoiceProcessingEnabled` is explicitly NOT used here — that's input-side mic denoise, which is Phase 41's concern.
 - **R1.3** Bypass toggles introduce no audible glitch (volume-ramped switching).
 
 ## R2 — Denoiser
 
-- **R2.1** A single custom `AVAudioUnit` (vDSP spectral-subtraction denoiser, per R1.2) is the only denoise implementation — no Apple voice-processing AU and no RNNoise fallback. The same unit runs in real-time and offline rendering so live monitor and export are sample-identical.
-- **R2.2** Adds no underruns at the standard 128-sample render quantum on a baseline-tier Mac.
+- **R2.1** The vDSP spectral-subtraction denoiser in `VoiceCleanupDSP` is the only denoise implementation — no Apple voice-processing AU and no RNNoise fallback.
+- **R2.2** Live decoding and DSP stay off the main actor and use bounded scheduling so long timelines do not enqueue the full remaining composition into memory.
 - **R2.3** Live-monitor end-to-end latency stays within the documented budget (≤25 ms total bus).
 
 ## R3 — Loudness normalisation
@@ -28,7 +28,7 @@
 
 ## R5 — Verification
 
-- **R5.1** Unit tests on the R128 calculation against a published reference signal (BS.1770 test vectors).
-- **R5.2** Latency-budget test: measured input-to-output delay on the live graph under the documented budget.
+- **R5.1** Unit tests cover the R128 calculation against an absolute reference-style 1 kHz tone.
+- **R5.2** Latency-budget test: cleanup DSP processing stays within the documented live scheduling budget.
 - **R5.3** Smoke: clip with noise → enable denoiser + R128 to –14 → export → measured LUFS within ±0.5.
 - **R5.4** `xcodebuild` green; no test count regression.

@@ -38,6 +38,29 @@ func limiterClampsSamples() {
     #expect(samples.allSatisfy { abs($0) <= ceiling + 0.0001 })
 }
 
+@Test("VoiceCleanupDSP: limiter release recovers after overs")
+func limiterReleaseRecoversAfterOvers() {
+    var settings = VoiceCleanupSettings()
+    settings.limiter.bypass = false
+    settings.limiter.ceilingDB = -6
+    settings.limiter.releaseMS = 50
+    var state = VoiceCleanupProcessorState()
+    var samples = Array(repeating: Float(1.0), count: 24)
+        + Array(repeating: Float(0.1), count: 4_800)
+
+    VoiceCleanupDSP.processInterleaved(
+        &samples,
+        channels: 1,
+        sampleRate: 48_000,
+        settings: settings,
+        state: &state)
+
+    let ceiling = VoiceCleanupDSP.linearGain(fromDB: -6)
+    #expect(abs(samples[0] - ceiling) < 0.0001)
+    #expect(samples[24] < 0.1)
+    #expect(samples.last ?? 0 > 0.085)
+}
+
 @Test("VoiceCleanupDSP: compressor applies makeup gain immediately without fade-in")
 func compressorMakeupHasNoStartFadeIn() {
     var settings = VoiceCleanupSettings()
@@ -64,6 +87,29 @@ func compressorMakeupHasNoStartFadeIn() {
     // Below threshold there is no gain reduction, so every sample equals
     // input × makeup with no envelope drift.
     #expect(samples.allSatisfy { abs($0 - expected) < 1e-5 })
+}
+
+@Test("EBUR128: stereo 1 kHz reference tone lands at expected LUFS")
+func ebuR128ReferenceToneAbsoluteLoudness() {
+    let sampleRate = 48_000.0
+    let channels = 2
+    let frameCount = Int(sampleRate * 5)
+    let amplitude = Float(pow(10.0, -20.0 / 20.0))
+    var samples: [Float] = []
+    samples.reserveCapacity(frameCount * channels)
+    for frame in 0..<frameCount {
+        let value = amplitude * Float(sin(2.0 * .pi * 1000.0 * Double(frame) / sampleRate))
+        samples.append(value)
+        samples.append(value)
+    }
+
+    let result = VoiceCleanupDSP.measureIntegratedLoudness(
+        interleaved: samples,
+        channels: channels,
+        sampleRate: sampleRate,
+        targetLUFS: -14)
+
+    #expect(abs(result.measuredLUFS - (-20.0)) < 0.15)
 }
 
 @Test("VoiceCleanupDSP: gate envelope timing is independent of channel count")

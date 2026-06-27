@@ -65,12 +65,15 @@ extension EditorModel {
                             target: AnyHashable = AnyHashable("audio.voiceCleanup"),
                             mutate: (inout VoiceCleanupSettings) -> Void) {
         let apply: () -> Void = { [self] in
+            let wasPreviewActive = project.voiceCleanup.requiresOfflineProcessing
             var settings = project.voiceCleanup
             mutate(&settings)
             settings.clamp()
             project.voiceCleanup = settings
-            // Sync to live audio chain so inspector edits reach the DSP.
             audioBus.updateLiveCleanupSettings(settings)
+            if wasPreviewActive != settings.requiresOfflineProcessing {
+                scheduleRebuild()
+            }
         }
         if coalesced {
             performCoalescedUndoable(name, target: target, rebuild: .skip, mutate: apply)
@@ -99,6 +102,8 @@ extension EditorModel {
     /// result computed against a now-changed project is ignored before it can be
     /// applied. Called from the central edit and document-load paths.
     func invalidateLoudnessMeasurement() {
+        loudnessTask?.cancel()
+        loudnessTask = nil
         loudnessMeasurementToken &+= 1
     }
 
@@ -114,8 +119,6 @@ extension EditorModel {
             return
         }
 
-        // Cancel any in-flight measurement to prevent concurrent operations.
-        loudnessTask?.cancel()
         // Supersede any prior measurement and remember which generation this run
         // belongs to; stale results are dropped at the apply site below.
         invalidateLoudnessMeasurement()
@@ -153,9 +156,14 @@ extension EditorModel {
                 }.value
                 // Drop the result if the project moved on while we measured.
                 guard token == loudnessMeasurementToken else { return }
+                loudnessTask = nil
                 applyLoudnessAnalysis(result)
+            } catch is CancellationError {
+                guard token == loudnessMeasurementToken else { return }
+                loudnessTask = nil
             } catch {
                 guard token == loudnessMeasurementToken else { return }
+                loudnessTask = nil
                 statusMessage = "Loudness measurement failed: \(error.localizedDescription)"
             }
         }

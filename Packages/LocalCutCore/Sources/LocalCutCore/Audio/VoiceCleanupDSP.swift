@@ -4,10 +4,12 @@ import Accelerate
 public struct VoiceCleanupProcessorState: Sendable {
     public var gateGain: Float
     public var compressorGain: Float
+    public var limiterGain: Float
 
-    public init(gateGain: Float = 1, compressorGain: Float = 1) {
+    public init(gateGain: Float = 1, compressorGain: Float = 1, limiterGain: Float = 1) {
         self.gateGain = gateGain
         self.compressorGain = compressorGain
+        self.limiterGain = limiterGain
     }
 }
 
@@ -103,7 +105,8 @@ public enum VoiceCleanupDSP {
             vDSP_vsmul(samples, 1, &gain, &samples, 1, vDSP_Length(samples.count))
         }
         if !clamped.limiter.bypass {
-            applyLimiter(to: &samples, settings: clamped.limiter)
+            applyLimiter(to: &samples, channels: channels, sampleRate: sampleRate,
+                         settings: clamped.limiter, gain: &state.limiterGain)
         }
     }
 
@@ -161,7 +164,8 @@ public enum VoiceCleanupDSP {
             targetBypass: bypassRamp.limiterTargetBypass,
             rampFrames: bypassRamp.rampFrames
         ) { stageSamples in
-            applyLimiter(to: &stageSamples, settings: clamped.limiter)
+            applyLimiter(to: &stageSamples, channels: channels, sampleRate: sampleRate,
+                         settings: clamped.limiter, gain: &state.limiterGain)
         }
     }
 
@@ -274,10 +278,33 @@ public enum VoiceCleanupDSP {
         }
     }
 
-    private static func applyLimiter(to samples: inout [Float], settings: LimiterSettings) {
+    private static func applyLimiter(to samples: inout [Float],
+                                     channels: Int,
+                                     sampleRate: Double,
+                                     settings: LimiterSettings,
+                                     gain: inout Float) {
         let ceiling = linearGain(fromDB: settings.ceilingDB)
-        for index in samples.indices {
-            samples[index] = max(-ceiling, min(ceiling, samples[index]))
+        let release = smoothingCoefficient(milliseconds: settings.releaseMS, sampleRate: sampleRate)
+        var frame = 0
+        while frame < samples.count {
+            let end = min(frame + channels, samples.count)
+            var magnitude: Float = 0
+            for i in frame..<end { magnitude = max(magnitude, abs(samples[i])) }
+
+            let targetGain = magnitude > ceiling && magnitude > 0
+                ? min(1, ceiling / magnitude)
+                : Float(1)
+            if targetGain < gain {
+                gain = targetGain
+            } else {
+                gain += (targetGain - gain) * release
+            }
+
+            for i in frame..<end {
+                let limited = samples[i] * gain
+                samples[i] = max(-ceiling, min(ceiling, limited))
+            }
+            frame += channels
         }
     }
 

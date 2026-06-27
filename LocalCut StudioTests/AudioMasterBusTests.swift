@@ -341,6 +341,26 @@ func writerPathSampleBufferMeterCopiesFragmentedBlockBuffer() throws {
     #expect(snapshot.rmsRight == 0)
 }
 
+@Test("VoiceCleanup: writer-path sample processing applies loudness gain")
+func writerPathVoiceCleanupProcessAppliesLoudnessGain() throws {
+    let samples = Array<Int16>(repeating: 8_192, count: 2_048)
+    let sampleBuffer = try makePCMInt16SampleBuffer(samples: samples, channels: 2)
+    let dry = try #require(RenderQueue.audioMeterSnapshot(from: sampleBuffer))
+
+    var settings = VoiceCleanupSettings()
+    settings.loudness.enabled = true
+    settings.loudness.appliedGainDB = 6
+    var state = VoiceCleanupProcessorState()
+
+    let processed = try #require(VoiceCleanupAudioProcessing.process(
+        sample: sampleBuffer,
+        settings: settings,
+        state: &state))
+    let wet = try #require(RenderQueue.audioMeterSnapshot(from: processed))
+    #expect(wet.rmsLeft > dry.rmsLeft * 1.8)
+    #expect(wet.rmsRight > dry.rmsRight * 1.8)
+}
+
 @Test("RenderQueue: offline meter ignores non-Int16 PCM sample buffers")
 func writerPathSampleBufferMeterRejectsUnsupportedPCM() throws {
     let sampleBuffer = try makePCMFloat32SampleBuffer(samples: [1, 0, -1, 0], channels: 2)
@@ -862,8 +882,8 @@ private func loadAudioMedia(from url: URL) async throws -> MediaItem {
 @Test("VoiceCleanup: live cleanup chain processes audio within latency budget (T3.5)")
 func liveCleanupLatencyBudget() {
     // The latency budget is defined in the design as ≤25 ms.
-    // The cleanup tap processes 1024-sample blocks at 48 kHz, which is ~21.3 ms.
-    // Adding the bypass ramp processing, we should stay well under 25 ms.
+    // The live cleanup path processes 1024-sample blocks at 48 kHz, which is
+    // ~21.3 ms. Adding the bypass ramp processing should stay under 25 ms.
     let maxLatencyMs: Double = 25.0
     let sampleRate: Double = 48_000
     let frameCount = 1024
@@ -976,7 +996,7 @@ func bypassRampStateAdvancesWithoutOvershoot() {
 func exportSmokeFixtureLoudness() async throws {
     // Create a noisy audio fixture.
     let sampleRate: Double = 48_000
-    let duration: Double = 5.0
+    let duration: Double = 31.0
     let frameCount = Int(sampleRate * duration)
 
     let url = FileManager.default.temporaryDirectory
@@ -996,13 +1016,13 @@ func exportSmokeFixtureLoudness() async throws {
     }
     buffer.frameLength = AVAudioFrameCount(frameCount)
 
-    // Generate a sine wave at -20 dBFS with noise.
+    // Generate a deterministic sine wave at -20 dBFS with low stationary noise.
     if let channelData = buffer.floatChannelData {
         let amplitude: Float = 0.1  // -20 dBFS
         let frequency: Float = 1000
         for frame in 0..<frameCount {
             let sine = amplitude * sin(2.0 * .pi * Float(frequency) * Float(frame) / Float(sampleRate))
-            let noise = Float.random(in: -0.01...0.01)
+            let noise = Float(0.01 * sin(2.0 * .pi * 173.0 * Double(frame) / sampleRate))
             channelData[0][frame] = sine + noise
         }
     }
@@ -1010,6 +1030,9 @@ func exportSmokeFixtureLoudness() async throws {
 
     // Load the media and create a project.
     let media = try await loadAudioMedia(from: url)
+    media.bookmark = try url.bookmarkData(options: .withSecurityScope,
+                                          includingResourceValuesForKeys: nil,
+                                          relativeTo: nil)
     let project = Project()
     project.mediaItems.append(media)
     project.audioTracks[0].clips = [
@@ -1023,25 +1046,71 @@ func exportSmokeFixtureLoudness() async throws {
     project.voiceCleanup.loudness.enabled = true
     project.voiceCleanup.loudness.preset = .streaming  // -14 LUFS
 
-    // Build composition and measure loudness.
+    // Measure the cleanup path first, then apply the gain that the writer path
+    // should render into the exported file.
     let built = try #require(try await CompositionBuilder.build(project: project))
-
-    // Use the loudness measurement to verify the result.
     var settings = project.voiceCleanup
     settings.loudness.appliedGainDB = 0
     settings.loudness.enabled = false
-
     let result = try VoiceCleanupAudioProcessing.measureLoudness(
         composition: built.composition,
         audioMix: built.audioMix,
         duration: built.duration,
         settings: settings)
+    #expect(result.measuredLUFS.isFinite, "Measured loudness should be finite")
+    project.voiceCleanup.loudness.appliedGainDB = result.gainDB
+    project.voiceCleanup.loudness.measuredLUFS = result.measuredLUFS
 
-    // The measured loudness should be finite.
-    #expect(result.measuredLUFS.isFinite,
-            "Measured loudness should be finite")
+    let outputURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("voice-cleanup-export-\(UUID().uuidString).mp4")
+    FileManager.default.createFile(atPath: outputURL.path, contents: Data())
+    defer { try? FileManager.default.removeItem(at: outputURL) }
+    let outputBookmark = try outputURL.bookmarkData(options: .withSecurityScope,
+                                                    includingResourceValuesForKeys: nil,
+                                                    relativeTo: nil)
 
-    // The gain to reach -14 LUFS should be reasonable (within ±30 dB).
-    #expect(abs(result.gainDB) < 30,
-            "Gain \(result.gainDB) dB is unreasonably large")
+    let queue = RenderQueue(persistsToDisk: false)
+    queue.enqueueWithDefaultPreset(outputURL: outputURL, project: project, bookmark: outputBookmark)
+    try await waitForRenderQueueToSettle(queue, expectedCount: 1, timeout: 60)
+    let job = try #require(queue.jobs.first)
+    #expect(job.status == .completed, "Export failed: \(job.errorMessage ?? "unknown error")")
+
+    let exported = AVURLAsset(url: outputURL)
+    let exportedDuration = try await exported.load(.duration)
+    let exportedAudio = try await exported.loadTracks(withMediaType: .audio)
+    let sourceAudio = try #require(exportedAudio.first)
+    let exportedComposition = AVMutableComposition()
+    let exportedTrack = try #require(exportedComposition.addMutableTrack(
+        withMediaType: .audio,
+        preferredTrackID: kCMPersistentTrackID_Invalid))
+    try exportedTrack.insertTimeRange(
+        CMTimeRange(start: .zero, duration: exportedDuration),
+        of: sourceAudio,
+        at: .zero)
+
+    let measuredExport = try VoiceCleanupAudioProcessing.measureLoudness(
+        composition: exportedComposition,
+        audioMix: nil,
+        duration: exportedDuration.seconds,
+        settings: VoiceCleanupSettings())
+    #expect(abs(measuredExport.measuredLUFS - project.voiceCleanup.loudness.targetLUFS) <= 0.5,
+            "Export measured \(measuredExport.measuredLUFS) LUFS, expected \(project.voiceCleanup.loudness.targetLUFS) ±0.5")
+}
+
+@MainActor
+private func waitForRenderQueueToSettle(
+    _ queue: RenderQueue,
+    expectedCount: Int,
+    timeout: TimeInterval
+) async throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if queue.jobs.count == expectedCount,
+           !queue.isRunning,
+           queue.jobs.allSatisfy(\.isTerminal) {
+            return
+        }
+        try await Task.sleep(for: .milliseconds(20))
+    }
+    Issue.record("Render queue did not settle before timeout")
 }

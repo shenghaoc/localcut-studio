@@ -16,8 +16,8 @@ final class EditorModel {
     /// Runtime audio master bus (P16). Owns the live + offline `AVAudioEngine`
     /// graphs and the peak/RMS meter snapshot; persistent parameters live on
     /// `project`. Created here so the inspector can bind to a stable instance
-    /// for the editor's lifetime; engine startup is deferred to Phase 36 so
-    /// landing the bus does not regress the current `AVPlayer` preview path.
+    /// for the editor's lifetime; live graph startup stays lazy so opening a
+    /// project does not start audio hardware until metering or cleanup needs it.
     let audioBus = AudioMasterBus()
 
     // Selection
@@ -242,6 +242,7 @@ final class EditorModel {
             guard notification.object as? AVPlayerItem == self?.player.currentItem else { return }
             MainActor.assumeIsolated {
                 self?.isPlaying = false
+                self?.audioBus.pauseLivePreview()
             }
         }
 
@@ -1170,15 +1171,23 @@ final class EditorModel {
         guard hasPreviewItem else { return }
         if isPlaying {
             player.pause()
-            audioBus.pauseLivePreview()
+            if project.voiceCleanup.requiresOfflineProcessing {
+                audioBus.pauseLivePreview()
+            }
             isPlaying = false
         } else {
             if currentTime >= totalDuration - 0.05 {
                 player.seek(to: .zero)
-                audioBus.seekLivePreview(to: .zero)
+                if project.voiceCleanup.requiresOfflineProcessing {
+                    audioBus.seekLivePreview(to: .zero) { [weak self] message in
+                        self?.statusMessage = "Live voice cleanup unavailable: \(message)"
+                    }
+                }
             }
             player.play()
-            audioBus.resumeLivePreview()
+            if project.voiceCleanup.requiresOfflineProcessing {
+                audioBus.resumeLivePreview()
+            }
             isPlaying = true
         }
     }
@@ -1196,23 +1205,28 @@ final class EditorModel {
         currentTime = clamped
         let time = CMTime(seconds: clamped, preferredTimescale: 600)
         player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
-        audioBus.seekLivePreview(to: time)
+        if project.voiceCleanup.requiresOfflineProcessing {
+            audioBus.seekLivePreview(to: time) { [weak self] message in
+                self?.statusMessage = "Live voice cleanup unavailable: \(message)"
+            }
+            if isPlaying {
+                audioBus.resumeLivePreview()
+            }
+        }
     }
 
     // MARK: - Audio metering
 
     func prepareAudioMetering() {
-        do {
-            try audioBus.prepareLiveForPreview()
-            statusMessage = "Live preview audio started."
-        } catch {
-            // Fallback to metering-only mode.
+        if project.voiceCleanup.requiresOfflineProcessing {
+            rebuildDebounced(after: .milliseconds(0))
+        } else {
             audioBus.prepareLive()
-            if let error = audioBus.lastStartError {
-                statusMessage = "Live metering unavailable: \(error)"
-            } else if audioBus.isLiveRunning {
-                statusMessage = "Live metering started."
-            }
+        }
+        if let error = audioBus.lastStartError {
+            statusMessage = "Live metering unavailable: \(error)"
+        } else if audioBus.isLiveRunning {
+            statusMessage = "Live metering started."
         }
     }
 

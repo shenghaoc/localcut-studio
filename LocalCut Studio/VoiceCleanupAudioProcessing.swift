@@ -178,22 +178,6 @@ enum VoiceCleanupAudioProcessing {
             blockBufferOut: &blockBuffer)
         guard createStatus == noErr, let blockBuffer else { return nil }
 
-        var lengthAtOffset = 0
-        var totalLength = 0
-        var dataPointer: UnsafeMutablePointer<Int8>?
-        let pointerStatus = CMBlockBufferGetDataPointer(
-            blockBuffer,
-            atOffset: 0,
-            lengthAtOffsetOut: &lengthAtOffset,
-            totalLengthOut: &totalLength,
-            dataPointerOut: &dataPointer)
-        guard pointerStatus == noErr,
-              let dataPointer,
-              lengthAtOffset >= byteCount,
-              totalLength >= byteCount else {
-            return nil
-        }
-
         var low: Float = -1.0
         var high: Float = 0.999_969_5
         var clamped = Array<Float>(unsafeUninitializedCapacity: samples.count) { buffer, initializedCount in
@@ -206,8 +190,18 @@ enum VoiceCleanupAudioProcessing {
         }
         var scale = Float(32767.0)
         vDSP_vsmul(clamped, 1, &scale, &clamped, 1, vDSP_Length(clamped.count))
-        dataPointer.withMemoryRebound(to: Int16.self, capacity: samples.count) { int16Pointer in
-            vDSP_vfix16(clamped, 1, int16Pointer, 1, vDSP_Length(clamped.count))
+        var quantized = Array<Int16>(repeating: 0, count: samples.count)
+        vDSP_vfix16(clamped, 1, &quantized, 1, vDSP_Length(clamped.count))
+        let replaceStatus = quantized.withUnsafeBytes { bytes in
+            guard let source = bytes.baseAddress else { return OSStatus(-1) }
+            return CMBlockBufferReplaceDataBytes(
+                with: source,
+                blockBuffer: blockBuffer,
+                offsetIntoDestination: 0,
+                dataLength: byteCount)
+        }
+        guard replaceStatus == noErr else {
+            return nil
         }
 
         guard let formatDescription = CMSampleBufferGetFormatDescription(source) else {
@@ -228,6 +222,7 @@ enum VoiceCleanupAudioProcessing {
             duration: sampleDuration,
             presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(source),
             decodeTimeStamp: .invalid)
+        var sampleSize = channels * MemoryLayout<Int16>.size
         var output: CMSampleBuffer?
         let sampleStatus = CMSampleBufferCreate(
             allocator: kCFAllocatorDefault,
@@ -239,8 +234,8 @@ enum VoiceCleanupAudioProcessing {
             sampleCount: frameCount,
             sampleTimingEntryCount: 1,
             sampleTimingArray: &timing,
-            sampleSizeEntryCount: 0,
-            sampleSizeArray: nil,
+            sampleSizeEntryCount: 1,
+            sampleSizeArray: &sampleSize,
             sampleBufferOut: &output)
         guard sampleStatus == noErr else { return nil }
         return output
