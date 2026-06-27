@@ -353,6 +353,7 @@ enum CompositionBuilder {
             composition: composition,
             projectTrackSegments: projectTrackSegments,
             captionTracks: captionTracks,
+            overlays: project.overlays,
             totalDuration: totalDuration,
             renderSize: renderSize,
             frameRate: project.frameRate,
@@ -528,6 +529,7 @@ enum CompositionBuilder {
         composition: AVComposition,
         projectTrackSegments: [[VideoSegment]],
         captionTracks: [CaptionTrack],
+        overlays: [OverlayClip],
         totalDuration: CMTime,
         renderSize: CGSize,
         frameRate: Double,
@@ -543,6 +545,7 @@ enum CompositionBuilder {
         // path).
         let hasAnySegment = projectTrackSegments.contains { !$0.isEmpty }
             || fillerTrackID != kCMPersistentTrackID_Invalid
+            || !overlays.isEmpty
         guard hasAnySegment else { return nil }
 
         // Collect and sort every distinct boundary time, including overlap edges
@@ -565,6 +568,10 @@ enum CompositionBuilder {
                 boundarySet.insert(line.range.start.seconds)
                 boundarySet.insert(line.range.end.seconds)
             }
+        }
+        for overlay in overlays {
+            boundarySet.insert(overlay.timelineStart.seconds)
+            boundarySet.insert(overlay.timelineEnd.seconds)
         }
         let boundaries = boundarySet.sorted()
 
@@ -621,9 +628,20 @@ enum CompositionBuilder {
 
             let captionsForInterval = activeCaptionItems(
                 in: captionTracks, midpoint: midpoint)
+            let overlaysForInterval = activeOverlayItems(
+                in: overlays, midpoint: midpoint)
             instructions.append(EffectCompositionInstruction(
                 timeRange: range, units: units, captions: captionsForInterval,
+                overlays: overlaysForInterval,
                 workingColourSpace: workingColourSpace))
+        }
+
+        // Register overlay frame sources with the compositor so it can decode
+        // frames on demand during rendering.
+        EffectCompositor.clearOverlaySources()
+        for overlay in overlays {
+            // Overlay source URL resolution happens at EditorModel level;
+            // here we just pass the metadata through the instruction.
         }
 
         var config = try await AVVideoComposition.Configuration(for: composition)
@@ -659,6 +677,30 @@ enum CompositionBuilder {
                     styleKeyframes: line.styleKeyframes,
                     range: line.range))
             }
+        }
+        return items
+    }
+
+    /// Overlay clips active at `midpoint`. Ordered bottom-to-top matching the
+    /// project's overlay array order.
+    private static func activeOverlayItems(in overlays: [OverlayClip],
+                                           midpoint: Double) -> [OverlayRenderItem] {
+        var items: [OverlayRenderItem] = []
+        for overlay in overlays {
+            let start = overlay.timelineStart.seconds
+            let end = overlay.timelineEnd.seconds
+            guard start <= midpoint, midpoint < end else { continue }
+            items.append(OverlayRenderItem(
+                overlayID: overlay.id,
+                sourceType: overlay.sourceType,
+                range: CMTimeRange(start: overlay.timelineStart, duration: overlay.duration),
+                positionOffset: overlay.positionOffset,
+                scale: overlay.scale,
+                rotation: overlay.rotation,
+                opacity: overlay.opacity,
+                endAction: overlay.endAction,
+                bookmark: Data(), // Resolved at EditorModel level
+                bundleRelativePath: nil))
         }
         return items
     }

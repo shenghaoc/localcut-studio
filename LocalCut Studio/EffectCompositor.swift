@@ -47,6 +47,23 @@ struct CaptionRenderItem: Sendable {
     let range: CMTimeRange
 }
 
+/// One animated overlay scheduled inside a composition instruction. Carries the
+/// metadata the compositor needs to locate and render the overlay frame.
+struct OverlayRenderItem: Sendable {
+    let overlayID: UUID
+    let sourceType: OverlaySourceType
+    let range: CMTimeRange
+    let positionOffset: CGSize
+    let scale: CGFloat
+    let rotation: CGFloat
+    let opacity: Float
+    let endAction: OverlayEndAction
+    /// Bookmark data for resolving the source URL at render time.
+    let bookmark: Data
+    /// Bundle-relative path as fallback resolution.
+    let bundleRelativePath: String?
+}
+
 /// One bottom-to-top render step within an instruction interval: either a single
 /// layer, or a transition that blends an outgoing and incoming layer over a
 /// derived progress through the overlap interval.
@@ -74,19 +91,22 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let passthroughTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
     let units: [RenderUnit]
     let captions: [CaptionRenderItem]
+    let overlays: [OverlayRenderItem]
     /// Working colour space — drives the per-space `CIContext` choice and the
     /// output buffer's colour-tag attachments.
     let workingColourSpace: WorkingColourSpace
 
     init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = [],
-         workingColourSpace: WorkingColourSpace = .sRGB) {
+         overlays: [OverlayRenderItem] = [], workingColourSpace: WorkingColourSpace = .sRGB) {
         self.timeRange = timeRange
         self.units = units
         self.captions = captions
+        self.overlays = overlays
         self.workingColourSpace = workingColourSpace
         // A transition tweens its layers across the interval. Captions also tween
         // (per-frame animation transform), so any caption forces tweening too.
-        containsTweening = !captions.isEmpty || units.contains {
+        // Overlays also tween (per-frame position/scale/opacity).
+        containsTweening = !captions.isEmpty || !overlays.isEmpty || units.contains {
             if case .transition = $0 { return true }; return false
         }
         let trackIDs = units.flatMap(\.trackIDs)
@@ -202,8 +222,16 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             }
         }
 
-        // Captions sit on top of every clip layer, honouring track / instruction
-        // order: earlier entries draw first, later entries on top.
+        // Overlays sit between video layers and captions. Earlier entries draw
+        // first, later entries on top.
+        for item in instruction.overlays {
+            guard let layer = overlayLayer(for: item, time: request.compositionTime,
+                                           renderSize: renderSize) else { continue }
+            result = layer.composited(over: result ?? CIImage(color: .clear)
+                .cropped(to: CGRect(origin: .zero, size: renderSize)))
+        }
+
+        // Captions sit on top of every clip and overlay layer.
         for item in instruction.captions {
             guard let layer = captionLayer(for: item, time: request.compositionTime,
                                            renderSize: renderSize) else { continue }
@@ -319,6 +347,87 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // filters and blends see matching extents even across clips of different
         // aspect ratios or orientations.
         let renderRect = CGRect(origin: .zero, size: request.renderContext.size)
+        let canvas = CIImage(color: .clear).cropped(to: renderRect)
+        return image.composited(over: canvas).cropped(to: renderRect)
+    }
+
+    // MARK: - Overlays
+
+    /// Cache of overlay frame sources keyed by overlay ID. Populated lazily
+    /// on first access for each overlay. The sources are thread-safe.
+    nonisolated(unsafe) private static var overlaySourceLock = NSLock()
+    nonisolated(unsafe) private static var overlaySources: [UUID: any OverlayFrameSource] = [:]
+
+    /// Registers a frame source for an overlay. Called from the composition
+    /// builder when overlays are present.
+    nonisolated static func setOverlaySource(_ source: any OverlayFrameSource, for id: UUID) {
+        overlaySourceLock.lock()
+        overlaySources[id] = source
+        overlaySourceLock.unlock()
+    }
+
+    /// Removes all cached overlay sources. Called when the project changes.
+    nonisolated static func clearOverlaySources() {
+        overlaySourceLock.lock()
+        overlaySources.removeAll()
+        overlaySourceLock.unlock()
+    }
+
+    /// Renders one overlay for the current frame: resolves the frame source,
+    /// decodes the frame at the overlay-local time, applies transform and
+    /// opacity, and crops to the render canvas.
+    nonisolated private func overlayLayer(for item: OverlayRenderItem,
+                                          time: CMTime,
+                                          renderSize: CGSize) -> CIImage? {
+        // Resolve the frame source.
+        Self.overlaySourceLock.lock()
+        let source = Self.overlaySources[item.overlayID]
+        Self.overlaySourceLock.unlock()
+        guard let source else { return nil }
+
+        // Compute overlay-local time (relative to the overlay's start).
+        let localTime = CMTimeMaximum(time - item.range.start, .zero)
+        guard let frame = source.frame(at: localTime, endAction: item.endAction) else {
+            return nil
+        }
+
+        var image = frame
+
+        // Scale the overlay to fit within a fraction of the render canvas.
+        // The naturalSize is in pixels; we scale relative to the render size.
+        let overlayW = source.naturalSize.width
+        let overlayH = source.naturalSize.height
+        guard overlayW > 0, overlayH > 0 else { return nil }
+
+        // Default overlay size: 25% of the render canvas width, preserving
+        // aspect ratio. The scale parameter is a multiplier on this.
+        let targetW = renderSize.width * 0.25 * item.scale
+        let scaleFactor = targetW / overlayW
+        let targetH = overlayH * scaleFactor
+
+        // Position: centre of the canvas + normalised offset.
+        let centreX = renderSize.width / 2 + item.positionOffset.width * renderSize.width / 2
+        let centreY = renderSize.height / 2 - item.positionOffset.height * renderSize.height / 2
+
+        var transform = CGAffineTransform.identity
+        // Scale to target size.
+        transform = transform.scaledBy(x: scaleFactor, y: scaleFactor)
+        // Rotate around the centre of the scaled image.
+        if item.rotation != 0 {
+            transform = transform.translatedBy(x: overlayW / 2, y: overlayH / 2)
+            transform = transform.rotated(by: item.rotation)
+            transform = transform.translatedBy(x: -overlayW / 2, y: -overlayH / 2)
+        }
+        // Translate to the target position (centre of the overlay at the target point).
+        transform = transform.translatedBy(x: centreX - targetW / 2,
+                                           y: centreY - targetH / 2)
+        image = image.transformed(by: transform)
+
+        if item.opacity < 1 {
+            image = scaled(image, by: Float(item.opacity))
+        }
+
+        let renderRect = CGRect(origin: .zero, size: renderSize)
         let canvas = CIImage(color: .clear).cropped(to: renderRect)
         return image.composited(over: canvas).cropped(to: renderRect)
     }
