@@ -284,7 +284,7 @@ final class AudioMasterBus {
     ///
     /// **Bypass ramping (T1.9).** Each insert has a ramp value [0,1] where
     /// 1.0 = fully bypassed and 0.0 = fully active. The ramp transitions over
-    /// ~5 ms (240 samples at 48 kHz) to avoid clicks when toggling bypass.
+    /// ~5 ms (240 frames at 48 kHz) to avoid clicks when toggling bypass.
     private func installLiveCleanupTap(on node: AVAudioPlayerNode, format: AVAudioFormat) {
         guard !liveCleanupTapInstalled else { return }
         let settingsRef = liveCleanupSettingsLock
@@ -305,78 +305,57 @@ final class AudioMasterBus {
             // Read current settings.
             let currentSettings = settingsRef.withLock { $0 }
 
-            // Update bypass ramps based on current settings.
-            rampRef.withLock { ramp in
+            let bypassRamp = rampRef.withLock { ramp in
                 let targetDenoiser: Float = currentSettings.denoiser.bypass ? 1.0 : 0.0
                 let targetGate: Float = currentSettings.gate.bypass ? 1.0 : 0.0
                 let targetCompressor: Float = currentSettings.compressor.bypass ? 1.0 : 0.0
                 let targetLimiter: Float = currentSettings.limiter.bypass ? 1.0 : 0.0
 
-                // Linear ramp toward target.
-                let step = 1.0 / Float(max(1, rampSamples))
-                ramp.denoiserBypass += (targetDenoiser - ramp.denoiserBypass) * step * Float(frameCount)
-                ramp.gateBypass += (targetGate - ramp.gateBypass) * step * Float(frameCount)
-                ramp.compressorBypass += (targetCompressor - ramp.compressorBypass) * step * Float(frameCount)
-                ramp.limiterBypass += (targetLimiter - ramp.limiterBypass) * step * Float(frameCount)
+                let snapshot = VoiceCleanupInsertBypassRamp(
+                    denoiserStartBypass: ramp.denoiserBypass,
+                    denoiserTargetBypass: targetDenoiser,
+                    gateStartBypass: ramp.gateBypass,
+                    gateTargetBypass: targetGate,
+                    compressorStartBypass: ramp.compressorBypass,
+                    compressorTargetBypass: targetCompressor,
+                    limiterStartBypass: ramp.limiterBypass,
+                    limiterTargetBypass: targetLimiter,
+                    rampFrames: rampSamples)
+                ramp.advance(targetDenoiserBypass: targetDenoiser,
+                             targetGateBypass: targetGate,
+                             targetCompressorBypass: targetCompressor,
+                             targetLimiterBypass: targetLimiter,
+                             frameCount: frameCount,
+                             rampFrames: rampSamples)
+                return snapshot
+            }
 
-                // Clamp to [0, 1].
-                ramp.denoiserBypass = max(0, min(1, ramp.denoiserBypass))
-                ramp.gateBypass = max(0, min(1, ramp.gateBypass))
-                ramp.compressorBypass = max(0, min(1, ramp.compressorBypass))
-                ramp.limiterBypass = max(0, min(1, ramp.limiterBypass))
+            // Convert non-interleaved to interleaved for VoiceCleanupDSP.
+            var interleaved = [Float](repeating: 0, count: frameCount * channelCount)
+            for channel in 0..<channelCount {
+                for frame in 0..<frameCount {
+                    interleaved[frame * channelCount + channel] = floatData[channel][frame]
+                }
             }
 
             // Process audio inline using the lock for processor state.
-            stateRef.withLock { state in
-                // Convert non-interleaved to interleaved for VoiceCleanupDSP.
-                var interleaved = [Float](repeating: 0, count: frameCount * channelCount)
-                for channel in 0..<channelCount {
-                    for frame in 0..<frameCount {
-                        interleaved[frame * channelCount + channel] = floatData[channel][frame]
-                    }
-                }
-
-                // Save pre-processing samples for bypass mixing.
-                let preProcess = interleaved
-
-                // Apply cleanup DSP.
+            let inputForProcessing = interleaved
+            interleaved = stateRef.withLock { state in
+                var processed = inputForProcessing
                 VoiceCleanupDSP.processInterleaved(
-                    &interleaved,
+                    &processed,
                     channels: channelCount,
                     sampleRate: sampleRate,
                     settings: currentSettings,
-                    state: &state)
+                    state: &state,
+                    bypassRamp: bypassRamp)
+                return processed
+            }
 
-                // Apply bypass ramping: mix between processed and original.
-                let ramp = rampRef.withLock { $0 }
+            // Write back to the buffer (non-interleaved).
+            for channel in 0..<channelCount {
                 for frame in 0..<frameCount {
-                    for channel in 0..<channelCount {
-                        let idx = frame * channelCount + channel
-                        // Each insert's bypass ramp mixes between original and processed.
-                        // The inserts are chained: denoiser → gate → compressor → limiter.
-                        // When bypassed, we fade back toward the original signal.
-                        let denoiserMix = 1.0 - ramp.denoiserBypass
-                        let gateMix = 1.0 - ramp.gateBypass
-                        let compressorMix = 1.0 - ramp.compressorBypass
-                        let limiterMix = 1.0 - ramp.limiterBypass
-
-                        // Apply each insert's bypass as a gain on its contribution.
-                        // When fully bypassed (mix=0), we keep the original signal.
-                        let processed = interleaved[idx]
-                        let original = preProcess[idx]
-
-                        // Simple approach: blend based on the average bypass state.
-                        let avgBypass = (ramp.denoiserBypass + ramp.gateBypass +
-                                        ramp.compressorBypass + ramp.limiterBypass) / 4.0
-                        interleaved[idx] = original * avgBypass + processed * (1.0 - avgBypass)
-                    }
-                }
-
-                // Write back to the buffer (non-interleaved).
-                for channel in 0..<channelCount {
-                    for frame in 0..<frameCount {
-                        floatData[channel][frame] = interleaved[frame * channelCount + channel]
-                    }
+                    floatData[channel][frame] = interleaved[frame * channelCount + channel]
                 }
             }
 
@@ -479,7 +458,7 @@ final class AudioMasterBus {
                     AVLinearPCMBitDepthKey: 32,
                     AVLinearPCMIsFloatKey: true,
                     AVLinearPCMIsBigEndianKey: false,
-                    AVLinearPCMIsNonInterleaved: true,
+                    AVLinearPCMIsNonInterleaved: false,
                 ])
             output.audioMix = audioMix
             output.alwaysCopiesSampleData = false
@@ -744,6 +723,40 @@ struct BypassRampState: Sendable {
     var gateBypass: Float = 1.0
     var compressorBypass: Float = 1.0
     var limiterBypass: Float = 1.0
+
+    nonisolated mutating func advance(targetDenoiserBypass: Float,
+                                      targetGateBypass: Float,
+                                      targetCompressorBypass: Float,
+                                      targetLimiterBypass: Float,
+                                      frameCount: Int,
+                                      rampFrames: Int) {
+        denoiserBypass = Self.rampedValue(start: denoiserBypass,
+                                          target: targetDenoiserBypass,
+                                          frameOffset: frameCount,
+                                          rampFrames: rampFrames)
+        gateBypass = Self.rampedValue(start: gateBypass,
+                                      target: targetGateBypass,
+                                      frameOffset: frameCount,
+                                      rampFrames: rampFrames)
+        compressorBypass = Self.rampedValue(start: compressorBypass,
+                                            target: targetCompressorBypass,
+                                            frameOffset: frameCount,
+                                            rampFrames: rampFrames)
+        limiterBypass = Self.rampedValue(start: limiterBypass,
+                                         target: targetLimiterBypass,
+                                         frameOffset: frameCount,
+                                         rampFrames: rampFrames)
+    }
+
+    nonisolated private static func rampedValue(start: Float,
+                                                target: Float,
+                                                frameOffset: Int,
+                                                rampFrames: Int) -> Float {
+        VoiceCleanupDSP.rampedBypass(start: start,
+                                     target: target,
+                                     frameOffset: frameOffset,
+                                     rampFrames: rampFrames)
+    }
 }
 
 // MARK: - Audio-mix parameter helpers (composition integration, R2.1 / R2.3)

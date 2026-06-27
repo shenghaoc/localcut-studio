@@ -31,6 +31,38 @@ public struct LoudnessAnalysisResult: Hashable, Sendable {
     }
 }
 
+public struct VoiceCleanupInsertBypassRamp: Hashable, Sendable {
+    public var denoiserStartBypass: Float
+    public var denoiserTargetBypass: Float
+    public var gateStartBypass: Float
+    public var gateTargetBypass: Float
+    public var compressorStartBypass: Float
+    public var compressorTargetBypass: Float
+    public var limiterStartBypass: Float
+    public var limiterTargetBypass: Float
+    public var rampFrames: Int
+
+    public init(denoiserStartBypass: Float,
+                denoiserTargetBypass: Float,
+                gateStartBypass: Float,
+                gateTargetBypass: Float,
+                compressorStartBypass: Float,
+                compressorTargetBypass: Float,
+                limiterStartBypass: Float,
+                limiterTargetBypass: Float,
+                rampFrames: Int) {
+        self.denoiserStartBypass = denoiserStartBypass
+        self.denoiserTargetBypass = denoiserTargetBypass
+        self.gateStartBypass = gateStartBypass
+        self.gateTargetBypass = gateTargetBypass
+        self.compressorStartBypass = compressorStartBypass
+        self.compressorTargetBypass = compressorTargetBypass
+        self.limiterStartBypass = limiterStartBypass
+        self.limiterTargetBypass = limiterTargetBypass
+        self.rampFrames = max(1, rampFrames)
+    }
+}
+
 public enum VoiceCleanupDSP {
     public static func linearGain(fromDB db: Float) -> Float {
         pow(10, db / 20)
@@ -72,6 +104,64 @@ public enum VoiceCleanupDSP {
         }
         if !clamped.limiter.bypass {
             applyLimiter(to: &samples, settings: clamped.limiter)
+        }
+    }
+
+    public static func processInterleaved(_ samples: inout [Float],
+                                          channels: Int,
+                                          sampleRate: Double,
+                                          settings: VoiceCleanupSettings,
+                                          state: inout VoiceCleanupProcessorState,
+                                          bypassRamp: VoiceCleanupInsertBypassRamp) {
+        guard channels > 0, !samples.isEmpty else { return }
+        var clamped = settings
+        clamped.clamp()
+
+        applyRampedStage(
+            to: &samples,
+            channels: channels,
+            startBypass: bypassRamp.denoiserStartBypass,
+            targetBypass: bypassRamp.denoiserTargetBypass,
+            rampFrames: bypassRamp.rampFrames
+        ) { stageSamples in
+            applyDenoiser(to: &stageSamples, channels: channels, settings: clamped.denoiser)
+        }
+
+        applyRampedStage(
+            to: &samples,
+            channels: channels,
+            startBypass: bypassRamp.gateStartBypass,
+            targetBypass: bypassRamp.gateTargetBypass,
+            rampFrames: bypassRamp.rampFrames
+        ) { stageSamples in
+            applyGate(to: &stageSamples, channels: channels, sampleRate: sampleRate,
+                      settings: clamped.gate, gain: &state.gateGain)
+        }
+
+        applyRampedStage(
+            to: &samples,
+            channels: channels,
+            startBypass: bypassRamp.compressorStartBypass,
+            targetBypass: bypassRamp.compressorTargetBypass,
+            rampFrames: bypassRamp.rampFrames
+        ) { stageSamples in
+            applyCompressor(to: &stageSamples, channels: channels, sampleRate: sampleRate,
+                            settings: clamped.compressor, gain: &state.compressorGain)
+        }
+
+        if clamped.loudness.enabled, abs(clamped.loudness.appliedGainDB) > 0.0001 {
+            var gain = linearGain(fromDB: clamped.loudness.appliedGainDB)
+            vDSP_vsmul(samples, 1, &gain, &samples, 1, vDSP_Length(samples.count))
+        }
+
+        applyRampedStage(
+            to: &samples,
+            channels: channels,
+            startBypass: bypassRamp.limiterStartBypass,
+            targetBypass: bypassRamp.limiterTargetBypass,
+            rampFrames: bypassRamp.rampFrames
+        ) { stageSamples in
+            applyLimiter(to: &stageSamples, settings: clamped.limiter)
         }
     }
 
@@ -133,8 +223,9 @@ public enum VoiceCleanupDSP {
                                   gain: inout Float) {
         let threshold = linearGain(fromDB: settings.thresholdDB)
         let closedGain = linearGain(fromDB: settings.rangeDB)
-        let attack = smoothingCoefficient(milliseconds: settings.attackMS, sampleRate: sampleRate)
-        let release = smoothingCoefficient(milliseconds: settings.releaseMS, sampleRate: sampleRate)
+        let detectorFrameRate = detectorFrameRate(sampleRate: sampleRate, channels: channels)
+        let attack = smoothingCoefficient(milliseconds: settings.attackMS, sampleRate: detectorFrameRate)
+        let release = smoothingCoefficient(milliseconds: settings.releaseMS, sampleRate: detectorFrameRate)
 
         var frame = 0
         while frame < samples.count {
@@ -155,8 +246,9 @@ public enum VoiceCleanupDSP {
                                         sampleRate: Double,
                                         settings: CompressorSettings,
                                         gain: inout Float) {
-        let attack = smoothingCoefficient(milliseconds: settings.attackMS, sampleRate: sampleRate)
-        let release = smoothingCoefficient(milliseconds: settings.releaseMS, sampleRate: sampleRate)
+        let detectorFrameRate = detectorFrameRate(sampleRate: sampleRate, channels: channels)
+        let attack = smoothingCoefficient(milliseconds: settings.attackMS, sampleRate: detectorFrameRate)
+        let release = smoothingCoefficient(milliseconds: settings.releaseMS, sampleRate: detectorFrameRate)
         let makeupGain = linearGain(fromDB: settings.makeupGainDB)
 
         var frame = 0
@@ -187,6 +279,74 @@ public enum VoiceCleanupDSP {
         for index in samples.indices {
             samples[index] = max(-ceiling, min(ceiling, samples[index]))
         }
+    }
+
+    private static func applyRampedStage(to samples: inout [Float],
+                                         channels: Int,
+                                         startBypass: Float,
+                                         targetBypass: Float,
+                                         rampFrames: Int,
+                                         process: (inout [Float]) -> Void) {
+        let startBypass = clampedBypass(startBypass)
+        let targetBypass = clampedBypass(targetBypass)
+        guard max(1 - startBypass, 1 - targetBypass) > 0.000_1 else { return }
+
+        let dry = samples
+        process(&samples)
+        blendRampedStage(output: &samples,
+                         dry: dry,
+                         channels: channels,
+                         startBypass: startBypass,
+                         targetBypass: targetBypass,
+                         rampFrames: rampFrames)
+    }
+
+    private static func blendRampedStage(output: inout [Float],
+                                         dry: [Float],
+                                         channels: Int,
+                                         startBypass: Float,
+                                         targetBypass: Float,
+                                         rampFrames: Int) {
+        let frameCount = output.count / channels
+        guard frameCount > 0 else { return }
+        for frame in 0..<frameCount {
+            let bypass = rampedBypass(start: startBypass,
+                                      target: targetBypass,
+                                      frameOffset: frame,
+                                      rampFrames: rampFrames)
+            let activeMix = 1 - bypass
+            let dryMix = bypass
+            let base = frame * channels
+            for channel in 0..<channels {
+                let index = base + channel
+                output[index] = dry[index] * dryMix + output[index] * activeMix
+            }
+        }
+    }
+
+    public static func rampedBypass(start: Float,
+                                    target: Float,
+                                    frameOffset: Int,
+                                    rampFrames: Int) -> Float {
+        let start = clampedBypass(start)
+        let target = clampedBypass(target)
+        guard start != target else { return target }
+        let delta = Float(max(0, frameOffset)) / Float(max(1, rampFrames))
+        if target > start {
+            return min(target, start + delta)
+        }
+        return max(target, start - delta)
+    }
+
+    private static func clampedBypass(_ value: Float) -> Float {
+        max(0, min(1, value))
+    }
+
+    private static func detectorFrameRate(sampleRate: Double, channels: Int) -> Double {
+        // AVFoundation sample rates are audio frame rates. The detector advances
+        // once per interleaved frame, so dividing by channel count would make the
+        // configured attack/release times too fast for stereo and surround input.
+        sampleRate
     }
 
     private static func smoothingCoefficient(milliseconds: Float, sampleRate: Double) -> Float {
@@ -348,15 +508,17 @@ private struct BiquadState: Sendable {
                           b2: Float,
                           a1: Float,
                           a2: Float) -> [Float] {
-        var output = Array(repeating: Float(0), count: input.count)
-        for index in input.indices {
-            let x = input[index]
-            let y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
-            output[index] = y
-            x2 = x1
-            x1 = x
-            y2 = y1
-            y1 = y
+        let output = Array<Float>(unsafeUninitializedCapacity: input.count) { buffer, initializedCount in
+            for index in input.indices {
+                let x = input[index]
+                let y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+                buffer[index] = y
+                x2 = x1
+                x1 = x
+                y2 = y1
+                y1 = y
+            }
+            initializedCount = input.count
         }
         return output
     }

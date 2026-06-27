@@ -66,6 +66,151 @@ func compressorMakeupHasNoStartFadeIn() {
     #expect(samples.allSatisfy { abs($0 - expected) < 1e-5 })
 }
 
+@Test("VoiceCleanupDSP: gate envelope timing is independent of channel count")
+func gateEnvelopeUsesAudioFrameRate() {
+    var settings = VoiceCleanupSettings()
+    settings.gate.bypass = false
+    settings.gate.thresholdDB = 0
+    settings.gate.rangeDB = -40
+    settings.gate.releaseMS = 10
+    let frames = 480
+    let sampleRate = 48_000.0
+    let amplitude: Float = 0.01
+
+    var mono = Array(repeating: amplitude, count: frames)
+    var stereo: [Float] = []
+    stereo.reserveCapacity(frames * 2)
+    for _ in 0..<frames {
+        stereo.append(amplitude)
+        stereo.append(amplitude)
+    }
+
+    var monoState = VoiceCleanupProcessorState()
+    var stereoState = VoiceCleanupProcessorState()
+    VoiceCleanupDSP.processInterleaved(
+        &mono,
+        channels: 1,
+        sampleRate: sampleRate,
+        settings: settings,
+        state: &monoState)
+    VoiceCleanupDSP.processInterleaved(
+        &stereo,
+        channels: 2,
+        sampleRate: sampleRate,
+        settings: settings,
+        state: &stereoState)
+
+    for frame in [0, 1, 120, 240, 479] {
+        #expect(abs(mono[frame] - stereo[frame * 2]) < 1e-6)
+        #expect(abs(mono[frame] - stereo[frame * 2 + 1]) < 1e-6)
+    }
+}
+
+@Test("VoiceCleanupDSP: compressor envelope timing is independent of channel count")
+func compressorEnvelopeUsesAudioFrameRate() {
+    var settings = VoiceCleanupSettings()
+    settings.compressor.bypass = false
+    settings.compressor.thresholdDB = -40
+    settings.compressor.ratio = 4
+    settings.compressor.attackMS = 10
+    settings.compressor.makeupGainDB = 0
+    let frames = 480
+    let sampleRate = 48_000.0
+    let amplitude: Float = 0.5
+
+    var mono = Array(repeating: amplitude, count: frames)
+    var stereo: [Float] = []
+    stereo.reserveCapacity(frames * 2)
+    for _ in 0..<frames {
+        stereo.append(amplitude)
+        stereo.append(amplitude)
+    }
+
+    var monoState = VoiceCleanupProcessorState()
+    var stereoState = VoiceCleanupProcessorState()
+    VoiceCleanupDSP.processInterleaved(
+        &mono,
+        channels: 1,
+        sampleRate: sampleRate,
+        settings: settings,
+        state: &monoState)
+    VoiceCleanupDSP.processInterleaved(
+        &stereo,
+        channels: 2,
+        sampleRate: sampleRate,
+        settings: settings,
+        state: &stereoState)
+
+    for frame in [0, 1, 120, 240, 479] {
+        #expect(abs(mono[frame] - stereo[frame * 2]) < 1e-6)
+        #expect(abs(mono[frame] - stereo[frame * 2 + 1]) < 1e-6)
+    }
+}
+
+@Test("VoiceCleanupDSP: ramped bypass applies each insert independently")
+func rampedBypassDoesNotDiluteActiveInsert() {
+    var settings = VoiceCleanupSettings()
+    settings.limiter.ceilingDB = -6
+    var samples: [Float] = [0.9, -0.9, 0.9, -0.9]
+    var state = VoiceCleanupProcessorState()
+    let ramp = VoiceCleanupInsertBypassRamp(
+        denoiserStartBypass: 1,
+        denoiserTargetBypass: 1,
+        gateStartBypass: 1,
+        gateTargetBypass: 1,
+        compressorStartBypass: 1,
+        compressorTargetBypass: 1,
+        limiterStartBypass: 0,
+        limiterTargetBypass: 0,
+        rampFrames: 1)
+
+    VoiceCleanupDSP.processInterleaved(
+        &samples,
+        channels: 2,
+        sampleRate: 48_000,
+        settings: settings,
+        state: &state,
+        bypassRamp: ramp)
+
+    let ceiling = VoiceCleanupDSP.linearGain(fromDB: -6)
+    #expect(samples.allSatisfy { abs($0) <= ceiling + 0.0001 })
+}
+
+@Test("VoiceCleanupDSP: ramped bypass interpolates within the buffer")
+func rampedBypassInterpolatesWithinBuffer() {
+    var settings = VoiceCleanupSettings()
+    settings.limiter.ceilingDB = -6
+    var samples: [Float] = [
+        0.9, 0.9,
+        0.9, 0.9,
+        0.9, 0.9,
+    ]
+    var state = VoiceCleanupProcessorState()
+    let ramp = VoiceCleanupInsertBypassRamp(
+        denoiserStartBypass: 1,
+        denoiserTargetBypass: 1,
+        gateStartBypass: 1,
+        gateTargetBypass: 1,
+        compressorStartBypass: 1,
+        compressorTargetBypass: 1,
+        limiterStartBypass: 1,
+        limiterTargetBypass: 0,
+        rampFrames: 2)
+
+    VoiceCleanupDSP.processInterleaved(
+        &samples,
+        channels: 2,
+        sampleRate: 48_000,
+        settings: settings,
+        state: &state,
+        bypassRamp: ramp)
+
+    let ceiling = VoiceCleanupDSP.linearGain(fromDB: -6)
+    #expect(abs(samples[0] - 0.9) < 0.0001)
+    #expect(samples[2] < 0.9)
+    #expect(abs(samples[4] - ceiling) < 0.0001)
+}
+
 @Test("Loudness: changing the target re-derives applied gain from the measurement")
 func loudnessTargetRederivesAppliedGain() {
     var loudness = LoudnessNormalisationSettings()

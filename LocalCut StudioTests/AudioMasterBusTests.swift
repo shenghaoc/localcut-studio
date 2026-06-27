@@ -936,6 +936,37 @@ func liveCleanupLatencyBudget() {
             "Average processing time \(averageMs) ms exceeds \(maxLatencyMs) ms budget")
 }
 
+@Test("VoiceCleanup: bypass ramp state advances monotonically without overshoot")
+func bypassRampStateAdvancesWithoutOvershoot() {
+    var ramp = BypassRampState()
+    ramp.advance(targetDenoiserBypass: 0,
+                 targetGateBypass: 1,
+                 targetCompressorBypass: 1,
+                 targetLimiterBypass: 1,
+                 frameCount: 1024,
+                 rampFrames: 240)
+    #expect(ramp.denoiserBypass == 0)
+    #expect(ramp.gateBypass == 1)
+    #expect(ramp.compressorBypass == 1)
+    #expect(ramp.limiterBypass == 1)
+
+    ramp.advance(targetDenoiserBypass: 1,
+                 targetGateBypass: 1,
+                 targetCompressorBypass: 1,
+                 targetLimiterBypass: 1,
+                 frameCount: 120,
+                 rampFrames: 240)
+    #expect(abs(ramp.denoiserBypass - 0.5) < 0.0001)
+
+    ramp.advance(targetDenoiserBypass: 1,
+                 targetGateBypass: 1,
+                 targetCompressorBypass: 1,
+                 targetLimiterBypass: 1,
+                 frameCount: 120,
+                 rampFrames: 240)
+    #expect(ramp.denoiserBypass == 1)
+}
+
 // MARK: - T3.6 — Export smoke fixture test
 
 /// Verifies that exporting a noisy clip with denoiser and R128 target produces

@@ -80,6 +80,10 @@ enum VoiceCleanupAudioProcessing {
         var analyser = EBUR128LoudnessAnalyser(sampleRate: 48_000, channels: 2)
 
         while let sample = output.copyNextSampleBuffer() {
+            if Task.isCancelled {
+                reader.cancelReading()
+                throw CancellationError()
+            }
             guard var block = floatBlock(from: sample) else { continue }
             VoiceCleanupDSP.processInterleaved(
                 &block.samples,
@@ -159,42 +163,52 @@ enum VoiceCleanupAudioProcessing {
                                                           source: CMSampleBuffer) -> CMSampleBuffer? {
         guard channels > 0, !samples.isEmpty else { return nil }
         let frameCount = samples.count / channels
-        var clamped = Array(repeating: Float(0), count: samples.count)
-        var low: Float = -1.0
-        var high: Float = 0.999_969_5
-        vDSP_vclip(samples, 1, &low, &high, &clamped, 1, vDSP_Length(samples.count))
-        var scale = Float(32767.0)
-        vDSP_vsmul(clamped, 1, &scale, &clamped, 1, vDSP_Length(clamped.count))
-
-        var outputBytes = Data(count: samples.count * MemoryLayout<Int16>.size)
-        outputBytes.withUnsafeMutableBytes { rawBuffer in
-            if let int16Pointer = rawBuffer.bindMemory(to: Int16.self).baseAddress {
-                vDSP_vfix16(clamped, 1, int16Pointer, 1, vDSP_Length(clamped.count))
-            }
-        }
+        let byteCount = samples.count * MemoryLayout<Int16>.size
 
         var blockBuffer: CMBlockBuffer?
         let createStatus = CMBlockBufferCreateWithMemoryBlock(
             allocator: kCFAllocatorDefault,
             memoryBlock: nil,
-            blockLength: outputBytes.count,
+            blockLength: byteCount,
             blockAllocator: kCFAllocatorDefault,
             customBlockSource: nil,
             offsetToData: 0,
-            dataLength: outputBytes.count,
+            dataLength: byteCount,
             flags: 0,
             blockBufferOut: &blockBuffer)
         guard createStatus == noErr, let blockBuffer else { return nil }
 
-        let replaceStatus = outputBytes.withUnsafeBytes { bytes in
-            guard let base = bytes.baseAddress else { return OSStatus(-1) }
-            return CMBlockBufferReplaceDataBytes(
-                with: base,
-                blockBuffer: blockBuffer,
-                offsetIntoDestination: 0,
-                dataLength: outputBytes.count)
+        var lengthAtOffset = 0
+        var totalLength = 0
+        var dataPointer: UnsafeMutablePointer<Int8>?
+        let pointerStatus = CMBlockBufferGetDataPointer(
+            blockBuffer,
+            atOffset: 0,
+            lengthAtOffsetOut: &lengthAtOffset,
+            totalLengthOut: &totalLength,
+            dataPointerOut: &dataPointer)
+        guard pointerStatus == noErr,
+              let dataPointer,
+              lengthAtOffset >= byteCount,
+              totalLength >= byteCount else {
+            return nil
         }
-        guard replaceStatus == noErr else { return nil }
+
+        var low: Float = -1.0
+        var high: Float = 0.999_969_5
+        var clamped = Array<Float>(unsafeUninitializedCapacity: samples.count) { buffer, initializedCount in
+            guard let baseAddress = buffer.baseAddress else {
+                initializedCount = 0
+                return
+            }
+            vDSP_vclip(samples, 1, &low, &high, baseAddress, 1, vDSP_Length(samples.count))
+            initializedCount = samples.count
+        }
+        var scale = Float(32767.0)
+        vDSP_vsmul(clamped, 1, &scale, &clamped, 1, vDSP_Length(clamped.count))
+        dataPointer.withMemoryRebound(to: Int16.self, capacity: samples.count) { int16Pointer in
+            vDSP_vfix16(clamped, 1, int16Pointer, 1, vDSP_Length(clamped.count))
+        }
 
         guard let formatDescription = CMSampleBufferGetFormatDescription(source) else {
             return nil
