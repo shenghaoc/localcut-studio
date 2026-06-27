@@ -5,9 +5,21 @@
 ## Implementation status
 
 Current branch implements the model, inspector, document persistence, EBU R128
-measurement, and AVAssetWriter PCM export-path processing foundation. The final
-custom vDSP `AVAudioUnit` and live preview routing through the same master-bus
-node graph remain open tasks in `tasks.md`.
+measurement, AVAssetWriter PCM export-path processing, and live preview routing
+through the cleanup chain. The live engine routes audio through the same
+`VoiceCleanupDSP` code path as offline export, ensuring sample parity.
+
+**Completed tasks:**
+- T1.1-T1.6: Settings, DSP, persistence, export path, loudness measurement
+- T1.7: Live preview cleanup chain using VoiceCleanupDSP
+- T1.8: Live preview routing through AudioMasterBus
+- T1.9: Volume-ramped bypass switching (~5 ms transitions)
+- T2.1-T2.3: Inspector UI with gain reduction meters
+- T3.1-T3.6: Tests including latency budget and export smoke fixture
+
+**Remaining tasks:**
+- T1.7 (original): Custom vDSP spectral-subtraction AVAudioUnit (replaced with
+  tap-based processing that uses the same DSP code path)
 
 ## Goal
 

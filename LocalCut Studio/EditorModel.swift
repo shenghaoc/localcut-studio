@@ -1166,12 +1166,15 @@ final class EditorModel {
         guard hasPreviewItem else { return }
         if isPlaying {
             player.pause()
+            audioBus.pauseLivePreview()
             isPlaying = false
         } else {
             if currentTime >= totalDuration - 0.05 {
                 player.seek(to: .zero)
+                audioBus.seekLivePreview(to: .zero)
             }
             player.play()
+            audioBus.resumeLivePreview()
             isPlaying = true
         }
     }
@@ -1187,21 +1190,25 @@ final class EditorModel {
     func seek(toSeconds seconds: Double, tolerance: CMTime) {
         let clamped = max(0, min(seconds, totalDuration))
         currentTime = clamped
-        player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600),
-                    toleranceBefore: tolerance, toleranceAfter: tolerance)
+        let time = CMTime(seconds: clamped, preferredTimescale: 600)
+        player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
+        audioBus.seekLivePreview(to: time)
     }
 
     // MARK: - Audio metering
 
     func prepareAudioMetering() {
-        audioBus.prepareLive()
-        if let error = audioBus.lastStartError {
-            statusMessage = "Live metering unavailable: \(error)"
-        } else if audioBus.isLiveRunning {
-            // A successful (re)start clears `lastStartError`; drop the stale
-            // failure message so the status bar / VoiceOver live region don't
-            // keep announcing "Live metering unavailable" after recovery.
-            statusMessage = "Live metering started."
+        do {
+            try audioBus.prepareLiveForPreview()
+            statusMessage = "Live preview audio started."
+        } catch {
+            // Fallback to metering-only mode.
+            audioBus.prepareLive()
+            if let error = audioBus.lastStartError {
+                statusMessage = "Live metering unavailable: \(error)"
+            } else if audioBus.isLiveRunning {
+                statusMessage = "Live metering started."
+            }
         }
     }
 

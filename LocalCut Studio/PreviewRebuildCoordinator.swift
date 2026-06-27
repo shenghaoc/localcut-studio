@@ -53,12 +53,21 @@ final class PreviewRebuildCoordinator {
             model.totalDuration = built.duration
             DiagnosticsBridge.shared.setDecoderCount(
                 built.composition.tracks(withMediaType: .video).count)
+
+            // Sync voice cleanup settings to the live bus and schedule audio.
+            model.audioBus.liveCleanupSettings = model.project.voiceCleanup
+            model.audioBus.scheduleLiveComposition(
+                built.composition,
+                audioMix: built.audioMix,
+                startTime: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600))
+
             await model.player.seek(
                 to: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600),
                 toleranceBefore: .zero,
                 toleranceAfter: .zero)
             if model.isPlaying {
                 model.player.play()
+                model.audioBus.resumeLivePreview()
             }
         } catch {
             model.statusMessage = "Preview build failed: \(error.localizedDescription)"

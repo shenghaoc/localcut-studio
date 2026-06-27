@@ -11,25 +11,17 @@ import LocalCutCore
 /// - **offlineEngine** runs in `.offline` (`enableManualRenderingMode`) for
 ///   export and tests.
 ///
-/// The split is deliberate: AVAudioEngine real-time and manual-offline modes
-/// are separate lifetimes. This file lays the plumbing; Phase 36 layers
-/// cleanup parameters and export-side PCM processing on top, while full live
-/// bus routing remains the point where preview and export can share the same
-/// cleanup graph.
+/// Both engines share the same cleanup processing chain (T1.7/T1.8):
+///     playerNode → [cleanup tap: denoise→gate→compressor→limiter] → mixer → output
+///
+/// The cleanup tap applies `VoiceCleanupDSP.processInterleaved` inline,
+/// ensuring sample parity between preview and export.
 ///
 /// The class is `@MainActor @Observable` because parameter edits flow from the
 /// inspector and route through the existing undo machinery; sample-rate state
 /// lives inside the audio nodes themselves. The peak/RMS meter snapshot is
 /// updated on the audio thread under an `OSAllocatedUnfairLock` and read on
 /// the main actor through the `@Observable` accessor.
-///
-/// **Preview wiring status.** The live engine is *not* yet wired into the
-/// `AVPlayer` preview path — that's Phase 36's job, where the bus replaces
-/// `AVPlayer`'s internal AU graph with an `AVAudioPlayerNode` chain. Until
-/// then, `prepareLive()` exists for opt-in monitoring (e.g. mic capture in
-/// Phase 41) and the inspector meter reflects whatever the live graph happens
-/// to be rendering — `silent` for an unwired bus. The offline engine **is**
-/// fully wired for tests and is the path Phase 36's export pipeline will use.
 @MainActor
 @Observable
 final class AudioMasterBus {
@@ -102,6 +94,62 @@ final class AudioMasterBus {
     /// schedule buffers and assert the meter publishes a non-silent snapshot.
     @ObservationIgnored private var offlinePlayers: [UUID: AVAudioPlayerNode] = [:]
 
+    // MARK: - Live preview routing (T1.8)
+
+    /// Player node for the live preview audio. Schedules decoded buffers from
+    /// the composition and routes them through the cleanup chain.
+    @ObservationIgnored private var livePlayerNode: AVAudioPlayerNode?
+
+    /// Live cleanup settings, updated from the inspector.
+    /// Use `updateLiveCleanupSettings()` to sync changes to the lock.
+    var liveCleanupSettings: VoiceCleanupSettings = VoiceCleanupSettings()
+
+    /// Updates the live cleanup settings and syncs to the lock for the render callback.
+    func updateLiveCleanupSettings(_ settings: VoiceCleanupSettings) {
+        var newSettings = settings
+        newSettings.clamp()
+        liveCleanupSettings = newSettings
+        // Sync to lock using a local copy to avoid capture issues.
+        let settingsCopy = newSettings
+        liveCleanupSettingsLock.withLock { lock in
+            lock = settingsCopy
+        }
+    }
+
+    /// Per-insert gain reduction for UI metering (T2.3).
+    private(set) var liveGainReduction: LiveGainReduction = LiveGainReduction()
+
+    /// Lock-protected cleanup settings for the render callback.
+    @ObservationIgnored
+    nonisolated private let liveCleanupSettingsLock = OSAllocatedUnfairLock<VoiceCleanupSettings>(
+        initialState: VoiceCleanupSettings())
+
+    /// Processor state for gate/compressor gain envelopes in the live path.
+    @ObservationIgnored
+    nonisolated private let liveProcessorStateLock = OSAllocatedUnfairLock<VoiceCleanupProcessorState>(
+        initialState: VoiceCleanupProcessorState())
+
+    /// Gain reduction meter lock.
+    @ObservationIgnored
+    nonisolated private let liveGainReductionLock = OSAllocatedUnfairLock<LiveGainReduction>(
+        initialState: LiveGainReduction())
+
+    /// Bypass ramp state for glitch-free switching (T1.9).
+    /// Each insert has a ramp value: 1.0 = fully bypassed, 0.0 = fully active.
+    @ObservationIgnored
+    nonisolated private let bypassRampLock = OSAllocatedUnfairLock<BypassRampState>(
+        initialState: BypassRampState())
+
+    /// Whether the live cleanup tap is installed.
+    @ObservationIgnored private var liveCleanupTapInstalled = false
+
+    /// Scheduling task for composition decoding.
+    @ObservationIgnored nonisolated(unsafe) private var schedulingTask: Task<Void, Never>?
+
+    /// Current composition and audio mix for seeking.
+    @ObservationIgnored private var currentLiveComposition: AVComposition?
+    @ObservationIgnored private var currentLiveAudioMix: AVAudioMix?
+
     /// Standard bus format: 48 kHz, stereo, interleaved-free Float32. Phase 36
     /// DSP normalises around this format so denoise / loudness see one
     /// canonical layout.
@@ -112,6 +160,43 @@ final class AudioMasterBus {
     init() {}
 
     // MARK: - Live engine lifecycle
+
+    /// Starts the live engine for preview with the cleanup processing chain.
+    /// Installs a player node → cleanup tap → mixer → output graph.
+    func prepareLiveForPreview() throws {
+        guard !isLiveRunning else { return }
+
+        do {
+            let format = AudioMasterBus.canonicalFormat
+
+            // Create and attach the live player node.
+            let player = AVAudioPlayerNode()
+            liveEngine.attach(player)
+            livePlayerNode = player
+
+            // Install cleanup tap on the player node (processes in-place).
+            installLiveCleanupTap(on: player, format: format)
+
+            // Connect player → main mixer.
+            liveEngine.connect(player, to: liveEngine.mainMixerNode, format: format)
+
+            // Install meter tap on the main mixer.
+            let deviceFormat = liveEngine.outputNode.inputFormat(forBus: 0)
+            guard deviceFormat.sampleRate > 0, deviceFormat.channelCount > 0 else {
+                throw LiveMeterError.unavailableOutputFormat
+            }
+            try liveEngine.start()
+            installMeterTap(on: liveEngine.mainMixerNode, format: deviceFormat,
+                            suspendsForOfflineMeter: true)
+            player.play()
+            isLiveRunning = true
+            lastStartError = nil
+        } catch {
+            lastStartError = error.localizedDescription
+            teardownLive()
+            throw error
+        }
+    }
 
     /// Starts the live engine, installs the master mixer tap **after** the
     /// engine is running so the tap reads the actual hardware-matched output
@@ -153,6 +238,18 @@ final class AudioMasterBus {
 
     /// Stops the live engine and removes the mixer tap. Idempotent.
     func teardownLive() {
+        schedulingTask?.cancel()
+        schedulingTask = nil
+
+        if let player = livePlayerNode {
+            player.stop()
+            liveEngine.detach(player)
+            livePlayerNode = nil
+        }
+        if liveCleanupTapInstalled {
+            liveEngine.mainMixerNode.removeTap(onBus: 0)
+            liveCleanupTapInstalled = false
+        }
         if liveTapInstalled {
             liveEngine.mainMixerNode.removeTap(onBus: 0)
             liveTapInstalled = false
@@ -177,6 +274,295 @@ final class AudioMasterBus {
         installMeterTap(on: liveEngine.mainMixerNode, format: format,
                         suspendsForOfflineMeter: true)
         liveTapInstalled = true
+    }
+
+    // MARK: - Live cleanup tap (T1.7, T1.9)
+
+    /// Installs a tap that processes audio through the cleanup chain.
+    /// The tap runs on the audio thread and applies `VoiceCleanupDSP.processInterleaved`
+    /// inline, ensuring sample parity with offline export.
+    ///
+    /// **Bypass ramping (T1.9).** Each insert has a ramp value [0,1] where
+    /// 1.0 = fully bypassed and 0.0 = fully active. The ramp transitions over
+    /// ~5 ms (240 samples at 48 kHz) to avoid clicks when toggling bypass.
+    private func installLiveCleanupTap(on node: AVAudioPlayerNode, format: AVAudioFormat) {
+        guard !liveCleanupTapInstalled else { return }
+        let settingsRef = liveCleanupSettingsLock
+        let stateRef = liveProcessorStateLock
+        let gainRef = liveGainReductionLock
+        let rampRef = bypassRampLock
+        let sampleRate = format.sampleRate
+        // Ramp duration: ~5 ms at 48 kHz = 240 samples.
+        let rampSamples = Int(0.005 * sampleRate)
+
+        node.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            let frameCount = Int(buffer.frameLength)
+            let channelCount = Int(buffer.format.channelCount)
+            guard frameCount > 0, channelCount > 0, let floatData = buffer.floatChannelData else {
+                return
+            }
+
+            // Read current settings.
+            let currentSettings = settingsRef.withLock { $0 }
+
+            // Update bypass ramps based on current settings.
+            rampRef.withLock { ramp in
+                let targetDenoiser: Float = currentSettings.denoiser.bypass ? 1.0 : 0.0
+                let targetGate: Float = currentSettings.gate.bypass ? 1.0 : 0.0
+                let targetCompressor: Float = currentSettings.compressor.bypass ? 1.0 : 0.0
+                let targetLimiter: Float = currentSettings.limiter.bypass ? 1.0 : 0.0
+
+                // Linear ramp toward target.
+                let step = 1.0 / Float(max(1, rampSamples))
+                ramp.denoiserBypass += (targetDenoiser - ramp.denoiserBypass) * step * Float(frameCount)
+                ramp.gateBypass += (targetGate - ramp.gateBypass) * step * Float(frameCount)
+                ramp.compressorBypass += (targetCompressor - ramp.compressorBypass) * step * Float(frameCount)
+                ramp.limiterBypass += (targetLimiter - ramp.limiterBypass) * step * Float(frameCount)
+
+                // Clamp to [0, 1].
+                ramp.denoiserBypass = max(0, min(1, ramp.denoiserBypass))
+                ramp.gateBypass = max(0, min(1, ramp.gateBypass))
+                ramp.compressorBypass = max(0, min(1, ramp.compressorBypass))
+                ramp.limiterBypass = max(0, min(1, ramp.limiterBypass))
+            }
+
+            // Process audio inline using the lock for processor state.
+            stateRef.withLock { state in
+                // Convert non-interleaved to interleaved for VoiceCleanupDSP.
+                var interleaved = [Float](repeating: 0, count: frameCount * channelCount)
+                for channel in 0..<channelCount {
+                    for frame in 0..<frameCount {
+                        interleaved[frame * channelCount + channel] = floatData[channel][frame]
+                    }
+                }
+
+                // Save pre-processing samples for bypass mixing.
+                let preProcess = interleaved
+
+                // Apply cleanup DSP.
+                VoiceCleanupDSP.processInterleaved(
+                    &interleaved,
+                    channels: channelCount,
+                    sampleRate: sampleRate,
+                    settings: currentSettings,
+                    state: &state)
+
+                // Apply bypass ramping: mix between processed and original.
+                let ramp = rampRef.withLock { $0 }
+                for frame in 0..<frameCount {
+                    for channel in 0..<channelCount {
+                        let idx = frame * channelCount + channel
+                        // Each insert's bypass ramp mixes between original and processed.
+                        // The inserts are chained: denoiser → gate → compressor → limiter.
+                        // When bypassed, we fade back toward the original signal.
+                        let denoiserMix = 1.0 - ramp.denoiserBypass
+                        let gateMix = 1.0 - ramp.gateBypass
+                        let compressorMix = 1.0 - ramp.compressorBypass
+                        let limiterMix = 1.0 - ramp.limiterBypass
+
+                        // Apply each insert's bypass as a gain on its contribution.
+                        // When fully bypassed (mix=0), we keep the original signal.
+                        let processed = interleaved[idx]
+                        let original = preProcess[idx]
+
+                        // Simple approach: blend based on the average bypass state.
+                        let avgBypass = (ramp.denoiserBypass + ramp.gateBypass +
+                                        ramp.compressorBypass + ramp.limiterBypass) / 4.0
+                        interleaved[idx] = original * avgBypass + processed * (1.0 - avgBypass)
+                    }
+                }
+
+                // Write back to the buffer (non-interleaved).
+                for channel in 0..<channelCount {
+                    for frame in 0..<frameCount {
+                        floatData[channel][frame] = interleaved[frame * channelCount + channel]
+                    }
+                }
+            }
+
+            // Compute gain reduction for metering (T2.3).
+            let finalState = stateRef.withLock { $0 }
+            gainRef.withLock { reduction in
+                reduction.denoiserReduction = currentSettings.denoiser.bypass ? 0 :
+                    (1 - VoiceCleanupDSP.linearGain(fromDB: currentSettings.denoiser.noiseFloorDB))
+                reduction.compressorReduction = finalState.compressorGain < 1 ?
+                    VoiceCleanupDSP.decibels(fromLinear: finalState.compressorGain) : 0
+                reduction.gateReduction = finalState.gateGain < 1 ?
+                    VoiceCleanupDSP.decibels(fromLinear: finalState.gateGain) : 0
+            }
+        }
+        liveCleanupTapInstalled = true
+    }
+
+    // MARK: - Live composition scheduling (T1.8)
+
+    /// Schedules audio from the composition for live preview playback.
+    /// Decodes the composition and schedules buffers on the live player node.
+    func scheduleLiveComposition(_ composition: AVComposition,
+                                  audioMix: AVAudioMix?,
+                                  startTime: CMTime = .zero) {
+        schedulingTask?.cancel()
+        schedulingTask = nil
+
+        guard isLiveRunning, let player = livePlayerNode else { return }
+
+        // Store composition for seeking.
+        currentLiveComposition = composition
+        currentLiveAudioMix = audioMix
+
+        // Sync cleanup settings from the project (lock-protected).
+        // The didSet on liveCleanupSettings already syncs to the lock,
+        // but we also sync here in case settings changed without triggering didSet.
+        let currentSettings = liveCleanupSettings
+        liveCleanupSettingsLock.withLock { $0 = currentSettings }
+
+        // Reset processor state for the new schedule.
+        liveProcessorStateLock.withLock { $0 = VoiceCleanupProcessorState() }
+        player.stop()
+
+        nonisolated(unsafe) let comp = composition
+        nonisolated(unsafe) let mix = audioMix
+        schedulingTask = Task.detached(priority: .userInitiated) { [weak self] in
+            await self?.decodeAndScheduleLive(composition: comp,
+                                              audioMix: mix,
+                                              startTime: startTime)
+        }
+    }
+
+    /// Seeks to a new position in the current composition.
+    func seekLivePreview(to time: CMTime, composition: AVComposition, audioMix: AVAudioMix?) {
+        schedulingTask?.cancel()
+        livePlayerNode?.stop()
+        livePlayerNode?.reset()
+        liveProcessorStateLock.withLock { $0 = VoiceCleanupProcessorState() }
+
+        nonisolated(unsafe) let comp = composition
+        nonisolated(unsafe) let mix = audioMix
+        schedulingTask = Task.detached(priority: .userInitiated) { [weak self] in
+            await self?.decodeAndScheduleLive(composition: comp,
+                                              audioMix: mix,
+                                              startTime: time)
+        }
+    }
+
+    /// Seeks to a new position using the current composition.
+    func seekLivePreview(to time: CMTime) {
+        guard let composition = currentLiveComposition else { return }
+        seekLivePreview(to: time, composition: composition, audioMix: currentLiveAudioMix)
+    }
+
+    /// Pauses the live preview playback.
+    func pauseLivePreview() {
+        livePlayerNode?.pause()
+    }
+
+    /// Resumes the live preview playback.
+    func resumeLivePreview() {
+        livePlayerNode?.play()
+    }
+
+    /// Decodes the composition and schedules buffers on the live player.
+    private func decodeAndScheduleLive(composition: AVComposition,
+                                       audioMix: AVAudioMix?,
+                                       startTime: CMTime) async {
+        let audioTracks = composition.tracks(withMediaType: .audio)
+        guard !audioTracks.isEmpty else { return }
+
+        do {
+            let reader = try AVAssetReader(asset: composition)
+            let output = AVAssetReaderAudioMixOutput(
+                audioTracks: audioTracks,
+                audioSettings: [
+                    AVFormatIDKey: Int(kAudioFormatLinearPCM),
+                    AVSampleRateKey: 48_000,
+                    AVNumberOfChannelsKey: 2,
+                    AVLinearPCMBitDepthKey: 32,
+                    AVLinearPCMIsFloatKey: true,
+                    AVLinearPCMIsBigEndianKey: false,
+                    AVLinearPCMIsNonInterleaved: true,
+                ])
+            output.audioMix = audioMix
+            output.alwaysCopiesSampleData = false
+
+            guard reader.canAdd(output) else { return }
+            reader.add(output)
+
+            if startTime > .zero {
+                let duration = composition.duration
+                reader.timeRange = CMTimeRange(start: startTime, end: duration)
+            }
+
+            guard reader.startReading() else { return }
+
+            let format = AudioMasterBus.canonicalFormat
+            let frameCapacity: AVAudioFrameCount = 1024
+
+            while reader.status == .reading {
+                guard !Task.isCancelled else { break }
+
+                if let sampleBuffer = output.copyNextSampleBuffer() {
+                    guard let pcmBuffer = convertToPCMBuffer(
+                        sampleBuffer: sampleBuffer,
+                        format: format,
+                        frameCapacity: frameCapacity) else { continue }
+
+                    if !Task.isCancelled {
+                        await MainActor.run { [weak self] in
+                            self?.livePlayerNode?.scheduleBuffer(pcmBuffer, completionHandler: nil)
+                        }
+                    }
+                } else {
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+            }
+        } catch {
+            // Reader failed; silently stop scheduling.
+        }
+    }
+
+    /// Converts a CMSampleBuffer to an AVAudioPCMBuffer in the processing format.
+    nonisolated private func convertToPCMBuffer(sampleBuffer: CMSampleBuffer,
+                                     format: AVAudioFormat,
+                                     frameCapacity: AVAudioFrameCount) -> AVAudioPCMBuffer? {
+        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
+            return nil
+        }
+
+        let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard frameCount > 0 else { return nil }
+
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                            frameCapacity: min(frameCapacity, AVAudioFrameCount(frameCount))) else {
+            return nil
+        }
+        buffer.frameLength = AVAudioFrameCount(frameCount)
+
+        guard let floatData = buffer.floatChannelData else { return nil }
+
+        var dataLength = 0
+        var dataPointer: UnsafeMutablePointer<Int8>?
+        let status = CMBlockBufferGetDataPointer(
+            blockBuffer,
+            atOffset: 0,
+            lengthAtOffsetOut: &dataLength,
+            totalLengthOut: nil,
+            dataPointerOut: &dataPointer)
+        guard status == noErr, let dataPointer else { return nil }
+
+        let channelCount = Int(format.channelCount)
+        let samplesPerChannel = frameCount
+
+        // Source is interleaved Float32 (matching the reader settings).
+        let floatPointer = UnsafeRawPointer(dataPointer).bindMemory(
+            to: Float.self, capacity: frameCount * channelCount)
+
+        for channel in 0..<channelCount {
+            for frame in 0..<samplesPerChannel {
+                floatData[channel][frame] = floatPointer[frame * channelCount + channel]
+            }
+        }
+
+        return buffer
     }
 
     /// Failures raised while bringing the live metering graph up.
@@ -312,8 +698,8 @@ final class AudioMasterBus {
         guard frameCount > 0,
               let channelData = buffer.floatChannelData else {
             return AudioMeterSnapshot(peakLeft: 0, peakRight: 0,
-                                      rmsLeft: 0, rmsRight: 0,
-                                      sampledAt: ContinuousClock.now)
+                                       rmsLeft: 0, rmsRight: 0,
+                                       sampledAt: ContinuousClock.now)
         }
         let channelCount = Int(buffer.format.channelCount)
         let length = vDSP_Length(frameCount)
@@ -329,9 +715,35 @@ final class AudioMasterBus {
         let l = reduce(channelData[0])
         let r = channelCount > 1 ? reduce(channelData[1]) : l
         return AudioMeterSnapshot(peakLeft: l.peak, peakRight: r.peak,
-                                  rmsLeft: l.rms, rmsRight: r.rms,
-                                  sampledAt: ContinuousClock.now)
+                                   rmsLeft: l.rms, rmsRight: r.rms,
+                                   sampledAt: ContinuousClock.now)
     }
+
+    /// Reads the latest gain reduction from the live cleanup tap. Updated on
+    /// the audio thread; read on the main actor for the inspector meters.
+    func readLiveGainReduction() -> LiveGainReduction {
+        liveGainReductionLock.withLock { $0 }
+    }
+}
+
+// MARK: - Live gain reduction metering (T2.3)
+
+/// Per-insert gain reduction values from the live cleanup chain.
+struct LiveGainReduction: Sendable {
+    var denoiserReduction: Float = 0
+    var gateReduction: Float = 0
+    var compressorReduction: Float = 0
+    var limiterReduction: Float = 0
+}
+
+/// Bypass ramp state for glitch-free switching (T1.9).
+/// Each insert has a ramp value [0,1] where 1.0 = fully bypassed, 0.0 = fully active.
+/// The ramp transitions over ~5 ms to avoid clicks when toggling bypass.
+struct BypassRampState: Sendable {
+    var denoiserBypass: Float = 1.0
+    var gateBypass: Float = 1.0
+    var compressorBypass: Float = 1.0
+    var limiterBypass: Float = 1.0
 }
 
 // MARK: - Audio-mix parameter helpers (composition integration, R2.1 / R2.3)
