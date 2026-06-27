@@ -343,11 +343,11 @@ public enum VoiceCleanupDSP {
     }
 
     private static func detectorFrameRate(sampleRate: Double, channels: Int) -> Double {
-        // The detector advances once per interleaved frame (every `channels`
-        // samples), so the effective frame rate is sampleRate / channels.
-        // For stereo at 48 kHz this is 24 kHz, making configured attack/release
-        // times match wall-clock duration correctly.
-        sampleRate / Double(max(1, channels))
+        // The detector advances once per interleaved frame (one set of all
+        // channels). The configured attack/release times are in terms of audio
+        // frames, not samples, so the frame rate equals the sample rate
+        // regardless of channel count.
+        sampleRate
     }
 
     private static func smoothingCoefficient(milliseconds: Float, sampleRate: Double) -> Float {
