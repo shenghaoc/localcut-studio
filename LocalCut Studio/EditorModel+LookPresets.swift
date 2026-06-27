@@ -180,7 +180,8 @@ extension EditorModel {
         guard let lut = selectedClipLUT(clip) else { return (preset, nil) }
         let presetBase = url.deletingPathExtension().lastPathComponent
         let ext = (lut.displayName as NSString).pathExtension
-        preset.lut = LookPresetLUTReference(relativePath: "\(presetBase).\(ext.isEmpty ? "cube" : ext)",
+        let lutFileName = "\(presetBase).\(ext.isEmpty ? "cube" : ext)"
+        preset.lut = LookPresetLUTReference(relativePath: "assets/luts/\(lutFileName)",
                                             displayName: lut.displayName)
         return (preset, lut.bookmark)
     }
@@ -224,6 +225,9 @@ extension EditorModel {
                     let destination = url.deletingLastPathComponent()
                         .appendingPathComponent(reference.relativePath)
                     if destination.standardizedFileURL == source.standardizedFileURL { return true }
+                    try FileManager.default.createDirectory(
+                        at: destination.deletingLastPathComponent(),
+                        withIntermediateDirectories: true)
                     try? FileManager.default.removeItem(at: destination)
                     do {
                         try FileManager.default.copyItem(at: source, to: destination)

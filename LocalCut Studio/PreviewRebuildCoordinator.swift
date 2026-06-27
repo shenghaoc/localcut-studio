@@ -38,7 +38,7 @@ final class PreviewRebuildCoordinator {
         do {
             // Register overlay frame sources before building the composition
             // so the compositor can decode overlay frames during rendering.
-            model.registerOverlaySources()
+            await model.registerOverlaySources()
             let result = try await CompositionBuilder.build(project: model.project, showSkinMask: model.showSkinMask)
             guard !Task.isCancelled else { return }
             guard let built = result else {

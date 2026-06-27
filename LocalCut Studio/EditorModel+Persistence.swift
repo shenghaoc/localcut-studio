@@ -55,6 +55,7 @@ struct ProjectState: Equatable {
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
+    var selectedOverlayID: OverlayClip.ID?
 
     static func == (lhs: ProjectState, rhs: ProjectState) -> Bool {
         lhs.name == rhs.name
@@ -71,11 +72,13 @@ struct ProjectState: Equatable {
             && lhs.masterGain == rhs.masterGain
             && lhs.trackInputs == rhs.trackInputs
             && lhs.voiceCleanup == rhs.voiceCleanup
-            && lhs.overlays.map(\.id) == rhs.overlays.map(\.id)
+            && lhs.overlays == rhs.overlays
             && lhs.overlayBookmarks == rhs.overlayBookmarks
+            && lhs.overlayBundlePaths == rhs.overlayBundlePaths
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
+            && lhs.selectedOverlayID == rhs.selectedOverlayID
     }
 }
 
@@ -118,7 +121,8 @@ extension EditorModel {
             overlayBundlePaths: project.overlayBundlePaths,
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID,
-            selectedMarkerID: selectedMarkerID)
+            selectedMarkerID: selectedMarkerID,
+            selectedOverlayID: selectedOverlayID)
     }
 
     /// Restores a previously captured arrangement. Track identities are stable
@@ -195,6 +199,7 @@ extension EditorModel {
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID
+        selectedOverlayID = state.selectedOverlayID
         restoreLUTDisplayNames(state.lutDisplayNames)
         reconcileAccessedURLs()
     }
@@ -204,7 +209,11 @@ extension EditorModel {
     /// (the restored items hold the same security-scoped URLs, which support
     /// repeated start/stop), so undo neither leaks tokens nor breaks redo.
     private func reconcileAccessedURLs() {
-        let active = Set(project.mediaItems.map(\.url))
+        var active = Set(project.mediaItems.map(\.url))
+        for overlay in project.overlays {
+            guard let url = resolveOverlayURL(for: overlay) else { continue }
+            active.insert(url)
+        }
         for url in accessedURLs.subtracting(active) {
             url.stopAccessingSecurityScopedResource()
             accessedURLs.remove(url)

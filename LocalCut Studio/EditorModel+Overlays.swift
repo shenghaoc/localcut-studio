@@ -13,15 +13,19 @@ extension EditorModel {
     func importOverlay(from url: URL, sourceType: OverlaySourceType) async {
         let generation = sessionGeneration
         let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
 
         guard let bookmark = try? url.bookmarkData(options: .withSecurityScope,
                                                     includingResourceValuesForKeys: nil,
                                                     relativeTo: nil) else {
+            if access { url.stopAccessingSecurityScopedResource() }
             statusMessage = "Could not create bookmark for \(url.lastPathComponent)."
             return
         }
-        guard sessionGeneration == generation else { return }
+        guard sessionGeneration == generation else {
+            if access { url.stopAccessingSecurityScopedResource() }
+            return
+        }
+        retainAccess(url, didStart: access)
 
         let defaultDuration = CMTime(seconds: 5, preferredTimescale: 600)
         let overlay = OverlayClip(
@@ -33,7 +37,12 @@ extension EditorModel {
             project.overlays.append(overlay)
             project.overlayBookmarks[overlay.id] = bookmark
         }
-        statusMessage = "Added \(sourceType.displayName) overlay."
+        if sourceType == .lottie,
+           let warning = LottieFrameSource.unsupportedFeatureWarning(for: url) {
+            statusMessage = "Added Lottie overlay — \(warning)"
+        } else {
+            statusMessage = "Added \(sourceType.displayName) overlay."
+        }
         await rebuild()
     }
 
@@ -43,6 +52,12 @@ extension EditorModel {
         guard project.overlays.contains(where: { $0.id == id }) else { return }
         performUndoable("Remove Overlay") {
             project.overlays.removeAll { $0.id == id }
+            if let bookmark = project.overlayBookmarks[id],
+               let url = resolveBookmark(bookmark) {
+                if let removed = accessedURLs.remove(url) {
+                    removed.stopAccessingSecurityScopedResource()
+                }
+            }
             project.overlayBookmarks.removeValue(forKey: id)
             project.overlayBundlePaths.removeValue(forKey: id)
         }
@@ -163,16 +178,24 @@ extension EditorModel {
     /// Registers overlay frame sources with the compositor for the current
     /// project's overlays. Called during composition rebuild.
     @MainActor
-    func registerOverlaySources() {
+    func registerOverlaySources() async {
         EffectCompositor.clearOverlaySources()
         for overlay in project.overlays {
             guard let url = resolveOverlayURL(for: overlay) else { continue }
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            guard let source = OverlayFrameSourceFactory.makeSource(for: overlay, sourceURL: url) else {
+            guard let source = await OverlayFrameSourceFactory.makeSource(for: overlay, sourceURL: url) else {
                 continue
             }
             EffectCompositor.setOverlaySource(source, for: overlay.id)
         }
+    }
+
+    private func resolveBookmark(_ bookmark: Data) -> URL? {
+        var isStale = false
+        return try? URL(resolvingBookmarkData: bookmark,
+                        options: .withSecurityScope,
+                        relativeTo: nil,
+                        bookmarkDataIsStale: &isStale)
     }
 }

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "name": "Soft Commercial",
+  "nodes": [
+    {
+      "effectName": "halation",
+      "params": {
+        "strength": { "keyframes": [], "defaultValue": 0.14 },
+        "threshold": 0.74,
+        "radius": 16,
+        "redBoost": 0.9
+      }
+    },
+    {
+      "effectName": "vignette",
+      "params": {
+        "amount": { "keyframes": [], "defaultValue": 0.05 },
+        "radius": 0.72,
+        "softness": 0.35
+      }
+    },
+    {
+      "effectName": "grain",
+      "params": {
+        "amount": { "keyframes": [], "defaultValue": 0.06 },
+        "size": 0.8,
+        "monochrome": true,
+        "seed": 2623387956675338549
+      }
+    }
+  ]
+}

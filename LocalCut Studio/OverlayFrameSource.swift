@@ -25,16 +25,14 @@ enum OverlayFrameSourceFactory {
     /// The `sourceURL` is resolved from the bookmark or bundle-relative path.
     @MainActor
     static func makeSource(for overlay: OverlayClip,
-                           sourceURL: URL) -> (any OverlayFrameSource)? {
+                           sourceURL: URL) async -> (any OverlayFrameSource)? {
         switch overlay.sourceType {
         case .animatedImage:
             return AnimatedImageSource(url: sourceURL)
         case .lottie:
-            // Lottie support requires lottie-ios SPM dependency.
-            // Return nil until the dependency is added.
-            return nil
+            return LottieFrameSource(url: sourceURL)
         case .alphaVideo:
-            return AlphaVideoSource(url: sourceURL)
+            return await AlphaVideoSource.make(url: sourceURL)
         }
     }
 }

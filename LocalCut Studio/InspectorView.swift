@@ -1005,15 +1005,17 @@ struct InspectorView: View {
                     pendingOverlayType = .alphaVideo
                     showOverlayImporter = true
                 }
-                Button("Lottie (coming soon)") { }
-                    .disabled(true)
+                Button("Lottie") {
+                    pendingOverlayType = .lottie
+                    showOverlayImporter = true
+                }
             } label: {
                 Label("Add Overlay", systemImage: "plus")
             }
         }
         .fileImporter(
             isPresented: $showOverlayImporter,
-            allowedContentTypes: [.image, .movie, .video, .data],
+            allowedContentTypes: [.image, .movie, .video, .json, .data],
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {

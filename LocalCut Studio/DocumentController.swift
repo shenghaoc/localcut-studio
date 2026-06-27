@@ -208,6 +208,7 @@ final class DocumentController {
         if !externallyEditedAssets.isEmpty {
             notes.append("\(externallyEditedAssets.count) bundled asset(s) changed externally — re-import or accept on next save")
         }
+        notes.append(contentsOf: lottieOverlayWarnings(model: model))
         model.statusMessage = notes.isEmpty
             ? "Opened \(model.project.name)."
             : "Opened \(model.project.name) — " + notes.joined(separator: "; ") + "."
@@ -226,6 +227,9 @@ final class DocumentController {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
+        let originalOverlayPaths = model.project.overlayBundlePaths
+        var overlayAccesses: [URL] = []
+        defer { stopOverlayAccesses(overlayAccesses) }
         do {
             if url.pathExtension == ProjectBundleLayout.fileExtension {
                 let bundledMedia: [ProjectBundle.BundledMedia] = model.project.mediaItems.compactMap { item in
@@ -236,10 +240,12 @@ final class DocumentController {
                         sourceURL: item.url,
                         bundleRelativePath: relative)
                 }
+                let overlayPlan = bundledOverlays(model: model)
+                overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
                 let projectJSON = try encodedDocument(forBundle: true, model: model)
                 let index = try ProjectBundle.write(projectJSON: projectJSON,
                                                      to: url,
-                                                     bundledMedia: bundledMedia,
+                                                     bundledMedia: bundledMedia + overlayPlan.assets,
                                                      previousFingerprints: model.lastBundleFingerprints)
                 model.lastBundleFingerprints = index
                 model.persistBeatCachesSynchronously(to: url)
@@ -254,6 +260,7 @@ final class DocumentController {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
             }
+            model.project.overlayBundlePaths = originalOverlayPaths
             model.statusMessage = "Save failed: \(error.localizedDescription)"
             return false
         }
@@ -270,6 +277,19 @@ final class DocumentController {
             document.media = document.media.map { ref in
                 var copy = ref
                 copy.bundleRelativePath = nil
+                return copy
+            }
+            document.overlays = document.overlays.map { overlay in
+                var copy = overlay
+                copy.bundleRelativePath = nil
+                return copy
+            }
+        } else {
+            document.overlays = document.overlays.map { overlay in
+                var copy = overlay
+                if copy.bundleRelativePath != nil {
+                    copy.bookmark = Data()
+                }
                 return copy
             }
         }
@@ -360,6 +380,9 @@ final class DocumentController {
             }
         }
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
+        let originalOverlayPaths = model.project.overlayBundlePaths
+        var overlayAccesses: [URL] = []
+        defer { stopOverlayAccesses(overlayAccesses) }
         do {
             let bundledMedia: [ProjectBundle.BundledMedia] = model.project.mediaItems.compactMap { item in
                 guard item.wantsBundling else {
@@ -374,12 +397,14 @@ final class DocumentController {
                     sourceURL: item.url,
                     bundleRelativePath: relative)
             }
+            let overlayPlan = bundledOverlays(model: model)
+            overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
             let projectJSON = try encodedDocument(forBundle: true, model: model)
             let bundleURLCopy = bundleURL
             let previous = model.lastBundleFingerprints
             let index = try await Task.detached {
                 try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
-                                        bundledMedia: bundledMedia,
+                                        bundledMedia: bundledMedia + overlayPlan.assets,
                                         previousFingerprints: previous)
             }.value
             model.lastBundleFingerprints = index
@@ -396,6 +421,7 @@ final class DocumentController {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
             }
+            model.project.overlayBundlePaths = originalOverlayPaths
             model.statusMessage = "Convert failed: \(error.localizedDescription)"
         }
     }
@@ -487,6 +513,9 @@ final class DocumentController {
             }
         }
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
+        let originalOverlayPaths = model.project.overlayBundlePaths
+        var overlayAccesses: [URL] = []
+        defer { stopOverlayAccesses(overlayAccesses) }
         do {
             let savedRevision = model.mutationRevision
             let bundledMedia: [ProjectBundle.BundledMedia] = model.project.mediaItems.compactMap { item in
@@ -498,12 +527,14 @@ final class DocumentController {
                     sourceURL: item.url,
                     bundleRelativePath: relative)
             }
+            let overlayPlan = bundledOverlays(model: model)
+            overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
             let projectJSON = try encodedDocument(forBundle: true, model: model)
             let previous = model.lastBundleFingerprints
             let bundleURLCopy = bundleURL
             let index = try await Task.detached {
                 try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
-                                        bundledMedia: bundledMedia,
+                                        bundledMedia: bundledMedia + overlayPlan.assets,
                                         previousFingerprints: previous)
             }.value
             model.lastBundleFingerprints = index
@@ -519,6 +550,7 @@ final class DocumentController {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
             }
+            model.project.overlayBundlePaths = originalOverlayPaths
             model.statusMessage = "Save failed: \(error.localizedDescription)"
         }
     }
@@ -531,6 +563,57 @@ final class DocumentController {
         guard item.wantsBundling else { return nil }
         if let existing = item.bundleRelativePath { return existing }
         return ProjectBundleLayout.assetRelativePath(mediaID: item.id, sourceExtension: item.url.pathExtension)
+    }
+
+    private struct OverlayBundlePlan {
+        var assets: [ProjectBundle.BundledMedia] = []
+        var accessedURLs: [URL] = []
+    }
+
+    private func bundledOverlays(model: EditorModel) -> OverlayBundlePlan {
+        var plan = OverlayBundlePlan()
+        for overlay in model.project.overlays {
+            guard let sourceURL = model.resolveOverlayURL(for: overlay) else { continue }
+            let didAccess = sourceURL.startAccessingSecurityScopedResource()
+            if didAccess { plan.accessedURLs.append(sourceURL) }
+            let relative = overlayBundleRelativePath(for: overlay, sourceURL: sourceURL, model: model)
+            model.project.overlayBundlePaths[overlay.id] = relative
+            plan.assets.append(ProjectBundle.BundledMedia(
+                mediaID: overlay.id,
+                sourceURL: sourceURL,
+                bundleRelativePath: relative))
+        }
+        return plan
+    }
+
+    private func overlayBundleRelativePath(for overlay: OverlayClip,
+                                           sourceURL: URL,
+                                           model: EditorModel) -> String {
+        if let existing = model.project.overlayBundlePaths[overlay.id],
+           ProjectBundleLayout.isSafeAssetRelativePath(existing) {
+            return existing
+        }
+        return ProjectBundleLayout.assetRelativePath(mediaID: overlay.id,
+                                                     sourceExtension: sourceURL.pathExtension)
+    }
+
+    private func stopOverlayAccesses(_ urls: [URL]) {
+        for url in urls {
+            url.stopAccessingSecurityScopedResource()
+        }
+    }
+
+    private func lottieOverlayWarnings(model: EditorModel) -> [String] {
+        model.project.overlays.compactMap { overlay in
+            guard overlay.sourceType == .lottie,
+                  let url = model.resolveOverlayURL(for: overlay) else {
+                return nil
+            }
+            let didAccess = url.startAccessingSecurityScopedResource()
+            defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+            guard let warning = LottieFrameSource.unsupportedFeatureWarning(for: url) else { return nil }
+            return "Lottie overlay \(overlay.id.uuidString.prefix(8)) \(warning)"
+        }
     }
 
     private func adoptSaved(url: URL, cleanIfRevision revision: Int? = nil, model: EditorModel) {

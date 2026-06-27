@@ -9,7 +9,7 @@
 ## R2 — Look presets
 
 - **R2.1** `LookPresetV1` JSON file format with versioning; built-in presets ship in the app bundle.
-- **R2.2** User presets import / export via `.fileImporter` / `NSSavePanel`; referenced LUTs travel in the project bundle's `assets/luts/`.
+- **R2.2** User presets import / export via `.fileImporter` / `NSSavePanel`; exported referenced LUT sidecars travel under `assets/luts/`.
 - **R2.3** Looks compose with the existing per-clip colour-grading; ordering documented (grade → looks → transform).
 - **R2.4** A missing referenced LUT loads with a neutral identity cube and a user-visible warning.
 
@@ -35,5 +35,5 @@
 - **R6.1** Snapshot tests for each built-in look preset on a fixture clip at a fixed time.
 - **R6.2** Lottie playback determinism test: same `.lottie` rendered twice at sampled times produces identical pixels.
 - **R6.3** Smoke: import animated overlay + Lottie sticker + alpha video → scrub → export → all three composite correctly.
-- **R6.4** Bundle save / load preserves preset selection, LUT reference, overlay sources, and Lottie file under `assets/`.
+- **R6.4** Bundle save / load preserves overlay sources and Lottie files under `assets/`; preset resources and exported LUT sidecars round-trip through the `LookPresetV1` format.
 - **R6.5** `xcodebuild` green; no test count regression.

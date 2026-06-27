@@ -140,6 +140,95 @@ struct ProjectBundleTests {
         #expect(ref.bookmark == Data([0xBA, 0x5E]))
     }
 
+    @Test("Bundle save copies overlay sources under assets and strips their bookmarks")
+    func bundleSaveCopiesOverlaySources() throws {
+        let tmp = try makeTempDirectory("overlay-source")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let source = try writeAsset(
+            Array("{\"v\":\"5.7.4\",\"fr\":30,\"ip\":0,\"op\":1,\"w\":8,\"h\":8,\"layers\":[]}".utf8),
+            name: "sticker.json",
+            in: tmp)
+        let bundleURL = tmp.appendingPathComponent("OverlayProject.lcbundle")
+
+        let model = EditorModel()
+        let overlay = OverlayClip(
+            id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+            sourceType: .lottie,
+            timelineStart: time(1),
+            duration: time(2))
+        model.project.overlays = [overlay]
+        model.project.overlayBookmarks[overlay.id] = try source.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil)
+
+        #expect(model.writeSynchronously(to: bundleURL))
+
+        let contents = try ProjectBundle.read(url: bundleURL)
+        let docOverlay = try #require(contents.document.overlays.first)
+        let relativePath = try #require(docOverlay.bundleRelativePath)
+        let copiedURL = bundleURL.appendingPathComponent(relativePath)
+
+        #expect(relativePath == "assets/\(overlay.id.uuidString).json")
+        #expect(FileManager.default.fileExists(atPath: copiedURL.path))
+        #expect(try Data(contentsOf: copiedURL) == Data(contentsOf: source))
+        #expect(docOverlay.bookmark.isEmpty)
+        #expect(contents.fingerprints.entries[relativePath] != nil)
+    }
+
+    @Test("Single-file save strips stale overlay bundle paths")
+    func singleFileSaveStripsOverlayBundlePaths() {
+        let model = EditorModel()
+        let overlay = OverlayClip(
+            sourceType: .animatedImage,
+            timelineStart: .zero,
+            duration: time(1))
+        model.project.overlays = [overlay]
+        model.project.overlayBookmarks[overlay.id] = Data([0x01])
+        model.project.overlayBundlePaths[overlay.id] = "assets/\(overlay.id.uuidString).gif"
+
+        let document = model.makeDocumentForSave(forBundle: false)
+
+        #expect(document.overlays.first?.bundleRelativePath == nil)
+        #expect(document.overlays.first?.bookmark == Data([0x01]))
+    }
+
+    @Test("Queue snapshot adds bookmarks for bundled overlay sources")
+    func queueSnapshotAddsBundledOverlayBookmarks() throws {
+        let tmp = try makeTempDirectory("overlay-queue-snapshot")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let source = try writeAsset(
+            Array("{\"v\":\"5.7.4\",\"fr\":30,\"ip\":0,\"op\":1,\"w\":8,\"h\":8,\"layers\":[]}".utf8),
+            name: "sticker.json",
+            in: tmp)
+        let bundleURL = tmp.appendingPathComponent("OverlayQueue.lcbundle")
+
+        let model = EditorModel()
+        let overlay = OverlayClip(
+            id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+            sourceType: .lottie,
+            timelineStart: time(1),
+            duration: time(2))
+        model.project.overlays = [overlay]
+        model.project.overlayBookmarks[overlay.id] = try source.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil)
+
+        #expect(model.writeSynchronously(to: bundleURL))
+
+        let saved = try ProjectBundle.read(url: bundleURL).document
+        let savedOverlay = try #require(saved.overlays.first)
+        #expect(savedOverlay.bookmark.isEmpty)
+
+        model.project.overlayBookmarks.removeAll()
+        let snapshot = ProjectDocument(project: model.project, queueBundleURL: bundleURL)
+        let queuedOverlay = try #require(snapshot.overlays.first)
+
+        #expect(queuedOverlay.bundleRelativePath == savedOverlay.bundleRelativePath)
+        #expect(!queuedOverlay.bookmark.isEmpty)
+    }
+
     // MARK: - T6.2 — fingerprint detects an external edit
 
     @Test("Fingerprint detects an external edit on a tracked asset")

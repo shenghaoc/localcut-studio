@@ -1,4 +1,5 @@
 import Testing
+import AppKit
 import AVFoundation
 import CoreGraphics
 import CoreImage
@@ -41,9 +42,9 @@ func animatedImageSourceMissingFile() {
 // MARK: - AlphaVideoSource tests
 
 @Test("AlphaVideoSource returns nil for nonexistent file")
-func alphaVideoSourceMissingFile() {
+func alphaVideoSourceMissingFile() async {
     let url = URL(fileURLWithPath: "/nonexistent/file.mov")
-    let source = AlphaVideoSource(url: url)
+    let source = await AlphaVideoSource.make(url: url)
     #expect(source == nil)
 }
 
@@ -129,3 +130,282 @@ func compositionOverlayBoundaries() async throws {
     #expect(project.overlays.count == 1)
     #expect(project.overlays[0].timelineStart == CMTime(seconds: 3, preferredTimescale: 600))
 }
+
+// MARK: - Lottie verification
+
+@Test("LottieFrameSource renders deterministic pixels at sampled times")
+@MainActor
+func lottieFrameSourceDeterminism() throws {
+    let tmp = try makeOverlayTempDirectory("lottie-determinism")
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let url = tmp.appendingPathComponent("sticker.json")
+    try minimalLottieJSON.data(using: .utf8)!.write(to: url, options: .atomic)
+
+    let first = try #require(LottieFrameSource(url: url))
+    let second = try #require(LottieFrameSource(url: url))
+
+    let sampleTime = CMTime(seconds: 1.0 / 30.0, preferredTimescale: 600)
+    let firstFrame = try #require(first.frame(at: sampleTime, endAction: .freeze))
+    let secondFrame = try #require(second.frame(at: sampleTime, endAction: .freeze))
+
+    #expect(first.naturalSize == CGSize(width: 8, height: 8))
+    #expect(pngBytes(firstFrame, size: first.naturalSize) == pngBytes(secondFrame, size: second.naturalSize))
+    #expect(first.frame(at: CMTime(seconds: 10, preferredTimescale: 600), endAction: .hide) == nil)
+}
+
+@Test("LottieFrameSource reports unsupported layer effects")
+func lottieUnsupportedFeatureWarning() throws {
+    let tmp = try makeOverlayTempDirectory("lottie-warning")
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let url = tmp.appendingPathComponent("warning.json")
+    try Data(#"{"layers":[{"ef":[{"ty":5,"nm":"blur"}]}]}"#.utf8).write(to: url, options: .atomic)
+
+    let warning = try #require(LottieFrameSource.unsupportedFeatureWarning(for: url))
+    #expect(warning.contains("layer effects"))
+}
+
+@Test("Render queue smoke exports animated image, Lottie, and alpha-video overlays")
+@MainActor
+func renderQueueExportsAllOverlayKinds() async throws {
+    let tmp = try makeOverlayTempDirectory("export-smoke")
+    defer { try? FileManager.default.removeItem(at: tmp) }
+
+    let videoURL = try await makeOverlayVideoFixture(seconds: 1, in: tmp)
+    let media = try await loadedOverlayMedia(from: videoURL)
+    media.bookmark = try videoURL.bookmarkData(options: .withSecurityScope,
+                                               includingResourceValuesForKeys: nil,
+                                               relativeTo: nil)
+
+    let pngURL = tmp.appendingPathComponent("sticker.png")
+    try #require(pngBytes(
+        CIImage(color: CIColor(red: 0, green: 1, blue: 0, alpha: 0.8))
+            .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8)),
+        size: CGSize(width: 8, height: 8)))
+        .write(to: pngURL, options: .atomic)
+
+    let lottieURL = tmp.appendingPathComponent("sticker.json")
+    try minimalLottieJSON.data(using: .utf8)!.write(to: lottieURL, options: .atomic)
+
+    let alphaURL = try await makeOverlayVideoFixture(seconds: 1, in: tmp)
+
+    let project = Project()
+    project.renderSize = CGSize(width: 64, height: 64)
+    project.frameRate = 30
+    project.mediaItems = [media]
+    project.videoTracks[0].clips = [
+        Clip(mediaID: media.id,
+             sourceStart: .zero,
+             duration: CMTime(seconds: 1, preferredTimescale: 600),
+             timelineStart: .zero),
+    ]
+
+    let overlays = [
+        OverlayClip(sourceType: .animatedImage,
+                    timelineStart: .zero,
+                    duration: CMTime(seconds: 0.8, preferredTimescale: 600),
+                    positionOffset: CGSize(width: -0.35, height: 0),
+                    scale: 0.5,
+                    endAction: .loop),
+        OverlayClip(sourceType: .lottie,
+                    timelineStart: .zero,
+                    duration: CMTime(seconds: 0.8, preferredTimescale: 600),
+                    scale: 0.5,
+                    endAction: .freeze),
+        OverlayClip(sourceType: .alphaVideo,
+                    timelineStart: .zero,
+                    duration: CMTime(seconds: 0.8, preferredTimescale: 600),
+                    positionOffset: CGSize(width: 0.35, height: 0),
+                    scale: 0.5,
+                    opacity: 0.75,
+                    endAction: .hide),
+    ]
+    project.overlays = overlays
+    let urlsByID = [
+        overlays[0].id: pngURL,
+        overlays[1].id: lottieURL,
+        overlays[2].id: alphaURL,
+    ]
+    for overlay in overlays {
+        let sourceURL = try #require(urlsByID[overlay.id])
+        project.overlayBookmarks[overlay.id] = try sourceURL.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil)
+    }
+
+    let outputURL = tmp.appendingPathComponent("overlay-smoke.mov")
+    try Data().write(to: outputURL, options: .atomic)
+    let outputBookmark = try outputURL.bookmarkData(options: .withSecurityScope,
+                                                    includingResourceValuesForKeys: nil,
+                                                    relativeTo: nil)
+
+    let queue = RenderQueue(persistsToDisk: false)
+    queue.enqueueWithDefaultPreset(outputURL: outputURL,
+                                   project: project,
+                                   bookmark: outputBookmark)
+    let job = try await waitForFinishedOverlayJob(queue)
+
+    #expect(job.status == .completed, "Render queue export failed: \(job.errorMessage ?? "unknown error")")
+    #expect(FileManager.default.fileExists(atPath: outputURL.path))
+    let outputAsset = AVURLAsset(url: outputURL)
+    let duration = try await outputAsset.load(.duration)
+    #expect(duration.seconds > 0)
+}
+
+private func makeOverlayTempDirectory(_ label: String) throws -> URL {
+    let url = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("overlay-tests-\(label)-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+}
+
+private func waitForFinishedOverlayJob(_ queue: RenderQueue) async throws -> QueueJob {
+    for _ in 0..<200 {
+        if let job = queue.jobs.first, job.isTerminal {
+            return job
+        }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    throw NSError(domain: "OverlayTests", code: -20,
+                  userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for overlay export"])
+}
+
+private func makeOverlayVideoFixture(seconds: Double,
+                                     fps: Int32 = 30,
+                                     in directory: URL) async throws -> URL {
+    let url = directory.appendingPathComponent("overlay-video-\(UUID().uuidString).mov")
+    let size = CGSize(width: 64, height: 64)
+    let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+    let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+        AVVideoCodecKey: AVVideoCodecType.h264,
+        AVVideoWidthKey: Int(size.width),
+        AVVideoHeightKey: Int(size.height),
+    ])
+    input.expectsMediaDataInRealTime = false
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+        assetWriterInput: input,
+        sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+            kCVPixelBufferWidthKey as String: Int(size.width),
+            kCVPixelBufferHeightKey as String: Int(size.height),
+        ])
+    writer.add(input)
+    try #require(writer.startWriting())
+    writer.startSession(atSourceTime: .zero)
+
+    let frameCount = Int(seconds * Double(fps))
+    for frame in 0..<frameCount {
+        while !input.isReadyForMoreMediaData {
+            guard writer.status == .writing else {
+                throw writer.error ?? NSError(domain: "OverlayTests", code: -1)
+            }
+            await Task.yield()
+        }
+        let buffer = try makeOverlayPixelBuffer(size: size, adaptor: adaptor, frame: frame)
+        guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else {
+            throw writer.error ?? NSError(domain: "OverlayTests", code: -2)
+        }
+    }
+
+    input.markAsFinished()
+    await writer.finishWriting()
+    try #require(writer.status == .completed)
+    return url
+}
+
+private func makeOverlayPixelBuffer(size: CGSize,
+                                    adaptor: AVAssetWriterInputPixelBufferAdaptor,
+                                    frame: Int) throws -> CVPixelBuffer {
+    var pixelBuffer: CVPixelBuffer?
+    if let pool = adaptor.pixelBufferPool {
+        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+    }
+    guard let pixelBuffer else {
+        throw NSError(domain: "OverlayTests", code: -3)
+    }
+    let status = CVPixelBufferLockBaseAddress(pixelBuffer, [])
+    guard status == kCVReturnSuccess else {
+        throw NSError(domain: "OverlayTests", code: Int(status))
+    }
+    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+
+    guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+        throw NSError(domain: "OverlayTests", code: -4)
+    }
+    let byte = UInt8(0x50 + (frame % 32))
+    memset(base, Int32(byte), CVPixelBufferGetBytesPerRow(pixelBuffer) * Int(size.height))
+    return pixelBuffer
+}
+
+private func loadedOverlayMedia(from url: URL) async throws -> MediaItem {
+    let item = MediaItem(url: url)
+    item.duration = try await item.asset.load(.duration).sanitized
+    let videoTracks = try await item.asset.loadTracks(withMediaType: .video)
+    let track = try #require(videoTracks.first)
+    item.hasVideo = true
+    item.naturalSize = try await track.load(.naturalSize).sanitized
+    item.preferredTransform = try await track.load(.preferredTransform).sanitized
+    return item
+}
+
+@MainActor
+private func pngBytes(_ image: CIImage, size: CGSize) -> Data? {
+    let context = CIContext(options: nil)
+    let rect = CGRect(origin: .zero, size: size)
+    guard let cgImage = context.createCGImage(image, from: rect) else { return nil }
+    let rep = NSBitmapImageRep(cgImage: cgImage)
+    return rep.representation(using: .png, properties: [:])
+}
+
+private let minimalLottieJSON = """
+{
+  "v": "5.7.4",
+  "fr": 30,
+  "ip": 0,
+  "op": 2,
+  "w": 8,
+  "h": 8,
+  "nm": "LocalCut Test Sticker",
+  "ddd": 0,
+  "assets": [],
+  "layers": [
+    {
+      "ddd": 0,
+      "ind": 1,
+      "ty": 4,
+      "nm": "red square",
+      "sr": 1,
+      "ks": {
+        "o": { "k": 100 },
+        "r": { "k": 0 },
+        "p": { "k": [4, 4, 0] },
+        "a": { "k": [0, 0, 0] },
+        "s": { "k": [100, 100, 100] }
+      },
+      "ao": 0,
+      "shapes": [
+        {
+          "ty": "rc",
+          "d": 1,
+          "s": { "k": [8, 8] },
+          "p": { "k": [0, 0] },
+          "r": { "k": 0 },
+          "nm": "rect"
+        },
+        {
+          "ty": "fl",
+          "c": { "k": [1, 0, 0, 1] },
+          "o": { "k": 100 },
+          "r": 1,
+          "bm": 0,
+          "nm": "fill"
+        }
+      ],
+      "ip": 0,
+      "op": 2,
+      "st": 0,
+      "bm": 0
+    }
+  ]
+}
+"""

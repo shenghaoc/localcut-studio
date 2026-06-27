@@ -253,6 +253,91 @@ func activeVignetteChangesEdgePixels() {
     #expect(!samplePixelEquals(result, source, at: CGPoint(x: 2, y: 2), tolerance: 0.02))
 }
 
+@Test("Built-in look presets render deterministic snapshots")
+@MainActor
+func builtInLookPresetSnapshots() throws {
+    let compositor = EffectCompositor()
+    let source = CIImage(color: CIColor(red: 0.52, green: 0.48, blue: 0.42, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+    let sourceBytes = try #require(rgbaBytes(source, width: 64, height: 64))
+
+    #expect(LookPresetLibrary.builtInPresets.count >= 10)
+    for preset in LookPresetLibrary.builtInPresets {
+        let first = compositor.applyEffectChain(
+            source, effects: preset.effects, cacheKey: nil,
+            at: CMTime(seconds: 0.25, preferredTimescale: 600))
+        let second = compositor.applyEffectChain(
+            source, effects: preset.effects, cacheKey: nil,
+            at: CMTime(seconds: 0.25, preferredTimescale: 600))
+        let firstBytes = try #require(rgbaBytes(first, width: 64, height: 64))
+        let secondBytes = try #require(rgbaBytes(second, width: 64, height: 64))
+
+        #expect(firstBytes == secondBytes, "\(preset.name) should render deterministically")
+        #expect(firstBytes != sourceBytes, "\(preset.name) should change the fixture image")
+    }
+}
+
+@Test("Built-in look preset resources match the in-memory library")
+func builtInLookPresetResourcesMatchLibrary() throws {
+    let root = try #require(Bundle.main.resourceURL)
+    let enumerator = FileManager.default.enumerator(
+        at: root,
+        includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles])
+    let urls = (enumerator?.compactMap { $0 as? URL } ?? [])
+        .filter { $0.pathExtension == LookPresetV1.fileExtension }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    let resourcePresets = try urls.map { try LookPresetV1(data: Data(contentsOf: $0)) }
+    let libraryByName = Dictionary(uniqueKeysWithValues: LookPresetLibrary.builtInPresets.map { ($0.name, $0) })
+
+    #expect(resourcePresets.count == LookPresetLibrary.builtInPresets.count)
+    #expect(Set(resourcePresets.map(\.name)) == Set(libraryByName.keys))
+    for preset in resourcePresets {
+        #expect(preset == libraryByName[preset.name], "\(preset.name) resource should match LookPresetLibrary")
+    }
+}
+
+@Test("Exported look presets copy LUTs under assets/luts")
+@MainActor
+func exportedLookPresetCopiesLUTUnderAssetsLuts() async throws {
+    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("look-preset-export-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+
+    let lutURL = tmp.appendingPathComponent("warm.cube")
+    let lutData = Data("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n".utf8)
+    try lutData.write(to: lutURL, options: .atomic)
+    let lutBookmark = try lutURL.bookmarkData(options: .withSecurityScope,
+                                              includingResourceValuesForKeys: nil,
+                                              relativeTo: nil)
+
+    let model = EditorModel()
+    let clip = Clip(mediaID: UUID(),
+                    sourceStart: .zero,
+                    duration: CMTime(seconds: 2, preferredTimescale: 600),
+                    timelineStart: .zero,
+                    effects: [
+                        .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
+                        .lut(bookmark: lutBookmark),
+                    ])
+    model.project.videoTracks.first!.clips = [clip]
+    model.selectedClipID = clip.id
+    model._testCacheLUTDisplayName("warm.cube", for: lutBookmark)
+
+    let presetURL = tmp.appendingPathComponent("Warm Look.lclook")
+    model.exportLookPreset(to: presetURL)
+    for _ in 0..<100 {
+        if FileManager.default.fileExists(atPath: presetURL.path) { break }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+
+    let preset = try LookPresetV1(data: Data(contentsOf: presetURL))
+    #expect(preset.lut?.relativePath == "assets/luts/Warm Look.cube")
+    let copiedLUT = tmp.appendingPathComponent("assets/luts/Warm Look.cube")
+    #expect(try Data(contentsOf: copiedLUT) == lutData)
+}
+
 /// Renders `a` and `b` to single-pixel CGImages at `point` and compares the
 /// RGBA bytes. Used by the colour-grading pass-through tests; lives near the
 /// top of the file so multiple tests can share it.
@@ -271,6 +356,20 @@ private func samplePixelEquals(_ a: CIImage, _ b: CIImage, at point: CGPoint,
         if diff > tolerance { return false }
     }
     return true
+}
+
+@MainActor
+private func rgbaBytes(_ image: CIImage, width: Int, height: Int) -> [UInt8]? {
+    let context = CIContext(options: nil)
+    var bytes = [UInt8](repeating: 0, count: width * height * 4)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    context.render(image,
+                   toBitmap: &bytes,
+                   rowBytes: width * 4,
+                   bounds: CGRect(x: 0, y: 0, width: width, height: height),
+                   format: .RGBA8,
+                   colorSpace: colorSpace)
+    return bytes
 }
 
 @Test("EditorModel.resetClipColourEffects preserves non-colour effects (audit fix)")

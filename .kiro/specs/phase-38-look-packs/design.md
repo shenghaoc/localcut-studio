@@ -1,6 +1,6 @@
 # Design: Phase 38 — Look Packs and Animated Overlays
 
-> Status: **Proposed**. Target tag: **v0.1.6**. May split into 38a (looks) and 38b (overlays) if task count grows past ~25.
+> Status: **Implemented**. Target tag: **v0.1.6**.
 
 ## Goal
 
@@ -16,15 +16,15 @@
 
 ### A — Looks
 
-1. **Grain node.** Resolution-independent hash noise in a `CIKernel`. Parameters: amount (0…1), size (in source pixels), monochrome toggle. Determinism keyed on a per-clip seed.
-2. **Halation node.** Bright-red bleed: extract a luminance-thresholded mask, gaussian-blur the red channel of that mask, add back at user strength. CIKernel pipeline.
-3. **Vignette node.** Radial darkening with adjustable inner / outer radius and softness. `CIVignette` is too rigid; use a CIKernel for the exact look.
-4. **Look preset format.** `LookPresetV1` JSON composes an ordered list of `(effectName, params)` plus a reference to a `.cube` LUT. LUTs travel in the project bundle's `assets/luts/`; the preset stores a relative path. Built-in presets ship under `Resources/LookPresets/`.
+1. **Grain node.** Resolution-independent Core Image noise pass. Parameters: amount (0…1), size (in source pixels), monochrome toggle. Determinism is keyed on a per-clip seed.
+2. **Halation node.** Bright-red bleed: extract a thresholded bright-pass proxy, gaussian-blur it, warm the result, and add back at user strength.
+3. **Vignette node.** Radial edge shading using Core Image's vignette filter with authored amount / radius / softness.
+4. **Look preset format.** `LookPresetV1` JSON composes an ordered list of `(effectName, params)` plus an optional reference to a `.cube` LUT. Exported preset LUT sidecars travel under `assets/luts/`; the preset stores a relative path. Built-in preset source JSON ships under `Resources/LookPresets/` and is copied into the app bundle resources by Xcode.
 
 ### B — Overlays
 
 1. **Animated images.** `ImageIO` decodes animated PNG / GIF / WebP / AVIF into a frame array with per-frame durations. We do not buffer the entire animation in RAM for long sources — instead we keep a sliding window keyed on the request time, decoded on demand by the worker.
-2. **Lottie.** `lottie-ios` (originally Airbnb, now community-maintained as `airbnb/lottie-ios`) renders into a `CALayer` driven off-screen by a Metal layer renderer that we sample into a `CIImage` per frame. Third-party dep justification (Phase 38 is the second of two such deps in the plan, alongside `GoogleWebRTC` in Phase 47): Apache-2.0 licence, organisational backing, active maintenance, no native Apple equivalent — `CAEmitterLayer` / `CAAnimation` / SwiftUI animation cover nothing of Lottie's After Effects JSON model, and writing one from scratch would dwarf the rest of the spec. Alternative considered: `rlottie` (Samsung) via a Swift wrapper — rejected because timing fidelity against `CADisplayLink` is worse and the WGSL-equivalent path would need a custom Metal renderer.
+2. **Lottie.** `lottie-ios` (originally Airbnb, now community-maintained as `airbnb/lottie-ios`) renders through an off-screen `LottieAnimationView`; frames are sampled into `CIImage`s before compositor use. Third-party dep justification (Phase 38 is the second of two such deps in the plan, alongside `GoogleWebRTC` in Phase 47): Apache-2.0 licence, organisational backing, active maintenance, no native Apple equivalent — `CAEmitterLayer` / `CAAnimation` / SwiftUI animation cover nothing of Lottie's After Effects JSON model, and writing one from scratch would dwarf the rest of the spec. Alternative considered: `rlottie` (Samsung) via a Swift wrapper — rejected because timing fidelity against `CADisplayLink` is worse and the WGSL-equivalent path would need a custom Metal renderer.
 3. **Alpha videos.** Standard `AVURLAsset` import; the compositor honours alpha by sampling RGBA and multiplying the layer instruction's opacity. We require the source to be a codec that AVFoundation can decode with alpha (ProRes 4444 + HEVC with alpha).
 
 ### Compositor integration

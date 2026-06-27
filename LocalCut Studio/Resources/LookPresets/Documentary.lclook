@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "name": "Documentary",
+  "nodes": [
+    {
+      "effectName": "halation",
+      "params": {
+        "strength": { "keyframes": [], "defaultValue": 0.04 },
+        "threshold": 0.84,
+        "radius": 8,
+        "redBoost": 0.9
+      }
+    },
+    {
+      "effectName": "vignette",
+      "params": {
+        "amount": { "keyframes": [], "defaultValue": 0.06 },
+        "radius": 0.72,
+        "softness": 0.35
+      }
+    },
+    {
+      "effectName": "grain",
+      "params": {
+        "amount": { "keyframes": [], "defaultValue": 0.09 },
+        "size": 0.9,
+        "monochrome": true,
+        "seed": 17473403940663419546
+      }
+    }
+  ]
+}
