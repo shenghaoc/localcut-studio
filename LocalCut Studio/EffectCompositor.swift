@@ -409,18 +409,21 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let centreX = renderSize.width / 2 + item.positionOffset.width * renderSize.width / 2
         let centreY = renderSize.height / 2 - item.positionOffset.height * renderSize.height / 2
 
+        // Build the transform: rotate in original space, scale, then translate.
+        // Transforms compose right-to-left in CGAffineTransform, so we write
+        // them in reverse logical order.
         var transform = CGAffineTransform.identity
-        // Scale to target size.
+        // 1. Move the overlay so its centre sits at the target position.
+        transform = transform.translatedBy(x: centreX - targetW / 2,
+                                           y: centreY - targetH / 2)
+        // 2. Scale from original to target size.
         transform = transform.scaledBy(x: scaleFactor, y: scaleFactor)
-        // Rotate around the centre of the scaled image.
+        // 3. Rotate around the centre of the original image (before scaling).
         if item.rotation != 0 {
             transform = transform.translatedBy(x: overlayW / 2, y: overlayH / 2)
             transform = transform.rotated(by: item.rotation)
             transform = transform.translatedBy(x: -overlayW / 2, y: -overlayH / 2)
         }
-        // Translate to the target position (centre of the overlay at the target point).
-        transform = transform.translatedBy(x: centreX - targetW / 2,
-                                           y: centreY - targetH / 2)
         image = image.transformed(by: transform)
 
         if item.opacity < 1 {

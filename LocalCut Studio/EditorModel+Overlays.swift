@@ -166,8 +166,10 @@ extension EditorModel {
     func registerOverlaySources() {
         EffectCompositor.clearOverlaySources()
         for overlay in project.overlays {
-            guard let url = resolveOverlayURL(for: overlay),
-                  let source = OverlayFrameSourceFactory.makeSource(for: overlay, sourceURL: url) else {
+            guard let url = resolveOverlayURL(for: overlay) else { continue }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            guard let source = OverlayFrameSourceFactory.makeSource(for: overlay, sourceURL: url) else {
                 continue
             }
             EffectCompositor.setOverlaySource(source, for: overlay.id)

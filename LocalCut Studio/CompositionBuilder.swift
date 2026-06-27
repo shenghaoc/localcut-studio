@@ -636,13 +636,8 @@ enum CompositionBuilder {
                 workingColourSpace: workingColourSpace))
         }
 
-        // Register overlay frame sources with the compositor so it can decode
-        // frames on demand during rendering.
-        EffectCompositor.clearOverlaySources()
-        for overlay in overlays {
-            // Overlay source URL resolution happens at EditorModel level;
-            // here we just pass the metadata through the instruction.
-        }
+        // Overlay frame sources are registered by EditorModel.registerOverlaySources()
+        // before CompositionBuilder.build() is called — do not clear them here.
 
         var config = try await AVVideoComposition.Configuration(for: composition)
         config.renderSize = renderSize
