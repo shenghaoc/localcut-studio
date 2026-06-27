@@ -333,7 +333,7 @@ func projectDocumentPureRoundTrip() throws {
 @Test("OverlayClip model round-trips through OverlayClipDoc")
 func overlayClipDocRoundTrip() {
     let overlay = OverlayClip(
-        id: UUID(uuidString: "AAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+        id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
         sourceType: .animatedImage,
         timelineStart: time(2),
         duration: time(5),
