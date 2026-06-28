@@ -133,6 +133,7 @@ final class EditorModel {
 
     // Capture engine (Phase 41)
     var isRecorderPresented = false
+    var isStartingRecording = false
     var isRecording = false
     var recordingStartedAt: Date?
     var recordingElapsedSeconds: Double = 0

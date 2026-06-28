@@ -42,7 +42,17 @@ enum CaptureSourceCatalog {
 
         let firstDisplay = content.displays.first
         for application in content.applications {
-            guard let display = firstDisplay else { continue }
+            // Find the display that contains this app's windows. On a
+            // multi-display setup, the first display may not be the one the app
+            // lives on, which would produce a blank or wrong recording.
+            let display = content.displays.first(where: { display in
+                content.windows.contains(where: {
+                    $0.owningApplication?.processID == application.processID
+                        && $0.isOnScreen
+                        && display.frame.intersects($0.frame)
+                })
+            }) ?? firstDisplay
+            guard let display else { continue }
             let width = max(16, display.width)
             let height = max(16, display.height)
             options.append(CaptureSourceOption(

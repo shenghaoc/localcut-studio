@@ -33,7 +33,7 @@ struct RecorderCommands: Commands {
             Button("Choose Recordings Folder…") {
                 _ = model.chooseRecordingsFolder()
             }
-            .disabled(model.isRecording)
+            .disabled(model.isRecording || model.isStartingRecording)
         }
     }
 }

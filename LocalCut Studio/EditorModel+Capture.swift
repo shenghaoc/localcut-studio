@@ -110,6 +110,8 @@ extension EditorModel {
                         webcamDeviceID: String?,
                         microphoneDeviceID: String?) async {
         guard !isRecording else { return }
+        isStartingRecording = true
+        defer { isStartingRecording = false }
         guard let root = resolvedRecordingsFolder(promptIfMissing: true) else {
             statusMessage = "Choose a recordings folder before recording."
             return
@@ -221,7 +223,11 @@ extension EditorModel {
                 recordingDiskWarning = nil
                 recordingSourceCount = 0
                 recordingBackpressureCount = 0
-                await landCaptureSession(result)
+                let manifestFinalizeFailed = result._manifestFinalizeFailed
+                _ = await landCaptureSession(result)
+                if manifestFinalizeFailed {
+                    statusMessage += " Manifest could not be finalized; this session may be re-offered for recovery on next launch."
+                }
             } catch {
                 isRecording = false
                 recordingStartedAt = nil

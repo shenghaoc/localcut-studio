@@ -8,6 +8,29 @@ protocol CaptureRunningSession: Sendable {
     func stop() async
 }
 
+nonisolated enum CapturePermissionAuthorizer {
+    static func requestScreenRecordingAccess() -> Bool {
+        CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
+    }
+
+    static func requestDeviceAccess(for mediaType: AVMediaType) async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: mediaType) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: mediaType) { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+}
+
 nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private let target: CaptureTarget
     private let frameRate: Double
@@ -30,7 +53,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     }
 
     func start() async throws {
-        guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
+        guard CapturePermissionAuthorizer.requestScreenRecordingAccess() else {
             throw CaptureEngineError.screenRecordingDenied
         }
 
@@ -108,6 +131,13 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         switch type {
         case .screen:
+            // ScreenCaptureKit can deliver idle, blank, or stopped frames during
+            // display changes, window transitions, or when the screen is locked.
+            // Only pass complete frames to the writer — non-frame buffers produce
+            // black/stale frames in the recording or trigger writer failures.
+            if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+               let status = attachments.first?[.status] as? Int,
+               status != 0 { return }  // 0 = SCFrameStatus.complete
             videoWriter?.append(sampleBuffer)
         case .audio:
             audioWriter?.append(sampleBuffer)
@@ -141,7 +171,7 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
     }
 
     func start() async throws {
-        guard await requestAuthorizationIfNeeded() else {
+        guard await CapturePermissionAuthorizer.requestDeviceAccess(for: mediaType) else {
             throw mediaType == .video
                 ? CaptureEngineError.cameraPermissionDenied
                 : CaptureEngineError.microphonePermissionDenied
@@ -214,22 +244,5 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         writer.append(sampleBuffer)
-    }
-
-    private func requestAuthorizationIfNeeded() async -> Bool {
-        switch AVCaptureDevice.authorizationStatus(for: mediaType) {
-        case .authorized:
-            return true
-        case .notDetermined:
-            return await withCheckedContinuation { continuation in
-                AVCaptureDevice.requestAccess(for: mediaType) { granted in
-                    continuation.resume(returning: granted)
-                }
-            }
-        case .denied, .restricted:
-            return false
-        @unknown default:
-            return false
-        }
     }
 }

@@ -129,7 +129,7 @@ struct RecorderSetupView: View {
     }
 
     private var canStart: Bool {
-        if isLoadingSources || model.isRecording { return false }
+        if isLoadingSources || model.isRecording || model.isStartingRecording { return false }
         if includeScreen && selectedScreenID != nil { return true }
         if includeWebcam && selectedWebcamID != nil { return true }
         if includeMicrophone && selectedMicrophoneID != nil { return true }

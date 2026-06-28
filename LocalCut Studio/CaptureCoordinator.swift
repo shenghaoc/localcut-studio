@@ -74,6 +74,8 @@ actor CaptureCoordinator {
                 "Total capture rate (\(Int(totalPixelRate / 1_000_000).formatted()) MPx/s) exceeds the \(capability.tier == .accelerated ? "Accelerated" : "Pro") tier budget of \(budgetFormatted) MPx/s. Lower resolution or frame rate, or reduce the number of video sources.")
         }
 
+        try await Self.preflightPermissions(for: request)
+
         let id = UUID()
         let directoryURL = request.rootURL
             .appendingPathComponent(id.uuidString, isDirectory: true)
@@ -255,6 +257,11 @@ actor CaptureCoordinator {
                 _ = try? await writer.finish()
             }
             manifest.close()
+            // Clean up the session directory so a failed start (permission denied,
+            // camera in use, etc.) doesn't appear as a crash-recovery candidate on
+            // the next launch — no frames were ever captured, and recovery would
+            // surface bogus zero-duration rows.
+            try? FileManager.default.removeItem(at: directoryURL)
             activeSession = nil
             state = .idle
             throw error
@@ -287,25 +294,30 @@ actor CaptureCoordinator {
         // unfinalized so the session is still re-offered by crash recovery on the
         // next launch — but always return a partial result here so the UI can
         // land the sources that did finish, rather than throwing them away.
+        var manifestFinalized = false
         if finishErrors.isEmpty {
             let durationUs = max(
                 0,
                 CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock())) - active.startHostTimeUs)
-            try? active.manifest.append(.finalize(CaptureFinalizeRecord(
+            manifestFinalized = (try? active.manifest.append(.finalize(CaptureFinalizeRecord(
                 atUs: active.startHostTimeUs + durationUs,
-                durationUs: durationUs)))
+                durationUs: durationUs)))) != nil
         }
         active.manifest.close()
         state = .idle
 
         let data = try Data(contentsOf: active.manifestURL)
         let parsed = CaptureManifest.parseNDJSON(data)
-        return CaptureSessionResult(
+        var result = CaptureSessionResult(
             id: active.id,
             directoryURL: active.directoryURL,
             manifestURL: active.manifestURL,
             manifest: parsed,
             wasRecovered: false)
+        if !manifestFinalized {
+            result._manifestFinalizeFailed = true
+        }
+        return result
     }
 
     func scanRecoveredSessions(rootURL: URL) throws -> [CaptureSessionResult] {
@@ -336,6 +348,20 @@ actor CaptureCoordinator {
     /// Refuse to start a capture when the recordings volume has less than this
     /// much important-usage space available.
     private static let minimumFreeBytes: Int64 = 2_000_000_000
+
+    private static func preflightPermissions(for request: CaptureStartRequest) async throws {
+        if request.target != nil, !CapturePermissionAuthorizer.requestScreenRecordingAccess() {
+            throw CaptureEngineError.screenRecordingDenied
+        }
+        if request.webcamDeviceID != nil,
+           !(await CapturePermissionAuthorizer.requestDeviceAccess(for: .video)) {
+            throw CaptureEngineError.cameraPermissionDenied
+        }
+        if request.microphoneDeviceID != nil,
+           !(await CapturePermissionAuthorizer.requestDeviceAccess(for: .audio)) {
+            throw CaptureEngineError.microphonePermissionDenied
+        }
+    }
 
     /// Maximum combined pixel rate (width × height × fps) per tier. Accelerated
     /// tops out at 1080p30 (≈ 62 MPx/s); Pro allows 4K60 (≈ 498 MPx/s).

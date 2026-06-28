@@ -120,4 +120,9 @@ nonisolated struct CaptureSessionResult: Sendable, Identifiable {
     var manifestURL: URL
     var manifest: CaptureManifest
     var wasRecovered: Bool
+    /// Set when the manifest's finalize record could not be written (disk full,
+    /// volume disappeared, etc.). The UI surfaces this; the manifest remains
+    /// unfinalized so the session can still be discovered by crash recovery, but
+    /// the warning prevents silent double-landing.
+    var _manifestFinalizeFailed: Bool = false
 }

@@ -178,6 +178,12 @@ extension EditorModel {
     /// immediately. Returns `true` if the window may close.
     func confirmClose(window: NSWindow) -> Bool {
         guard !blockDocumentCommandDuringCloseSave() else { return false }
+        guard !isRecording, !isStartingRecording else {
+            statusMessage = isStartingRecording
+                ? "Wait for the recording to start before closing the window."
+                : "Stop the recording before closing the window."
+            return false
+        }
         guard isDirty else { return true }
         let alert = NSAlert()
         alert.messageText = "Do you want to save the changes you made to “\(project.name)”?"
@@ -220,8 +226,10 @@ extension EditorModel {
     /// session reset would tear down media access while capture writers keep
     /// running, and a later Stop could land the take into the wrong project.
     private func blockDocumentCommandWhileRecording() -> Bool {
-        guard isRecording else { return false }
-        statusMessage = "Stop the recording before switching projects."
+        guard isRecording || isStartingRecording else { return false }
+        statusMessage = isStartingRecording
+            ? "Wait for the recording to start before switching projects."
+            : "Stop the recording before switching projects."
         return true
     }
 }
