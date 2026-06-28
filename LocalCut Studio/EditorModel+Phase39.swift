@@ -81,7 +81,11 @@ extension EditorModel {
     func makeCoverImageData() async throws -> Data {
         let cover = project.coverFrame
             ?? CoverFrameDoc(time: CMTimeCode(CMTime(seconds: max(0, currentTime), preferredTimescale: 600)))
-        guard let built = try await CompositionBuilder.build(project: project) else {
+        let overlaySourceRegistryID = await registerOverlaySources()
+        defer { EffectCompositor.releaseOverlaySources(for: overlaySourceRegistryID) }
+        guard let built = try await CompositionBuilder.build(
+            project: project,
+            overlaySourceRegistryID: overlaySourceRegistryID) else {
             throw CoverExportError.emptyProject
         }
         let generator = AVAssetImageGenerator(asset: built.composition)

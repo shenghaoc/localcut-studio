@@ -408,6 +408,16 @@ nonisolated enum ProjectBundle {
             let coverFilename = "cover.\(cover.fileExtension)"
             let coverRelativePath = ProjectBundleLayout.coverRelativePath(format: cover.fileExtension)
             let coverPath = coversURL.appendingPathComponent(coverFilename)
+            // Remove stale cover files with a different extension (e.g. old
+            // cover.png when format changed to JPEG) so they don't linger.
+            for ext in ["png", "jpg", "heic"] where ext != cover.fileExtension {
+                let stale = coversURL.appendingPathComponent("cover.\(ext)")
+                if fm.fileExists(atPath: stale.path) {
+                    try? fm.removeItem(at: stale)
+                    let staleRel = ProjectBundleLayout.coverRelativePath(format: ext)
+                    index.entries.removeValue(forKey: staleRel)
+                }
+            }
             try cover.imageData.write(to: coverPath, options: .atomic)
             if let digest = try? Fingerprint.sha256(of: coverPath) {
                 index.entries[coverRelativePath] = digest

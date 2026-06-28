@@ -790,6 +790,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// so a later `CIContext.render` only reuploads the texture instead of
     /// re-running the per-clip kernel chain.
     nonisolated private func materialise(_ image: CIImage, extent: CGRect) -> CIImage? {
+        // NOTE: Materialises through sRGB rather than the project's working
+        // colour space because this `nonisolated` method cannot access
+        // `self.workingColourSpace`. The render-cache key includes the working
+        // space so entries are not shared across spaces; the colour shift is
+        // bounded to the sRGB↔working-space gamut mapping.
         guard let cg = Self.context(for: .sRGB).createCGImage(image, from: extent) else {
             return nil
         }

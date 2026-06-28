@@ -60,17 +60,23 @@ enum SafeZoneLibrary {
     /// caller can surface errors through `statusMessage`.
     static private(set) var loadErrors: [String] = []
 
+    /// Cached profiles — loaded once from bundle JSON on first access, then
+    /// reused. The bundle resources never change at runtime.
+    private static var _cachedProfiles: [SafeZoneProfile]?
+
     /// Loads profiles from bundled JSON, then falls back to hardcoded profiles
     /// for any platform that failed to load or validate.
     /// Surface errors via `loadErrors` so the app can show `statusMessage`
     /// without crashing preview or export.
     static var builtInProfiles: [SafeZoneProfile] {
+        if let cached = _cachedProfiles { return cached }
         let loaded = loadFromBundle()
         let fallbackIDs = Set(hardcodedFallbackProfiles.map(\.platformID))
         var merged = hardcodedFallbackProfiles.map { fallback in
             loaded.first { $0.platformID == fallback.platformID } ?? fallback
         }
         merged.append(contentsOf: loaded.filter { !fallbackIDs.contains($0.platformID) })
+        _cachedProfiles = merged
         return merged
     }
 
@@ -87,13 +93,15 @@ enum SafeZoneLibrary {
 
     // MARK: - JSON loading
 
-    /// Loads every `*.json` in `Resources/SafeZones/`, decodes, validates.
+    /// Loads every safe-zone `*.json`, decodes, validates. Xcode's synchronized
+    /// groups flatten these resources into the app bundle root today, while
+    /// older/manual resource phases may preserve `SafeZones/`.
     /// Profiles that fail to load or validate are dropped and an error is
     /// appended to `loadErrors`; the hardcoded fallback for that platform still
     /// works so preview never breaks.
     private static func loadFromBundle() -> [SafeZoneProfile] {
-        guard let urls = Bundle.main.urls(forResourcesWithExtension: "json",
-                                          subdirectory: "SafeZones") else {
+        let urls = bundledProfileURLs()
+        guard !urls.isEmpty else {
             Self.loadErrors = ["Safe zone directory not found in bundle resources."]
             return []
         }
@@ -123,6 +131,28 @@ enum SafeZoneLibrary {
         }
         Self.loadErrors = newErrors
         return profiles
+    }
+
+    private static func bundledProfileURLs() -> [URL] {
+        for subdirectory in ["SafeZones", "Resources/SafeZones"] {
+            let urls = Bundle.main.urls(forResourcesWithExtension: "json",
+                                        subdirectory: subdirectory) ?? []
+            if !urls.isEmpty { return urls }
+        }
+        let fallbackIDs = Set(hardcodedFallbackProfiles.map(\.platformID))
+        let rootURLs = Bundle.main.urls(forResourcesWithExtension: "json",
+                                        subdirectory: nil) ?? []
+        return rootURLs.filter { url in
+            if url.lastPathComponent == "safe-zones-v1.schema.json" {
+                return true
+            }
+            let profileID = url.deletingPathExtension().lastPathComponent
+            if fallbackIDs.contains(profileID) {
+                return true
+            }
+            guard let data = try? Data(contentsOf: url) else { return false }
+            return (try? JSONDecoder().decode(SafeZoneProfile.self, from: data)) != nil
+        }
     }
 
     // MARK: - Hardcoded fallback
