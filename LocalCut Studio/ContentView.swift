@@ -33,7 +33,7 @@ struct RecorderCommands: Commands {
             Button("Choose Recordings Folder…") {
                 _ = model.chooseRecordingsFolder()
             }
-            .disabled(model.isRecording || model.isStartingRecording)
+            .disabled(model.isRecording || model.isStartingRecording || model.isStoppingRecording)
         }
     }
 }
@@ -286,6 +286,7 @@ struct EditorView: View {
                 } label: {
                     Label("Record", systemImage: "record.circle")
                 }
+                .disabled(model.isStartingRecording || model.isStoppingRecording)
                 .help("Open recorder")
             }
 

@@ -135,6 +135,7 @@ final class EditorModel {
     var isRecorderPresented = false
     var isStartingRecording = false
     var isRecording = false
+    var isStoppingRecording = false
     var recordingStartedAt: Date?
     var recordingElapsedSeconds: Double = 0
     var recordingDiskFreeBytes: Int64?

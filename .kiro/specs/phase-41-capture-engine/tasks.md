@@ -33,7 +33,7 @@
 - [x] **T4.1** Recorder modal (basic) — source picker, target picker; full UX in Phase 42.
 - [x] **T4.2** Live record indicator + storage countdown in the status bar.
 - [x] **T4.3** Permission failure states for screen recording, camera, microphone, and recordings folder access; each gives a concrete next action.
-- [x] **T4.4** Clean stop lands captured sources into the current project as one undoable "Add Recording" action, one track per source.
+- [x] **T4.4** Clean stop lands captured sources into the current project as one undoable "Add Recording" action, one track per source; stopping/finalisation suppresses duplicate Stop taps while continuing to block New / Open / Close until landing is complete.
 
 ## Signing + privacy
 

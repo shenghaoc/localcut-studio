@@ -109,7 +109,7 @@ extension EditorModel {
                         includeSystemAudio: Bool,
                         webcamDeviceID: String?,
                         microphoneDeviceID: String?) async {
-        guard !isRecording else { return }
+        guard !isRecording, !isStartingRecording, !isStoppingRecording else { return }
         isStartingRecording = true
         defer { isStartingRecording = false }
         guard let root = resolvedRecordingsFolder(promptIfMissing: true) else {
@@ -209,14 +209,16 @@ extension EditorModel {
     }
 
     func stopRecording(statusMessage stopStatusMessage: String = "Stopping recording…") {
-        guard isRecording else { return }
+        guard isRecording, !isStoppingRecording else { return }
+        isRecording = false
+        isStoppingRecording = true
         recordingMonitorTask?.cancel()
         recordingMonitorTask = nil
         statusMessage = stopStatusMessage
         Task {
+            defer { isStoppingRecording = false }
             do {
                 let result = try await captureCoordinator.stop()
-                isRecording = false
                 recordingStartedAt = nil
                 recordingElapsedSeconds = 0
                 recordingDiskFreeBytes = nil

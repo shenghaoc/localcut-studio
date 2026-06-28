@@ -280,14 +280,29 @@ actor CaptureCoordinator {
         }
 
         // Finish every writer even if one fails, so no FileHandle or fragmented
-        // .mov is left open.
+        // .mov is left open. Run writers concurrently — `AVAssetWriter.finishWriting`
+        // performs async disk I/O and fragment flushing, and sequential execution
+        // can noticeably delay stop responsiveness with multiple sources.
         var finishErrors: [Error] = []
-        for writer in active.writers {
-            do {
-                let ended = try await writer.finish()
-                try? active.manifest.append(.sourceEnded(ended))
-            } catch {
-                finishErrors.append(error)
+        await withTaskGroup(of: (UUID, Result<CaptureSourceEndedRecord, Error>).self) { group in
+            for writer in active.writers {
+                let sourceID = writer.source.id
+                group.addTask {
+                    do {
+                        let ended = try await writer.finish()
+                        return (sourceID, .success(ended))
+                    } catch {
+                        return (sourceID, .failure(error))
+                    }
+                }
+            }
+            for await (_, result) in group {
+                switch result {
+                case .success(let ended):
+                    try? active.manifest.append(.sourceEnded(ended))
+                case .failure(let error):
+                    finishErrors.append(error)
+                }
             }
         }
         // Only finalize a clean stop. If a writer failed, leave the manifest

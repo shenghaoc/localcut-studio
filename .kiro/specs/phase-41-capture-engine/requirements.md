@@ -30,6 +30,7 @@
 - **R4.3** Recovery on launch scans for sessions whose `manifest.ndjson` ends without a `finalize` record and offers them in the media bin.
 - **R4.4** The recordings-root security-scoped bookmark is persisted in app settings, resolved before recovery, refreshed when stale, and re-bindable through Preferences.
 - **R4.5** Clean stops and recovered sessions land as normal media items, one timeline track per source, in one undoable "Add Recording" action.
+- **R4.6** Stop finalisation suppresses duplicate stop requests while still blocking New / Open / Close until captured files have been finalised and landed into the current project.
 
 ## R5 — Capability
 

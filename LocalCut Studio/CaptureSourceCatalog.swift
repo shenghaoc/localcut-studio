@@ -41,16 +41,16 @@ enum CaptureSourceCatalog {
         }
 
         let firstDisplay = content.displays.first
+        // Group on-screen windows by owning process ID upfront so the per-app
+        // display lookup is O(N + M) instead of a nested O(N × M) scan.
+        let windowsByAppID = Dictionary(
+            grouping: content.windows.filter { $0.isOnScreen },
+            by: { $0.owningApplication?.processID }
+        )
         for application in content.applications {
-            // Find the display that contains this app's windows. On a
-            // multi-display setup, the first display may not be the one the app
-            // lives on, which would produce a blank or wrong recording.
+            let appWindows = windowsByAppID[application.processID] ?? []
             let display = content.displays.first(where: { display in
-                content.windows.contains(where: {
-                    $0.owningApplication?.processID == application.processID
-                        && $0.isOnScreen
-                        && display.frame.intersects($0.frame)
-                })
+                appWindows.contains(where: { display.frame.intersects($0.frame) })
             }) ?? firstDisplay
             guard let display else { continue }
             let width = max(16, display.width)
