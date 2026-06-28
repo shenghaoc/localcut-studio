@@ -87,7 +87,7 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
         self.totalDuration = max(animation.duration, Double(frameCount) / frameRate)
     }
 
-    nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) -> CIImage? {
+    nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage? {
         guard !frames.isEmpty else { return nil }
         let seconds = time.seconds
         guard seconds >= 0 else { return nil }

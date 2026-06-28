@@ -4,15 +4,17 @@ import CoreGraphics
 import CoreImage
 import CoreMedia
 import CoreVideo
-import Dispatch
 import LocalCutCore
 
 /// Decodes frames from a video file with an alpha channel using AVFoundation.
 /// The alpha channel is preserved in the CIImage for correct compositing.
+///
+/// Uses the modern `AVAssetImageGenerator.image(at:)` async API for
+/// frame-accurate random access without deprecation warnings.
 nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize: CGSize
     private let url: URL
-    private let generator: AVAssetImageGenerator
+    private let asset: AVAsset
     private let frameStarts: [TimeInterval]
     private let duration: TimeInterval
     private let lock = NSLock()
@@ -22,12 +24,12 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
 
     private init(naturalSize: CGSize,
                  url: URL,
-                 generator: AVAssetImageGenerator,
+                 asset: AVAsset,
                  frameStarts: [TimeInterval],
                  duration: TimeInterval) {
         self.naturalSize = naturalSize
         self.url = url
-        self.generator = generator
+        self.asset = asset
         self.frameStarts = frameStarts
         self.duration = duration
     }
@@ -58,6 +60,7 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
                                   height: abs(orientedRect.height)).sanitized
         let displaySize = orientedSize == .zero ? size : orientedSize
 
+        // Index frame timestamps using AVAssetReader.
         guard let reader = try? AVAssetReader(asset: asset) else { return nil }
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
         output.alwaysCopiesSampleData = false
@@ -80,19 +83,16 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
         }
         let firstStart = frameStarts.first ?? 0
         let normalizedStarts = frameStarts.map { max(0, $0 - firstStart) }
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
+
         return AlphaVideoSource(
             naturalSize: displaySize,
             url: url,
-            generator: generator,
+            asset: asset,
             frameStarts: normalizedStarts,
             duration: duration.seconds)
     }
 
-    nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) -> CIImage? {
+    nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage? {
         guard !frameStarts.isEmpty else { return nil }
         let t = time.seconds
         guard t >= 0 else { return nil }
@@ -111,69 +111,47 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
         }
 
         let index = frameStarts.lastIndex(where: { $0 <= effectiveTime }) ?? 0
-        return cachedFrame(at: index)
+        return await cachedFrame(at: index)
     }
 
-    private func cachedFrame(at index: Int) -> CIImage? {
-        lock.lock()
-        if let cached = cache[index] {
+    private func cachedFrame(at index: Int) async -> CIImage? {
+        // Check cache first.
+        if let cached = lock.withLock({ () -> CIImage? in
+            guard let cached = cache[index] else { return nil }
             touchCachedFrame(at: index)
-            lock.unlock()
+            return cached
+        }) {
             return cached
         }
 
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer {
-            if accessing { url.stopAccessingSecurityScopedResource() }
-            lock.unlock()
-        }
-
         let requested = CMTime(seconds: frameStarts[index], preferredTimescale: 600)
-        guard let cgImage = generateImage(at: requested) else {
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+        guard let result = try? await generator.image(at: requested) else {
             return nil
         }
-        let image = CIImage(cgImage: cgImage)
-        cache[index] = image
-        touchCachedFrame(at: index)
-        while cacheOrder.count > maxCachedFrames {
-            let evicted = cacheOrder.removeFirst()
-            cache.removeValue(forKey: evicted)
-        }
-        return image
-    }
+        let image = CIImage(cgImage: result.image)
 
-    private func generateImage(at requested: CMTime) -> CGImage? {
-        let semaphore = DispatchSemaphore(value: 0)
-        let box = GeneratedAlphaVideoFrame()
-        generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: requested)]) { _, image, _, result, _ in
-            if result == .succeeded {
-                box.store(image)
+        lock.withLock {
+            cache[index] = image
+            touchCachedFrame(at: index)
+            while cacheOrder.count > maxCachedFrames {
+                let evicted = cacheOrder.removeFirst()
+                cache.removeValue(forKey: evicted)
             }
-            semaphore.signal()
         }
-        semaphore.wait()
-        return box.image()
+
+        return image
     }
 
     private func touchCachedFrame(at index: Int) {
         cacheOrder.removeAll { $0 == index }
         cacheOrder.append(index)
-    }
-}
-
-nonisolated private final class GeneratedAlphaVideoFrame: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedImage: CGImage?
-
-    func store(_ image: CGImage?) {
-        lock.withLock {
-            storedImage = image
-        }
-    }
-
-    func image() -> CGImage? {
-        lock.withLock {
-            storedImage
-        }
     }
 }

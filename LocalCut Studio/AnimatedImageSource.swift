@@ -71,7 +71,7 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
         self.frameStarts = starts
     }
 
-    nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) -> CIImage? {
+    nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage? {
         let t = time.seconds
         guard t >= 0 else { return nil }
 
@@ -89,30 +89,29 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
         // Binary search for the frame index.
         let index = frameStarts.lastIndex(where: { $0 <= effectiveTime }) ?? 0
 
-        lock.lock()
-        defer { lock.unlock() }
-
-        if let cached = cache[index] {
-            return cached
-        }
-
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-
-        guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil) else {
-            return nil
-        }
-        let ciImage = CIImage(cgImage: cgImage)
-
-        cache[index] = ciImage
-        if cache.count > maxCachedFrames {
-            // Evict frames farthest from the current index.
-            let sorted = cache.keys.sorted { abs($0 - index) < abs($1 - index) }
-            for key in sorted.dropFirst(maxCachedFrames) {
-                cache.removeValue(forKey: key)
+        return lock.withLock {
+            if let cached = cache[index] {
+                return cached
             }
-        }
 
-        return ciImage
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+            guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil) else {
+                return nil
+            }
+            let ciImage = CIImage(cgImage: cgImage)
+
+            cache[index] = ciImage
+            if cache.count > maxCachedFrames {
+                // Evict frames farthest from the current index.
+                let sorted = cache.keys.sorted { abs($0 - index) < abs($1 - index) }
+                for key in sorted.dropFirst(maxCachedFrames) {
+                    cache.removeValue(forKey: key)
+                }
+            }
+
+            return ciImage
+        }
     }
 }

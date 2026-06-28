@@ -123,6 +123,16 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
 // MARK: - Custom video compositor
 
+nonisolated private struct PendingVideoCompositionRequest: @unchecked Sendable {
+    let request: AVAsynchronousVideoCompositionRequest
+    var task: Task<Void, Never>?
+
+    init(request: AVAsynchronousVideoCompositionRequest, task: Task<Void, Never>? = nil) {
+        self.request = request
+        self.task = task
+    }
+}
+
 final class EffectCompositor: NSObject, AVVideoCompositing {
 
     /// Per-working-space `CIContext` cache. `CIContext.workingColorSpace` is
@@ -131,6 +141,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// `uncheckedState:` because `CIContext` is not `Sendable`; the lock is
     /// the synchronisation, not the type system.
     private static let contextCache = OSAllocatedUnfairLock<[WorkingColourSpace: CIContext]>(uncheckedState: [:])
+    private let pendingRequests = OSAllocatedUnfairLock<[UUID: PendingVideoCompositionRequest]>(uncheckedState: [:])
 
     nonisolated static func context(for space: WorkingColourSpace) -> CIContext {
         contextCache.withLock { cache in
@@ -204,6 +215,37 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             return
         }
 
+        let requestID = UUID()
+        let pending = PendingVideoCompositionRequest(request: request)
+        pendingRequests.withLock { $0[requestID] = pending }
+        let task = Task.detached(priority: .userInitiated) { [self] in
+            await renderRequest(request, instruction: instruction, requestID: requestID)
+        }
+        pendingRequests.withLock { requests in
+            guard var pending = requests[requestID] else {
+                task.cancel()
+                return
+            }
+            pending.task = task
+            requests[requestID] = pending
+        }
+    }
+
+    nonisolated func cancelAllPendingVideoCompositionRequests() {
+        let requests = pendingRequests.withLock { requests in
+            let pending = Array(requests.values)
+            requests.removeAll()
+            return pending
+        }
+        for request in requests {
+            request.task?.cancel()
+            request.request.finishCancelledRequest()
+        }
+    }
+
+    nonisolated private func renderRequest(_ request: AVAsynchronousVideoCompositionRequest,
+                                           instruction: EffectCompositionInstruction,
+                                           requestID: UUID) async {
         // Gate render-time collection on the diagnostics panel actually being
         // open — otherwise every preview / export frame would pay for a
         // timestamp + lock + ring-buffer mutation that nobody reads (Codex P2).
@@ -233,9 +275,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // Overlays sit between video layers and captions. Earlier entries draw
         // first, later entries on top.
         for item in instruction.overlays {
-            guard let layer = overlayLayer(for: item, time: request.compositionTime,
-                                           registryID: instruction.overlaySourceRegistryID,
-                                           renderSize: renderSize) else { continue }
+            if Task.isCancelled || !isPending(requestID) { return }
+            guard let layer = await overlayLayer(for: item, time: request.compositionTime,
+                                                 registryID: instruction.overlaySourceRegistryID,
+                                                 renderSize: renderSize) else { continue }
+            if Task.isCancelled || !isPending(requestID) { return }
             result = layer.composited(over: result ?? CIImage(color: .clear)
                 .cropped(to: CGRect(origin: .zero, size: renderSize)))
         }
@@ -249,7 +293,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
 
         guard let destination = request.renderContext.newPixelBuffer() else {
-            request.finish(with: AVError(.invalidVideoComposition))
+            finishPendingRequest(requestID) {
+                request.finish(with: AVError(.invalidVideoComposition))
+            }
             return
         }
 
@@ -272,7 +318,23 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             ScopeSampler.shared.publish(sample)
         }
 
-        request.finish(withComposedVideoFrame: destination)
+        finishPendingRequest(requestID) {
+            request.finish(withComposedVideoFrame: destination)
+        }
+    }
+
+    nonisolated private func isPending(_ requestID: UUID) -> Bool {
+        pendingRequests.withLock {
+            $0[requestID] != nil
+        }
+    }
+
+    nonisolated private func finishPendingRequest(_ requestID: UUID, finish: () -> Void) {
+        let shouldFinish = pendingRequests.withLock {
+            $0.removeValue(forKey: requestID) != nil
+        }
+        guard shouldFinish else { return }
+        finish()
     }
 
     // MARK: - Render units
@@ -404,16 +466,16 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     nonisolated private func overlayLayer(for item: OverlayRenderItem,
                                           time: CMTime,
                                           registryID: UUID?,
-                                          renderSize: CGSize) -> CIImage? {
+                                          renderSize: CGSize) async -> CIImage? {
         // Resolve the frame source.
-        Self.overlaySourceLock.lock()
-        let source = registryID.flatMap { Self.overlaySourceRegistries[$0]?[item.overlayID] }
-        Self.overlaySourceLock.unlock()
+        let source = Self.overlaySourceLock.withLock {
+            registryID.flatMap { Self.overlaySourceRegistries[$0]?[item.overlayID] }
+        }
         guard let source else { return nil }
 
         // Compute overlay-local time (relative to the overlay's start).
         let localTime = CMTimeMaximum(time - item.range.start, .zero)
-        guard let frame = source.frame(at: localTime, endAction: item.endAction) else {
+        guard let frame = await source.frame(at: localTime, endAction: item.endAction) else {
             return nil
         }
 

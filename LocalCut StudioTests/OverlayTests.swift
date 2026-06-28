@@ -248,7 +248,7 @@ func compositionOverlayOnlyDuration() async throws {
 
 @Test("LottieFrameSource renders deterministic pixels at sampled times")
 @MainActor
-func lottieFrameSourceDeterminism() throws {
+func lottieFrameSourceDeterminism() async throws {
     let tmp = try makeOverlayTempDirectory("lottie-determinism")
     defer { try? FileManager.default.removeItem(at: tmp) }
     let url = tmp.appendingPathComponent("sticker.json")
@@ -258,12 +258,12 @@ func lottieFrameSourceDeterminism() throws {
     let second = try #require(LottieFrameSource(url: url))
 
     let sampleTime = CMTime(seconds: 1.0 / 30.0, preferredTimescale: 600)
-    let firstFrame = try #require(first.frame(at: sampleTime, endAction: .freeze))
-    let secondFrame = try #require(second.frame(at: sampleTime, endAction: .freeze))
+    let firstFrame = try #require(await first.frame(at: sampleTime, endAction: .freeze))
+    let secondFrame = try #require(await second.frame(at: sampleTime, endAction: .freeze))
 
     #expect(first.naturalSize == CGSize(width: 8, height: 8))
     #expect(pngBytes(firstFrame, size: first.naturalSize) == pngBytes(secondFrame, size: second.naturalSize))
-    #expect(first.frame(at: CMTime(seconds: 10, preferredTimescale: 600), endAction: .hide) == nil)
+    #expect(await first.frame(at: CMTime(seconds: 10, preferredTimescale: 600), endAction: .hide) == nil)
 }
 
 @Test("LottieFrameSource reports unsupported layer effects")
