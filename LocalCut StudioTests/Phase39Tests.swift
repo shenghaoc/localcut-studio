@@ -3,6 +3,7 @@ import Foundation
 import CoreGraphics
 import CoreMedia
 import AVFoundation
+import UniformTypeIdentifiers
 import LocalCutCore
 @testable import LocalCut_Studio
 
@@ -153,6 +154,7 @@ struct Phase39Tests {
     @Test("Built-in safe-zone profiles validate")
     func safeZoneProfilesValidate() {
         #expect(SafeZoneLibrary.builtInProfiles.count >= 6)
+        #expect(SafeZoneLibrary.loadErrors.isEmpty)
         for profile in SafeZoneLibrary.builtInProfiles {
             #expect(profile.validationErrors().isEmpty,
                     "\(profile.displayName): \(profile.validationErrors().joined(separator: ", "))")
@@ -207,6 +209,13 @@ struct Phase39Tests {
             ])
 
         #expect(!bad.validationErrors().isEmpty)
+    }
+
+    @Test("Unsupported cover destination types are rejected")
+    func unsupportedCoverDestinationTypeRejected() {
+        let type = UTType(exportedAs: "com.localcutstudio.tests.unsupported-cover-\(UUID().uuidString)")
+
+        #expect(!EditorModel.supportsCoverImageDestination(type))
     }
 
     @Test("Preview canvas geometry aspect-fits vertical canvas")

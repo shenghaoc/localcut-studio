@@ -202,7 +202,7 @@ extension EditorModel {
 
     nonisolated private static func encodeCoverImage(_ image: CGImage, format: CoverFormat) throws -> Data {
         let type = format.utType
-        guard Self.supportsImageDestination(type) else {
+        guard Self.supportsCoverImageDestination(type) else {
             throw CoverExportError.unsupportedFormat(format.displayName)
         }
         let data = NSMutableData()
@@ -223,7 +223,7 @@ extension EditorModel {
         return data as Data
     }
 
-    nonisolated private static func supportsImageDestination(_ type: UTType) -> Bool {
+    nonisolated static func supportsCoverImageDestination(_ type: UTType) -> Bool {
         guard let identifiers = CGImageDestinationCopyTypeIdentifiers() as? [String] else {
             return false
         }

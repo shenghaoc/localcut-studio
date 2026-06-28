@@ -64,20 +64,14 @@ enum SafeZoneLibrary {
     /// reused. The bundle resources never change at runtime.
     private static var _cachedProfiles: [SafeZoneProfile]?
 
-    /// Loads profiles from bundled JSON, then falls back to hardcoded profiles
-    /// for any platform that failed to load or validate.
-    /// Surface errors via `loadErrors` so the app can show `statusMessage`
-    /// without crashing preview or export.
+    /// Loads profiles from bundled JSON resources. Surface errors via
+    /// `loadErrors` so the app can show `statusMessage` without crashing
+    /// preview or export.
     static var builtInProfiles: [SafeZoneProfile] {
         if let cached = _cachedProfiles { return cached }
         let loaded = loadFromBundle()
-        let fallbackIDs = Set(hardcodedFallbackProfiles.map(\.platformID))
-        var merged = hardcodedFallbackProfiles.map { fallback in
-            loaded.first { $0.platformID == fallback.platformID } ?? fallback
-        }
-        merged.append(contentsOf: loaded.filter { !fallbackIDs.contains($0.platformID) })
-        _cachedProfiles = merged
-        return merged
+        _cachedProfiles = loaded
+        return loaded
     }
 
     static func profile(id: String) -> SafeZoneProfile? {
@@ -97,8 +91,7 @@ enum SafeZoneLibrary {
     /// groups flatten these resources into the app bundle root today, while
     /// older/manual resource phases may preserve `SafeZones/`.
     /// Profiles that fail to load or validate are dropped and an error is
-    /// appended to `loadErrors`; the hardcoded fallback for that platform still
-    /// works so preview never breaks.
+    /// appended to `loadErrors`.
     private static func loadFromBundle() -> [SafeZoneProfile] {
         let urls = bundledProfileURLs()
         guard !urls.isEmpty else {
@@ -106,10 +99,14 @@ enum SafeZoneLibrary {
             return []
         }
         var profiles: [SafeZoneProfile] = []
-        var newErrors: [String] = []
+        let filenames = Set(urls.map(\.lastPathComponent))
+        var newErrors = Self.profileResourceFilenames
+            .subtracting(filenames)
+            .sorted()
+            .map { "Safe-zone file \($0) is missing from bundle resources." }
         for url in urls {
             let filename = url.lastPathComponent
-            guard filename != "safe-zones-v1.schema.json" else { continue }
+            guard filename != Self.schemaFilename else { continue }
             guard let data = try? Data(contentsOf: url) else {
                 newErrors.append("Could not read safe-zone file \(filename).")
                 continue
@@ -137,115 +134,27 @@ enum SafeZoneLibrary {
         for subdirectory in ["SafeZones", "Resources/SafeZones"] {
             let urls = Bundle.main.urls(forResourcesWithExtension: "json",
                                         subdirectory: subdirectory) ?? []
-            if !urls.isEmpty { return urls }
+            let profileURLs = urls.filter { Self.allSafeZoneResourceFilenames.contains($0.lastPathComponent) }
+            if !profileURLs.isEmpty { return profileURLs }
         }
-        let fallbackIDs = Set(hardcodedFallbackProfiles.map(\.platformID))
         let rootURLs = Bundle.main.urls(forResourcesWithExtension: "json",
                                         subdirectory: nil) ?? []
-        return rootURLs.filter { url in
-            if url.lastPathComponent == "safe-zones-v1.schema.json" {
-                return true
-            }
-            let profileID = url.deletingPathExtension().lastPathComponent
-            if fallbackIDs.contains(profileID) {
-                return true
-            }
-            guard let data = try? Data(contentsOf: url) else { return false }
-            return (try? JSONDecoder().decode(SafeZoneProfile.self, from: data)) != nil
-        }
+        return rootURLs.filter { Self.allSafeZoneResourceFilenames.contains($0.lastPathComponent) }
     }
 
-    // MARK: - Hardcoded fallback
+    private static let schemaFilename = "safe-zones-v1.schema.json"
 
-    private static var hardcodedFallbackProfiles: [SafeZoneProfile] {
-        [
-            verticalProfile(
-                id: "douyin",
-                name: "Douyin",
-                sourceName: "Douyin creator guidance",
-                sourceURL: nil,
-                regions: commonVerticalRegions()),
-            SafeZoneProfile(
-                schemaVersion: 1,
-                platformID: "xiaohongshu-square",
-                displayName: "Xiaohongshu 1:1",
-                aspect: .square1x1,
-                sourceName: "Xiaohongshu creator guidance",
-                sourceURL: nil,
-                validatedAt: "2026-06-25",
-                regions: [
-                    rect(id: "caption-band", x: 0.08, y: 0.78, width: 0.84, height: 0.16),
-                    rect(id: "right-actions", x: 0.86, y: 0.42, width: 0.11, height: 0.36),
-                ]),
-            SafeZoneProfile(
-                schemaVersion: 1,
-                platformID: "xiaohongshu-portrait",
-                displayName: "Xiaohongshu 4:5",
-                aspect: .portrait4x5,
-                sourceName: "Xiaohongshu creator guidance",
-                sourceURL: nil,
-                validatedAt: "2026-06-25",
-                regions: [
-                    rect(id: "top-title", x: 0, y: 0, width: 1, height: 0.10),
-                    rect(id: "caption-band", x: 0.08, y: 0.80, width: 0.84, height: 0.14),
-                    rect(id: "right-actions", x: 0.86, y: 0.46, width: 0.11, height: 0.34),
-                ]),
-            verticalProfile(
-                id: "youtube-shorts",
-                name: "YouTube Shorts",
-                sourceName: "YouTube Help",
-                sourceURL: "https://support.google.com/youtube/answer/6375112",
-                regions: commonVerticalRegions()),
-            verticalProfile(
-                id: "instagram-reels",
-                name: "Instagram Reels",
-                sourceName: "Meta creator guidance",
-                sourceURL: nil,
-                regions: commonVerticalRegions()),
-            verticalProfile(
-                id: "tiktok",
-                name: "TikTok",
-                sourceName: "TikTok Business Help Center",
-                sourceURL: "https://ads.tiktok.com/help/article/tiktok-auction-in-feed-ads",
-                regions: commonVerticalRegions()),
-        ]
-    }
+    private static let profileResourceFilenames: Set<String> = [
+        "douyin.json",
+        "instagram-reels.json",
+        "tiktok.json",
+        "xiaohongshu-portrait.json",
+        "xiaohongshu-square.json",
+        "youtube-shorts.json",
+    ]
 
-    private static func verticalProfile(id: String,
-                                        name: String,
-                                        sourceName: String,
-                                        sourceURL: String?,
-                                        regions: [SafeZoneRegion]) -> SafeZoneProfile {
-        SafeZoneProfile(
-            schemaVersion: 1,
-            platformID: id,
-            displayName: name,
-            aspect: .vertical9x16,
-            sourceName: sourceName,
-            sourceURL: sourceURL,
-            validatedAt: "2026-06-25",
-            regions: regions)
-    }
-
-    private static func commonVerticalRegions() -> [SafeZoneRegion] {
-        [
-            rect(id: "top-chrome", x: 0, y: 0, width: 1, height: 0.09),
-            rect(id: "bottom-caption", x: 0.06, y: 0.78, width: 0.78, height: 0.17),
-            rect(id: "right-actions", x: 0.84, y: 0.48, width: 0.14, height: 0.40),
-        ]
-    }
-
-    private static func rect(id: String, x: Double, y: Double,
-                             width: Double, height: Double) -> SafeZoneRegion {
-        SafeZoneRegion(
-            id: id,
-            kind: "occlusion",
-            points: [
-                SafeZonePoint(x: x, y: y),
-                SafeZonePoint(x: x + width, y: y),
-                SafeZonePoint(x: x + width, y: y + height),
-                SafeZonePoint(x: x, y: y + height),
-            ])
+    private static var allSafeZoneResourceFilenames: Set<String> {
+        profileResourceFilenames.union([schemaFilename])
     }
 }
 

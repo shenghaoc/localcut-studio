@@ -1,6 +1,6 @@
 # Design: Phase 39 - Vertical and Platform Finishing
 
-> Status: **Proposed**. Target tag: **v0.1.7**.
+> Status: **Completed**. Target tag: **v0.1.7**.
 
 ## Goal
 
@@ -59,9 +59,9 @@ nonisolated struct CoverFrameDoc: Codable, Hashable, Sendable {
 }
 ```
 
-`bundleRelativePath` is reserved for a follow-up where generated cover assets
-are stored inside `.lcbundle`; the first implementation persists the cover
-choice and writes explicit user-selected sidecar files.
+`bundleRelativePath` records the generated cover asset path when a `.lcbundle`
+save includes a cover image under `covers/`. Explicit sidecar cover exports
+still use a user-confirmed save-panel URL.
 
 ## Aspect modes
 
@@ -96,7 +96,8 @@ Safe zones are resource data, not Swift view constants. The resource layout is:
 Resources/SafeZones/
   safe-zones-v1.schema.json
   douyin.json
-  xiaohongshu.json
+  xiaohongshu-square.json
+  xiaohongshu-portrait.json
   youtube-shorts.json
   instagram-reels.json
   tiktok.json
@@ -168,8 +169,9 @@ Sandboxing matters for sidecars. A video output bookmark does not imply write
 access to arbitrary sibling files forever, so Phase 39's cover export opens an
 explicit `NSSavePanel` for the cover file. The UI can default the cover filename
 beside the video, but the user still grants that exact URL before the app writes
-it. Queue-attached cover sidecars and `.lcbundle/covers/` storage remain
-follow-ups.
+it. Bundle saves generate a cover asset under `.lcbundle/covers/` when
+`coverFrame` is present; a cover-generation failure is surfaced as a save
+warning and does not corrupt the bundle.
 
 ## Platform export profiles
 

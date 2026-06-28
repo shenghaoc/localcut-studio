@@ -88,9 +88,10 @@
 - [x] **T6.4** Render queue tests: legacy `queue.json` decode, optional platform
   metadata round-trip, mismatched aspect warning state, and unsupported
   capability errors.
-- [x] **T6.5** Cover tests: selected-time persistence and cover metadata
-  round-trip. Unsupported-format and generated-image smoke are covered by the
-  implementation path but still need a fixture-backed integration test.
+- [x] **T6.5** Cover tests: selected-time persistence, cover metadata
+  round-trip, unsupported-format guard behavior, valid-frame snapping,
+  fixture-backed generated-image smoke, and `.lcbundle` cover asset write /
+  stale-format cleanup.
 - [x] **T6.6** UI/accessibility smoke: aspect picker, safe-zone toggle/platform
   picker, cover controls, and platform preset rows are keyboard reachable and
   labelled.

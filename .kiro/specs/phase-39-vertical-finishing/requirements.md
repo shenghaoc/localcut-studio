@@ -57,9 +57,9 @@
   an explicit user-confirmed `NSSavePanel` URL for the cover file instead of
   assuming write access to a sibling path next to the video.
 - **R3.5** `ProjectDocument` persists `coverFrame` data: selected time,
-  optional title text/style, and output format preference. Bundled cover assets
-  are reserved for a follow-up because they require generating media during the
-  bundle save path.
+  optional title text/style, output format preference, and a bundle-relative
+  generated asset path when a `.lcbundle` save includes the cover image under
+  `covers/`.
 - **R3.6** Re-exporting a cover can overwrite only the cover file. Re-exporting
   the video requires a separate explicit user action or render queue job.
 
@@ -98,9 +98,9 @@
 - **R5.4** Render queue tests cover mismatched project/preset aspect warnings,
   optional Phase 39 preset metadata round-trip, unsupported capability errors,
   and legacy queue decoding.
-- **R5.5** Cover tests cover selected-time persistence, bundle round-trip,
-  sandbox bookmark capture for the cover output, unsupported-format failure,
-  and "cover only" re-export leaving the video job untouched.
+- **R5.5** Cover tests cover selected-time persistence, cover metadata
+  round-trip, unsupported-format guard behavior, valid-frame snapping, generated
+  image smoke, and `.lcbundle` cover asset writes including stale-format cleanup.
 - **R5.6** UI/accessibility smoke covers the aspect picker, safe-zone toggle,
   platform profile selector, cover controls, and icon-only controls. New
   controls have accessibility labels and keyboard-reachable actions.
