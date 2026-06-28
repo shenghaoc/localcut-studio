@@ -94,6 +94,27 @@ struct UndoRedoTests {
         #expect(!model.accessedURLs.contains(url))
     }
 
+    @Test("Undo removes regular tracks added by a single action")
+    func addedTrackUndoRedo() {
+        let model = EditorModel()
+        let originalVideoTrackIDs = model.project.videoTracks.map(\.id)
+
+        model.performUndoable("Add Recording") {
+            let track = Track(name: "Screen", kind: .video)
+            model.project.videoTracks.append(track)
+        }
+        #expect(model.project.videoTracks.count == originalVideoTrackIDs.count + 1)
+        #expect(model.canUndo)
+
+        model.undo()
+        #expect(model.project.videoTracks.map(\.id) == originalVideoTrackIDs)
+        #expect(model.canRedo)
+
+        model.redo()
+        #expect(model.project.videoTracks.count == originalVideoTrackIDs.count + 1)
+        #expect(model.project.videoTracks.last?.name == "Screen")
+    }
+
     @Test("Undo label reflects the action name")
     func undoLabel() {
         let (model, clipID) = makeModel()
