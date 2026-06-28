@@ -4,7 +4,7 @@
 
 - **R1.1** `GrainEffect`, `HalationEffect`, `VignetteEffect` integrate into the per-clip effect chain.
 - **R1.2** All three effects keyframable on their primary strength parameter.
-- **R1.3** Grain is deterministic given a fixed per-clip seed; identical inputs yield identical pixels.
+- **R1.3** Grain is deterministic given a fixed per-clip seed and project frame rate; identical inputs yield identical pixels.
 - **R1.4** Look strength keyframes are authored in clip source-local time and continue to target the same source frames under speed ramps.
 - **R1.5** Positive vignette amounts darken edges; negative amounts produce an edge-lift look instead of silently no-oping.
 - **R1.6** Decoded look-effect parameters are clamped on load so malformed project/preset JSON cannot persist out-of-range render values.

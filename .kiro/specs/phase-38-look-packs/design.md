@@ -16,7 +16,7 @@
 
 ### A — Looks
 
-1. **Grain node.** Resolution-independent Core Image noise pass. Parameters: amount (0…1), size (in source pixels), monochrome toggle. Determinism is keyed on a per-clip seed.
+1. **Grain node.** Resolution-independent Core Image noise pass. Parameters: amount (0…1), size (in source pixels), monochrome toggle. Determinism is keyed on a per-clip seed and the project frame-rate cadence, which is also part of render-cache identity.
 2. **Halation node.** Bright-red bleed: extract a thresholded bright-pass proxy, gaussian-blur it, warm the result, and add back at user strength.
 3. **Vignette node.** Radial edge shading using Core Image's vignette filter with authored amount / radius / softness. Positive amounts darken edges; negative amounts composite a radial edge-lift layer for faded-stock looks.
 4. **Look preset format.** `LookPresetV1` JSON composes an ordered list of `(effectName, params)` plus an optional reference to a `.cube` LUT. Exported preset LUT sidecars travel under `assets/luts/`; the preset stores a relative path. Built-in preset source JSON ships under `Resources/LookPresets/` and is copied into the app bundle resources by Xcode.

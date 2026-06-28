@@ -93,18 +93,22 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let captions: [CaptionRenderItem]
     let overlays: [OverlayRenderItem]
     let overlaySourceRegistryID: UUID?
+    /// Project frame rate — used by grain to advance the noise pattern each
+    /// real frame instead of hardcoding a 24 fps cadence.
+    let frameRate: Double
     /// Working colour space — drives the per-space `CIContext` choice and the
     /// output buffer's colour-tag attachments.
     let workingColourSpace: WorkingColourSpace
 
     init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = [],
          overlays: [OverlayRenderItem] = [], overlaySourceRegistryID: UUID? = nil,
-         workingColourSpace: WorkingColourSpace = .sRGB) {
+         frameRate: Double = 24, workingColourSpace: WorkingColourSpace = .sRGB) {
         self.timeRange = timeRange
         self.units = units
         self.captions = captions
         self.overlays = overlays
         self.overlaySourceRegistryID = overlaySourceRegistryID
+        self.frameRate = frameRate
         self.workingColourSpace = workingColourSpace
         // A transition tweens its layers across the interval. Captions also tween
         // (per-frame animation transform), so any caption forces tweening too.
@@ -217,7 +221,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         var result: CIImage?
 
         for unit in instruction.units {
-            guard let image = renderedImage(for: unit, request: request) else { continue }
+            guard let image = renderedImage(for: unit, request: request,
+                                            frameRate: instruction.frameRate) else { continue }
             if let existing = result {
                 result = image.composited(over: existing)
             } else {
@@ -275,15 +280,16 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// Renders a single unit (a plain layer or a transition blend) to a CIImage.
     nonisolated private func renderedImage(
         for unit: RenderUnit,
-        request: AVAsynchronousVideoCompositionRequest) -> CIImage? {
+        request: AVAsynchronousVideoCompositionRequest,
+        frameRate: Double = 24) -> CIImage? {
 
         switch unit {
         case .layer(let layer):
-            return renderedImage(for: layer, request: request)
+            return renderedImage(for: layer, request: request, frameRate: frameRate)
 
         case .transition(let outgoing, let incoming, let type, let wipeAngle, let overlap):
-            let out = renderedImage(for: outgoing, request: request)
-            let into = renderedImage(for: incoming, request: request)
+            let out = renderedImage(for: outgoing, request: request, frameRate: frameRate)
+            let into = renderedImage(for: incoming, request: request, frameRate: frameRate)
             // If a source frame is missing, fall back to whichever is available.
             guard let out else { return into }
             guard let into else { return out }
@@ -301,7 +307,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// its source frame.
     nonisolated private func renderedImage(
         for layer: CompositorLayer,
-        request: AVAsynchronousVideoCompositionRequest) -> CIImage? {
+        request: AVAsynchronousVideoCompositionRequest,
+        frameRate: Double = 24) -> CIImage? {
 
         guard let sourceBuffer = request.sourceFrame(byTrackID: layer.trackID) else { return nil }
 
@@ -335,10 +342,12 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                     clipID: layer.clipID,
                     effectChainHash: layer.effects.renderCacheHash,
                     time: sourceTime,
-                    renderSize: request.renderContext.size)
+                    renderSize: request.renderContext.size,
+                    frameRate: frameRate)
             }()
             image = applyEffectChain(image, effects: layer.effects,
-                                     cacheKey: cacheKey, at: clipLocalTime)
+                                     cacheKey: cacheKey, at: clipLocalTime,
+                                     frameRate: frameRate)
         }
 
         image = image.transformed(by: layer.transform)
@@ -647,9 +656,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     // pass-through invariant — an empty effect chain must return the input
     // image byte-for-byte (R5.1 from feature-colour-grading / EffectsTests).
     nonisolated func applyEffectChain(_ image: CIImage,
-                                      effects: [Effect],
-                                      cacheKey: RenderCacheKey?,
-                                      at time: CMTime = .zero) -> CIImage {
+                                       effects: [Effect],
+                                       cacheKey: RenderCacheKey?,
+                                       at time: CMTime = .zero,
+                                       frameRate: Double = 24) -> CIImage {
         if effects.isEmpty { return image }
         if let cacheKey, let cached = RenderCache.shared.image(for: cacheKey) {
             return cached
@@ -682,7 +692,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             case .vignette(let params):
                 result = applyVignette(result, params: params, at: time)
             case .grain(let params):
-                result = applyGrain(result, params: params, at: time)
+                result = applyGrain(result, params: params, at: time, frameRate: frameRate)
             }
         }
         // Materialise into a CGImage-backed CIImage before caching: a lazy
@@ -739,8 +749,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     /// Applies procedural grain using Core Image's deterministic random source.
     /// Grain is intentionally last in the built-in presets so halation and
-    /// vignette do not blur or reshape the pattern.
-    nonisolated func applyGrain(_ image: CIImage, params: GrainEffect, at time: CMTime) -> CIImage {
+    /// vignette do not blur or reshape the pattern. The noise pattern advances
+    /// each real frame at the project's frame rate so it never appears frozen.
+    nonisolated func applyGrain(_ image: CIImage, params: GrainEffect, at time: CMTime,
+                                 frameRate: Double = 24) -> CIImage {
         let amount = params.amount(at: time)
         guard amount > 0 else { return image }
 
@@ -748,7 +760,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         guard var noise = random.outputImage else { return image }
 
         let size = max(0.25, CGFloat(params.size))
-        let frame = time.seconds.isFinite ? floor(time.seconds * 24) : 0
+        let grainCadence = frameRate.isFinite ? max(1, frameRate) : 1
+        let frame = time.seconds.isFinite ? floor(time.seconds * grainCadence) : 0
         let seedOffset = CGFloat(params.seed % 997) + CGFloat(frame.truncatingRemainder(dividingBy: 997))
         noise = noise
             .transformed(by: CGAffineTransform(translationX: seedOffset, y: -seedOffset * 0.37))

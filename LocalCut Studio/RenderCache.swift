@@ -14,7 +14,8 @@ import LocalCutCore
 /// `CaptionStyle.rasterHash` uses. `time` is normalised to a high-precision
 /// (microsecond) timescale before being stored, so equivalent times expressed
 /// in different timescales (e.g. preview's frame-rate timescale vs export's
-/// source-asset timescale for the same instant) collapse to one key.
+/// source-asset timescale for the same instant) collapse to one key. Frame
+/// rate is part of the identity because grain advances at project cadence.
 nonisolated struct RenderCacheKey: Hashable, Sendable {
     /// Timescale every key is normalised to (microsecond resolution). High
     /// enough that two adjacent frames at any practical project frame rate
@@ -28,8 +29,10 @@ nonisolated struct RenderCacheKey: Hashable, Sendable {
     let timeScale: Int32
     let renderWidth: Int
     let renderHeight: Int
+    let frameRateMillis: Int
 
-    init(clipID: UUID, effectChainHash: Int, time: CMTime, renderSize: CGSize) {
+    init(clipID: UUID, effectChainHash: Int, time: CMTime, renderSize: CGSize,
+         frameRate: Double = 24) {
         self.clipID = clipID
         self.effectChainHash = effectChainHash
         let normalised: CMTime
@@ -42,10 +45,16 @@ nonisolated struct RenderCacheKey: Hashable, Sendable {
         self.timeScale = normalised.timescale > 0 ? normalised.timescale : Self.normalisedTimescale
         self.renderWidth = max(0, Int(renderSize.width.rounded()))
         self.renderHeight = max(0, Int(renderSize.height.rounded()))
+        self.frameRateMillis = Self.normalisedFrameRateMillis(frameRate)
     }
 
     var time: CMTime { CMTime(value: timeValue, timescale: timeScale) }
     var renderSize: CGSize { CGSize(width: renderWidth, height: renderHeight) }
+
+    private nonisolated static func normalisedFrameRateMillis(_ frameRate: Double) -> Int {
+        let cadence = frameRate.isFinite ? max(1, frameRate) : 1
+        return Int((cadence * 1_000).rounded())
+    }
 }
 
 // MARK: - Effect chain digest
@@ -446,6 +455,7 @@ final class RenderCache: Sendable {
             String(key.timeValue),
             String(key.timeScale),
             "\(key.renderWidth)x\(key.renderHeight)",
+            "\(key.frameRateMillis)fps",
         ].joined(separator: "-")
     }
 

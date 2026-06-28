@@ -19,9 +19,10 @@ private func tinyImage(width: CGFloat = 100, height: CGFloat = 100) -> CIImage {
 private func key(clipID: UUID = UUID(),
                  effectChainHash: Int = 0,
                  time: CMTime = .zero,
-                 renderSize: CGSize = CGSize(width: 1920, height: 1080)) -> RenderCacheKey {
+                 renderSize: CGSize = CGSize(width: 1920, height: 1080),
+                 frameRate: Double = 24) -> RenderCacheKey {
     RenderCacheKey(clipID: clipID, effectChainHash: effectChainHash,
-                   time: time, renderSize: renderSize)
+                   time: time, renderSize: renderSize, frameRate: frameRate)
 }
 
 private func temporaryRenderCacheDirectory() throws -> URL {
@@ -63,6 +64,26 @@ func keyDistinctOnAnyFieldChange() {
     #expect(base != RenderCacheKey(clipID: sameClip, effectChainHash: 1,
                                    time: CMTime(value: 30, timescale: 600),
                                    renderSize: CGSize(width: 1280, height: 720)))
+    #expect(base != RenderCacheKey(clipID: sameClip, effectChainHash: 1,
+                                   time: CMTime(value: 30, timescale: 600),
+                                   renderSize: CGSize(width: 1920, height: 1080),
+                                   frameRate: 60))
+}
+
+@Test("RenderCacheKey: normalises frame rate for grain cadence identity")
+func keyNormalisesFrameRateCadence() {
+    let id = UUID()
+    let fractional = key(clipID: id, frameRate: 23.976)
+    let same = key(clipID: id, frameRate: 23.9764)
+    let differentCadence = key(clipID: id, frameRate: 24)
+    let invalid = key(clipID: id, frameRate: .nan)
+    let oneFPS = key(clipID: id, frameRate: 1)
+
+    #expect(fractional == same)
+    #expect(fractional.frameRateMillis == 23_976)
+    #expect(differentCadence.frameRateMillis == 24_000)
+    #expect(fractional != differentCadence)
+    #expect(invalid == oneFPS)
 }
 
 @Test("RenderCacheKey: normalises CMTime to the microsecond timescale")

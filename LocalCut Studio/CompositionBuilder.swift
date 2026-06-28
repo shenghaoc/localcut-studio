@@ -641,6 +641,7 @@ enum CompositionBuilder {
                 timeRange: range, units: units, captions: captionsForInterval,
                 overlays: overlaysForInterval,
                 overlaySourceRegistryID: overlaySourceRegistryID,
+                frameRate: frameRate,
                 workingColourSpace: workingColourSpace))
         }
 

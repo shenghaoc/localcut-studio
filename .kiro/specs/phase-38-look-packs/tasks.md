@@ -4,7 +4,7 @@
 
 ## Looks (38a)
 
-- [x] **T1.1** Implement `GrainEffect` Core Image pass with deterministic seeding.
+- [x] **T1.1** Implement `GrainEffect` Core Image pass with deterministic seeding and project-frame-rate cadence.
 - [x] **T1.2** Implement `HalationEffect` Core Image pass.
 - [x] **T1.3** Implement `VignetteEffect` Core Image pass.
 - [x] **T1.4** Wire all three into the effect chain ordering (grade → looks → transform).
