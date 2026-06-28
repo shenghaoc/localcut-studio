@@ -42,6 +42,8 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     /// When true, the next `.screen` frame is dropped (used after source switch
     /// to discard the transitional frame).
     private var dropNextScreenFrame = false
+    /// Window IDs to exclude from capture (e.g. the floating control panel).
+    private var excludingWindowIDs: Set<CGWindowID> = []
 
     init(target: CaptureTarget,
          frameRate: Double,
@@ -121,12 +123,17 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     }
 
     private func makeFilter(from content: SCShareableContent) throws -> SCContentFilter {
+        // Resolve window IDs to SCWindow objects for exclusion.
+        let excludedWindows = excludingWindowIDs.compactMap { windowID in
+            content.windows.first(where: { $0.windowID == windowID })
+        }
+
         switch target {
         case .display(let displayID, _, _):
             guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                 throw CaptureEngineError.targetUnavailable
             }
-            return SCContentFilter(display: display, excludingWindows: [])
+            return SCContentFilter(display: display, excludingWindows: excludedWindows)
 
         case .window(let windowID, _, _, _, _):
             guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
@@ -141,7 +148,26 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
                   }) else {
                 throw CaptureEngineError.targetUnavailable
             }
-            return SCContentFilter(display: display, including: [app], exceptingWindows: [])
+            return SCContentFilter(display: display, including: [app], exceptingWindows: excludedWindows)
+        }
+    }
+
+    /// Add a window ID to the exclusion list and update the live capture filter.
+    /// Used to exclude the floating control panel from screen capture.
+    func excludeWindow(_ windowID: CGWindowID) async throws {
+        excludingWindowIDs.insert(windowID)
+        // If the stream is running, update the filter in-place.
+        guard let stream else { return }
+        let content = try await SCShareableContent.current
+        let newFilter = try makeFilter(from: content)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            stream.updateContentFilter(newFilter) { error in
+                if let error {
+                    continuation.resume(throwing: CaptureEngineError.captureSessionFailed(error.localizedDescription))
+                } else {
+                    continuation.resume()
+                }
+            }
         }
     }
 

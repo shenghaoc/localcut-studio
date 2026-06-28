@@ -155,7 +155,7 @@ extension EditorModel {
             recordingDiskWarning = nil
             startRecordingMonitor(rootURL: root)
             floatingPanelController.show(model: self)
-            await captureCoordinator.setFloatingPanelWindowID(floatingPanelController.windowID)
+            try? await captureCoordinator.setFloatingPanelWindowID(floatingPanelController.windowID)
             statusMessage = "Recording…"
         } catch {
             isRecording = false

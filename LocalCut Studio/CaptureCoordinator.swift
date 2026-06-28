@@ -634,8 +634,16 @@ actor CaptureCoordinator {
     private var floatingPanelWindowID: CGWindowID = 0
 
     /// Update the floating panel window ID for capture exclusion.
-    func setFloatingPanelWindowID(_ windowID: CGWindowID) {
+    func setFloatingPanelWindowID(_ windowID: CGWindowID) async throws {
         floatingPanelWindowID = windowID
+        // Update the live screen capture session to exclude the panel.
+        guard state == .recording, let active = activeSession else { return }
+        for session in active.sessions {
+            if let screenSession = session as? ScreenCaptureSession {
+                try await screenSession.excludeWindow(windowID)
+                return
+            }
+        }
     }
 
     func scanRecoveredSessions(rootURL: URL) throws -> [CaptureSessionResult] {
