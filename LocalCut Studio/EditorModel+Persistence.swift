@@ -143,8 +143,20 @@ extension EditorModel {
             // that would otherwise purge.
             EffectCompositor.purgeCaptionRasterCache()
         }
-        project.videoTracks = restoredTracks(from: state.videoTracks, existing: project.videoTracks, kind: .video)
-        project.audioTracks = restoredTracks(from: state.audioTracks, existing: project.audioTracks, kind: .audio)
+        for snapshot in state.videoTracks {
+            if let track = project.videoTracks.first(where: { $0.id == snapshot.trackID }) {
+                track.name = snapshot.name
+                track.isMuted = snapshot.isMuted
+                track.clips = snapshot.clips
+            }
+        }
+        for snapshot in state.audioTracks {
+            if let track = project.audioTracks.first(where: { $0.id == snapshot.trackID }) {
+                track.name = snapshot.name
+                track.isMuted = snapshot.isMuted
+                track.clips = snapshot.clips
+            }
+        }
         // Caption tracks: restore existing-by-id, drop tracks not in the snapshot,
         // and append any from the snapshot that the current project doesn't yet have
         // (an undo that brings back a deleted track). `uniquingKeysWith` rather
@@ -190,20 +202,6 @@ extension EditorModel {
         selectedOverlayID = state.selectedOverlayID
         restoreLUTDisplayNames(state.lutDisplayNames)
         reconcileAccessedURLs()
-    }
-
-    private func restoredTracks(from snapshots: [ProjectState.TrackClips],
-                                existing tracks: [Track],
-                                kind: TrackKind) -> [Track] {
-        var existing = Dictionary(tracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return snapshots.map { snapshot in
-            let track = existing.removeValue(forKey: snapshot.trackID)
-                ?? Track(id: snapshot.trackID, name: snapshot.name, kind: kind)
-            track.name = snapshot.name
-            track.isMuted = snapshot.isMuted
-            track.clips = snapshot.clips
-            return track
-        }
     }
 
     /// Keeps retained security-scoped access aligned with the restored media set:
