@@ -13,7 +13,6 @@ extension EditorModel {
     /// File ▸ New — offers to save first, then resets to an empty project.
     func requestNew() {
         Task {
-            guard !blockDocumentCommandWhileRecording() else { return }
             guard await confirmSaveIfNeeded() else { return }
             newDocument()
         }
@@ -23,7 +22,6 @@ extension EditorModel {
     /// accepts both `.lcstudio` (legacy single-file) and `.lcbundle` (package).
     func requestOpen() {
         Task {
-            guard !blockDocumentCommandWhileRecording() else { return }
             guard await confirmSaveIfNeeded() else { return }
             let panel = NSOpenPanel()
             panel.allowedContentTypes = [.lcStudioProjectBundle, .lcStudioProject]
@@ -47,7 +45,6 @@ extension EditorModel {
 
     func requestOpenRecent(_ url: URL) {
         Task {
-            guard !blockDocumentCommandWhileRecording() else { return }
             guard await confirmSaveIfNeeded() else { return }
             await open(url: url)
         }
@@ -213,15 +210,6 @@ extension EditorModel {
     private func blockDocumentCommandDuringCloseSave() -> Bool {
         guard closeSaveInProgress else { return false }
         statusMessage = "Finish saving before closing…"
-        return true
-    }
-
-    /// Document lifecycle commands (New/Open) must not run mid-recording: the
-    /// session reset would tear down media access while capture writers keep
-    /// running, and a later Stop could land the take into the wrong project.
-    private func blockDocumentCommandWhileRecording() -> Bool {
-        guard isRecording else { return false }
-        statusMessage = "Stop the recording before switching projects."
         return true
     }
 }

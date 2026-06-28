@@ -10,9 +10,9 @@ The browser-editor implements this entirely in the pipeline worker via MSTP + We
 
 ## Prerequisites
 
-- Phase 41 capture engine — `CaptureCoordinator`, per-source pipelines, continuous fragmented writer, crash-safe manifest. **Hard dependency.** Phase 45 adds a live-compose tap alongside the ISO path, a `scene-switch` manifest record kind, and a layout track at landing.
+- Phase 41 capture engine — `CaptureSession`, per-track pipelines, chunked writer, crash-safe manifest. **Hard dependency.** Phase 45 adds a live-compose tap alongside the ISO path, a `scene-switch` manifest record kind, and a layout track at landing.
 - `feature-colour-grading`'s compositor (Metal-backed `EffectCompositor` is the basis for `ProgramCompositor`).
-- Keyframe system (implemented) — layout track segments store transform snapshots as keyframes at boundaries.
+- Keyframes (not yet specced) — layout track segments store transform snapshots as keyframes at boundaries.
 
 ## Approach
 
