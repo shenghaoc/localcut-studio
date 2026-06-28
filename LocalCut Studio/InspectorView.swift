@@ -1045,7 +1045,7 @@ struct InspectorView: View {
     private var coverPreviewKey: String {
         let cover = model.project.coverFrame
         let title = cover?.title?.text ?? ""
-        let time = cover?.time.cmTime.seconds ?? model.currentTime
+        let time = cover?.time.cmTime.sanitized.seconds ?? model.currentTime
         return [
             "\(CoverPreviewInvalidationKey.make(for: model.project))",
             "\(time)",
@@ -1080,7 +1080,7 @@ struct InspectorView: View {
     }
 
     private var coverTimeLabel: String {
-        let time = model.project.coverFrame?.time.cmTime.seconds ?? model.currentTime
+        let time = model.project.coverFrame?.time.cmTime.sanitized.seconds ?? model.currentTime
         return TimeFormatting.timecode(time)
     }
 

@@ -33,7 +33,7 @@ extension EditorModel {
 
     func nudgeCoverFrame(byFrames frames: Int) {
         let fps = project.frameRate.isFinite && project.frameRate > 0 ? project.frameRate : 30
-        let current = project.coverFrame?.time.cmTime.seconds ?? currentTime
+        let current = project.coverFrame?.time.cmTime.sanitized.seconds ?? currentTime
         let frameStep = Double(frames) / fps
         let lastFrame = max(0, totalDuration - (1.0 / fps))
         let seconds = min(max(0, current + frameStep), lastFrame)
@@ -93,7 +93,7 @@ extension EditorModel {
         // Render the cover from a frame strictly inside the timeline: requesting
         // exactly at `duration` (the exclusive end) can fail to produce an image.
         let seconds = Self.snappedCoverFrameSeconds(
-            requested: cover.time.cmTime.seconds,
+            requested: cover.time.cmTime.sanitized.seconds,
             duration: built.duration,
             frameRate: project.frameRate)
         let frameImage = try await Self.generateCoverImage(

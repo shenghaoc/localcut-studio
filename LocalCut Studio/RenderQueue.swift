@@ -1375,9 +1375,9 @@ final class RenderQueue {
             }
             let item = MediaItem(url: url, id: ref.id)
             item.name = ref.displayName
-            item.duration = ref.duration.cmTime
-            item.naturalSize = CGSize(width: ref.naturalWidth, height: ref.naturalHeight)
-            item.preferredTransform = ref.preferredTransform.cgTransform
+            item.duration = ref.duration.cmTime.sanitized
+            item.naturalSize = CGSize(width: ref.naturalWidth, height: ref.naturalHeight).sanitized
+            item.preferredTransform = ref.preferredTransform.cgTransform.sanitized
             item.hasVideo = ref.hasVideo
             item.hasAudio = ref.hasAudio
             item.bookmark = ref.bookmark
