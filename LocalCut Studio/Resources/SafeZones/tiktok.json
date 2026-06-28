@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "platformID": "tiktok",
+  "displayName": "TikTok",
+  "aspect": "vertical9x16",
+  "sourceName": "TikTok Business Help Center",
+  "sourceURL": "https://ads.tiktok.com/help/article/tiktok-auction-in-feed-ads",
+  "validatedAt": "2026-06-25",
+  "regions": [
+    { "id": "top-chrome", "kind": "occlusion", "points": [{ "x": 0, "y": 0 }, { "x": 1, "y": 0 }, { "x": 1, "y": 0.09 }, { "x": 0, "y": 0.09 }] },
+    { "id": "bottom-caption", "kind": "occlusion", "points": [{ "x": 0.06, "y": 0.78 }, { "x": 0.84, "y": 0.78 }, { "x": 0.84, "y": 0.95 }, { "x": 0.06, "y": 0.95 }] },
+    { "id": "right-actions", "kind": "occlusion", "points": [{ "x": 0.84, "y": 0.48 }, { "x": 0.98, "y": 0.48 }, { "x": 0.98, "y": 0.88 }, { "x": 0.84, "y": 0.88 }] }
+  ]
+}

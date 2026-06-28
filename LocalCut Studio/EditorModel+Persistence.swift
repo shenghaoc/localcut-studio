@@ -28,9 +28,11 @@ struct ProjectState: Equatable {
     var name: String
     var media: [MediaItem]
     var unresolvedMedia: [MediaRef]
+    var aspect: ProjectAspect
     var renderSize: CGSize
     var frameRate: Double
     var workingColourSpace: WorkingColourSpace
+    var coverFrame: CoverFrameDoc?
     var videoTracks: [TrackClips]
     var audioTracks: [TrackClips]
     var captionTracks: [CaptionTrackSnapshot]
@@ -61,9 +63,11 @@ struct ProjectState: Equatable {
         lhs.name == rhs.name
             && lhs.media.map(\.id) == rhs.media.map(\.id)
             && lhs.unresolvedMedia == rhs.unresolvedMedia
+            && lhs.aspect == rhs.aspect
             && lhs.renderSize == rhs.renderSize
             && lhs.frameRate == rhs.frameRate
             && lhs.workingColourSpace == rhs.workingColourSpace
+            && lhs.coverFrame == rhs.coverFrame
             && lhs.videoTracks == rhs.videoTracks
             && lhs.audioTracks == rhs.audioTracks
             && lhs.captionTracks == rhs.captionTracks
@@ -97,9 +101,11 @@ extension EditorModel {
             name: project.name,
             media: project.mediaItems,
             unresolvedMedia: unresolvedMedia,
+            aspect: project.aspect,
             renderSize: project.renderSize,
             frameRate: project.frameRate,
             workingColourSpace: project.workingColourSpace,
+            coverFrame: project.coverFrame,
             videoTracks: project.videoTracks.map {
                 ProjectState.TrackClips(trackID: $0.id, name: $0.name, isMuted: $0.isMuted, clips: $0.clips)
             },
@@ -131,6 +137,7 @@ extension EditorModel {
         project.name = state.name
         project.mediaItems = state.media
         unresolvedMedia = state.unresolvedMedia
+        project.aspect = state.aspect
         let renderSizeChanged = project.renderSize != state.renderSize
         project.renderSize = state.renderSize
         project.frameRate = state.frameRate
@@ -142,7 +149,11 @@ extension EditorModel {
             // must drop the now-stale entries — applyState bypasses the setters
             // that would otherwise purge.
             EffectCompositor.purgeCaptionRasterCache()
+            if renderSizeChanged {
+                RenderCache.shared.invalidate(notMatchingRenderSize: state.renderSize)
+            }
         }
+        project.coverFrame = state.coverFrame
         for snapshot in state.videoTracks {
             if let track = project.videoTracks.first(where: { $0.id == snapshot.trackID }) {
                 track.name = snapshot.name
@@ -404,7 +415,8 @@ extension EditorModel {
         await documentController.saveAs(url: url, model: self)
     }
 
-    /// Synchronous save used by the close prompt.
+    /// Synchronous save used by tests and non-interactive callers. Window close
+    /// uses the async save path so bundle cover generation can complete.
     func writeSynchronously(to url: URL) -> Bool {
         documentController.writeSynchronously(to: url, model: self)
     }

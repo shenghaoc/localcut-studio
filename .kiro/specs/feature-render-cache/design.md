@@ -4,13 +4,13 @@
 
 ## Goal
 
-Memoise the **post-effect-chain** image of each video clip so the per-clip CIFilter pipeline runs at most once per `(clip, effect chain, time, render size)` quadruplet. Speed ramps re-fetch the same source-frame time several times per output frame and frame interpolation reads each neighbour twice; without a cache the chain would re-execute every time, blowing past the budget the preview path can spend on each frame.
+Memoise the **post-effect-chain** image of each video clip so the per-clip CIFilter pipeline runs at most once per `(clip, effect chain, time, render size, working colour space)` tuple. Speed ramps re-fetch the same source-frame time several times per output frame and frame interpolation reads each neighbour twice; without a cache the chain would re-execute every time, blowing past the budget the preview path can spend on each frame.
 
 The cache sits **inside `EffectCompositor`**, replacing the per-frame `applyEffectChain(_:effects:)` body with a memoised one. Preview and export share the compositor, so they share the cache — Phase 35 / 37 do not need a second copy on either side.
 
 ## Approach
 
-1. **Composite key.** A frame is uniquely identified by *which clip* produced it, *what effects* the chain applied, *when in the source media* we were, and *what canvas* we were rendering into. Each axis maps to one field of `RenderCacheKey`. The time field is the **source-frame time** (computed from `sourceRange` / `timeRange`), not `compositionTime` — this makes the key stable across repeated source-frame requests (speed ramps, frame interpolation) and unique per source frame (no collisions across pieces of the same clip split by transition cuts).
+1. **Composite key.** A frame is uniquely identified by *which clip* produced it, *what effects* the chain applied, *when in the source media* we were, *what canvas* we were rendering into, and *which working colour space* materialised it. Each axis maps to one field of `RenderCacheKey`. The time field is the **source-frame time** (computed from `sourceRange` / `timeRange`), not `compositionTime` — this makes the key stable across repeated source-frame requests (speed ramps, frame interpolation) and unique per source frame (no collisions across pieces of the same clip split by transition cuts).
 2. **In-memory LRU.** An `OSAllocatedUnfairLock`-guarded dictionary plus lock-confined doubly-linked list. Most-recently-used entries live at the tail; the head is dropped first. Lookup touch and eviction are O(1).
 3. **Byte-budget eviction.** Frames are large (8 MiB at 1080p, 33 MiB at 4K) and *variable* (project resize jumps an entry's footprint by 4×), so the cap is total estimated bytes, not entry count.
 4. **Disk spill.** Evicted memory entries are PNG-encoded into the sandbox Caches directory, tracked by a second bounded LRU, and rehydrated into memory on miss.
@@ -30,6 +30,7 @@ nonisolated struct RenderCacheKey: Hashable, Sendable {
     let timeScale: Int32          // Always `normalisedTimescale` (1_000_000).
     let renderWidth: Int
     let renderHeight: Int
+    let workingColourSpace: WorkingColourSpace
 }
 
 final class RenderCache: @unchecked Sendable {
@@ -91,7 +92,7 @@ Lookup touches the matched memory node to the tail. Insert appends a memory node
 
 ## Compositor integration
 
-`EffectCompositor.applyEffectChain(_:effects:cacheKey:at:)` consults `RenderCache.shared` before iterating the chain; on a hit it returns the cached image untouched and the per-clip filters never run. On a miss it executes the existing pipeline and **materialises** the result into a CGImage-backed `CIImage` before writing it back — a lazy `CIImage` filter graph would force `CIContext.render` to re-evaluate the colour / LUT / skin-smooth kernels on every hit, so Phase 35 / 37's repeated-frame requests would still pay the work this cache exists to avoid (codex review P1). The cache is consulted **after** the source `CIImage(cvPixelBuffer:)` materialisation and **before** the layer's fit transform / opacity — those are cheap and frame-size sensitive, so caching them would balloon the entry space without saving meaningful work.
+`EffectCompositor.applyEffectChain(_:effects:cacheKey:at:)` consults `RenderCache.shared` before iterating the chain; on a hit it returns the cached image untouched and the per-clip filters never run. On a miss it executes the existing pipeline and **materialises** the result into a CGImage-backed `CIImage` through the instruction's working-colour-space `CIContext` before writing it back — a lazy `CIImage` filter graph would force `CIContext.render` to re-evaluate the colour / LUT / skin-smooth kernels on every hit, so Phase 35 / 37's repeated-frame requests would still pay the work this cache exists to avoid (codex review P1). The cache is consulted **after** the source `CIImage(cvPixelBuffer:)` materialisation and **before** the layer's fit transform / opacity — those are cheap and frame-size sensitive, so caching them would balloon the entry space without saving meaningful work.
 
 ```swift
 nonisolated private func applyEffectChain(_ image: CIImage,
@@ -129,7 +130,7 @@ nonisolated private func applyEffectChain(_ image: CIImage,
 }
 ```
 
-`renderedImage(for layer:, request:)` builds the key from the layer's `clipID`, the chain's `renderCacheHash`, a **source-frame time** computed from `layer.sourceRange` and `layer.timeRange` (not `request.compositionTime`), and `request.renderContext.size`. When `effects.isEmpty` the key is `nil` — there is nothing to cache. The skin-mask debug visualisation (`layer.showSkinMask`) bypasses the cache entirely: it produces a one-off debug image that must not be served back on a normal preview after the toggle.
+`renderedImage(for layer:, request:)` builds the key from the layer's `clipID`, the chain's `renderCacheHash`, a **source-frame time** computed from `layer.sourceRange` and `layer.timeRange` (not `request.compositionTime`), `request.renderContext.size`, and the instruction's `workingColourSpace`. When `effects.isEmpty` the key is `nil` — there is nothing to cache. The skin-mask debug visualisation (`layer.showSkinMask`) bypasses the cache entirely: it produces a one-off debug image that must not be served back on a normal preview after the toggle.
 
 ## Invalidation
 

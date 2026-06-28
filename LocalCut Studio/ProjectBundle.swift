@@ -131,6 +131,13 @@ nonisolated enum ProjectBundleLayout {
     static let assetsSubdirectory = "assets"
     /// Directory containing portable beat-analysis cache blobs.
     static let beatCachesSubdirectory = "Caches/beats"
+    /// Directory containing generated cover images.
+    static let coversSubdirectory = "covers"
+
+    /// Bundle-relative path for a generated cover image.
+    static func coverRelativePath(format: String) -> String {
+        "\(coversSubdirectory)/cover.\(format)"
+    }
 
     /// Bundle-relative path for the given media UUID + source extension. Stable
     /// across renames in the bin so the on-disk layout doesn't churn on every
@@ -145,12 +152,21 @@ nonisolated enum ProjectBundleLayout {
     /// to a single file directly under `assets/`. Returns `false` for anything
     /// a hand-edited or hostile `project.json` could use to escape the bundle.
     static func isSafeAssetRelativePath(_ relative: String) -> Bool {
+        isSafeSubdirectoryPath(relative, directory: assetsSubdirectory)
+    }
+
+    /// Validates that `relative` stays under `covers/` inside the bundle.
+    static func isSafeCoversPath(_ relative: String) -> Bool {
+        isSafeSubdirectoryPath(relative, directory: coversSubdirectory)
+    }
+
+    private static func isSafeSubdirectoryPath(_ relative: String, directory: String) -> Bool {
         // Reject absolute paths outright.
         if relative.hasPrefix("/") { return false }
         let components = relative.split(separator: "/", omittingEmptySubsequences: false)
-        // Expect exactly `assets/<filename>` — two non-empty components.
+        // Expect exactly `<dir>/<filename>` — two non-empty components.
         guard components.count == 2,
-              components[0] == Substring(assetsSubdirectory),
+              components[0] == Substring(directory),
               !components[1].isEmpty else { return false }
         // No `.`/`..` traversal in the filename component.
         if components[1] == "." || components[1] == ".." { return false }
@@ -286,11 +302,26 @@ nonisolated enum ProjectBundle {
     ///
     /// Returns the regenerated `FingerprintIndex` so the caller can stash it on
     /// the editor for the next save's fast path.
+    /// Optional cover image data + file extension to write into `covers/` during
+    /// bundle save. Generated on the main actor before the detached write so
+    /// AppKit drawing has finished before IO begins.
+    struct CoverBundleData: Sendable {
+        let imageData: Data
+        /// File extension without the dot, e.g. "png", "jpg", "heic".
+        let fileExtension: String
+
+        init(imageData: Data, fileExtension: String) {
+            self.imageData = imageData
+            self.fileExtension = fileExtension
+        }
+    }
+
     @discardableResult
     static func write(projectJSON: Data,
-                      to bundleURL: URL,
-                      bundledMedia: [BundledMedia],
-                      previousFingerprints: FingerprintIndex) throws -> FingerprintIndex {
+                       to bundleURL: URL,
+                       bundledMedia: [BundledMedia],
+                       previousFingerprints: FingerprintIndex,
+                       coverData: CoverBundleData? = nil) throws -> FingerprintIndex {
         // Path-safety pass first, so a hostile `project.json` can't make us
         // touch anything outside `assets/` before we even open a file handle.
         for media in bundledMedia where !ProjectBundleLayout.isSafeAssetRelativePath(media.bundleRelativePath) {
@@ -301,6 +332,8 @@ nonisolated enum ProjectBundle {
         try fm.createDirectory(at: bundleURL, withIntermediateDirectories: true)
         let assetsURL = bundleURL.appendingPathComponent(ProjectBundleLayout.assetsSubdirectory)
         try fm.createDirectory(at: assetsURL, withIntermediateDirectories: true)
+        let coversURL = bundleURL.appendingPathComponent(ProjectBundleLayout.coversSubdirectory)
+        try fm.createDirectory(at: coversURL, withIntermediateDirectories: true)
 
         // Collect digests during the copy/skip loop so we don't re-hash
         // every file a second time at the end.
@@ -366,6 +399,32 @@ nonisolated enum ProjectBundle {
             } else if let digest = try? Fingerprint.sha256(of: destination) {
                 index.entries[media.bundleRelativePath] = digest
             }
+        }
+
+        // Write cover image if provided. The cover is generated on the main
+        // actor before calling write and passed as a Data blob; this path only
+        // does the file IO + fingerprint.
+        if let cover = coverData, !cover.imageData.isEmpty {
+            let coverFilename = "cover.\(cover.fileExtension)"
+            let coverRelativePath = ProjectBundleLayout.coverRelativePath(format: cover.fileExtension)
+            let coverPath = coversURL.appendingPathComponent(coverFilename)
+            // Remove stale cover files with a different extension (e.g. old
+            // cover.png when format changed to JPEG) so they don't linger.
+            for ext in ["png", "jpg", "heic"] where ext != cover.fileExtension {
+                let stale = coversURL.appendingPathComponent("cover.\(ext)")
+                if fm.fileExists(atPath: stale.path) {
+                    try? fm.removeItem(at: stale)
+                    let staleRel = ProjectBundleLayout.coverRelativePath(format: ext)
+                    index.entries.removeValue(forKey: staleRel)
+                }
+            }
+            try cover.imageData.write(to: coverPath, options: .atomic)
+            if let digest = try? Fingerprint.sha256(of: coverPath) {
+                index.entries[coverRelativePath] = digest
+            }
+            // Update the document's coverFrame.bundleRelativePath so the next
+            // open knows where the cover lives inside the bundle.
+            // The caller (DocumentController) applies this back to the model.
         }
 
         try writeMetadata(projectJSON: projectJSON, fingerprints: index, to: bundleURL)

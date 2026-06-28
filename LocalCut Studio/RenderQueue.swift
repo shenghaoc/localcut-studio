@@ -122,6 +122,7 @@ struct RenderQueueDoc: Codable, Equatable, Sendable {
 /// inspector status pill via `QueueJob.errorMessage`.
 nonisolated enum RenderQueueError: Error, LocalizedError {
     case unsupportedCombination(container: String, codec: String)
+    case hostNotCapable(String)
     case outputDestinationUnavailable
     case compositionEmpty
     case exportSessionCreationFailed
@@ -131,6 +132,8 @@ nonisolated enum RenderQueueError: Error, LocalizedError {
         switch self {
         case .unsupportedCombination(let container, let codec):
             "Container \(container) does not support codec \(codec)."
+        case .hostNotCapable(let reason):
+            reason
         case .outputDestinationUnavailable:
             "Output destination unavailable."
         case .compositionEmpty:
@@ -291,6 +294,16 @@ final class RenderQueue {
             rejected.errorMessage = RenderQueueError.unsupportedCombination(
                 container: job.preset.containerFormat,
                 codec: job.preset.videoCodec).localizedDescription
+            jobs.append(rejected)
+            log("job \(job.id.uuidString.prefix(8)) failed — \(rejected.errorMessage ?? "")")
+            persist()
+            recomputeTotalProgress()
+            return
+        }
+        if let hostError = job.preset.hostCapabilityError() {
+            var rejected = job
+            rejected.status = .failed
+            rejected.errorMessage = RenderQueueError.hostNotCapable(hostError).localizedDescription
             jobs.append(rejected)
             log("job \(job.id.uuidString.prefix(8)) failed — \(rejected.errorMessage ?? "")")
             persist()

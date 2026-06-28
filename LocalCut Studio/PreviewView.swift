@@ -93,6 +93,9 @@ struct PreviewView: View {
                 .overlay(alignment: .topTrailing) {
                     formatBadge.padding(12)
                 }
+                .overlay(alignment: .topLeading) {
+                    safeZoneBadge.padding(12)
+                }
                 .layoutPriority(1)
 
             if model.showScopes {
@@ -116,6 +119,15 @@ struct PreviewView: View {
                     description: Text("Import media, then drag a clip to the timeline."))
                 .foregroundStyle(.secondary)
             }
+            if model.showSafeZones,
+               let profile = SafeZoneLibrary.validProfile(
+                id: model.selectedSafeZoneProfileID,
+                for: model.project.aspect,
+                renderSize: model.project.renderSize) {
+                SafeZoneOverlayView(
+                    profile: profile,
+                    renderSize: model.project.renderSize)
+            }
         }
     }
 
@@ -136,6 +148,26 @@ struct PreviewView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text("Render format"))
             .accessibilityValue(Text("\(Int(model.project.renderSize.width)) by \(Int(model.project.renderSize.height)), \(Int(model.project.frameRate)) frames per second"))
+    }
+
+    @ViewBuilder
+    private var safeZoneBadge: some View {
+        if model.showSafeZones,
+           let profile = SafeZoneLibrary.validProfile(
+            id: model.selectedSafeZoneProfileID,
+            for: model.project.aspect,
+            renderSize: model.project.renderSize) {
+            Text(profile.displayName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.thinMaterial, in: .capsule)
+                .help("Safe-zone profile")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("Safe-zone profile"))
+                .accessibilityValue(Text(profile.displayName))
+        }
     }
 
     /// Extracted view to isolate `@Observable` high-frequency updates (like `model.currentTime`)

@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import AVFoundation
 import CoreImage
+import ImageIO
 import LocalCutCore
 @testable import LocalCut_Studio
 
@@ -194,6 +195,30 @@ struct PreviewVideoDiagnosticsTests {
 
         let luma = try meanLuma(image)
         #expect(luma > 50, "Rendered frame should not be black; got luma \(luma)")
+    }
+
+    @Test("Cover generation renders image data from the built composition")
+    func coverGenerationRendersImageData() async throws {
+        let url = try await makeVideoFixture(seconds: 2)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let model = EditorModel()
+        let media = try await loadedMedia(from: url)
+        model.project.mediaItems.append(media)
+        model.addToTimeline(mediaID: media.id)
+        model.project.coverFrame = CoverFrameDoc(
+            time: CMTimeCode(CMTime(seconds: 0.5, preferredTimescale: 600)),
+            format: .png,
+            title: CoverTitleDoc(text: "Cover"))
+
+        let data = try await model.makeCoverImageData()
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+
+        #expect(!data.isEmpty)
+        #expect(CGImageSourceGetCount(source) == 1)
+        #expect(image.width == Int(model.project.renderSize.width))
+        #expect(image.height == Int(model.project.renderSize.height))
     }
 
     @Test("AVAssetExportSession produces valid video with the custom compositor")

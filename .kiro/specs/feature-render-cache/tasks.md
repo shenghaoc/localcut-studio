@@ -4,7 +4,7 @@
 
 ## Engine
 
-- [x] **T1.1** Define `RenderCacheKey` (Hashable, Sendable) per the [design](./design.md#types). `CMTime` is normalised to a microsecond timescale so equivalent times in different timescales collapse to one key (Gemini review).
+- [x] **T1.1** Define `RenderCacheKey` (Hashable, Sendable) per the [design](./design.md#types). `CMTime` is normalised to a microsecond timescale so equivalent times in different timescales collapse to one key (Gemini review), and working colour space is part of the key so materialised frames are not shared across colour contexts.
 - [x] **T1.2** Add `[Effect].renderCacheHash` (Hasher digest over the chain, in order).
 - [x] **T1.3** Implement `RenderCache`: `OSAllocatedUnfairLock`-guarded dictionary + linked-list LRU; O(1) touch/evict on lookup/insert; byte-budget eviction (sized off the stored image's `extent`, not the key's `renderSize` — Claude review); default memory budget 256 MiB.
 - [x] **T1.4** `invalidate(clipID:)`, `invalidate(notMatchingRenderSize:)`, and `purge()` methods.
@@ -14,7 +14,7 @@
 ## Compositor
 
 - [x] **T2.1** Add `clipID: UUID`, `sourceRange: CMTimeRange`, and `timeRange: CMTimeRange` to `CompositorLayer`; thread `clip.id` and piece ranges through `CompositionBuilder.VideoSegment` so the layer carries them. The compositor computes source-frame time from `sourceRange` / `timeRange` for the cache key (Gemini review — key by source time, not composition time, so speed ramps and frame interpolation hit the same entry for repeated source frames).
-- [x] **T2.2** `EffectCompositor.applyEffectChain` consults `RenderCache.shared` before running the chain; on miss runs the chain, **materialises the result into a CGImage-backed `CIImage`** (so cache hits skip kernel evaluation, not just Swift filter-chain construction — codex review P1), and writes it back. No-op when `effects.isEmpty`. Skips the write when any effect failed to apply, so a transient LUT-load failure does not freeze the un-LUT'ed image (codex review P2).
+- [x] **T2.2** `EffectCompositor.applyEffectChain` consults `RenderCache.shared` before running the chain; on miss runs the chain, **materialises the result into a CGImage-backed `CIImage` through the instruction's working-colour-space `CIContext`** (so cache hits skip kernel evaluation, not just Swift filter-chain construction — codex review P1), and writes it back. No-op when `effects.isEmpty`. Skips the write when any effect failed to apply, so a transient LUT-load failure does not freeze the un-LUT'ed image (codex review P2).
 - [x] **T2.3** Effect-chain edits in `EditorModel` invalidate the cache:
   - `selectedClipGrade` / `selectedClipSkinSmooth` setters
   - `updateSelectedClipSkinSmooth`, `resetClipColourEffects`, `resetClipSkinSmooth`, `importLUT`
@@ -26,7 +26,7 @@
 ## Verification
 
 - [x] **V1** Unit test: identical request → cache hit; same `CIImage` instance returned.
-- [x] **V2** Unit test: changing any one of `clipID`, `effectChainHash`, `time`, `renderSize` produces a miss.
+- [x] **V2** Unit test: changing any one of `clipID`, `effectChainHash`, `time`, `renderSize`, or `workingColourSpace` produces a miss.
 - [x] **V3** Unit test: byte-budget eviction order — least-recently-used entries dropped first.
 - [x] **V3.1** Unit test: byte cost reflects the stored image's `extent`, not the key's `renderSize` (Claude review).
 - [x] **V4** Unit test: `invalidate(clipID:)` clears only matching entries; other clips' entries survive ("cache survives a composition rebuild but not an effect-chain edit").

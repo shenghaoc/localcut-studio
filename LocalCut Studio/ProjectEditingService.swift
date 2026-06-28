@@ -319,8 +319,25 @@ final class ProjectEditingService {
     }
 
     func setRenderSize(_ size: CGSize, model: EditorModel) {
+        let size = Self.sanitizedRenderSize(size)
         guard size != model.project.renderSize else { return }
         model.performUndoable("Change Resolution") {
+            let shouldPreserveCustomAspect = model.project.aspect == .custom
+            model.project.renderSize = size
+            model.project.aspect = shouldPreserveCustomAspect
+                ? .custom
+                : ProjectAspect.infer(width: Double(size.width), height: Double(size.height))
+            RenderCache.shared.invalidate(notMatchingRenderSize: size)
+            EffectCompositor.purgeCaptionRasterCache()
+            model.scheduleRebuild()
+        }
+    }
+
+    func setProjectAspect(_ aspect: ProjectAspect, model: EditorModel) {
+        let size = aspect == .custom ? model.project.renderSize : aspect.defaultRenderSize
+        guard aspect != model.project.aspect || size != model.project.renderSize else { return }
+        model.performUndoable("Change Aspect") {
+            model.project.aspect = aspect
             model.project.renderSize = size
             RenderCache.shared.invalidate(notMatchingRenderSize: size)
             EffectCompositor.purgeCaptionRasterCache()
@@ -418,6 +435,17 @@ final class ProjectEditingService {
 
     private func minClipDuration(model: EditorModel) -> CMTime {
         CMTime(value: 1, timescale: CMTimeScale(max(1, model.project.frameRate)))
+    }
+
+    private static func sanitizedRenderSize(_ size: CGSize) -> CGSize {
+        CGSize(
+            width: sanitizedRenderDimension(size.width),
+            height: sanitizedRenderDimension(size.height))
+    }
+
+    private static func sanitizedRenderDimension(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite else { return 8192 }
+        return min(8192, max(2, value.rounded()))
     }
 
     private func releaseAccessIfUnused(for url: URL, model: EditorModel) {

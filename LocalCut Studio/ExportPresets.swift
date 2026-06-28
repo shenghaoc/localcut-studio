@@ -19,6 +19,17 @@ nonisolated enum ExportAspect: String, Codable, Hashable, Sendable, CaseIterable
 
     var id: String { rawValue }
 
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        self = Self(rawValue: rawValue) ?? .widescreen
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
     var ratio: CGSize {
         switch self {
         case .widescreen: CGSize(width: 16, height: 9)
@@ -120,6 +131,34 @@ nonisolated struct ExportSize: Codable, Hashable, Sendable {
     var cgSize: CGSize { CGSize(width: width, height: height) }
 }
 
+// MARK: - Platform finishing metadata
+
+nonisolated struct PlatformExportMetadata: Codable, Hashable, Sendable {
+    var platformID: String
+    var displayName: String
+    var safeZoneProfileID: String?
+    var loudnessTargetLUFS: Double?
+    var guidanceSourceName: String?
+    var guidanceSourceURL: String?
+    var guidanceValidatedAt: String?
+
+    init(platformID: String,
+         displayName: String,
+         safeZoneProfileID: String? = nil,
+         loudnessTargetLUFS: Double? = -14,
+         guidanceSourceName: String? = nil,
+         guidanceSourceURL: String? = nil,
+         guidanceValidatedAt: String? = nil) {
+        self.platformID = platformID
+        self.displayName = displayName
+        self.safeZoneProfileID = safeZoneProfileID
+        self.loudnessTargetLUFS = loudnessTargetLUFS
+        self.guidanceSourceName = guidanceSourceName
+        self.guidanceSourceURL = guidanceSourceURL
+        self.guidanceValidatedAt = guidanceValidatedAt
+    }
+}
+
 // MARK: - ExportPreset
 
 /// One vetted output recipe: container × video codec × aspect × pixel
@@ -154,6 +193,7 @@ nonisolated struct ExportPreset: Codable, Hashable, Sendable, Identifiable {
     var frameRate: Double?
 
     var audioConfig: AudioConfig
+    var platformMetadata: PlatformExportMetadata?
 
     init(id: UUID = UUID(),
          name: String,
@@ -163,7 +203,8 @@ nonisolated struct ExportPreset: Codable, Hashable, Sendable, Identifiable {
          targetSize: CGSize,
          bitrate: ExportBitrateBracket,
          frameRate: Double? = nil,
-         audioConfig: AudioConfig) {
+         audioConfig: AudioConfig,
+         platformMetadata: PlatformExportMetadata? = nil) {
         self.id = id
         self.name = name
         self.containerFormat = containerFormat
@@ -173,6 +214,7 @@ nonisolated struct ExportPreset: Codable, Hashable, Sendable, Identifiable {
         self.bitrate = bitrate
         self.frameRate = frameRate
         self.audioConfig = audioConfig
+        self.platformMetadata = platformMetadata
     }
 
     /// Convenience accessor for the typed `AVFileType`. Always synthesised
@@ -232,6 +274,25 @@ extension ExportPreset {
             (m4v, AVVideoCodecType.hevc.rawValue),
         ]
     }()
+
+    // MARK: - Host capability validation
+
+    /// Returns `true` when HEVC video encoding is available on this Mac.
+    /// Checks `AVAssetExportSession` preset availability — if the HEVC 1920×1080
+    /// preset is listed, the hardware + software stack supports HEVC output.
+    static let isHEVCEncodingAvailable: Bool = {
+        AVAssetExportSession.allExportPresets().contains(AVAssetExportPresetHEVC1920x1080)
+    }()
+
+    /// Returns any host-capability error for this preset beyond the
+    /// container/codec allow-list. Returns `nil` if the preset is usable.
+    func hostCapabilityError() -> String? {
+        if videoCodec == AVVideoCodecType.hevc.rawValue,
+           !Self.isHEVCEncodingAvailable {
+            return "HEVC encoding is not available on this Mac."
+        }
+        return nil
+    }
 }
 
 // MARK: - Built-in library
@@ -244,6 +305,10 @@ nonisolated enum BuiltInExportPresets {
     static let all: [ExportPreset] = [
         youTube1080p,
         youTube4K,
+        youTubeShorts,
+        douyinVertical,
+        xiaohongshuSquare,
+        xiaohongshuPortrait,
         instagramVertical,
         tikTokVertical,
         proRes4K,
@@ -268,6 +333,10 @@ nonisolated enum BuiltInExportPresets {
     private static let tikTokID        = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
     private static let proRes4KID      = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
     private static let web720pID       = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+    private static let youTubeShortsID = UUID(uuidString: "77777777-7777-7777-7777-777777777777")!
+    private static let douyinID        = UUID(uuidString: "88888888-8888-8888-8888-888888888888")!
+    private static let xhsSquareID     = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!
+    private static let xhsPortraitID   = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
 
     static let youTube1080p = ExportPreset(
         id: youTube1080pID,
@@ -278,7 +347,14 @@ nonisolated enum BuiltInExportPresets {
         targetSize: CGSize(width: 1920, height: 1080),
         bitrate: .standard,
         frameRate: nil,
-        audioConfig: .aac192k)
+        audioConfig: .aac192k,
+        platformMetadata: PlatformExportMetadata(
+            platformID: "youtube",
+            displayName: "YouTube",
+            safeZoneProfileID: nil,
+            guidanceSourceName: "YouTube Help",
+            guidanceSourceURL: "https://support.google.com/youtube/answer/1722171",
+            guidanceValidatedAt: "2026-06-25"))
 
     static let youTube4K = ExportPreset(
         id: youTube4KID,
@@ -291,6 +367,75 @@ nonisolated enum BuiltInExportPresets {
         frameRate: nil,
         audioConfig: .aac256k)
 
+    static let youTubeShorts = ExportPreset(
+        id: youTubeShortsID,
+        name: "YouTube Shorts 9:16",
+        containerFormat: AVFileType.mp4.rawValue,
+        videoCodec: AVVideoCodecType.h264.rawValue,
+        aspect: .vertical,
+        targetSize: CGSize(width: 1080, height: 1920),
+        bitrate: .standard,
+        frameRate: nil,
+        audioConfig: .aac128k,
+        platformMetadata: PlatformExportMetadata(
+            platformID: "youtube-shorts",
+            displayName: "YouTube Shorts",
+            safeZoneProfileID: "youtube-shorts",
+            guidanceSourceName: "YouTube Help",
+            guidanceSourceURL: "https://support.google.com/youtube/answer/6375112",
+            guidanceValidatedAt: "2026-06-25"))
+
+    static let douyinVertical = ExportPreset(
+        id: douyinID,
+        name: "Douyin 9:16",
+        containerFormat: AVFileType.mp4.rawValue,
+        videoCodec: AVVideoCodecType.h264.rawValue,
+        aspect: .vertical,
+        targetSize: CGSize(width: 1080, height: 1920),
+        bitrate: .standard,
+        frameRate: nil,
+        audioConfig: .aac128k,
+        platformMetadata: PlatformExportMetadata(
+            platformID: "douyin",
+            displayName: "Douyin",
+            safeZoneProfileID: "douyin",
+            guidanceSourceName: "Douyin creator guidance",
+            guidanceValidatedAt: "2026-06-25"))
+
+    static let xiaohongshuSquare = ExportPreset(
+        id: xhsSquareID,
+        name: "Xiaohongshu 1:1",
+        containerFormat: AVFileType.mp4.rawValue,
+        videoCodec: AVVideoCodecType.h264.rawValue,
+        aspect: .square,
+        targetSize: CGSize(width: 1080, height: 1080),
+        bitrate: .standard,
+        frameRate: nil,
+        audioConfig: .aac128k,
+        platformMetadata: PlatformExportMetadata(
+            platformID: "xiaohongshu",
+            displayName: "Xiaohongshu",
+            safeZoneProfileID: "xiaohongshu-square",
+            guidanceSourceName: "Xiaohongshu creator guidance",
+            guidanceValidatedAt: "2026-06-25"))
+
+    static let xiaohongshuPortrait = ExportPreset(
+        id: xhsPortraitID,
+        name: "Xiaohongshu 4:5",
+        containerFormat: AVFileType.mp4.rawValue,
+        videoCodec: AVVideoCodecType.h264.rawValue,
+        aspect: .portrait4x5,
+        targetSize: CGSize(width: 1080, height: 1350),
+        bitrate: .standard,
+        frameRate: nil,
+        audioConfig: .aac128k,
+        platformMetadata: PlatformExportMetadata(
+            platformID: "xiaohongshu",
+            displayName: "Xiaohongshu",
+            safeZoneProfileID: "xiaohongshu-portrait",
+            guidanceSourceName: "Xiaohongshu creator guidance",
+            guidanceValidatedAt: "2026-06-25"))
+
     static let instagramVertical = ExportPreset(
         id: instagramID,
         name: "Instagram 9:16",
@@ -300,7 +445,13 @@ nonisolated enum BuiltInExportPresets {
         targetSize: CGSize(width: 1080, height: 1920),
         bitrate: .standard,
         frameRate: nil,
-        audioConfig: .aac128k)
+        audioConfig: .aac128k,
+        platformMetadata: PlatformExportMetadata(
+            platformID: "instagram-reels",
+            displayName: "Instagram Reels",
+            safeZoneProfileID: "instagram-reels",
+            guidanceSourceName: "Meta creator guidance",
+            guidanceValidatedAt: "2026-06-25"))
 
     static let tikTokVertical = ExportPreset(
         id: tikTokID,
@@ -311,7 +462,14 @@ nonisolated enum BuiltInExportPresets {
         targetSize: CGSize(width: 1080, height: 1920),
         bitrate: .standard,
         frameRate: nil,
-        audioConfig: .aac128k)
+        audioConfig: .aac128k,
+        platformMetadata: PlatformExportMetadata(
+            platformID: "tiktok",
+            displayName: "TikTok",
+            safeZoneProfileID: "tiktok",
+            guidanceSourceName: "TikTok Business Help Center",
+            guidanceSourceURL: "https://ads.tiktok.com/help/article/tiktok-auction-in-feed-ads",
+            guidanceValidatedAt: "2026-06-25"))
 
     static let proRes4K = ExportPreset(
         id: proRes4KID,
@@ -339,6 +497,16 @@ nonisolated enum BuiltInExportPresets {
 // MARK: - AVAssetExportSession preset mapping
 
 extension ExportPreset {
+
+    var projectAspect: ProjectAspect {
+        switch aspect {
+        case .widescreen: .widescreen16x9
+        case .vertical: .vertical9x16
+        case .square: .square1x1
+        case .portrait4x5: .portrait4x5
+        case .cinema21x9: .custom
+        }
+    }
 
     /// Maps the recipe onto an `AVAssetExportSession` preset name when one
     /// exists. The render queue falls back to the `AVAssetWriter` path when

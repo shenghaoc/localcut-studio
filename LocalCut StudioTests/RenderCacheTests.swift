@@ -20,9 +20,11 @@ private func key(clipID: UUID = UUID(),
                  effectChainHash: Int = 0,
                  time: CMTime = .zero,
                  renderSize: CGSize = CGSize(width: 1920, height: 1080),
-                 frameRate: Double = 24) -> RenderCacheKey {
+                 frameRate: Double = 24,
+                 workingColourSpace: WorkingColourSpace = .sRGB) -> RenderCacheKey {
     RenderCacheKey(clipID: clipID, effectChainHash: effectChainHash,
-                   time: time, renderSize: renderSize, frameRate: frameRate)
+                   time: time, renderSize: renderSize, frameRate: frameRate,
+                   workingColourSpace: workingColourSpace)
 }
 
 private func temporaryRenderCacheDirectory() throws -> URL {
@@ -68,6 +70,10 @@ func keyDistinctOnAnyFieldChange() {
                                    time: CMTime(value: 30, timescale: 600),
                                    renderSize: CGSize(width: 1920, height: 1080),
                                    frameRate: 60))
+    #expect(base != RenderCacheKey(clipID: sameClip, effectChainHash: 1,
+                                   time: CMTime(value: 30, timescale: 600),
+                                   renderSize: CGSize(width: 1920, height: 1080),
+                                   workingColourSpace: .displayP3))
 }
 
 @Test("RenderCacheKey: normalises frame rate for grain cadence identity")

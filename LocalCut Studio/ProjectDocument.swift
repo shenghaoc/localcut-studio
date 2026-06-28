@@ -34,7 +34,9 @@ extension ProjectDocument {
             captionTracks: project.captionTracks.map(CaptionTrackDoc.init(track:)),
             markers: project.markers,
             audioBus: AudioBusDoc(project: project),
-            overlays: project.overlayDocs)
+            overlays: project.overlayDocs,
+            aspect: project.aspect,
+            coverFrame: project.coverFrame)
     }
 
     /// Captures a queue snapshot. Saved bundle documents intentionally strip

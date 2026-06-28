@@ -122,6 +122,61 @@ struct ProjectBundleTests {
         #expect(!names.contains { $0.contains(".staged-") })
     }
 
+    @Test("Bundle cover save removes stale cover file for previous format")
+    func bundleCoverSaveRemovesStalePreviousFormat() throws {
+        let tmp = try makeTempDirectory("stale-cover")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Sample.lcbundle")
+        let document = sampleDocument(mediaID: UUID(),
+                                      bundleRelativePath: nil,
+                                      captionTrackID: UUID())
+
+        let pngCover = ProjectBundle.CoverBundleData(
+            imageData: Data([0x89, 0x50, 0x4E, 0x47]),
+            fileExtension: "png")
+        let firstIndex = try ProjectBundle.write(
+            projectJSON: document.encoded(),
+            to: bundleURL,
+            bundledMedia: [],
+            previousFingerprints: FingerprintIndex(),
+            coverData: pngCover)
+
+        let pngRelative = ProjectBundleLayout.coverRelativePath(format: "png")
+        let pngURL = bundleURL.appendingPathComponent(pngRelative)
+        #expect(FileManager.default.fileExists(atPath: pngURL.path))
+        #expect(firstIndex.entries[pngRelative] != nil)
+
+        let jpgCover = ProjectBundle.CoverBundleData(
+            imageData: Data([0xFF, 0xD8, 0xFF]),
+            fileExtension: "jpg")
+        let secondIndex = try ProjectBundle.write(
+            projectJSON: document.encoded(),
+            to: bundleURL,
+            bundledMedia: [],
+            previousFingerprints: firstIndex,
+            coverData: jpgCover)
+
+        let jpgRelative = ProjectBundleLayout.coverRelativePath(format: "jpg")
+        let jpgURL = bundleURL.appendingPathComponent(jpgRelative)
+        #expect(FileManager.default.fileExists(atPath: jpgURL.path))
+        #expect(!FileManager.default.fileExists(atPath: pngURL.path))
+        #expect(secondIndex.entries[pngRelative] == nil)
+        #expect(secondIndex.entries[jpgRelative] != nil)
+    }
+
+    @Test("Synchronous bundle save rejects cover generation instead of dropping the cover")
+    func synchronousBundleSaveRejectsCoverFrame() throws {
+        let tmp = try makeTempDirectory("sync-cover")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Sample.lcbundle")
+        let model = EditorModel()
+        model.project.coverFrame = CoverFrameDoc(time: CMTimeCode(.zero))
+
+        #expect(!model.writeSynchronously(to: bundleURL))
+        #expect(!FileManager.default.fileExists(atPath: bundleURL.path))
+        #expect(model.statusMessage.contains("async Save path"))
+    }
+
     @Test("Bundle save keeps media external when import opts out of copying")
     func bundleDocumentRespectsDontCopyImportFlag() throws {
         let tmp = try makeTempDirectory("dont-copy")

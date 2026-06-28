@@ -260,7 +260,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         for unit in instruction.units {
             guard let image = renderedImage(for: unit, request: request,
-                                            frameRate: instruction.frameRate) else { continue }
+                                            frameRate: instruction.frameRate,
+                                            workingColourSpace: space) else { continue }
             if let existing = result {
                 result = image.composited(over: existing)
             } else {
@@ -354,15 +355,22 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     nonisolated private func renderedImage(
         for unit: RenderUnit,
         request: AVAsynchronousVideoCompositionRequest,
-        frameRate: Double = 24) -> CIImage? {
+        frameRate: Double = 24,
+        workingColourSpace: WorkingColourSpace = .sRGB) -> CIImage? {
 
         switch unit {
         case .layer(let layer):
-            return renderedImage(for: layer, request: request, frameRate: frameRate)
+            return renderedImage(for: layer, request: request,
+                                 frameRate: frameRate,
+                                 workingColourSpace: workingColourSpace)
 
         case .transition(let outgoing, let incoming, let type, let wipeAngle, let overlap):
-            let out = renderedImage(for: outgoing, request: request, frameRate: frameRate)
-            let into = renderedImage(for: incoming, request: request, frameRate: frameRate)
+            let out = renderedImage(for: outgoing, request: request,
+                                    frameRate: frameRate,
+                                    workingColourSpace: workingColourSpace)
+            let into = renderedImage(for: incoming, request: request,
+                                     frameRate: frameRate,
+                                     workingColourSpace: workingColourSpace)
             // If a source frame is missing, fall back to whichever is available.
             guard let out else { return into }
             guard let into else { return out }
@@ -381,7 +389,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     nonisolated private func renderedImage(
         for layer: CompositorLayer,
         request: AVAsynchronousVideoCompositionRequest,
-        frameRate: Double = 24) -> CIImage? {
+        frameRate: Double = 24,
+        workingColourSpace: WorkingColourSpace = .sRGB) -> CIImage? {
 
         guard let sourceBuffer = request.sourceFrame(byTrackID: layer.trackID) else { return nil }
 
@@ -421,12 +430,14 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                     effectChainHash: layer.effects.renderCacheHash,
                     time: cacheTime,
                     renderSize: request.renderContext.size,
-                    frameRate: frameRate)
+                    frameRate: frameRate,
+                    workingColourSpace: workingColourSpace)
             }()
             image = applyEffectChain(image, effects: layer.effects,
                                      cacheKey: cacheKey, at: clipLocalTime,
                                      grainCadenceTime: request.compositionTime,
-                                     frameRate: frameRate)
+                                     frameRate: frameRate,
+                                     workingColourSpace: workingColourSpace)
         }
 
         image = image.transformed(by: layer.transform)
@@ -732,7 +743,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                                        cacheKey: RenderCacheKey?,
                                        at time: CMTime = .zero,
                                        grainCadenceTime: CMTime? = nil,
-                                       frameRate: Double = 24) -> CIImage {
+                                       frameRate: Double = 24,
+                                       workingColourSpace: WorkingColourSpace = .sRGB) -> CIImage {
         if effects.isEmpty { return image }
         if let cacheKey, let cached = RenderCache.shared.image(for: cacheKey) {
             return cached
@@ -778,7 +790,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // above) and when the source extent is degenerate.
         guard let cacheKey, allEffectsApplied,
               !sourceExtent.isInfinite, !sourceExtent.isNull, !sourceExtent.isEmpty,
-              let materialised = materialise(result, extent: sourceExtent) else {
+              let materialised = materialise(result, extent: sourceExtent,
+                                            workingColourSpace: workingColourSpace) else {
             return result
         }
         RenderCache.shared.setImage(materialised, for: cacheKey)
@@ -789,8 +802,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// shared `CIContext`. The returned CIImage is backed by a static CGImage,
     /// so a later `CIContext.render` only reuploads the texture instead of
     /// re-running the per-clip kernel chain.
-    nonisolated private func materialise(_ image: CIImage, extent: CGRect) -> CIImage? {
-        guard let cg = Self.context(for: .sRGB).createCGImage(image, from: extent) else {
+    nonisolated private func materialise(_ image: CIImage,
+                                         extent: CGRect,
+                                         workingColourSpace: WorkingColourSpace) -> CIImage? {
+        guard let cg = Self.context(for: workingColourSpace).createCGImage(image, from: extent) else {
             return nil
         }
         return CIImage(cgImage: cg)

@@ -9,6 +9,7 @@ final class DocumentController {
     func newDocument(model: EditorModel) {
         releaseSession(model: model)
         model.project.name = "Untitled"
+        model.project.aspect = .widescreen16x9
         model.project.renderSize = CGSize(width: 1920, height: 1080)
         model.project.frameRate = 30
         model.project.workingColourSpace = .sRGB
@@ -27,6 +28,7 @@ final class DocumentController {
         model.showBeatMarkers = false
         model.snapToBeats = false
         model.beatOffsetSeconds = 0
+        model.project.coverFrame = nil
         model.documentURL = nil
         model.isDirty = false
         model.unresolvedMedia = []
@@ -54,6 +56,7 @@ final class DocumentController {
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
+        model.project.coverFrame = nil
         model.selectedClipID = nil
         model.selectedMediaID = nil
         model.selectedTransitionClipID = nil
@@ -154,9 +157,11 @@ final class DocumentController {
         let width = max(1, document.renderWidth.isFinite ? document.renderWidth : 1920)
         let height = max(1, document.renderHeight.isFinite ? document.renderHeight : 1080)
         model.project.renderSize = CGSize(width: width, height: height)
+        model.project.aspect = document.aspect
         model.project.frameRate = max(1, document.frameRate.isFinite ? document.frameRate : 30)
         EffectCompositor.purgeCaptionRasterCache()
         model.project.workingColourSpace = document.workingColourSpace
+        model.project.coverFrame = document.coverFrame
 
         var unresolved: [MediaRef] = []
         var refreshedBookmark = false
@@ -240,6 +245,10 @@ final class DocumentController {
         defer { stopOverlayAccesses(overlayAccesses) }
         do {
             if url.pathExtension == ProjectBundleLayout.fileExtension {
+                guard model.project.coverFrame == nil else {
+                    model.statusMessage = "Save failed: bundle cover generation requires the async Save path."
+                    return false
+                }
                 let bundledMedia: [ProjectBundle.BundledMedia] = model.project.mediaItems.compactMap { item in
                     guard let relative = bundleRelativePath(for: item, model: model) else { return nil }
                     item.bundleRelativePath = relative
@@ -284,6 +293,7 @@ final class DocumentController {
             : ProjectDocument.singleFileSchemaVersion
         document.bundleFormat = forBundle ? ProjectDocument.currentBundleFormat : nil
         if !forBundle {
+            document.coverFrame?.bundleRelativePath = nil
             document.media = document.media.map { ref in
                 var copy = ref
                 copy.bundleRelativePath = nil
@@ -305,6 +315,10 @@ final class DocumentController {
                     copy.bookmark = Data()
                 }
                 return copy
+            }
+            if let path = document.coverFrame?.bundleRelativePath,
+               !ProjectBundleLayout.isSafeCoversPath(path) {
+                document.coverFrame?.bundleRelativePath = nil
             }
         }
         document.media.append(contentsOf: model.unresolvedMedia)
@@ -395,6 +409,7 @@ final class DocumentController {
         }
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
         let originalOverlayPaths = model.project.overlayBundlePaths
+        let originalCoverPath = model.project.coverFrame?.bundleRelativePath
         var overlayAccesses: [URL] = []
         defer { stopOverlayAccesses(overlayAccesses) }
         do {
@@ -413,13 +428,21 @@ final class DocumentController {
             }
             let overlayPlan = bundledOverlays(model: model)
             overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
+            let coverPreparation = await model.makeCoverBundleData()
+            if let coverData = coverPreparation.data {
+                model.project.coverFrame?.bundleRelativePath =
+                    ProjectBundleLayout.coverRelativePath(format: coverData.fileExtension)
+            } else if model.project.coverFrame != nil {
+                model.project.coverFrame?.bundleRelativePath = nil
+            }
             let projectJSON = try encodedDocument(forBundle: true, model: model)
             let bundleURLCopy = bundleURL
             let previous = model.lastBundleFingerprints
             let index = try await Task.detached {
                 try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
                                         bundledMedia: bundledMedia + overlayPlan.assets,
-                                        previousFingerprints: previous)
+                                        previousFingerprints: previous,
+                                        coverData: coverPreparation.data)
             }.value
             model.lastBundleFingerprints = index
 
@@ -430,12 +453,15 @@ final class DocumentController {
 
             adoptSaved(url: bundleURL, model: model)
             await model.rebuild()
-            model.statusMessage = "Converted to bundle — original .lcstudio left in place."
+            model.statusMessage = coverPreparation.warning.map {
+                "Converted to bundle — original .lcstudio left in place; \($0)"
+            } ?? "Converted to bundle — original .lcstudio left in place."
         } catch {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
             }
             model.project.overlayBundlePaths = originalOverlayPaths
+            model.project.coverFrame?.bundleRelativePath = originalCoverPath
             model.statusMessage = "Convert failed: \(error.localizedDescription)"
         }
     }
@@ -530,6 +556,7 @@ final class DocumentController {
         }
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
         let originalOverlayPaths = model.project.overlayBundlePaths
+        let originalCoverPath = model.project.coverFrame?.bundleRelativePath
         var overlayAccesses: [URL] = []
         defer { stopOverlayAccesses(overlayAccesses) }
         do {
@@ -545,13 +572,21 @@ final class DocumentController {
             }
             let overlayPlan = bundledOverlays(model: model)
             overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
+            let coverPreparation = await model.makeCoverBundleData()
+            if let coverData = coverPreparation.data {
+                model.project.coverFrame?.bundleRelativePath =
+                    ProjectBundleLayout.coverRelativePath(format: coverData.fileExtension)
+            } else if model.project.coverFrame != nil {
+                model.project.coverFrame?.bundleRelativePath = nil
+            }
             let projectJSON = try encodedDocument(forBundle: true, model: model)
             let previous = model.lastBundleFingerprints
             let bundleURLCopy = bundleURL
             let index = try await Task.detached {
                 try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
                                         bundledMedia: bundledMedia + overlayPlan.assets,
-                                        previousFingerprints: previous)
+                                        previousFingerprints: previous,
+                                        coverData: coverPreparation.data)
             }.value
             model.lastBundleFingerprints = index
 
@@ -561,12 +596,15 @@ final class DocumentController {
             didTransferAccess = scoped
 
             adoptSaved(url: bundleURL, cleanIfRevision: savedRevision, model: model)
-            model.statusMessage = "Saved \(bundleURL.lastPathComponent)."
+            model.statusMessage = coverPreparation.warning.map {
+                "Saved \(bundleURL.lastPathComponent); \($0)"
+            } ?? "Saved \(bundleURL.lastPathComponent)."
         } catch {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
             }
             model.project.overlayBundlePaths = originalOverlayPaths
+            model.project.coverFrame?.bundleRelativePath = originalCoverPath
             model.statusMessage = "Save failed: \(error.localizedDescription)"
         }
     }

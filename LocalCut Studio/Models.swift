@@ -107,6 +107,9 @@ final class Project {
 
     /// Output canvas size for preview and export.
     var renderSize = CGSize(width: 1920, height: 1080)
+    /// User-facing aspect profile for the render canvas. `renderSize` remains
+    /// the AVFoundation source of truth; this is the preset/inspector label.
+    var aspect: ProjectAspect = .widescreen16x9
     /// Output frame rate (frames per second).
     var frameRate: Double = 30
     /// Working colour space used by the compositor's `CIContext` and stamped
@@ -127,6 +130,10 @@ final class Project {
     /// legacy projects and exports remain bit-identical until a user enables an
     /// insert or applies loudness normalisation.
     var voiceCleanup = VoiceCleanupSettings()
+
+    // MARK: - Phase 39 finishing
+
+    var coverFrame: CoverFrameDoc?
 
     init() {
         videoTracks = [Track(name: "V1", kind: .video)]

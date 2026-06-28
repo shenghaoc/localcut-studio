@@ -10,6 +10,9 @@ struct InspectorView: View {
     @Bindable var model: EditorModel
     @State private var showLUTImporter = false
     @State private var showLookImporter = false
+    @State private var coverPreviewImage: NSImage?
+    @State private var coverPreviewIsLoading = false
+    @State private var coverPreviewError: String?
 
     var body: some View {
         // The side rail's segmented switcher (EditorSideRailView) is the sole
@@ -40,6 +43,7 @@ struct InspectorView: View {
                 }
             }
 
+            coverSection
             projectSection
             overlayListSection
         }
@@ -857,16 +861,66 @@ struct InspectorView: View {
     @ViewBuilder
     private var projectSection: some View {
         Section("Project") {
-            Picker("Resolution", selection: resolutionBinding) {
-                Text("1920 × 1080").tag(CGSize(width: 1920, height: 1080))
-                Text("1280 × 720").tag(CGSize(width: 1280, height: 720))
-                Text("3840 × 2160").tag(CGSize(width: 3840, height: 2160))
-                Text("1080 × 1920 (Vertical)").tag(CGSize(width: 1080, height: 1920))
+            Picker("Aspect", selection: aspectBinding) {
+                ForEach(ProjectAspect.builtIns) { aspect in
+                    Text(aspect.displayName).tag(aspect)
+                }
+                Text("Custom").tag(ProjectAspect.custom)
+            }
+            .help("Choose the project canvas aspect ratio for preview and export")
+            .accessibilityLabel("Project canvas aspect ratio")
+            if model.project.aspect == .custom {
+                LabeledContent("Width") {
+                    TextField("Width", value: customWidthBinding, format: .number)
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 80)
+                        .help("Enter a custom canvas width in pixels")
+                        .accessibilityLabel("Custom canvas width in pixels")
+                }
+                LabeledContent("Height") {
+                    TextField("Height", value: customHeightBinding, format: .number)
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 80)
+                        .help("Enter a custom canvas height in pixels")
+                        .accessibilityLabel("Custom canvas height in pixels")
+                }
+            } else {
+                LabeledContent("Canvas") {
+                    Text("\(Int(model.project.renderSize.width))×\(Int(model.project.renderSize.height))")
+                        .foregroundStyle(.secondary)
+                }
             }
             Picker("Frame Rate", selection: frameRateBinding) {
                 Text("24 fps").tag(24.0)
                 Text("30 fps").tag(30.0)
                 Text("60 fps").tag(60.0)
+            }
+            .help("Choose the project frame rate in frames per second")
+            .accessibilityLabel("Project frame rate")
+        }
+        Section("Safe Zones") {
+            Toggle("Show Safe Zones", isOn: $model.showSafeZones)
+                .help("Overlay platform-specific safe-zone guides on the preview canvas")
+                .onChange(of: model.showSafeZones) { _, newValue in
+                    if newValue { model.surfaceSafeZoneLoadErrors() }
+                }
+            Picker("Platform", selection: $model.selectedSafeZoneProfileID) {
+                ForEach(SafeZoneLibrary.builtInProfiles) { profile in
+                    Text(profile.displayName).tag(profile.platformID)
+                }
+            }
+            .help("Choose a platform safe-zone profile (TikTok, YouTube Shorts, Instagram Reels, etc.)")
+            .accessibilityLabel("Safe zone platform profile")
+            if let profile = model.selectedSafeZoneProfile,
+               !SafeZoneLibrary.isProfile(
+                profile,
+                compatibleWith: model.project.aspect,
+                renderSize: model.project.renderSize) {
+                Text("Switch the project aspect to \(profile.aspect.displayName) to show this overlay.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         Section("Colour") {
@@ -887,10 +941,193 @@ struct InspectorView: View {
         }
     }
 
-    private var resolutionBinding: Binding<CGSize> {
+    @ViewBuilder
+    private var coverSection: some View {
+        Section("Cover") {
+            coverPreview
+            LabeledContent("Time") {
+                Text(coverTimeLabel)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            HStack {
+                Button {
+                    model.nudgeCoverFrame(byFrames: -1)
+                } label: {
+                    Label("Previous Frame", systemImage: "backward.frame")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(model.totalDuration <= 0)
+                .controlSize(.small)
+                .help("Move cover frame back one frame")
+                .accessibilityLabel("Move cover frame back one frame")
+
+                Button("Set to Playhead") {
+                    model.setCoverTimeToPlayhead()
+                }
+                .controlSize(.small)
+                .help("Use the current playhead position as the cover frame time")
+                .accessibilityLabel("Set cover frame to current playhead position")
+
+                Button {
+                    model.nudgeCoverFrame(byFrames: 1)
+                } label: {
+                    Label("Next Frame", systemImage: "forward.frame")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(model.totalDuration <= 0)
+                .controlSize(.small)
+                .help("Move cover frame forward one frame")
+                .accessibilityLabel("Move cover frame forward one frame")
+                Spacer()
+            }
+            Picker("Format", selection: coverFormatBinding) {
+                ForEach(CoverFormat.allCases) { format in
+                    Text(format.displayName).tag(format)
+                }
+            }
+            .help("Choose the cover image output format (PNG, JPEG, or HEIC)")
+            .accessibilityLabel("Cover image output format")
+            TextField("Title", text: coverTitleBinding)
+                .help("Optional title text drawn onto the cover image")
+                .accessibilityLabel("Cover title text")
+                .onSubmit { model.commitCoalescedUndo() }
+            HStack {
+                Button {
+                    exportCoverTapped()
+                } label: {
+                    Label("Export Cover…", systemImage: "photo")
+                }
+                .help("Save the cover image to a file")
+                .disabled(model.totalDuration <= 0)
+                .controlSize(.small)
+                Spacer()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var coverPreview: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.12))
+                .frame(maxWidth: .infinity)
+                .aspectRatio(coverPreviewAspectRatio, contentMode: .fit)
+            if let coverPreviewImage {
+                Image(nsImage: coverPreviewImage)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else if coverPreviewIsLoading {
+                ProgressView()
+            } else if let coverPreviewError {
+                Text(coverPreviewError)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(8)
+            }
+        }
+        .frame(maxHeight: 180)
+        .task(id: coverPreviewKey) {
+            await refreshCoverPreview()
+        }
+    }
+
+    private var coverPreviewAspectRatio: CGFloat {
+        let size = model.project.renderSize
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else {
+            return 16.0 / 9.0
+        }
+        return size.width / size.height
+    }
+
+    private var coverPreviewKey: String {
+        let cover = model.project.coverFrame
+        let title = cover?.title?.text ?? ""
+        let time = cover?.time.cmTime.seconds ?? model.currentTime
+        return [
+            "\(CoverPreviewInvalidationKey.make(for: model.project))",
+            "\(time)",
+            cover?.format.rawValue ?? CoverFormat.png.rawValue,
+            title,
+            "\(model.project.renderSize.width)x\(model.project.renderSize.height)",
+            model.project.workingColourSpace.rawValue,
+        ].joined(separator: "|")
+    }
+
+    private func refreshCoverPreview() async {
+        guard model.totalDuration > 0 else {
+            coverPreviewImage = nil
+            coverPreviewError = nil
+            coverPreviewIsLoading = false
+            return
+        }
+        coverPreviewIsLoading = true
+        coverPreviewError = nil
+        coverPreviewImage = nil
+        do {
+            let data = try await model.makeCoverImageData()
+            guard !Task.isCancelled else { return }
+            coverPreviewImage = NSImage(data: data)
+            coverPreviewError = coverPreviewImage == nil ? "Cover preview unavailable." : nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            coverPreviewImage = nil
+            coverPreviewError = "Cover preview unavailable."
+        }
+        coverPreviewIsLoading = false
+    }
+
+    private var coverTimeLabel: String {
+        let time = model.project.coverFrame?.time.cmTime.seconds ?? model.currentTime
+        return TimeFormatting.timecode(time)
+    }
+
+    private var coverFormatBinding: Binding<CoverFormat> {
         Binding(
-            get: { model.project.renderSize },
-            set: { model.setRenderSize($0) })
+            get: { model.project.coverFrame?.format ?? .png },
+            set: { model.setCoverFormat($0) })
+    }
+
+    private var coverTitleBinding: Binding<String> {
+        Binding(
+            get: { model.project.coverFrame?.title?.text ?? "" },
+            set: { model.setCoverTitle($0) })
+    }
+
+    private func exportCoverTapped() {
+        let format = model.project.coverFrame?.format ?? .png
+        let panel = NSSavePanel()
+        if let type = UTType(filenameExtension: format.fileExtension) {
+            panel.allowedContentTypes = [type]
+        }
+        panel.nameFieldStringValue = "\(model.project.name)-cover.\(format.fileExtension)"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await model.exportCover(to: url) }
+    }
+
+    private var aspectBinding: Binding<ProjectAspect> {
+        Binding(
+            get: { model.project.aspect },
+            set: { model.setProjectAspect($0) })
+    }
+
+    private var customWidthBinding: Binding<Double> {
+        Binding(
+            get: { model.project.renderSize.width },
+            set: { newValue in
+                model.setRenderSize(CGSize(width: newValue, height: model.project.renderSize.height))
+            })
+    }
+
+    private var customHeightBinding: Binding<Double> {
+        Binding(
+            get: { model.project.renderSize.height },
+            set: { newValue in
+                model.setRenderSize(CGSize(width: model.project.renderSize.width, height: newValue))
+            })
     }
 
     private var frameRateBinding: Binding<Double> {
