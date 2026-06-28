@@ -154,9 +154,7 @@ func overlayRenderItemMetadata() {
         scale: 2.0,
         rotation: 1.57,
         opacity: 0.6,
-        endAction: .loop,
-        bookmark: Data([0xDE]),
-        bundleRelativePath: nil)
+        endAction: .loop)
     #expect(item.sourceType == .alphaVideo)
     #expect(item.opacity == 0.6)
     #expect(item.endAction == .loop)

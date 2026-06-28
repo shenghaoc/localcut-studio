@@ -404,6 +404,32 @@ func overlayClipDocRoundTrip() {
     #expect(restored.endAction == .freeze)
 }
 
+@Test("OverlayClipDoc clamps malformed transform values when restoring model")
+func overlayClipDocClampsMalformedTransformValues() {
+    let doc = OverlayClipDoc(
+        sourceType: .animatedImage,
+        bookmark: Data(),
+        timelineStart: CMTimeCode(time(1)),
+        duration: CMTimeCode(time(2)),
+        scale: 0,
+        opacity: -0.25,
+        endAction: .loop)
+    let restored = doc.makeOverlayClip()
+
+    #expect(restored.scale == 0.1)
+    #expect(restored.opacity == 0)
+
+    let overOpaque = OverlayClipDoc(
+        sourceType: .animatedImage,
+        bookmark: Data(),
+        timelineStart: CMTimeCode(time(1)),
+        duration: CMTimeCode(time(2)),
+        scale: 1,
+        opacity: 1.25,
+        endAction: .loop).makeOverlayClip()
+    #expect(overOpaque.opacity == 1)
+}
+
 @Test("OverlayClipDoc round-trips through JSON encoding")
 func overlayClipDocJSONRoundTrip() throws {
     let doc = OverlayClipDoc(

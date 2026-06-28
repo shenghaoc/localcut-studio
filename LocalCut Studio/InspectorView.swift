@@ -1065,9 +1065,13 @@ struct InspectorView: View {
                     .onTapGesture {
                         model.selectOverlay(overlay.id)
                     }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("\(overlay.sourceType.displayName) overlay at \(TimeFormatting.timecode(overlay.timelineStart.seconds))")
                 }
                 .onDelete { indexSet in
-                    for index in indexSet {
+                    // Remove in descending order so earlier removals don't shift
+                    // the indices of later entries.
+                    for index in indexSet.sorted().reversed() {
                         model.removeOverlay(id: model.project.overlays[index].id)
                     }
                 }

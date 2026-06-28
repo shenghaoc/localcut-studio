@@ -213,7 +213,8 @@ extension EditorModel {
         guard let url = try? URL(resolvingBookmarkData: bookmark,
                                   options: .withSecurityScope,
                                   relativeTo: nil,
-                                  bookmarkDataIsStale: &isStale) else {
+                                  bookmarkDataIsStale: &isStale),
+              !isStale else {
             return nil
         }
         return url

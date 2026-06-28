@@ -58,10 +58,6 @@ struct OverlayRenderItem: Sendable {
     let rotation: CGFloat
     let opacity: Float
     let endAction: OverlayEndAction
-    /// Bookmark data for resolving the source URL at render time.
-    let bookmark: Data
-    /// Bundle-relative path as fallback resolution.
-    let bundleRelativePath: String?
 }
 
 /// One bottom-to-top render step within an instruction interval: either a single

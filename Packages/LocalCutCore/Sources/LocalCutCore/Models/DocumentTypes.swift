@@ -508,9 +508,9 @@ public struct OverlayClipDoc: Codable, Equatable, Sendable {
             timelineStart: timelineStart.cmTime,
             duration: duration.cmTime,
             positionOffset: CGSize(width: positionOffsetX, height: positionOffsetY),
-            scale: scale,
+            scale: max(0.1, scale),
             rotation: rotation,
-            opacity: opacity,
+            opacity: max(0, min(1, opacity)),
             endAction: endAction)
     }
 }

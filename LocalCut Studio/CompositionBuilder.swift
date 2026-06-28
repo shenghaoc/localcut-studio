@@ -702,9 +702,7 @@ enum CompositionBuilder {
                 scale: overlay.scale,
                 rotation: overlay.rotation,
                 opacity: overlay.opacity,
-                endAction: overlay.endAction,
-                bookmark: Data(), // Resolved at EditorModel level
-                bundleRelativePath: nil))
+                endAction: overlay.endAction))
         }
         return items
     }

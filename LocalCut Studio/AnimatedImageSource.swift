@@ -11,7 +11,6 @@ import LocalCutCore
 nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize: CGSize
     private let url: URL
-    private let source: CGImageSource
     private let frameCount: Int
     private let totalDuration: TimeInterval
     /// Per-frame durations extracted at init time.
@@ -57,7 +56,6 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
               w > 0, h > 0 else { return nil }
 
         self.url = url
-        self.source = src
         self.frameCount = count
         self.naturalSize = CGSize(width: w, height: h)
         self.frameDurations = durations
@@ -81,7 +79,11 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
             guard t < totalDuration else { return nil }
             effectiveTime = t
         case .freeze:
-            effectiveTime = min(t, totalDuration - 0.001)
+            // Clamp to the start of the last frame, matching LottieFrameSource's
+            // `totalDuration - (1 / frameRate)` formula. Use the last frame's own
+            // start time so the freeze lands exactly on the last frame boundary.
+            let lastFrameStart = frameStarts.last ?? 0
+            effectiveTime = min(t, lastFrameStart)
         case .loop:
             effectiveTime = totalDuration > 0 ? t.truncatingRemainder(dividingBy: totalDuration) : 0
         }
@@ -89,19 +91,25 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
         // Binary search for the frame index.
         let index = frameStarts.lastIndex(where: { $0 <= effectiveTime }) ?? 0
 
-        return lock.withLock {
-            if let cached = cache[index] {
-                return cached
-            }
+        // Check cache first.
+        if let cached = lock.withLock({ cache[index] }) {
+            return cached
+        }
 
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        // Decode outside the lock so concurrent callers can decode different
+        // frames in parallel. Use a fresh image source so concurrent decodes do
+        // not share mutable ImageIO decoder state.
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
-            guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil) else {
-                return nil
-            }
-            let ciImage = CIImage(cgImage: cgImage)
+        guard let decodeSource = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(decodeSource, index, nil) else {
+            return nil
+        }
+        let ciImage = CIImage(cgImage: cgImage)
 
+        // Insert into cache under lock.
+        lock.withLock {
             cache[index] = ciImage
             if cache.count > maxCachedFrames {
                 // Evict frames farthest from the current index.
@@ -110,8 +118,8 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
                     cache.removeValue(forKey: key)
                 }
             }
-
-            return ciImage
         }
+
+        return ciImage
     }
 }
