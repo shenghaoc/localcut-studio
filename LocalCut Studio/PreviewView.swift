@@ -122,7 +122,8 @@ struct PreviewView: View {
             if model.showSafeZones,
                let profile = SafeZoneLibrary.validProfile(
                 id: model.selectedSafeZoneProfileID,
-                for: model.project.aspect) {
+                for: model.project.aspect,
+                renderSize: model.project.renderSize) {
                 SafeZoneOverlayView(
                     profile: profile,
                     renderSize: model.project.renderSize)
@@ -154,7 +155,8 @@ struct PreviewView: View {
         if model.showSafeZones,
            let profile = SafeZoneLibrary.validProfile(
             id: model.selectedSafeZoneProfileID,
-            for: model.project.aspect) {
+            for: model.project.aspect,
+            renderSize: model.project.renderSize) {
             Text(profile.displayName)
                 .font(.caption)
                 .foregroundStyle(.secondary)

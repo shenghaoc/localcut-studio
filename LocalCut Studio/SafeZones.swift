@@ -78,11 +78,30 @@ enum SafeZoneLibrary {
         builtInProfiles.first { $0.platformID == id }
     }
 
-    static func validProfile(id: String, for aspect: ProjectAspect) -> SafeZoneProfile? {
+    static func validProfile(id: String,
+                             for aspect: ProjectAspect,
+                             renderSize: CGSize) -> SafeZoneProfile? {
         guard let profile = profile(id: id),
-              profile.aspect == aspect,
+              isProfile(profile, compatibleWith: aspect, renderSize: renderSize),
               profile.validationErrors().isEmpty else { return nil }
         return profile
+    }
+
+    static func isProfile(_ profile: SafeZoneProfile,
+                          compatibleWith aspect: ProjectAspect,
+                          renderSize: CGSize) -> Bool {
+        if profile.aspect == aspect { return true }
+        guard aspect == .custom,
+              renderSize.width.isFinite,
+              renderSize.height.isFinite,
+              renderSize.width > 0,
+              renderSize.height > 0 else {
+            return false
+        }
+        let inferredAspect = ProjectAspect.infer(
+            width: Double(renderSize.width),
+            height: Double(renderSize.height))
+        return profile.aspect == inferredAspect
     }
 
     // MARK: - JSON loading

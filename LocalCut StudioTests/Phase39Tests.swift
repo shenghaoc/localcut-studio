@@ -211,6 +211,20 @@ struct Phase39Tests {
         #expect(!bad.validationErrors().isEmpty)
     }
 
+    @Test("Safe-zone profiles allow compatible custom canvas sizes")
+    func safeZoneProfilesAllowCompatibleCustomCanvasSizes() throws {
+        let verticalProfile = try #require(SafeZoneLibrary.profile(id: "tiktok"))
+
+        #expect(SafeZoneLibrary.validProfile(
+            id: verticalProfile.platformID,
+            for: .custom,
+            renderSize: CGSize(width: 720, height: 1280)) != nil)
+        #expect(SafeZoneLibrary.validProfile(
+            id: verticalProfile.platformID,
+            for: .custom,
+            renderSize: CGSize(width: 1000, height: 1001)) == nil)
+    }
+
     @Test("Unsupported cover destination types are rejected")
     func unsupportedCoverDestinationTypeRejected() {
         let type = UTType(exportedAs: "com.localcutstudio.tests.unsupported-cover-\(UUID().uuidString)")

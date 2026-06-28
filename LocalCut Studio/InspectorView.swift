@@ -906,7 +906,10 @@ struct InspectorView: View {
             }
             .accessibilityLabel("Safe zone platform profile")
             if let profile = model.selectedSafeZoneProfile,
-               profile.aspect != model.project.aspect {
+               !SafeZoneLibrary.isProfile(
+                profile,
+                compatibleWith: model.project.aspect,
+                renderSize: model.project.renderSize) {
                 Text("Switch the project aspect to \(profile.aspect.displayName) to show this overlay.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
