@@ -4,7 +4,7 @@
 
 ## R1 — Composite key
 
-- **R1.1** A `RenderCacheKey` identifies one cached post-effect-chain frame by `(clipID: UUID, effectChainHash: Int, time: CMTime, renderSize: CGSize)`. The `time` field is the **source-frame time** computed from the layer's `sourceRange` / `timeRange`, not the raw `compositionTime` — this makes the key stable across repeated source-frame requests (speed ramps, frame interpolation) and unique per source frame (no collisions across pieces of the same clip split by transition cuts).
+- **R1.1** A `RenderCacheKey` identifies one cached post-effect-chain frame by `(clipID: UUID, effectChainHash: Int, time: CMTime, renderSize: CGSize, workingColourSpace: WorkingColourSpace)`. The `time` field is the **source-frame time** computed from the layer's `sourceRange` / `timeRange`, not the raw `compositionTime` — this makes the key stable across repeated source-frame requests (speed ramps, frame interpolation) and unique per source frame (no collisions across pieces of the same clip split by transition cuts). The working-colour-space field keeps materialised frames from being shared across distinct `CIContext` colour spaces.
 - **R1.2** `effectChainHash` is derived from `[Effect]` using a `Hasher`, the same approach `CaptionStyle.rasterHash` uses.
 - **R1.3** Two keys are equal iff every field matches. Changing any field produces a distinct key.
 - **R1.4** `CMTime` is normalised to a high-precision microsecond timescale before being stored, so equivalent times in different timescales (e.g. `1/2` s vs `15/30` s) produce the same key.
@@ -36,7 +36,7 @@
 
 - **R5.1** `EffectCompositor.applyEffectChain` consults the cache before executing the CIFilter chain. The cache key's `time` field is the source-frame time derived from `layer.sourceRange` and `layer.timeRange`, not `request.compositionTime`.
 - **R5.2** A cache hit returns the cached image and does not run the chain.
-- **R5.3** A cache miss runs the chain, **materialises the result into a CGImage-backed `CIImage`** (forcing kernel evaluation once), then writes that back. A later cache hit therefore avoids the kernel work, not just the Swift filter-chain construction.
+- **R5.3** A cache miss runs the chain, **materialises the result into a CGImage-backed `CIImage`** through the instruction's working-colour-space `CIContext` (forcing kernel evaluation once), then writes that back. A later cache hit therefore avoids the kernel work, not just the Swift filter-chain construction.
 - **R5.4** When `effects.isEmpty`, the cache is not consulted and nothing is written — there is nothing to memoise.
 - **R5.5** When any effect in the chain fails to apply (e.g. a transiently-unreadable LUT bookmark), the cache is not written — the next request must re-attempt the chain so the recovered effect reaches the frame.
 - **R5.6** The skin-mask debug visualisation (`layer.showSkinMask`) bypasses the cache entirely — it produces a one-off debug image that must not be served back on a normal preview after the toggle.
@@ -50,8 +50,8 @@
 
 ## R7 — Verification
 
-- **R7.1** Unit test: cache hit on identical `(clipID, effectChainHash, time, renderSize)`.
-- **R7.2** Unit test: miss when any single key field changes — clipID, effectChainHash, time, renderSize.
+- **R7.1** Unit test: cache hit on identical `(clipID, effectChainHash, time, renderSize, workingColourSpace)`.
+- **R7.2** Unit test: miss when any single key field changes — clipID, effectChainHash, time, renderSize, workingColourSpace.
 - **R7.3** Unit test: byte-budget eviction drops the least-recently-used entry first.
 - **R7.4** Unit test: cache survives a composition rebuild but not an effect-chain edit (verified via `invalidate(clipID:)` clearing only matching entries).
 - **R7.5** Unit test: render-size change clears non-matching entries via `invalidate(notMatchingRenderSize:)`.

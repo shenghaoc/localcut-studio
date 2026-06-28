@@ -245,6 +245,10 @@ final class DocumentController {
         defer { stopOverlayAccesses(overlayAccesses) }
         do {
             if url.pathExtension == ProjectBundleLayout.fileExtension {
+                guard model.project.coverFrame == nil else {
+                    model.statusMessage = "Save failed: bundle cover generation requires the async Save path."
+                    return false
+                }
                 let bundledMedia: [ProjectBundle.BundledMedia] = model.project.mediaItems.compactMap { item in
                     guard let relative = bundleRelativePath(for: item, model: model) else { return nil }
                     item.bundleRelativePath = relative

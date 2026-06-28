@@ -218,6 +218,29 @@ struct Phase39Tests {
         #expect(!EditorModel.supportsCoverImageDestination(type))
     }
 
+    @Test("Cover preview invalidation ignores annotations and tracks visible content")
+    func coverPreviewInvalidationKeyScopesToVisibleContent() {
+        let project = Project()
+        let initial = CoverPreviewInvalidationKey.make(for: project)
+
+        project.markers = [TimelineMarker(time: CMTime(seconds: 1, preferredTimescale: 600))]
+        project.audioTracks[0].clips.append(Clip(
+            mediaID: UUID(),
+            sourceStart: .zero,
+            duration: CMTime(seconds: 1, preferredTimescale: 600),
+            timelineStart: .zero))
+
+        #expect(CoverPreviewInvalidationKey.make(for: project) == initial)
+
+        project.videoTracks[0].clips.append(Clip(
+            mediaID: UUID(),
+            sourceStart: .zero,
+            duration: CMTime(seconds: 1, preferredTimescale: 600),
+            timelineStart: .zero))
+
+        #expect(CoverPreviewInvalidationKey.make(for: project) != initial)
+    }
+
     @Test("Preview canvas geometry aspect-fits vertical canvas")
     func previewCanvasGeometryAspectFits() {
         let rect = PreviewCanvasGeometry.canvasRect(

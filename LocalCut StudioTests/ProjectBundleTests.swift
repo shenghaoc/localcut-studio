@@ -164,6 +164,19 @@ struct ProjectBundleTests {
         #expect(secondIndex.entries[jpgRelative] != nil)
     }
 
+    @Test("Synchronous bundle save rejects cover generation instead of dropping the cover")
+    func synchronousBundleSaveRejectsCoverFrame() throws {
+        let tmp = try makeTempDirectory("sync-cover")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Sample.lcbundle")
+        let model = EditorModel()
+        model.project.coverFrame = CoverFrameDoc(time: CMTimeCode(.zero))
+
+        #expect(!model.writeSynchronously(to: bundleURL))
+        #expect(!FileManager.default.fileExists(atPath: bundleURL.path))
+        #expect(model.statusMessage.contains("async Save path"))
+    }
+
     @Test("Bundle save keeps media external when import opts out of copying")
     func bundleDocumentRespectsDontCopyImportFlag() throws {
         let tmp = try makeTempDirectory("dont-copy")

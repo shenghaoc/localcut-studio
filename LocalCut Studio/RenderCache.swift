@@ -16,6 +16,8 @@ import LocalCutCore
 /// in different timescales (e.g. preview's frame-rate timescale vs export's
 /// source-asset timescale for the same instant) collapse to one key. Frame
 /// rate is part of the identity because grain advances at project cadence.
+/// Working colour space is part of the identity because cached materialised
+/// frames are evaluated through a colour-space-specific `CIContext`.
 nonisolated struct RenderCacheKey: Hashable, Sendable {
     /// Timescale every key is normalised to (microsecond resolution). High
     /// enough that two adjacent frames at any practical project frame rate
@@ -30,9 +32,10 @@ nonisolated struct RenderCacheKey: Hashable, Sendable {
     let renderWidth: Int
     let renderHeight: Int
     let frameRateMillis: Int
+    let workingColourSpace: WorkingColourSpace
 
     init(clipID: UUID, effectChainHash: Int, time: CMTime, renderSize: CGSize,
-         frameRate: Double = 24) {
+         frameRate: Double = 24, workingColourSpace: WorkingColourSpace = .sRGB) {
         self.clipID = clipID
         self.effectChainHash = effectChainHash
         let normalised: CMTime
@@ -46,6 +49,7 @@ nonisolated struct RenderCacheKey: Hashable, Sendable {
         self.renderWidth = max(0, Int(renderSize.width.rounded()))
         self.renderHeight = max(0, Int(renderSize.height.rounded()))
         self.frameRateMillis = Self.normalisedFrameRateMillis(frameRate)
+        self.workingColourSpace = workingColourSpace
     }
 
     var time: CMTime { CMTime(value: timeValue, timescale: timeScale) }

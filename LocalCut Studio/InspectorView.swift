@@ -1031,7 +1031,7 @@ struct InspectorView: View {
         let title = cover?.title?.text ?? ""
         let time = cover?.time.cmTime.seconds ?? model.currentTime
         return [
-            "\(model.mutationRevision)",
+            "\(CoverPreviewInvalidationKey.make(for: model.project))",
             "\(time)",
             cover?.format.rawValue ?? CoverFormat.png.rawValue,
             title,

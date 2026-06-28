@@ -415,7 +415,8 @@ extension EditorModel {
         await documentController.saveAs(url: url, model: self)
     }
 
-    /// Synchronous save used by the close prompt.
+    /// Synchronous save used by tests and non-interactive callers. Window close
+    /// uses the async save path so bundle cover generation can complete.
     func writeSynchronously(to url: URL) -> Bool {
         documentController.writeSynchronously(to: url, model: self)
     }
