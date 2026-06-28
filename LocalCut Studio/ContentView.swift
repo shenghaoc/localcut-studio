@@ -20,6 +20,20 @@ struct LocalCutStudioApp: App {
         .commands {
             DocumentCommands(model: model)
             ViewCommands(model: model)
+            RecorderCommands(model: model)
+        }
+    }
+}
+
+struct RecorderCommands: Commands {
+    let model: EditorModel
+
+    var body: some Commands {
+        CommandGroup(after: .appSettings) {
+            Button("Choose Recordings Folder…") {
+                _ = model.chooseRecordingsFolder()
+            }
+            .disabled(model.isRecording)
         }
     }
 }
@@ -308,24 +322,91 @@ struct EditorView: View {
                 relinkBanner
                 Spacer()
             }
-            Text(model.statusMessage)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .allowsHitTesting(false)
-                .accessibilityLabel(model.statusMessage)
-                .accessibilityAddTraits(.updatesFrequently)
-            Spacer()
+            if model.isRecording {
+                Image(systemName: "record.circle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .accessibilityHidden(true)
+                Text(formatElapsed(model.recordingElapsedSeconds))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.red)
+                    .accessibilityLabel("Recording elapsed \(formatElapsed(model.recordingElapsedSeconds))")
+                Text("\(model.recordingSourceCount) source\(model.recordingSourceCount == 1 ? "" : "s")")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                if model.recordingBackpressureCount > 0 {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.yellow)
+                        .accessibilityLabel("\(model.recordingBackpressureCount) backpressure warning\(model.recordingBackpressureCount == 1 ? "" : "s")")
+                }
+                if let recordingStatusMessage {
+                    Text(recordingStatusMessage)
+                        .font(.caption)
+                        .foregroundStyle(recordingStatusColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(1)
+                        .accessibilityLabel(recordingStatusMessage)
+                }
+                if let free = model.recordingDiskFreeBytes {
+                    Text("|")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Text("\(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(model.recordingDiskWarning == .warn ? .yellow : .secondary)
+                        .accessibilityLabel("Disk free: \(ByteCountFormatter.string(fromByteCount: free, countStyle: .file))")
+                }
+                Spacer()
+            } else {
+                Text(model.statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel(model.statusMessage)
+                    .accessibilityAddTraits(.updatesFrequently)
+                Spacer()
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
         .background(.bar)
-        // Announce status changes so background work and errors reach VoiceOver
-        // (A11Y-CHECKLIST: status line is an announced live region).
         .onChange(of: model.statusMessage) { _, message in
             AccessibilityNotification.Announcement(message).post()
         }
+    }
+
+    private var recordingStatusMessage: String? {
+        if model.recordingDiskWarning == .stop {
+            return "Disk space critically low — stopping recording."
+        }
+        if model.recordingDiskWarning == .warn {
+            return "Low disk space — recording will stop at 5% free."
+        }
+        if model.recordingBackpressureCount > 0 || model.statusMessage != "Recording…" {
+            return model.statusMessage
+        }
+        return nil
+    }
+
+    private var recordingStatusColor: Color {
+        if model.recordingDiskWarning != nil || model.recordingBackpressureCount > 0 {
+            return .yellow
+        }
+        return .secondary
+    }
+
+    private func formatElapsed(_ seconds: Double) -> String {
+        let h = Int(seconds) / 3600
+        let m = (Int(seconds) % 3600) / 60
+        let s = Int(seconds) % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%02d:%02d", m, s)
     }
 
     private var relinkBanner: some View {

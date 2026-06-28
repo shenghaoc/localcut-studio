@@ -6,7 +6,7 @@ import ScreenCaptureKit
 import VideoToolbox
 import LocalCutCore
 
-nonisolated enum CaptureEngineError: LocalizedError {
+nonisolated enum CaptureEngineError: LocalizedError, Equatable {
     case alreadyRecording
     case notRecording
     case noCaptureSources
@@ -195,6 +195,22 @@ enum CaptureSourceCatalog {
             position: .unspecified)
         return discovery.devices.map { CaptureDeviceOption(id: $0.uniqueID, title: $0.localizedName) }
     }
+
+    /// True when the host supports system audio capture via ScreenCaptureKit.
+    /// System audio requires macOS 13+ and a chip with hardware audio routing
+    /// (Apple Silicon). Intel Macs running macOS 13+ may report the capability
+    /// but cannot reliably deliver system audio through SCStream.
+    static nonisolated var isSystemAudioAvailable: Bool {
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        if os.majorVersion < 13 { return false }
+        let isAppleSilicon = {
+            var value: Int32 = 0
+            var size = MemoryLayout<Int32>.size
+            guard sysctlbyname("hw.optional.arm64", &value, &size, nil, 0) == 0 else { return false }
+            return value == 1
+        }()
+        return isAppleSilicon
+    }
 }
 
 nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
@@ -206,6 +222,10 @@ nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
         self.url = url
         FileManager.default.createFile(atPath: url.path, contents: nil)
         self.handle = try FileHandle(forWritingTo: url)
+    }
+
+    deinit {
+        close()
     }
 
     func append(_ record: CaptureManifestRecord) throws {
@@ -246,6 +266,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private var droppedSamples = 0
     private var didRecordBackpressure = false
     private var didNotifyBackpressure = false
+    private var writeStartupError: String?
 
     init(source: CaptureSourceDescriptor,
          outputURL: URL,
@@ -287,7 +308,9 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
 
         if !didStartWriting {
             guard writer.startWriting() else {
-                recordBackpressure(reason: writer.error?.localizedDescription ?? "writer.startWriting failed")
+                let reason = writer.error?.localizedDescription ?? "writer.startWriting failed"
+                writeStartupError = reason
+                recordBackpressure(reason: reason)
                 // A failed AVAssetWriter cannot recover; stop attempting on
                 // every subsequent frame.
                 isFinished = true
@@ -340,16 +363,21 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
             lock.lock()
             // Block any concurrent late buffers before finalizing the input.
             isFinished = true
-            input.markAsFinished()
 
             guard didStartWriting else {
-                writer.cancelWriting()
+                if let message = writeStartupError {
+                    writer.cancelWriting()
+                    lock.unlock()
+                    continuation.resume(throwing: CaptureEngineError.writerStartFailed(message))
+                    return
+                }
                 let record = endedRecord(durationUs: 0)
                 lock.unlock()
                 continuation.resume(returning: record)
                 return
             }
 
+            input.markAsFinished()
             let record = endedRecord(durationUs: durationUs())
             lock.unlock()
             writer.finishWriting {
@@ -593,6 +621,13 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
 }
 
 actor CaptureCoordinator {
+    private enum State {
+        case idle
+        case starting
+        case recording
+        case stopping
+    }
+
     private struct ActiveSession {
         var id: UUID
         var directoryURL: URL
@@ -603,12 +638,20 @@ actor CaptureCoordinator {
         var startHostTimeUs: Int64
     }
 
+    private var state: State = .idle
     private var activeSession: ActiveSession?
 
     func start(_ request: CaptureStartRequest,
                onStreamStopped: (@Sendable (Error) -> Void)? = nil,
                onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil) async throws {
-        guard activeSession == nil else { throw CaptureEngineError.alreadyRecording }
+        guard state == .idle else { throw CaptureEngineError.alreadyRecording }
+        state = .starting
+        var didStartRecording = false
+        defer {
+            if !didStartRecording {
+                state = .idle
+            }
+        }
         let sourceCount = (request.target.map { _ in 1 } ?? 0)
             + (request.includeSystemAudio ? 1 : 0)
             + (request.webcamDeviceID == nil ? 0 : 1)
@@ -626,6 +669,25 @@ actor CaptureCoordinator {
         if videoStreamCount >= 3, capability.tier < .pro {
             throw CaptureEngineError.captureSessionFailed(
                 "Recording three or more video sources requires a Pro-tier Mac.")
+        }
+
+        // Per-source resolution / fps preflight: compute the total pixel rate and
+        // validate it against the tier's budget so a 4K60 config on accelerated
+        // tier is rejected before capture starts rather than dropping mid-record.
+        var totalPixelRate: Double = 0
+        if let target = request.target {
+            let size = target.outputSize
+            totalPixelRate += Double(size.width * size.height) * request.frameRate
+        }
+        if request.webcamDeviceID != nil {
+            let camSize = Self.webcamDimensions(deviceID: request.webcamDeviceID!)
+            totalPixelRate += Double(camSize.width * camSize.height) * request.frameRate
+        }
+        let budget = Self.maxPixelRate(for: capability.tier)
+        let budgetFormatted = Int(budget / 1_000_000)
+        if totalPixelRate > budget {
+            throw CaptureEngineError.captureSessionFailed(
+                "Total capture rate (\(Int(totalPixelRate / 1_000_000).formatted()) MPx/s) exceeds the \(capability.tier == .accelerated ? "Accelerated" : "Pro") tier budget of \(budgetFormatted) MPx/s. Lower resolution or frame rate, or reduce the number of video sources.")
         }
 
         let id = UUID()
@@ -810,12 +872,16 @@ actor CaptureCoordinator {
             }
             manifest.close()
             activeSession = nil
+            state = .idle
             throw error
         }
+        state = .recording
+        didStartRecording = true
     }
 
     func stop() async throws -> CaptureSessionResult {
-        guard let active = activeSession else { throw CaptureEngineError.notRecording }
+        guard state == .recording, let active = activeSession else { throw CaptureEngineError.notRecording }
+        state = .stopping
         activeSession = nil
 
         for session in active.sessions {
@@ -846,6 +912,7 @@ actor CaptureCoordinator {
                 durationUs: durationUs)))
         }
         active.manifest.close()
+        state = .idle
 
         let data = try Data(contentsOf: active.manifestURL)
         let parsed = CaptureManifest.parseNDJSON(data)
@@ -860,7 +927,7 @@ actor CaptureCoordinator {
     func scanRecoveredSessions(rootURL: URL) throws -> [CaptureSessionResult] {
         // A live recording's manifest isn't finalized yet; don't mistake it for
         // a crashed session.
-        let activeID = activeSession?.id
+        let activeID = state == .idle ? nil : activeSession?.id
         let contents = try FileManager.default.contentsOfDirectory(
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -885,6 +952,17 @@ actor CaptureCoordinator {
     /// Refuse to start a capture when the recordings volume has less than this
     /// much important-usage space available.
     private static let minimumFreeBytes: Int64 = 2_000_000_000
+
+    /// Maximum combined pixel rate (width × height × fps) per tier. Accelerated
+    /// tops out at 1080p30 (≈ 62 MPx/s); Pro allows 4K60 (≈ 498 MPx/s).
+    /// Baseline returns 0 so any capture request is rejected.
+    private static func maxPixelRate(for tier: CapabilityTier) -> Double {
+        switch tier {
+        case .baseline: return 0
+        case .accelerated: return 1920 * 1080 * 30  // ~62 MPx/s
+        case .pro: return 3840 * 2160 * 60  // ~498 MPx/s
+        }
+    }
 
     private static func webcamDimensions(deviceID: String) -> (width: Int, height: Int) {
         let fallback = (width: 1280, height: 720)

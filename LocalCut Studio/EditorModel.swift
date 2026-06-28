@@ -135,8 +135,14 @@ final class EditorModel {
     var isRecorderPresented = false
     var isRecording = false
     var recordingStartedAt: Date?
+    var recordingElapsedSeconds: Double = 0
+    var recordingDiskFreeBytes: Int64?
+    var recordingDiskWarning: RecordingDiskWarning?
+    var recordingSourceCount: Int = 0
+    var recordingBackpressureCount: Int = 0
     var recoveredCaptureSessions: [CaptureSessionResult] = []
-    @ObservationIgnored var recordingsFolderAccessURL: URL?
+    @ObservationIgnored nonisolated(unsafe) var recordingsFolderAccessURL: URL?
+    @ObservationIgnored nonisolated(unsafe) var recordingMonitorTask: Task<Void, Never>?
 
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
@@ -267,6 +273,7 @@ final class EditorModel {
     deinit {
         previewRebuildCoordinator.cancelAll()
         beatAnalysisTask?.cancel()
+        recordingMonitorTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         EffectCompositor.releaseOverlaySources(for: activeOverlaySourceRegistryID)

@@ -69,7 +69,7 @@ func captureManifestSkipsUnknownAndTruncatedLines() throws {
     data.append(#"{"kind":"finalize","atUs":"#.data(using: .utf8)!)
 
     let parsed = CaptureManifest.parseNDJSON(data)
-    #expect(parsed.records.count == 3)
+    #expect(parsed.records.count == 2)
     #expect(!parsed.isFinalized)
     #expect(parsed.recoveredSources.count == 1)
     #expect(parsed.recoveredSources[0].droppedSamples == 3)

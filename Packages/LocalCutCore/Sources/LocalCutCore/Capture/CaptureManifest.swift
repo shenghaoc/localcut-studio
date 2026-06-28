@@ -340,6 +340,9 @@ public struct CaptureManifest: Hashable, Sendable {
                   let record = try? decoder.decode(CaptureManifestRecord.self, from: lineData) else {
                 continue
             }
+            if case .unknown = record {
+                continue
+            }
             records.append(record)
         }
         return CaptureManifest(records: records)

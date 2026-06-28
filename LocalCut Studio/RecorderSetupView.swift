@@ -31,7 +31,12 @@ struct RecorderSetupView: View {
                     }
                     .disabled(!includeScreen || screenOptions.isEmpty)
                     Toggle("System audio", isOn: $includeSystemAudio)
-                        .disabled(!includeScreen)
+                        .disabled(!includeScreen || !CaptureSourceCatalog.isSystemAudioAvailable)
+                    if !CaptureSourceCatalog.isSystemAudioAvailable {
+                        Text("System audio capture requires macOS 13+ with Apple Silicon.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Camera") {

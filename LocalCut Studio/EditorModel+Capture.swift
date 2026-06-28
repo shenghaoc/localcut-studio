@@ -129,20 +129,29 @@ extension EditorModel {
                 // finalize so the toolbar doesn't keep showing an active capture.
                 Task { @MainActor in
                     guard let self, self.isRecording else { return }
-                    self.statusMessage = "Screen capture stopped: \(error.localizedDescription)"
-                    self.stopRecording()
+                    self.stopRecording(statusMessage: "Screen capture stopped: \(error.localizedDescription)")
                 }
             }, onBackpressure: { [weak self] source in
                 // Sustained frame drops — warn the user so they don't finish with
                 // a silently gapped take.
                 Task { @MainActor in
                     guard let self, self.isRecording else { return }
+                    self.recordingBackpressureCount += 1
                     self.statusMessage = "Recording can't keep up — dropping data from \(source.displayName). Free disk space or lower the frame rate."
                 }
             })
             recordingStartedAt = Date()
             isRecording = true
             isRecorderPresented = false
+            recordingSourceCount = 0
+            if target != nil { recordingSourceCount += 1 }
+            if includeSystemAudio { recordingSourceCount += 1 }
+            if webcamDeviceID != nil { recordingSourceCount += 1 }
+            if microphoneDeviceID != nil { recordingSourceCount += 1 }
+            recordingBackpressureCount = 0
+            recordingDiskFreeBytes = nil
+            recordingDiskWarning = nil
+            startRecordingMonitor(rootURL: root)
             statusMessage = "Recording…"
         } catch {
             isRecording = false
@@ -151,18 +160,76 @@ extension EditorModel {
         }
     }
 
-    func stopRecording() {
+    private func startRecordingMonitor(rootURL: URL) {
+        recordingMonitorTask?.cancel()
+        recordingMonitorTask = Task { [weak self] in
+            guard let self else { return }
+            var lastDiskCheck = Date.distantPast
+            while !Task.isCancelled, self.isRecording {
+                let elapsed = Date().timeIntervalSince(self.recordingStartedAt ?? Date())
+                self.recordingElapsedSeconds = elapsed
+                let now = Date()
+                if now.timeIntervalSince(lastDiskCheck) >= 5 {
+                    lastDiskCheck = now
+                    if let available = try? rootURL.resourceValues(
+                        forKeys: [.volumeAvailableCapacityForImportantUsageKey,
+                                  .volumeTotalCapacityKey])
+                        .volumeAvailableCapacityForImportantUsage,
+                       let total = try? rootURL.resourceValues(
+                        forKeys: [.volumeTotalCapacityKey])
+                        .volumeTotalCapacity {
+                        self.recordingDiskFreeBytes = available
+                        let fraction = total > 0 ? Double(available) / Double(total) : 0
+                        if fraction < 0.05 {
+                            self.recordingDiskWarning = .stop
+                            self.stopRecording(statusMessage: "Disk space critically low — stopping recording.")
+                        } else if fraction < 0.10 {
+                            if self.recordingDiskWarning != .warn {
+                                self.statusMessage = "Low disk space — recording will stop at 5% free."
+                            }
+                            self.recordingDiskWarning = .warn
+                        } else {
+                            if self.recordingDiskWarning != nil, self.isRecording {
+                                self.statusMessage = "Recording…"
+                            }
+                            self.recordingDiskWarning = nil
+                        }
+                    }
+                }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    enum RecordingDiskWarning: Equatable {
+        case warn
+        case stop
+    }
+
+    func stopRecording(statusMessage stopStatusMessage: String = "Stopping recording…") {
         guard isRecording else { return }
-        statusMessage = "Stopping recording…"
+        recordingMonitorTask?.cancel()
+        recordingMonitorTask = nil
+        statusMessage = stopStatusMessage
         Task {
             do {
                 let result = try await captureCoordinator.stop()
                 isRecording = false
                 recordingStartedAt = nil
+                recordingElapsedSeconds = 0
+                recordingDiskFreeBytes = nil
+                recordingDiskWarning = nil
+                recordingSourceCount = 0
+                recordingBackpressureCount = 0
                 await landCaptureSession(result)
             } catch {
                 isRecording = false
                 recordingStartedAt = nil
+                recordingElapsedSeconds = 0
+                recordingDiskFreeBytes = nil
+                recordingDiskWarning = nil
+                recordingSourceCount = 0
+                recordingBackpressureCount = 0
                 statusMessage = error.localizedDescription
             }
         }

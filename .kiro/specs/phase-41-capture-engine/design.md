@@ -1,6 +1,6 @@
 # Design: Phase 41 — Capture Engine
 
-> Status: **Proposed**. Target tag: **v0.1.8**.
+> Status: **Done**. Target tag: **v0.1.8**.
 
 ## Goal
 
