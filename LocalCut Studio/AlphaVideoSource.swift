@@ -1,8 +1,10 @@
 import Foundation
 import AVFoundation
+import CoreGraphics
 import CoreImage
 import CoreMedia
 import CoreVideo
+import Dispatch
 import LocalCutCore
 
 /// Decodes frames from a video file with an alpha channel using AVFoundation.
@@ -127,7 +129,7 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
         }
 
         let requested = CMTime(seconds: frameStarts[index], preferredTimescale: 600)
-        guard let cgImage = try? generator.copyCGImage(at: requested, actualTime: nil) else {
+        guard let cgImage = generateImage(at: requested) else {
             return nil
         }
         let image = CIImage(cgImage: cgImage)
@@ -140,8 +142,38 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
         return image
     }
 
+    private func generateImage(at requested: CMTime) -> CGImage? {
+        let semaphore = DispatchSemaphore(value: 0)
+        let box = GeneratedAlphaVideoFrame()
+        generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: requested)]) { _, image, _, result, _ in
+            if result == .succeeded {
+                box.store(image)
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return box.image()
+    }
+
     private func touchCachedFrame(at index: Int) {
         cacheOrder.removeAll { $0 == index }
         cacheOrder.append(index)
+    }
+}
+
+nonisolated private final class GeneratedAlphaVideoFrame: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedImage: CGImage?
+
+    func store(_ image: CGImage?) {
+        lock.withLock {
+            storedImage = image
+        }
+    }
+
+    func image() -> CGImage? {
+        lock.withLock {
+            storedImage
+        }
     }
 }
