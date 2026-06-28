@@ -9,6 +9,7 @@ actor CaptureCoordinator {
         case idle
         case starting
         case recording
+        case paused
         case stopping
     }
 
@@ -20,6 +21,17 @@ actor CaptureCoordinator {
         var sessions: [CaptureRunningSession]
         var writers: [ContinuousCaptureWriter]
         var startHostTimeUs: Int64
+        /// Accumulated finished writers from previous chunks (pause/resume cycles).
+        /// Each pause finishes the current chunk's writers; they are collected here
+        /// so `stop()` can finalize everything.
+        var allFinishedWriters: [ContinuousCaptureWriter] = []
+        /// The original `CaptureStartRequest` so `resume()` can recreate writers.
+        var startRequest: CaptureStartRequest?
+        /// Callbacks for stream events, stored for resume().
+        var onStreamStopped: (@Sendable (Error) -> Void)?
+        var onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)?
+        /// Monotonically increasing chunk counter for unique file names.
+        var chunkIndex: Int = 1
     }
 
     private var state: State = .idle
@@ -242,7 +254,10 @@ actor CaptureCoordinator {
             manifest: manifest,
             sessions: sessions,
             writers: writers,
-            startHostTimeUs: startHostTimeUs)
+            startHostTimeUs: startHostTimeUs,
+            startRequest: request,
+            onStreamStopped: onStreamStopped,
+            onBackpressure: onBackpressure)
         activeSession = active
 
         do {
@@ -271,10 +286,13 @@ actor CaptureCoordinator {
     }
 
     func stop() async throws -> CaptureSessionResult {
-        guard state == .recording, let active = activeSession else { throw CaptureEngineError.notRecording }
+        guard state == .recording || state == .paused, let active = activeSession else {
+            throw CaptureEngineError.notRecording
+        }
         state = .stopping
         activeSession = nil
 
+        // Stop all running sessions (no-op if already paused).
         for session in active.sessions {
             await session.stop()
         }
@@ -283,9 +301,17 @@ actor CaptureCoordinator {
         // .mov is left open. Run writers concurrently — `AVAssetWriter.finishWriting`
         // performs async disk I/O and fragment flushing, and sequential execution
         // can noticeably delay stop responsiveness with multiple sources.
+        //
+        // Include both the current chunk's writers and any previously finished
+        // writers from pause/resume cycles. Only the current chunk's writers need
+        // finishing; the others are already done.
+        let activeWriters = active.writers
+        let finishedWriters = active.allFinishedWriters
         var finishErrors: [Error] = []
+        var allEndedRecords: [CaptureSourceEndedRecord] = []
+
         await withTaskGroup(of: (UUID, Result<CaptureSourceEndedRecord, Error>).self) { group in
-            for writer in active.writers {
+            for writer in activeWriters {
                 let sourceID = writer.source.id
                 group.addTask {
                     do {
@@ -299,11 +325,16 @@ actor CaptureCoordinator {
             for await (_, result) in group {
                 switch result {
                 case .success(let ended):
-                    try? active.manifest.append(.sourceEnded(ended))
+                    allEndedRecords.append(ended)
                 case .failure(let error):
                     finishErrors.append(error)
                 }
             }
+        }
+
+        // Append all ended records (current chunk + previously finished chunks).
+        for ended in allEndedRecords {
+            try? active.manifest.append(.sourceEnded(ended))
         }
         // Only finalize a clean stop. If a writer failed, leave the manifest
         // unfinalized so the session is still re-offered by crash recovery on the
@@ -333,6 +364,241 @@ actor CaptureCoordinator {
             result._manifestFinalizeFailed = true
         }
         return result
+    }
+
+    /// Pause the current recording. Stops all streams and finishes the current
+    /// writer chunks. The PTS gap between pause and the subsequent `resume()` is
+    /// preserved as a timestamp jump — the timeline shows the gap, not a stitched
+    /// continuous clip.
+    func pause() async throws {
+        guard state == .recording, var active = activeSession else {
+            throw CaptureEngineError.notRecording
+        }
+        state = .paused
+
+        // Stop all capture streams.
+        for session in active.sessions {
+            await session.stop()
+        }
+
+        // Finish the current chunk's writers and collect ended records.
+        let chunkWriters = active.writers
+        await withTaskGroup(of: (UUID, Result<CaptureSourceEndedRecord, Error>).self) { group in
+            for writer in chunkWriters {
+                let sourceID = writer.source.id
+                group.addTask {
+                    do {
+                        let ended = try await writer.finish()
+                        return (sourceID, .success(ended))
+                    } catch {
+                        return (sourceID, .failure(error))
+                    }
+                }
+            }
+            for await (_, result) in group {
+                switch result {
+                case .success(let ended):
+                    try? active.manifest.append(.sourceEnded(ended))
+                case .failure:
+                    break
+                }
+            }
+        }
+
+        // Record the pause event and accumulate finished writers.
+        let pauseHostTimeUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
+        try? active.manifest.append(.pause(CapturePauseRecord(atUs: pauseHostTimeUs)))
+        active.allFinishedWriters.append(contentsOf: chunkWriters)
+        active.writers = []
+        active.sessions = []
+        activeSession = active
+    }
+
+    /// Resume a paused recording. Creates new writer chunks for each source and
+    /// restarts capture streams. The PTS gap since `pause()` is preserved.
+    func resume() async throws {
+        guard state == .paused, let active = activeSession, let request = active.startRequest else {
+            throw CaptureEngineError.captureSessionFailed("No paused recording to resume.")
+        }
+        state = .starting
+        var didStartRecording = false
+        defer {
+            if !didStartRecording { state = .paused }
+        }
+
+        let directoryURL = active.directoryURL
+        let manifest = active.manifest
+        let startHostTimeUs = active.startHostTimeUs
+        let fragment = request.fragmentInterval
+        let chunkIndex = active.chunkIndex
+        var newChunkIndex = chunkIndex
+
+        var writers: [ContinuousCaptureWriter] = []
+        var sessions: [CaptureRunningSession] = []
+        var screenVideoWriter: ContinuousCaptureWriter?
+        var screenAudioWriter: ContinuousCaptureWriter?
+
+        // Create new writer chunks with unique file names.
+        if let target = request.target {
+            let size = target.outputSize
+            let filename = "screen-\(chunkIndex).mov"
+            let source = CaptureSourceDescriptor(
+                kind: target.sourceKind,
+                displayName: target.displayName,
+                relativePath: filename,
+                width: size.width,
+                height: size.height,
+                frameRate: request.frameRate)
+            let settings = Self.videoSettings(
+                width: size.width,
+                height: size.height,
+                bitrate: Self.videoBitrate(width: size.width, height: size.height, frameRate: request.frameRate))
+            let writer = try ContinuousCaptureWriter(
+                source: source,
+                outputURL: directoryURL.appendingPathComponent(filename),
+                mediaType: .video,
+                outputSettings: settings,
+                fragmentInterval: fragment,
+                sessionStartHostTimeUs: startHostTimeUs,
+                manifest: manifest)
+            writers.append(writer)
+            screenVideoWriter = writer
+            newChunkIndex += 1
+        }
+
+        if request.includeSystemAudio {
+            let filename = "system-audio-\(chunkIndex).mov"
+            let source = CaptureSourceDescriptor(
+                kind: .systemAudio,
+                displayName: "System Audio",
+                relativePath: filename,
+                sampleRate: 48_000,
+                channels: 2)
+            let writer = try ContinuousCaptureWriter(
+                source: source,
+                outputURL: directoryURL.appendingPathComponent(filename),
+                mediaType: .audio,
+                outputSettings: Self.audioSettings(sampleRate: 48_000, channels: 2),
+                fragmentInterval: fragment,
+                sessionStartHostTimeUs: startHostTimeUs,
+                manifest: manifest)
+            writers.append(writer)
+            screenAudioWriter = writer
+            newChunkIndex += 1
+        }
+
+        if let target = request.target {
+            sessions.append(ScreenCaptureSession(
+                target: target,
+                frameRate: request.frameRate,
+                videoWriter: screenVideoWriter,
+                audioWriter: screenAudioWriter,
+                onStop: active.onStreamStopped))
+        }
+
+        if let webcamDeviceID = request.webcamDeviceID {
+            let camSize = Self.webcamDimensions(deviceID: webcamDeviceID)
+            let bitrate = Self.videoBitrate(width: camSize.width, height: camSize.height, frameRate: request.frameRate)
+            let filename = "webcam-\(chunkIndex).mov"
+            let source = CaptureSourceDescriptor(
+                kind: .webcam,
+                displayName: "Webcam",
+                relativePath: filename,
+                width: camSize.width,
+                height: camSize.height,
+                frameRate: request.frameRate)
+            let writer = try ContinuousCaptureWriter(
+                source: source,
+                outputURL: directoryURL.appendingPathComponent(filename),
+                mediaType: .video,
+                outputSettings: Self.videoSettings(
+                    width: camSize.width,
+                    height: camSize.height,
+                    bitrate: bitrate),
+                fragmentInterval: fragment,
+                sessionStartHostTimeUs: startHostTimeUs,
+                manifest: manifest)
+            writers.append(writer)
+            sessions.append(AVCaptureSampleSession(deviceID: webcamDeviceID, mediaType: .video, writer: writer))
+            newChunkIndex += 1
+        }
+
+        if let microphoneDeviceID = request.microphoneDeviceID {
+            let filename = "microphone-\(chunkIndex).mov"
+            let source = CaptureSourceDescriptor(
+                kind: .microphone,
+                displayName: "Microphone",
+                relativePath: filename,
+                sampleRate: 48_000,
+                channels: 1)
+            let writer = try ContinuousCaptureWriter(
+                source: source,
+                outputURL: directoryURL.appendingPathComponent(filename),
+                mediaType: .audio,
+                outputSettings: Self.audioSettings(sampleRate: 48_000, channels: 1),
+                fragmentInterval: fragment,
+                sessionStartHostTimeUs: startHostTimeUs,
+                manifest: manifest)
+            writers.append(writer)
+            sessions.append(AVCaptureSampleSession(deviceID: microphoneDeviceID, mediaType: .audio, writer: writer))
+            newChunkIndex += 1
+        }
+
+        // Record resume event.
+        let resumeHostTimeUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
+        try? manifest.append(.resume(CaptureResumeRecord(atUs: resumeHostTimeUs)))
+
+        // Update the active session with new writers and sessions.
+        var updated = active
+        updated.writers = writers
+        updated.sessions = sessions
+        updated.chunkIndex = newChunkIndex
+        activeSession = updated
+
+        do {
+            for session in sessions {
+                try await session.start()
+            }
+        } catch {
+            for writer in writers {
+                _ = try? await writer.finish()
+            }
+            // Restore paused state so user can retry or stop.
+            var restored = updated
+            restored.writers = []
+            restored.sessions = []
+            activeSession = restored
+            state = .paused
+            throw error
+        }
+        state = .recording
+        didStartRecording = true
+    }
+
+    /// Switch the capture source mid-session. Updates the screen capture
+    /// session's target (content filter + configuration). The first frame after
+    /// the switch is dropped to avoid transitional artifacts.
+    func updateSource(_ newTarget: CaptureTarget) async throws {
+        guard state == .recording, let active = activeSession else {
+            throw CaptureEngineError.notRecording
+        }
+        // Find the ScreenCaptureSession and update it.
+        for session in active.sessions {
+            if let screenSession = session as? ScreenCaptureSession {
+                try await screenSession.updateTarget(newTarget)
+                return
+            }
+        }
+        throw CaptureEngineError.captureSessionFailed("No screen capture session to update.")
+    }
+
+    /// The CGWindowID of the floating control panel, used to exclude it from
+    /// screen capture. Set by the EditorModel when the panel is shown.
+    private var floatingPanelWindowID: CGWindowID = 0
+
+    /// Update the floating panel window ID for capture exclusion.
+    func setFloatingPanelWindowID(_ windowID: CGWindowID) {
+        floatingPanelWindowID = windowID
     }
 
     func scanRecoveredSessions(rootURL: URL) throws -> [CaptureSessionResult] {

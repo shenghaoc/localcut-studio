@@ -146,6 +146,21 @@ final class EditorModel {
     @ObservationIgnored nonisolated(unsafe) var recordingsFolderAccessURL: URL?
     @ObservationIgnored nonisolated(unsafe) var recordingMonitorTask: Task<Void, Never>?
 
+    // Phase 42 — Recorder UX
+    var isCountdownActive = false
+    var countdownSeconds = 3
+    var isPaused = false
+    /// Stored request for retake: replaces the most recent chunk-set in the same
+    /// timeline slot.
+    @ObservationIgnored nonisolated(unsafe) var lastRecordingRequest: CaptureStartRequest?
+    /// Tracks the timeline slots (track indices + clip IDs) occupied by the most
+    /// recent recording landing, so retake can replace them.
+    @ObservationIgnored var lastRecordingSlots: [(trackKind: TrackKind, trackIndex: Int, clipID: Clip.ID)] = []
+    /// PiP preset applied to webcam tracks.
+    var activePiPPreset: PiPPreset?
+    /// Floating control panel controller.
+    @ObservationIgnored let floatingPanelController = FloatingPanelController()
+
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
     @ObservationIgnored let beatAnalyzer = BeatAnalyzer()

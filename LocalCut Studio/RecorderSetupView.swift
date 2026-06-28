@@ -16,6 +16,7 @@ struct RecorderSetupView: View {
     @State private var includeMicrophone = false
     @State private var isLoadingSources = true
     @State private var loadError: String?
+    @State private var countdownDuration = 3
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -59,6 +60,14 @@ struct RecorderSetupView: View {
                         }
                     }
                     .disabled(!includeMicrophone || microphoneOptions.isEmpty)
+                }
+
+                Section("Countdown") {
+                    Picker("Delay", selection: $countdownDuration) {
+                        Text("3 seconds").tag(3)
+                        Text("5 seconds").tag(5)
+                        Text("10 seconds").tag(10)
+                    }
                 }
 
                 Section("Storage") {
@@ -164,7 +173,8 @@ struct RecorderSetupView: View {
         let webcam = includeWebcam ? selectedWebcamID : nil
         let mic = includeMicrophone ? selectedMicrophoneID : nil
         Task {
-            await model.startRecording(
+            await model.startRecordingWithCountdown(
+                countdownSeconds: countdownDuration,
                 target: target,
                 // Only capture system audio when a screen target actually
                 // exists; otherwise its writer would never receive data.

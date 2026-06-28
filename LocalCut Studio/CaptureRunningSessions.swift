@@ -32,13 +32,16 @@ nonisolated enum CapturePermissionAuthorizer {
 }
 
 nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    private let target: CaptureTarget
+    private var target: CaptureTarget
     private let frameRate: Double
-    private let videoWriter: ContinuousCaptureWriter?
-    private let audioWriter: ContinuousCaptureWriter?
+    private var videoWriter: ContinuousCaptureWriter?
+    private var audioWriter: ContinuousCaptureWriter?
     private let outputQueue = DispatchQueue(label: "com.localcutstudio.capture.screen.output")
     private let onStop: (@Sendable (Error) -> Void)?
     private var stream: SCStream?
+    /// When true, the next `.screen` frame is dropped (used after source switch
+    /// to discard the transitional frame).
+    private var dropNextScreenFrame = false
 
     init(target: CaptureTarget,
          frameRate: Double,
@@ -85,6 +88,35 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
             stream.stopCapture { _ in continuation.resume() }
         }
         self.stream = nil
+    }
+
+    /// Update the capture target mid-session. The stream's content filter and
+    /// configuration are updated in-place; the first frame after the switch is
+    /// dropped to avoid a transitional artifact.
+    func updateTarget(_ newTarget: CaptureTarget) async throws {
+        guard let stream else { throw CaptureEngineError.notRecording }
+        self.target = newTarget
+        self.dropNextScreenFrame = true
+
+        let content = try await SCShareableContent.current
+        let newFilter = try makeFilter(from: content)
+        let newConfig = makeConfiguration()
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            stream.updateContentFilter(newFilter) { error in
+                if let error {
+                    continuation.resume(throwing: CaptureEngineError.captureSessionFailed(error.localizedDescription))
+                } else {
+                    stream.updateConfiguration(newConfig) { error in
+                        if let error {
+                            continuation.resume(throwing: CaptureEngineError.captureSessionFailed(error.localizedDescription))
+                        } else {
+                            continuation.resume()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func makeFilter(from content: SCShareableContent) throws -> SCContentFilter {
@@ -138,6 +170,11 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
             if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
                let status = attachments.first?[.status] as? Int,
                status != 0 { return }  // 0 = SCFrameStatus.complete
+            // Drop the first frame after a source switch to avoid transitional artifacts.
+            if dropNextScreenFrame {
+                dropNextScreenFrame = false
+                return
+            }
             videoWriter?.append(sampleBuffer)
         case .audio:
             audioWriter?.append(sampleBuffer)

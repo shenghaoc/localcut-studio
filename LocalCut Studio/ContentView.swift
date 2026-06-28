@@ -226,6 +226,12 @@ struct EditorView: View {
         .sheet(isPresented: $model.isRecorderPresented) {
             RecorderSetupView(model: model)
         }
+        .overlay {
+            if model.isCountdownActive {
+                RecordingCountdownView(model: model, totalSeconds: model.countdownSeconds)
+                    .transition(.opacity)
+            }
+        }
         .background(WindowConfigurator(model: model))
         .overlay(alignment: .topTrailing) {
             if model.isDiagnosticsVisible {
@@ -273,7 +279,22 @@ struct EditorView: View {
             .keyboardShortcut(.delete, modifiers: [])
             .help("Delete selected clip or transition")
 
-            if model.isRecording {
+            if model.isRecording || model.isPaused {
+                if model.isPaused {
+                    Button {
+                        Task { await model.resumeRecording() }
+                    } label: {
+                        Label("Resume", systemImage: "play.circle.fill")
+                    }
+                    .help("Resume recording")
+                } else {
+                    Button {
+                        Task { await model.pauseRecording() }
+                    } label: {
+                        Label("Pause", systemImage: "pause.circle.fill")
+                    }
+                    .help("Pause recording")
+                }
                 Button {
                     model.stopRecording()
                 } label: {
@@ -323,15 +344,15 @@ struct EditorView: View {
                 relinkBanner
                 Spacer()
             }
-            if model.isRecording {
-                Image(systemName: "record.circle.fill")
-                    .foregroundStyle(.red)
+            if model.isRecording || model.isPaused {
+                Image(systemName: model.isPaused ? "pause.circle.fill" : "record.circle.fill")
+                    .foregroundStyle(model.isPaused ? .orange : .red)
                     .font(.caption)
                     .accessibilityHidden(true)
                 Text(formatElapsed(model.recordingElapsedSeconds))
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.red)
-                    .accessibilityLabel("Recording elapsed \(formatElapsed(model.recordingElapsedSeconds))")
+                    .foregroundStyle(model.isPaused ? .orange : .red)
+                    .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(formatElapsed(model.recordingElapsedSeconds))")
                 Text("\(model.recordingSourceCount) source\(model.recordingSourceCount == 1 ? "" : "s")")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
