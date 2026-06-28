@@ -17,7 +17,7 @@ Phase 41 stops at a reliable start / stop / recover / land pipeline. Countdown, 
 
 ## Approach
 
-1. **Session ownership.** `CaptureCoordinator` is a dedicated actor that owns all capture sources, writer lifetimes, manifest writes, capacity monitoring, and recovery parsing. `EditorModel` stays `@MainActor` and only starts / stops sessions, reflects status, and lands resulting media. Source descriptors and session snapshots are `Sendable` value types so the actor boundary is explicit.
+1. **Session ownership.** `CaptureCoordinator` is a dedicated actor that owns capture-session state, manifest finalisation, capacity preflight, and recovery parsing. The implementation is split across focused capture files: `CaptureTypes.swift` for Sendable value/error types, `CaptureSourceCatalog.swift` for device/source discovery, `CaptureRunningSessions.swift` for ScreenCaptureKit / AVCapture adapters, `CaptureWriters.swift` for fragmented writer + manifest resources, and `CaptureCoordinator.swift` for orchestration. `EditorModel` stays `@MainActor` and only starts / stops sessions, reflects status, and lands resulting media. Source descriptors and session snapshots are `Sendable` value types so the actor boundary is explicit.
 2. **Source acquisition.**
    - **Display / window / app:** ScreenCaptureKit `SCStream` with `SCStreamConfiguration` (resolution, fps, audio yes/no).
    - **Webcam:** `AVCaptureDevice.DiscoverySession` for built-in and external cameras + `AVCaptureSession` + `AVCaptureVideoDataOutput`.
