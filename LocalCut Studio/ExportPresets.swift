@@ -263,6 +263,25 @@ extension ExportPreset {
             (m4v, AVVideoCodecType.hevc.rawValue),
         ]
     }()
+
+    // MARK: - Host capability validation
+
+    /// Returns `true` when HEVC video encoding is available on this Mac.
+    /// Checks `AVAssetExportSession` preset availability — if the HEVC 1920×1080
+    /// preset is listed, the hardware + software stack supports HEVC output.
+    static let isHEVCEncodingAvailable: Bool = {
+        AVAssetExportSession.allExportPresets().contains(AVAssetExportPresetHEVC1920x1080)
+    }()
+
+    /// Returns any host-capability error for this preset beyond the
+    /// container/codec allow-list. Returns `nil` if the preset is usable.
+    func hostCapabilityError() -> String? {
+        if videoCodec == AVVideoCodecType.hevc.rawValue,
+           !Self.isHEVCEncodingAvailable {
+            return "HEVC encoding is not available on this Mac."
+        }
+        return nil
+    }
 }
 
 // MARK: - Built-in library

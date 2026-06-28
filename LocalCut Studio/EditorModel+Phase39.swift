@@ -10,6 +10,18 @@ extension EditorModel {
         SafeZoneLibrary.profile(id: selectedSafeZoneProfileID)
     }
 
+    /// Surfaces any safe-zone JSON load/validation errors through `statusMessage`.
+    /// Safe to call whenever the safe-zone UI is presented; errors never crash
+    /// preview or export.
+    func surfaceSafeZoneLoadErrors() {
+        let errors = SafeZoneLibrary.loadErrors
+        guard !errors.isEmpty else { return }
+        let message = errors.count == 1
+            ? "Safe zone: \(errors[0])"
+            : "\(errors.count) safe-zone profiles failed to load."
+        statusMessage = message
+    }
+
     func setCoverTimeToPlayhead() {
         let time = CMTime(seconds: max(0, currentTime), preferredTimescale: 600)
         performUndoable("Set Cover Frame") {
@@ -183,6 +195,22 @@ extension EditorModel {
             return false
         }
         return identifiers.contains(type.identifier)
+    }
+
+    /// Generates cover image data for inclusion in a `.lcbundle` save. A cover
+    /// generation error should not block the bundle save, but the caller must
+    /// surface the warning after the save succeeds.
+    func makeCoverBundleData() async -> (data: ProjectBundle.CoverBundleData?, warning: String?) {
+        guard project.coverFrame != nil else { return (nil, nil) }
+        do {
+            let data = try await makeCoverImageData()
+            let format = project.coverFrame?.format ?? .png
+            return (ProjectBundle.CoverBundleData(
+                imageData: data,
+                fileExtension: format.fileExtension), nil)
+        } catch {
+            return (nil, "Could not generate bundle cover: \(error.localizedDescription)")
+        }
     }
 }
 

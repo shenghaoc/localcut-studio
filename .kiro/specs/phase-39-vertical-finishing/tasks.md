@@ -1,6 +1,6 @@
 # Tasks: Phase 39 - Vertical and Platform Finishing
 
-> Status: **In progress**. Depends on implemented `feature-export-queue`,
+> Status: **Completed**. Depends on implemented `feature-export-queue`,
 > `feature-project-persistence`, and `feature-project-bundles`. Phase 36 is a
 > soft dependency for applying loudness targets.
 
@@ -39,7 +39,7 @@
   (normalized coordinates, non-empty regions, unique ids, matching aspect).
 - [x] **T3.4** Add a preview-only safe-zone overlay toggle and platform picker.
   The overlay is off by default and never enters `AVVideoComposition`.
-- [ ] **T3.5** Surface malformed or missing safe-zone data through
+- [x] **T3.5** Surface malformed or missing safe-zone data through
   `statusMessage` without crashing preview or export.
 
 ## Cover picker
@@ -54,7 +54,7 @@
   explicit unsupported-format errors.
 - [x] **T4.5** Capture an explicit user-confirmed cover output URL through
   `NSSavePanel`. Support "cover only" export without touching the video output.
-- [ ] **T4.6** Extend `.lcbundle` layout/path validation for `covers/` and
+- [x] **T4.6** Extend `.lcbundle` layout/path validation for `covers/` and
   include generated cover assets on bundle save when present.
 
 ## Platform export profiles
@@ -66,7 +66,7 @@
 - [x] **T5.2** Add built-in profiles for Douyin, Xiaohongshu, YouTube Shorts,
   Instagram Reels, TikTok, and 16:9 YouTube using current platform guidance
   captured in source metadata.
-- [ ] **T5.3** Extend capability validation for platform profiles: existing
+- [x] **T5.3** Extend capability validation for platform profiles: existing
   codec/container gate, HEVC availability, HEIC cover availability, and required
   output bookmarks.
 - [x] **T5.4** Wire platform profile selection into `RenderQueueInspectorView`
@@ -91,7 +91,7 @@
 - [x] **T6.5** Cover tests: selected-time persistence and cover metadata
   round-trip. Unsupported-format and generated-image smoke are covered by the
   implementation path but still need a fixture-backed integration test.
-- [ ] **T6.6** UI/accessibility smoke: aspect picker, safe-zone toggle/platform
+- [x] **T6.6** UI/accessibility smoke: aspect picker, safe-zone toggle/platform
   picker, cover controls, and platform preset rows are keyboard reachable and
   labelled.
 - [x] **T6.7** `xcodebuild` (Debug, macOS) green; no test count regression.

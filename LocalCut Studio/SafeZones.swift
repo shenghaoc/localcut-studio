@@ -55,7 +55,78 @@ struct SafeZoneProfile: Codable, Equatable, Identifiable, Sendable {
 enum SafeZoneLibrary {
     static let defaultProfileID = "tiktok"
 
+    /// Tracks whether bundled JSON profiles failed to load or validate so the
+    /// caller can surface errors through `statusMessage`.
+    static private(set) var loadErrors: [String] = []
+
+    /// Loads profiles from bundled JSON, then falls back to hardcoded profiles
+    /// for any platform that failed to load or validate.
+    /// Surface errors via `loadErrors` so the app can show `statusMessage`
+    /// without crashing preview or export.
     static var builtInProfiles: [SafeZoneProfile] {
+        let loaded = loadFromBundle()
+        let fallbackIDs = Set(hardcodedFallbackProfiles.map(\.platformID))
+        var merged = hardcodedFallbackProfiles.map { fallback in
+            loaded.first { $0.platformID == fallback.platformID } ?? fallback
+        }
+        merged.append(contentsOf: loaded.filter { !fallbackIDs.contains($0.platformID) })
+        return merged
+    }
+
+    static func profile(id: String) -> SafeZoneProfile? {
+        builtInProfiles.first { $0.platformID == id }
+    }
+
+    static func validProfile(id: String, for aspect: ProjectAspect) -> SafeZoneProfile? {
+        guard let profile = profile(id: id),
+              profile.aspect == aspect,
+              profile.validationErrors().isEmpty else { return nil }
+        return profile
+    }
+
+    // MARK: - JSON loading
+
+    /// Loads every `*.json` in `Resources/SafeZones/`, decodes, validates.
+    /// Profiles that fail to load or validate are dropped and an error is
+    /// appended to `loadErrors`; the hardcoded fallback for that platform still
+    /// works so preview never breaks.
+    private static func loadFromBundle() -> [SafeZoneProfile] {
+        guard let urls = Bundle.main.urls(forResourcesWithExtension: "json",
+                                          subdirectory: "SafeZones") else {
+            Self.loadErrors = ["Safe zone directory not found in bundle resources."]
+            return []
+        }
+        var profiles: [SafeZoneProfile] = []
+        var newErrors: [String] = []
+        for url in urls {
+            let filename = url.lastPathComponent
+            guard filename != "safe-zones-v1.schema.json" else { continue }
+            guard let data = try? Data(contentsOf: url) else {
+                newErrors.append("Could not read safe-zone file \(filename).")
+                continue
+            }
+            let decoder = JSONDecoder()
+            guard let profile = try? decoder.decode(SafeZoneProfile.self, from: data) else {
+                newErrors.append("Safe-zone file \(filename) is malformed JSON.")
+                continue
+            }
+            let validationErrors = profile.validationErrors()
+            if !validationErrors.isEmpty {
+                newErrors.append("Safe-zone profile \(filename) has validation errors: \(validationErrors.joined(separator: "; ")).")
+                continue
+            }
+            profiles.append(profile)
+        }
+        if newErrors.isEmpty, profiles.isEmpty {
+            newErrors.append("No safe-zone profiles loaded from bundle resources.")
+        }
+        Self.loadErrors = newErrors
+        return profiles
+    }
+
+    // MARK: - Hardcoded fallback
+
+    private static var hardcodedFallbackProfiles: [SafeZoneProfile] {
         [
             verticalProfile(
                 id: "douyin",
@@ -107,17 +178,6 @@ enum SafeZoneLibrary {
                 sourceURL: "https://ads.tiktok.com/help/article/tiktok-auction-in-feed-ads",
                 regions: commonVerticalRegions()),
         ]
-    }
-
-    static func profile(id: String) -> SafeZoneProfile? {
-        builtInProfiles.first { $0.platformID == id }
-    }
-
-    static func validProfile(id: String, for aspect: ProjectAspect) -> SafeZoneProfile? {
-        guard let profile = profile(id: id),
-              profile.aspect == aspect,
-              profile.validationErrors().isEmpty else { return nil }
-        return profile
     }
 
     private static func verticalProfile(id: String,

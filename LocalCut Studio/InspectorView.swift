@@ -893,11 +893,15 @@ struct InspectorView: View {
         }
         Section("Safe Zones") {
             Toggle("Show Safe Zones", isOn: $model.showSafeZones)
+                .onChange(of: model.showSafeZones) { _, newValue in
+                    if newValue { model.surfaceSafeZoneLoadErrors() }
+                }
             Picker("Platform", selection: $model.selectedSafeZoneProfileID) {
                 ForEach(SafeZoneLibrary.builtInProfiles) { profile in
                     Text(profile.displayName).tag(profile.platformID)
                 }
             }
+            .accessibilityLabel("Safe zone platform profile")
             if let profile = model.selectedSafeZoneProfile,
                profile.aspect != model.project.aspect {
                 Text("Switch the project aspect to \(profile.aspect.displayName) to show this overlay.")
@@ -936,6 +940,8 @@ struct InspectorView: View {
                     model.setCoverTimeToPlayhead()
                 }
                 .controlSize(.small)
+                .help("Use the current playhead position as the cover frame time")
+                .accessibilityLabel("Set cover frame to current playhead position")
                 Spacer()
             }
             Picker("Format", selection: coverFormatBinding) {
