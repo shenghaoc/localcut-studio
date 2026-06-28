@@ -68,7 +68,13 @@ public struct CMTimeCode: Codable, Equatable, Sendable {
     }
 
     public var cmTime: CMTime {
-        CMTime(value: value, timescale: timescale > 0 ? timescale : 600)
+        // A nonpositive timescale is always corrupt metadata; return an invalid
+        // CMTime so downstream `.sanitized` rejects it rather than silently
+        // rewriting the timescale and accepting a bogus duration.
+        guard timescale > 0 else {
+            return CMTime(value: 0, timescale: 0) // invalid
+        }
+        return CMTime(value: value, timescale: timescale)
     }
 }
 
