@@ -46,6 +46,13 @@ final class RecorderFloatingPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
+    /// Break the retain cycle: EditorModel -> floatingPanelController -> panel
+    /// -> contentView -> rootView -> EditorModel.
+    override func close() {
+        contentView = nil
+        super.close()
+    }
+
     /// Capture the window ID after the panel is shown on screen.
     func captureWindowID() {
         panelWindowID = CGWindowID(windowNumber)

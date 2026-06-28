@@ -156,6 +156,9 @@ final class EditorModel {
     /// Tracks the timeline slots (track indices + clip IDs) occupied by the most
     /// recent recording landing, so retake can replace them.
     @ObservationIgnored var lastRecordingSlots: [(trackKind: TrackKind, trackIndex: Int, clipID: Clip.ID)] = []
+    /// When set, `landCaptureSession` uses these positions instead of capture PTS
+    /// so a retake lands in the original timeline slot.
+    @ObservationIgnored var retakeTimelinePositions: [UUID: CMTime] = [:]
     /// PiP preset applied to webcam tracks.
     var activePiPPreset: PiPPreset?
     /// Floating control panel controller.

@@ -264,11 +264,18 @@ extension EditorModel {
         isRecorderPresented = false
 
         // Run the countdown. Each second, update the UI; cancellation is handled
-        // by the view setting `isCountdownActive = false`.
+        // by the view setting `isCountdownActive = false` or Task cancellation.
         for remaining in (1...countdownSeconds).reversed() {
             guard isCountdownActive else { return }
             statusMessage = "Recording in \(remaining)…"
-            try? await Task.sleep(for: .seconds(1))
+            do {
+                try await Task.sleep(for: .seconds(1))
+            } catch {
+                // Task was cancelled (e.g. user dismissed the view). Don't spin
+                // to completion — stop the countdown immediately.
+                isCountdownActive = false
+                return
+            }
         }
         guard isCountdownActive else { return }
         isCountdownActive = false
@@ -326,6 +333,10 @@ extension EditorModel {
             try await captureCoordinator.resume()
             isPaused = false
             isRecording = true
+            // Restart the recording monitor (elapsed time, disk space).
+            if let root = resolvedRecordingsFolder(promptIfMissing: false) {
+                startRecordingMonitor(rootURL: root)
+            }
             statusMessage = "Recording…"
         } catch {
             statusMessage = "Could not resume: \(error.localizedDescription)"
@@ -334,25 +345,34 @@ extension EditorModel {
 
     // MARK: - Phase 42: Ripple-collapse gap
 
-    /// Collapse timestamp gaps in recording tracks caused by pause/resume.
-    /// After a pause/resume cycle, the captured clips land at their raw PTS
-    /// positions, leaving gaps on the timeline. This command ripple-closes
-    /// those gaps by shifting downstream clips.
+    /// Collapse timestamp gaps in the most recent recording's tracks caused by
+    /// pause/resume. Only operates on tracks/clips referenced by
+    /// `lastRecordingSlots` to avoid disturbing unrelated timeline content.
     func collapseRecordingGap() {
         guard !isRecording, !isPaused else {
             statusMessage = "Stop the recording before collapsing gaps."
             return
         }
+        guard !lastRecordingSlots.isEmpty else {
+            statusMessage = "No recording gaps to collapse."
+            return
+        }
+        // Collect the track IDs that contain recording clips.
+        let recordedTrackIDs: Set<UUID> = Set(lastRecordingSlots.map { slot in
+            let tracks = slot.trackKind == .video ? project.videoTracks : project.audioTracks
+            guard slot.trackIndex < tracks.count else { return slot.clipID }
+            return tracks[slot.trackIndex].id
+        })
         var collapsed = false
         performUndoable("Collapse Recording Gap") {
-            for track in project.videoTracks + project.audioTracks {
+            for track in (project.videoTracks + project.audioTracks)
+                where recordedTrackIDs.contains(track.id) {
                 let sorted = track.clips.sorted { $0.timelineStart < $1.timelineStart }
                 guard sorted.count >= 2 else { continue }
                 for i in 1..<sorted.count {
                     let prevEnd = sorted[i - 1].timelineStart + sorted[i - 1].duration
                     let gap = sorted[i].timelineStart - prevEnd
                     guard gap > .zero else { continue }
-                    // Shift this clip and all downstream by -gap.
                     if let idx = track.clips.firstIndex(where: { $0.id == sorted[i].id }) {
                         track.clips[idx].timelineStart = prevEnd
                         for j in (idx + 1)..<track.clips.count {
@@ -384,6 +404,19 @@ extension EditorModel {
             return
         }
 
+        // Store the timeline positions of the clips being removed so the
+        // replacement recording lands in the same slots.
+        var positions: [UUID: CMTime] = [:]
+        for slot in lastRecordingSlots {
+            let tracks = slot.trackKind == .video ? project.videoTracks : project.audioTracks
+            guard slot.trackIndex < tracks.count else { continue }
+            let track = tracks[slot.trackIndex]
+            if let clip = track.clips.first(where: { $0.id == slot.clipID }) {
+                positions[slot.clipID] = clip.timelineStart
+            }
+        }
+        retakeTimelinePositions = positions
+
         // Remove the previous recording's tracks/clips.
         if !lastRecordingSlots.isEmpty {
             performUndoable("Retake Recording — Remove Previous") {
@@ -392,14 +425,12 @@ extension EditorModel {
                 let sortedSlots = lastRecordingSlots.sorted {
                     ($0.trackIndex, $0.clipID.hashValue) > ($1.trackIndex, $1.clipID.hashValue)
                 }
-                var modifiedTracks: Set<String> = []
                 for slot in sortedSlots {
                     let tracks = slot.trackKind == .video ? project.videoTracks : project.audioTracks
                     guard slot.trackIndex < tracks.count else { continue }
                     let track = tracks[slot.trackIndex]
                     if let clipIdx = track.clips.firstIndex(where: { $0.id == slot.clipID }) {
                         track.clips.remove(at: clipIdx)
-                        modifiedTracks.insert("\(slot.trackKind)-\(slot.trackIndex)")
                     }
                 }
                 // Remove empty tracks.
@@ -466,58 +497,76 @@ extension EditorModel {
         var loadErrors: [String] = []
         for source in recoveredSources {
             let chunks = endedBySource[source.id] ?? []
-            // Collect all chunk file URLs for this source.
-            let chunkURLs: [URL]
+            // Collect (URL, ended-record) pairs for each chunk.
+            struct ChunkInfo {
+                var url: URL
+                var ended: CaptureSourceEndedRecord?
+            }
+            let chunkInfos: [ChunkInfo]
             if chunks.isEmpty {
-                // No ended records (recovered / header-only): use the descriptor path.
                 let url = result.directoryURL.appendingPathComponent(source.descriptor.relativePath)
-                chunkURLs = FileManager.default.fileExists(atPath: url.path) ? [url] : []
+                chunkInfos = FileManager.default.fileExists(atPath: url.path)
+                    ? [ChunkInfo(url: url, ended: nil)]
+                    : []
             } else {
-                chunkURLs = chunks.map { ended in
-                    // Reconstruct the relative path from the header source + chunk index.
-                    // The ended record doesn't store the path; infer it from the source's
-                    // base name. For chunk 0 the file is the original name; for chunks
-                    // 1+ it's "base-N.ext".
+                chunkInfos = chunks.compactMap { ended -> ChunkInfo? in
+                    let resumeCountBefore = result.manifest.records.filter { record in
+                        if case .resume(let resume) = record, resume.atUs <= ended.atUs {
+                            return true
+                        }
+                        return false
+                    }.count
                     let basePath = source.descriptor.relativePath
                     let baseURL = URL(fileURLWithPath: basePath)
                     let ext = baseURL.pathExtension
                     let stem = baseURL.deletingPathExtension().lastPathComponent
-                    // Find the chunk index by matching the ended record's position.
-                    let chunkIndex = chunks.firstIndex(where: { $0.sourceID == ended.sourceID && $0.atUs == ended.atUs }) ?? 0
-                    let filename = chunkIndex == 0 ? "\(stem).\(ext)" : "\(stem)-\(chunkIndex).\(ext)"
-                    return result.directoryURL.appendingPathComponent(filename)
-                }.filter { FileManager.default.fileExists(atPath: $0.path) }
+                    let filename = resumeCountBefore == 0
+                        ? "\(stem).\(ext)"
+                        : "\(stem)-\(resumeCountBefore).\(ext)"
+                    let url = result.directoryURL.appendingPathComponent(filename)
+                    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+                    return ChunkInfo(url: url, ended: ended)
+                }
             }
 
-            guard !chunkURLs.isEmpty else { continue }
+            guard !chunkInfos.isEmpty else { continue }
 
-            // Load the first chunk as the primary item.
-            let primaryURL = chunkURLs[0]
-            let didAccess = primaryURL.startAccessingSecurityScopedResource()
-            let item = MediaItem(url: primaryURL)
-            item.name = result.wasRecovered
-                ? "Recovered \(source.descriptor.displayName)"
-                : "Recording \(source.descriptor.displayName)"
-            item.wantsBundling = true
-            do {
-                item.duration = try await item.asset.load(.duration).sanitized
-                if item.duration <= .zero, source.duration > .zero {
-                    item.duration = source.duration
+            // Create a MediaItem + LoadedCapturedSource for each chunk so each
+            // lands at its own timeline position.
+            for (index, chunk) in chunkInfos.enumerated() {
+                let didAccess = chunk.url.startAccessingSecurityScopedResource()
+                let item = MediaItem(url: chunk.url)
+                let chunkLabel = chunkInfos.count > 1 ? " (chunk \(index + 1))" : ""
+                item.name = result.wasRecovered
+                    ? "Recovered \(source.descriptor.displayName)\(chunkLabel)"
+                    : "Recording \(source.descriptor.displayName)\(chunkLabel)"
+                item.wantsBundling = true
+                do {
+                    item.duration = try await item.asset.load(.duration).sanitized
+                    if item.duration <= .zero {
+                        item.duration = chunk.ended?.duration ?? source.duration
+                    }
+                    if let videoTrack = try await item.asset.loadTracks(withMediaType: .video).first {
+                        item.hasVideo = true
+                        item.naturalSize = try await videoTrack.load(.naturalSize).sanitized
+                        item.preferredTransform = try await videoTrack.load(.preferredTransform).sanitized
+                    }
+                    item.hasAudio = try await !item.asset.loadTracks(withMediaType: .audio).isEmpty
+                    item.bookmark = try? chunk.url.bookmarkData(
+                        options: .withSecurityScope,
+                        includingResourceValuesForKeys: nil,
+                        relativeTo: nil)
+                    // Build a per-chunk source descriptor with the correct
+                    // timelineStart from the ended record.
+                    var chunkSource = source
+                    if let ended = chunk.ended {
+                        chunkSource.descriptor.timelineStartUs = ended.timelineStartUs
+                    }
+                    loaded.append(LoadedCapturedSource(item: item, source: chunkSource, didAccess: didAccess))
+                } catch {
+                    if didAccess { chunk.url.stopAccessingSecurityScopedResource() }
+                    loadErrors.append("\(chunk.url.lastPathComponent): \(error.localizedDescription)")
                 }
-                if let videoTrack = try await item.asset.loadTracks(withMediaType: .video).first {
-                    item.hasVideo = true
-                    item.naturalSize = try await videoTrack.load(.naturalSize).sanitized
-                    item.preferredTransform = try await videoTrack.load(.preferredTransform).sanitized
-                }
-                item.hasAudio = try await !item.asset.loadTracks(withMediaType: .audio).isEmpty
-                item.bookmark = try? primaryURL.bookmarkData(
-                    options: .withSecurityScope,
-                    includingResourceValuesForKeys: nil,
-                    relativeTo: nil)
-                loaded.append(LoadedCapturedSource(item: item, source: source, didAccess: didAccess))
-            } catch {
-                if didAccess { primaryURL.stopAccessingSecurityScopedResource() }
-                loadErrors.append("\(primaryURL.lastPathComponent): \(error.localizedDescription)")
             }
         }
 
@@ -529,6 +578,8 @@ extension EditorModel {
         }
 
         var newSlots: [(trackKind: TrackKind, trackIndex: Int, clipID: Clip.ID)] = []
+        // If this is a retake landing, use the stored positions.
+        let isRetake = !retakeTimelinePositions.isEmpty
 
         performUndoable(result.wasRecovered ? "Add Recovered Recording" : "Add Recording") {
             project.mediaItems.append(contentsOf: loaded.map(\.item))
@@ -536,7 +587,13 @@ extension EditorModel {
                 retainAccess(entry.item.url, didStart: entry.didAccess)
                 let duration = entry.item.duration > .zero ? entry.item.duration : entry.source.duration
                 guard duration > .zero else { continue }
-                let start = entry.source.descriptor.timelineStart
+                // Use retake position if available, otherwise use capture PTS.
+                let start: CMTime
+                if isRetake, let retakePos = retakeTimelinePositions.values.first {
+                    start = retakePos
+                } else {
+                    start = entry.source.descriptor.timelineStart
+                }
                 let clip = Clip(
                     mediaID: entry.item.id,
                     sourceStart: .zero,
@@ -565,6 +622,8 @@ extension EditorModel {
         if !result.wasRecovered {
             lastRecordingSlots = newSlots
         }
+        // Clear retake positions after use.
+        retakeTimelinePositions = [:]
 
         if !loadErrors.isEmpty {
             statusMessage += " Some sources failed: \(loadErrors.joined(separator: "; "))"

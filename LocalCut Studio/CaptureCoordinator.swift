@@ -30,8 +30,15 @@ actor CaptureCoordinator {
         /// Callbacks for stream events, stored for resume().
         var onStreamStopped: (@Sendable (Error) -> Void)?
         var onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)?
-        /// Monotonically increasing chunk counter for unique file names.
+        /// Monotonically increasing chunk counter for unique file names. Incremented
+        /// once per resume cycle (not per source).
         var chunkIndex: Int = 1
+        /// The current capture target, updated by `updateSource()`. Resume uses
+        /// this instead of `startRequest.target` so switched targets are preserved.
+        var currentTarget: CaptureTarget?
+        /// Source IDs from the original header, reused for resumed chunks so
+        /// `source-ended` records are keyed to header sources.
+        var sourceIDs: [CaptureSourceKind: UUID] = [:]
     }
 
     private var state: State = .idle
@@ -247,6 +254,11 @@ actor CaptureCoordinator {
             encoders: encoders)))
         try manifest.append(.epoch(CaptureEpochRecord(atUs: startHostTimeUs, wallClock: Date())))
 
+        // Build source ID map so resumed chunks reuse the same IDs.
+        var sourceIDs: [CaptureSourceKind: UUID] = [:]
+        for descriptor in descriptors {
+            sourceIDs[descriptor.kind] = descriptor.id
+        }
         let active = ActiveSession(
             id: id,
             directoryURL: directoryURL,
@@ -257,7 +269,9 @@ actor CaptureCoordinator {
             startHostTimeUs: startHostTimeUs,
             startRequest: request,
             onStreamStopped: onStreamStopped,
-            onBackpressure: onBackpressure)
+            onBackpressure: onBackpressure,
+            currentTarget: request.target,
+            sourceIDs: sourceIDs)
         activeSession = active
 
         do {
@@ -383,6 +397,7 @@ actor CaptureCoordinator {
 
         // Finish the current chunk's writers and collect ended records.
         let chunkWriters = active.writers
+        var pauseErrors: [String] = []
         await withTaskGroup(of: (UUID, Result<CaptureSourceEndedRecord, Error>).self) { group in
             for writer in chunkWriters {
                 let sourceID = writer.source.id
@@ -399,8 +414,8 @@ actor CaptureCoordinator {
                 switch result {
                 case .success(let ended):
                     try? active.manifest.append(.sourceEnded(ended))
-                case .failure:
-                    break
+                case .failure(let error):
+                    pauseErrors.append(error.localizedDescription)
                 }
             }
         }
@@ -412,6 +427,12 @@ actor CaptureCoordinator {
         active.writers = []
         active.sessions = []
         activeSession = active
+
+        // Surface any writer finish failures so the UI can report them.
+        if !pauseErrors.isEmpty {
+            throw CaptureEngineError.captureSessionFailed(
+                "Pause encountered writer errors: \(pauseErrors.joined(separator: "; "))")
+        }
     }
 
     /// Resume a paused recording. Creates new writer chunks for each source and
@@ -431,18 +452,24 @@ actor CaptureCoordinator {
         let startHostTimeUs = active.startHostTimeUs
         let fragment = request.fragmentInterval
         let chunkIndex = active.chunkIndex
-        var newChunkIndex = chunkIndex
+        // Use the current target (may have been switched) rather than the
+        // original request target.
+        let target = active.currentTarget
 
         var writers: [ContinuousCaptureWriter] = []
         var sessions: [CaptureRunningSession] = []
         var screenVideoWriter: ContinuousCaptureWriter?
         var screenAudioWriter: ContinuousCaptureWriter?
 
-        // Create new writer chunks with unique file names.
-        if let target = request.target {
+        // Create new writer chunks with unique file names. All sources in one
+        // resume cycle share the same chunk index.
+        if let target {
             let size = target.outputSize
             let filename = "screen-\(chunkIndex).mov"
+            // Reuse the source ID from the header so ended records match.
+            let sourceID = active.sourceIDs[target.sourceKind] ?? UUID()
             let source = CaptureSourceDescriptor(
+                id: sourceID,
                 kind: target.sourceKind,
                 displayName: target.displayName,
                 relativePath: filename,
@@ -460,15 +487,17 @@ actor CaptureCoordinator {
                 outputSettings: settings,
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
-                manifest: manifest)
+                manifest: manifest,
+                onSustainedBackpressure: active.onBackpressure)
             writers.append(writer)
             screenVideoWriter = writer
-            newChunkIndex += 1
         }
 
         if request.includeSystemAudio {
             let filename = "system-audio-\(chunkIndex).mov"
+            let sourceID = active.sourceIDs[.systemAudio] ?? UUID()
             let source = CaptureSourceDescriptor(
+                id: sourceID,
                 kind: .systemAudio,
                 displayName: "System Audio",
                 relativePath: filename,
@@ -481,13 +510,13 @@ actor CaptureCoordinator {
                 outputSettings: Self.audioSettings(sampleRate: 48_000, channels: 2),
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
-                manifest: manifest)
+                manifest: manifest,
+                onSustainedBackpressure: active.onBackpressure)
             writers.append(writer)
             screenAudioWriter = writer
-            newChunkIndex += 1
         }
 
-        if let target = request.target {
+        if let target {
             sessions.append(ScreenCaptureSession(
                 target: target,
                 frameRate: request.frameRate,
@@ -500,7 +529,9 @@ actor CaptureCoordinator {
             let camSize = Self.webcamDimensions(deviceID: webcamDeviceID)
             let bitrate = Self.videoBitrate(width: camSize.width, height: camSize.height, frameRate: request.frameRate)
             let filename = "webcam-\(chunkIndex).mov"
+            let sourceID = active.sourceIDs[.webcam] ?? UUID()
             let source = CaptureSourceDescriptor(
+                id: sourceID,
                 kind: .webcam,
                 displayName: "Webcam",
                 relativePath: filename,
@@ -517,15 +548,17 @@ actor CaptureCoordinator {
                     bitrate: bitrate),
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
-                manifest: manifest)
+                manifest: manifest,
+                onSustainedBackpressure: active.onBackpressure)
             writers.append(writer)
             sessions.append(AVCaptureSampleSession(deviceID: webcamDeviceID, mediaType: .video, writer: writer))
-            newChunkIndex += 1
         }
 
         if let microphoneDeviceID = request.microphoneDeviceID {
             let filename = "microphone-\(chunkIndex).mov"
+            let sourceID = active.sourceIDs[.microphone] ?? UUID()
             let source = CaptureSourceDescriptor(
+                id: sourceID,
                 kind: .microphone,
                 displayName: "Microphone",
                 relativePath: filename,
@@ -538,10 +571,10 @@ actor CaptureCoordinator {
                 outputSettings: Self.audioSettings(sampleRate: 48_000, channels: 1),
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
-                manifest: manifest)
+                manifest: manifest,
+                onSustainedBackpressure: active.onBackpressure)
             writers.append(writer)
             sessions.append(AVCaptureSampleSession(deviceID: microphoneDeviceID, mediaType: .audio, writer: writer))
-            newChunkIndex += 1
         }
 
         // Record resume event.
@@ -549,10 +582,11 @@ actor CaptureCoordinator {
         try? manifest.append(.resume(CaptureResumeRecord(atUs: resumeHostTimeUs)))
 
         // Update the active session with new writers and sessions.
+        // Increment chunk index once for the whole resume cycle.
         var updated = active
         updated.writers = writers
         updated.sessions = sessions
-        updated.chunkIndex = newChunkIndex
+        updated.chunkIndex = chunkIndex + 1
         activeSession = updated
 
         do {
@@ -579,13 +613,16 @@ actor CaptureCoordinator {
     /// session's target (content filter + configuration). The first frame after
     /// the switch is dropped to avoid transitional artifacts.
     func updateSource(_ newTarget: CaptureTarget) async throws {
-        guard state == .recording, let active = activeSession else {
+        guard state == .recording, var active = activeSession else {
             throw CaptureEngineError.notRecording
         }
         // Find the ScreenCaptureSession and update it.
         for session in active.sessions {
             if let screenSession = session as? ScreenCaptureSession {
                 try await screenSession.updateTarget(newTarget)
+                // Persist the switched target so resume() uses it.
+                active.currentTarget = newTarget
+                activeSession = active
                 return
             }
         }

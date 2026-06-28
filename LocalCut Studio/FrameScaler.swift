@@ -9,18 +9,36 @@ nonisolated final class FrameScaler: @unchecked Sendable {
     private let ciContext: CIContext
     private let targetWidth: Int
     private let targetHeight: Int
+    private let pixelFormat: OSType
+    /// Reusable pixel buffer pool to avoid per-frame CVPixelBufferCreate overhead.
+    private let pool: CVPixelBufferPool?
 
     /// Lanzcos scale transform filter, cached and reused per instance.
     private static let filterName = "CILanczosScaleTransform"
 
-    init(targetWidth: Int, targetHeight: Int) {
+    init(targetWidth: Int, targetHeight: Int, pixelFormat: OSType = kCVPixelFormatType_32BGRA) {
         self.targetWidth = targetWidth
         self.targetHeight = targetHeight
+        self.pixelFormat = pixelFormat
         if let device = MTLCreateSystemDefaultDevice() {
             self.ciContext = CIContext(mtlDevice: device)
         } else {
             self.ciContext = CIContext()
         }
+        // Create a pixel buffer pool for efficient buffer reuse.
+        let poolAttrs: [String: Any] = [
+            kCVPixelBufferPoolMinimumBufferCountKey as String: 2,
+            kCVPixelBufferPoolMaximumBufferAgeKey as String: 0,
+        ]
+        let bufferAttrs: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
+            kCVPixelBufferWidthKey as String: targetWidth,
+            kCVPixelBufferHeightKey as String: targetHeight,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any],
+        ]
+        var poolOut: CVPixelBufferPool?
+        CVPixelBufferPoolCreate(kCFAllocatorDefault, poolAttrs as CFDictionary, bufferAttrs as CFDictionary, &poolOut)
+        self.pool = poolOut
     }
 
     /// Scale a pixel buffer to the target dimensions. Returns `nil` if scaling
@@ -57,21 +75,16 @@ nonisolated final class FrameScaler: @unchecked Sendable {
             height: CGFloat(targetHeight))
         let croppedImage = scaledImage.cropped(to: cropRect)
 
-        // Render into a new pixel buffer.
+        // Allocate from the pool when available, fall back to one-shot create.
         var outputBuffer: CVPixelBuffer?
-        let attrs: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: CVPixelBufferGetPixelFormatType(sourceBuffer),
-            kCVPixelBufferWidthKey as String: targetWidth,
-            kCVPixelBufferHeightKey as String: targetHeight,
-        ]
-        let status = CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            targetWidth,
-            targetHeight,
-            CVPixelBufferGetPixelFormatType(sourceBuffer),
-            attrs as CFDictionary,
-            &outputBuffer)
-        guard status == kCVReturnSuccess, let output = outputBuffer else { return nil }
+        if let pool {
+            CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &outputBuffer)
+        } else {
+            CVPixelBufferCreate(
+                kCFAllocatorDefault, targetWidth, targetHeight, pixelFormat,
+                nil, &outputBuffer)
+        }
+        guard let output = outputBuffer else { return nil }
 
         ciContext.render(croppedImage, to: output)
         return output

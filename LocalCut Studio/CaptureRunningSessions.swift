@@ -96,7 +96,8 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     func updateTarget(_ newTarget: CaptureTarget) async throws {
         guard let stream else { throw CaptureEngineError.notRecording }
         self.target = newTarget
-        self.dropNextScreenFrame = true
+        // Dispatch to outputQueue to avoid racing with the stream output callback.
+        outputQueue.async { self.dropNextScreenFrame = true }
 
         let content = try await SCShareableContent.current
         let newFilter = try makeFilter(from: content)
