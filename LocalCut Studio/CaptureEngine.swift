@@ -190,7 +190,7 @@ enum CaptureSourceCatalog {
     @MainActor
     static func microphoneOptions() -> [CaptureDeviceOption] {
         let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInMicrophone, .external],
+            deviceTypes: [.microphone, .external],
             mediaType: .audio,
             position: .unspecified)
         return discovery.devices.map { CaptureDeviceOption(id: $0.uniqueID, title: $0.localizedName) }
