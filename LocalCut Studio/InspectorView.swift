@@ -2,7 +2,6 @@ import SwiftUI
 import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
-import AppKit
 import LocalCutCore
 
 /// Context-sensitive properties for the current selection plus project-wide
