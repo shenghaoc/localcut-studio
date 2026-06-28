@@ -212,6 +212,10 @@ extension EditorModel {
                 // a relink on import) rather than failing the whole export.
                 let data = try preset.encoded()
                 let copiedLUT = try await Task.detached { () -> Bool in
+                    let didAccessDestination = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if didAccessDestination { url.stopAccessingSecurityScopedResource() }
+                    }
                     try data.write(to: url, options: [.atomic])
                     guard let lutBookmark, let reference = preset.lut else { return false }
                     var isStale = false

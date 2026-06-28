@@ -14,7 +14,7 @@ import LocalCutCore
 nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize: CGSize
     private let url: URL
-    private let asset: AVAsset
+    private let generator: AVAssetImageGenerator
     private let frameStarts: [TimeInterval]
     private let duration: TimeInterval
     private let lock = NSLock()
@@ -29,7 +29,11 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
                  duration: TimeInterval) {
         self.naturalSize = naturalSize
         self.url = url
-        self.asset = asset
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        self.generator = generator
         self.frameStarts = frameStarts
         self.duration = duration
     }
@@ -125,10 +129,6 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
         }
 
         let requested = CMTime(seconds: frameStarts[index], preferredTimescale: 600)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
 
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }

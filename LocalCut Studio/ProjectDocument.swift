@@ -51,6 +51,9 @@ extension ProjectDocument {
         guard let bundleURL,
               ProjectBundle.isBundle(url: bundleURL) else { return }
 
+        let didAccess = bundleURL.startAccessingSecurityScopedResource()
+        defer { if didAccess { bundleURL.stopAccessingSecurityScopedResource() } }
+
         for index in overlays.indices {
             guard overlays[index].bookmark.isEmpty,
                   let relative = overlays[index].bundleRelativePath,
@@ -58,8 +61,6 @@ extension ProjectDocument {
 
             let sourceURL = bundleURL.appendingPathComponent(relative)
             guard FileManager.default.isReadableFile(atPath: sourceURL.path) else { continue }
-            let didAccess = sourceURL.startAccessingSecurityScopedResource()
-            defer { if didAccess { sourceURL.stopAccessingSecurityScopedResource() } }
             overlays[index].bookmark = (try? sourceURL.bookmarkData(
                 options: .withSecurityScope,
                 includingResourceValuesForKeys: nil,

@@ -271,11 +271,19 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // Overlays sit between video layers and captions. Earlier entries draw
         // first, later entries on top.
         for item in instruction.overlays {
-            if Task.isCancelled || !isPending(requestID) { return }
+            if Task.isCancelled {
+                finishCancelledRequest(requestID, request: request)
+                return
+            }
+            if !isPending(requestID) { return }
             guard let layer = await overlayLayer(for: item, time: request.compositionTime,
                                                  registryID: instruction.overlaySourceRegistryID,
                                                  renderSize: renderSize) else { continue }
-            if Task.isCancelled || !isPending(requestID) { return }
+            if Task.isCancelled {
+                finishCancelledRequest(requestID, request: request)
+                return
+            }
+            if !isPending(requestID) { return }
             result = layer.composited(over: result ?? CIImage(color: .clear)
                 .cropped(to: CGRect(origin: .zero, size: renderSize)))
         }
@@ -331,6 +339,13 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
         guard shouldFinish else { return }
         finish()
+    }
+
+    nonisolated private func finishCancelledRequest(_ requestID: UUID,
+                                                    request: AVAsynchronousVideoCompositionRequest) {
+        finishPendingRequest(requestID) {
+            request.finishCancelledRequest()
+        }
     }
 
     // MARK: - Render units
