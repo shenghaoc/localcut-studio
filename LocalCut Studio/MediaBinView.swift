@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import CoreMedia
 import LocalCutCore
 
 /// The media library: imported source files with poster frames. Selecting an
@@ -34,7 +35,7 @@ struct MediaBinView: View {
             Divider()
 
             Group {
-                if model.project.mediaItems.isEmpty {
+                if model.project.mediaItems.isEmpty && model.recoveredCaptureSessions.isEmpty {
                     ContentUnavailableView {
                         Label("No media yet", systemImage: "film.stack")
                     } description: {
@@ -48,6 +49,22 @@ struct MediaBinView: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 6) {
+                            if !model.recoveredCaptureSessions.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Recovered")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 4)
+                                    ForEach(model.recoveredCaptureSessions) { session in
+                                        RecoveredRecordingRow(session: session) {
+                                            model.importRecoveredCaptureSession(session)
+                                        }
+                                    }
+                                }
+                                .padding(.bottom, 6)
+                            }
+
                             ForEach(model.project.mediaItems) { item in
                                 MediaRow(item: item,
                                          isSelected: model.selectedMediaID == item.id,
@@ -135,6 +152,41 @@ struct MediaBinView: View {
     private func deleteFocusedMedia() {
         guard let id = focusedMediaID ?? model.selectedMediaID else { return }
         model.removeMedia(itemID: id)
+    }
+}
+
+private struct RecoveredRecordingRow: View {
+    let session: CaptureSessionResult
+    let importAction: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "recordingtape")
+                .foregroundStyle(.secondary)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Recovered recording")
+                    .font(.subheadline)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Button("Add") { importAction() }
+                .controlSize(.small)
+        }
+        .padding(6)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Recovered recording, \(detail)")
+        .accessibilityAction(named: "Add to Timeline") { importAction() }
+    }
+
+    private var detail: String {
+        let sources = session.manifest.recoveredSources
+        let duration = sources.map { $0.duration.seconds }.max() ?? 0
+        let sourceLabel = sources.count == 1 ? "1 source" : "\(sources.count) sources"
+        return "\(sourceLabel), \(TimeFormatting.timecode(duration))"
     }
 }
 

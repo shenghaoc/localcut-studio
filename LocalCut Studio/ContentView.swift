@@ -207,7 +207,11 @@ struct EditorView: View {
         .tint(.lcAccent)
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) { statusBar }
+        .onAppear { Task { await model.scanRecoveredRecordings() } }
         .onDisappear { model.teardownAudioMetering() }
+        .sheet(isPresented: $model.isRecorderPresented) {
+            RecorderSetupView(model: model)
+        }
         .background(WindowConfigurator(model: model))
         .overlay(alignment: .topTrailing) {
             if model.isDiagnosticsVisible {
@@ -254,6 +258,22 @@ struct EditorView: View {
             .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             .keyboardShortcut(.delete, modifiers: [])
             .help("Delete selected clip or transition")
+
+            if model.isRecording {
+                Button {
+                    model.stopRecording()
+                } label: {
+                    Label("Stop", systemImage: "stop.circle.fill")
+                }
+                .help("Stop recording")
+            } else {
+                Button {
+                    model.requestRecorder()
+                } label: {
+                    Label("Record", systemImage: "record.circle")
+                }
+                .help("Open recorder")
+            }
 
             Button {
                 model.inspectorVisible.toggle()
