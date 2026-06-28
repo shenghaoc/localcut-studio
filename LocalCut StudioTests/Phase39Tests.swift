@@ -113,6 +113,43 @@ struct Phase39Tests {
         #expect(decoded.renderHeight == 1001)
     }
 
+    @Test("Custom size edits preserve custom aspect and clamp unsafe dimensions")
+    func customSizeEditsPreserveCustomAspectAndClamp() {
+        let model = EditorModel()
+
+        model.setProjectAspect(.custom)
+        model.setRenderSize(CGSize(width: 1000, height: 1001))
+
+        #expect(model.project.aspect == .custom)
+        #expect(model.project.renderSize == CGSize(width: 1000, height: 1001))
+
+        model.setRenderSize(CGSize(width: 1.0e20, height: .infinity))
+
+        #expect(model.project.aspect == .custom)
+        #expect(model.project.renderSize == CGSize(width: 8192, height: 8192))
+    }
+
+    @Test("Cover extraction time snaps to a valid project frame")
+    func coverExtractionTimeSnapsToProjectFrame() {
+        let snapped = EditorModel.snappedCoverFrameSeconds(
+            requested: 1.234,
+            duration: 2.0,
+            frameRate: 30)
+        #expect(abs(snapped - (37.0 / 30.0)) < 0.000_001)
+
+        let endClamped = EditorModel.snappedCoverFrameSeconds(
+            requested: 2.0,
+            duration: 2.0,
+            frameRate: 30)
+        #expect(abs(endClamped - (59.0 / 30.0)) < 0.000_001)
+
+        let nonFinite = EditorModel.snappedCoverFrameSeconds(
+            requested: .infinity,
+            duration: .infinity,
+            frameRate: 0)
+        #expect(nonFinite == 0)
+    }
+
     @Test("Built-in safe-zone profiles validate")
     func safeZoneProfilesValidate() {
         #expect(SafeZoneLibrary.builtInProfiles.count >= 6)

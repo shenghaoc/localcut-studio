@@ -31,6 +31,20 @@ extension EditorModel {
         }
     }
 
+    func nudgeCoverFrame(byFrames frames: Int) {
+        let fps = project.frameRate.isFinite && project.frameRate > 0 ? project.frameRate : 30
+        let current = project.coverFrame?.time.cmTime.seconds ?? currentTime
+        let frameStep = Double(frames) / fps
+        let lastFrame = max(0, totalDuration - (1.0 / fps))
+        let seconds = min(max(0, current + frameStep), lastFrame)
+        performUndoable("Nudge Cover Frame") {
+            var cover = project.coverFrame
+                ?? CoverFrameDoc(time: CMTimeCode(CMTime(seconds: max(0, current), preferredTimescale: 600)))
+            cover.time = CMTimeCode(CMTime(seconds: seconds, preferredTimescale: 600))
+            project.coverFrame = cover
+        }
+    }
+
     func setCoverFormat(_ format: CoverFormat) {
         performUndoable("Set Cover Format") {
             var cover = project.coverFrame
@@ -78,9 +92,10 @@ extension EditorModel {
 
         // Render the cover from a frame strictly inside the timeline: requesting
         // exactly at `duration` (the exclusive end) can fail to produce an image.
-        let frameStep = project.frameRate > 0 ? 1.0 / project.frameRate : 0
-        let lastFrame = max(0, built.duration - frameStep)
-        let seconds = min(max(0, cover.time.cmTime.seconds), lastFrame)
+        let seconds = Self.snappedCoverFrameSeconds(
+            requested: cover.time.cmTime.seconds,
+            duration: built.duration,
+            frameRate: project.frameRate)
         let frameImage = try await Self.generateCoverImage(
             generator: generator,
             time: CMTime(seconds: seconds, preferredTimescale: 600))
@@ -89,11 +104,25 @@ extension EditorModel {
         let imageWithTitle = try Self.imageWithTitleIfNeeded(
             frameImage,
             title: cover.title,
-            renderSize: project.renderSize)
+            renderSize: project.renderSize,
+            workingColourSpace: project.workingColourSpace)
         let format = cover.format
         return try await Task.detached {
             try Self.encodeCoverImage(imageWithTitle, format: format)
         }.value
+    }
+
+    nonisolated static func snappedCoverFrameSeconds(requested: Double,
+                                                     duration: Double,
+                                                     frameRate: Double) -> Double {
+        let fps = frameRate.isFinite && frameRate > 0 ? frameRate : 30
+        let frameStep = 1.0 / fps
+        let timelineDuration = duration.isFinite ? max(0, duration) : 0
+        let lastFrame = max(0, timelineDuration - frameStep)
+        let requested = requested.isFinite ? requested : 0
+        let clamped = min(max(0, requested), lastFrame)
+        let snapped = (clamped / frameStep).rounded() * frameStep
+        return min(max(0, snapped), lastFrame)
     }
 
     /// Bridges the completion-handler frame API into async/await. Kept over the
@@ -115,28 +144,28 @@ extension EditorModel {
     @MainActor
     private static func imageWithTitleIfNeeded(_ image: CGImage,
                                                title: CoverTitleDoc?,
-                                               renderSize: CGSize) throws -> CGImage {
+                                               renderSize: CGSize,
+                                               workingColourSpace: WorkingColourSpace) throws -> CGImage {
         guard let title, !title.text.isEmpty else { return image }
         let width = max(1, Int(renderSize.width.rounded()))
         let height = max(1, Int(renderSize.height.rounded()))
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: width,
-            pixelsHigh: height,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue
+            | CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
             bytesPerRow: 0,
-            bitsPerPixel: 0),
-              let graphicsContext = NSGraphicsContext(bitmapImageRep: rep) else {
+            space: workingColourSpace.cgColorSpace,
+            bitmapInfo: bitmapInfo) else {
             throw CoverExportError.imageEncodingFailed
         }
+        let graphicsContext = NSGraphicsContext(cgContext: context, flipped: false)
         let size = NSSize(width: width, height: height)
-        NSGraphicsContext.saveGraphicsState()
+        let previousContext = NSGraphicsContext.current
         NSGraphicsContext.current = graphicsContext
-        defer { NSGraphicsContext.restoreGraphicsState() }
+        defer { NSGraphicsContext.current = previousContext }
         NSColor.black.setFill()
         NSRect(origin: .zero, size: size).fill()
         NSImage(cgImage: image, size: size).draw(
@@ -163,7 +192,7 @@ extension EditorModel {
         NSString(string: title.text).draw(
             in: NSRect(x: originX, y: originY, width: textWidth, height: textHeight),
             withAttributes: attributes)
-        guard let cgImage = rep.cgImage else { throw CoverExportError.imageEncodingFailed }
+        guard let cgImage = context.makeImage() else { throw CoverExportError.imageEncodingFailed }
         return cgImage
     }
 

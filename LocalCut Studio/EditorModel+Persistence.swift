@@ -149,6 +149,9 @@ extension EditorModel {
             // must drop the now-stale entries — applyState bypasses the setters
             // that would otherwise purge.
             EffectCompositor.purgeCaptionRasterCache()
+            if renderSizeChanged {
+                RenderCache.shared.invalidate(notMatchingRenderSize: state.renderSize)
+            }
         }
         project.coverFrame = state.coverFrame
         for snapshot in state.videoTracks {

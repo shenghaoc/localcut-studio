@@ -52,6 +52,7 @@ struct SafeZoneProfile: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+@MainActor
 enum SafeZoneLibrary {
     static let defaultProfileID = "tiktok"
 
