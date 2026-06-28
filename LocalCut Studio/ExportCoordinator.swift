@@ -13,7 +13,10 @@ final class ExportCoordinator {
             model.statusMessage = "Could not access \(url.lastPathComponent)."
             return
         }
-        model.renderQueue.enqueueWithDefaultPreset(outputURL: url, project: model.project, bookmark: bookmark)
+        model.renderQueue.enqueueWithDefaultPreset(outputURL: url,
+                                                   project: model.project,
+                                                   bookmark: bookmark,
+                                                   projectDocumentURL: model.documentURL)
         model.statusMessage = "Queued \(url.lastPathComponent) with \(BuiltInExportPresets.defaultPreset.name)."
     }
 }

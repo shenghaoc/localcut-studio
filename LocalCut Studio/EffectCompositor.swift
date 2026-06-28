@@ -47,6 +47,19 @@ struct CaptionRenderItem: Sendable {
     let range: CMTimeRange
 }
 
+/// One animated overlay scheduled inside a composition instruction. Carries the
+/// metadata the compositor needs to locate and render the overlay frame.
+struct OverlayRenderItem: Sendable {
+    let overlayID: UUID
+    let sourceType: OverlaySourceType
+    let range: CMTimeRange
+    let positionOffset: CGSize
+    let scale: CGFloat
+    let rotation: CGFloat
+    let opacity: Float
+    let endAction: OverlayEndAction
+}
+
 /// One bottom-to-top render step within an instruction interval: either a single
 /// layer, or a transition that blends an outgoing and incoming layer over a
 /// derived progress through the overlap interval.
@@ -74,19 +87,29 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let passthroughTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
     let units: [RenderUnit]
     let captions: [CaptionRenderItem]
+    let overlays: [OverlayRenderItem]
+    let overlaySourceRegistryID: UUID?
+    /// Project frame rate — used by grain to advance the noise pattern each
+    /// real frame instead of hardcoding a 24 fps cadence.
+    let frameRate: Double
     /// Working colour space — drives the per-space `CIContext` choice and the
     /// output buffer's colour-tag attachments.
     let workingColourSpace: WorkingColourSpace
 
     init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = [],
-         workingColourSpace: WorkingColourSpace = .sRGB) {
+         overlays: [OverlayRenderItem] = [], overlaySourceRegistryID: UUID? = nil,
+         frameRate: Double = 24, workingColourSpace: WorkingColourSpace = .sRGB) {
         self.timeRange = timeRange
         self.units = units
         self.captions = captions
+        self.overlays = overlays
+        self.overlaySourceRegistryID = overlaySourceRegistryID
+        self.frameRate = frameRate
         self.workingColourSpace = workingColourSpace
         // A transition tweens its layers across the interval. Captions also tween
         // (per-frame animation transform), so any caption forces tweening too.
-        containsTweening = !captions.isEmpty || units.contains {
+        // Overlays also tween (per-frame position/scale/opacity).
+        containsTweening = !captions.isEmpty || !overlays.isEmpty || units.contains {
             if case .transition = $0 { return true }; return false
         }
         let trackIDs = units.flatMap(\.trackIDs)
@@ -96,6 +119,16 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
 // MARK: - Custom video compositor
 
+nonisolated private struct PendingVideoCompositionRequest: @unchecked Sendable {
+    let request: AVAsynchronousVideoCompositionRequest
+    var task: Task<Void, Never>?
+
+    init(request: AVAsynchronousVideoCompositionRequest, task: Task<Void, Never>? = nil) {
+        self.request = request
+        self.task = task
+    }
+}
+
 final class EffectCompositor: NSObject, AVVideoCompositing {
 
     /// Per-working-space `CIContext` cache. `CIContext.workingColorSpace` is
@@ -104,6 +137,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// `uncheckedState:` because `CIContext` is not `Sendable`; the lock is
     /// the synchronisation, not the type system.
     private static let contextCache = OSAllocatedUnfairLock<[WorkingColourSpace: CIContext]>(uncheckedState: [:])
+    private let pendingRequests = OSAllocatedUnfairLock<[UUID: PendingVideoCompositionRequest]>(uncheckedState: [:])
 
     nonisolated static func context(for space: WorkingColourSpace) -> CIContext {
         contextCache.withLock { cache in
@@ -177,6 +211,37 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             return
         }
 
+        let requestID = UUID()
+        let pending = PendingVideoCompositionRequest(request: request)
+        pendingRequests.withLock { $0[requestID] = pending }
+        let task = Task.detached(priority: .userInitiated) { [self] in
+            await renderRequest(request, instruction: instruction, requestID: requestID)
+        }
+        pendingRequests.withLock { requests in
+            guard var pending = requests[requestID] else {
+                task.cancel()
+                return
+            }
+            pending.task = task
+            requests[requestID] = pending
+        }
+    }
+
+    nonisolated func cancelAllPendingVideoCompositionRequests() {
+        let requests = pendingRequests.withLock { requests in
+            let pending = Array(requests.values)
+            requests.removeAll()
+            return pending
+        }
+        for request in requests {
+            request.task?.cancel()
+            request.request.finishCancelledRequest()
+        }
+    }
+
+    nonisolated private func renderRequest(_ request: AVAsynchronousVideoCompositionRequest,
+                                           instruction: EffectCompositionInstruction,
+                                           requestID: UUID) async {
         // Gate render-time collection on the diagnostics panel actually being
         // open — otherwise every preview / export frame would pay for a
         // timestamp + lock + ring-buffer mutation that nobody reads (Codex P2).
@@ -194,7 +259,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         var result: CIImage?
 
         for unit in instruction.units {
-            guard let image = renderedImage(for: unit, request: request) else { continue }
+            guard let image = renderedImage(for: unit, request: request,
+                                            frameRate: instruction.frameRate) else { continue }
             if let existing = result {
                 result = image.composited(over: existing)
             } else {
@@ -202,8 +268,27 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             }
         }
 
-        // Captions sit on top of every clip layer, honouring track / instruction
-        // order: earlier entries draw first, later entries on top.
+        // Overlays sit between video layers and captions. Earlier entries draw
+        // first, later entries on top.
+        for item in instruction.overlays {
+            if Task.isCancelled {
+                finishCancelledRequest(requestID, request: request)
+                return
+            }
+            if !isPending(requestID) { return }
+            guard let layer = await overlayLayer(for: item, time: request.compositionTime,
+                                                 registryID: instruction.overlaySourceRegistryID,
+                                                 renderSize: renderSize) else { continue }
+            if Task.isCancelled {
+                finishCancelledRequest(requestID, request: request)
+                return
+            }
+            if !isPending(requestID) { return }
+            result = layer.composited(over: result ?? CIImage(color: .clear)
+                .cropped(to: CGRect(origin: .zero, size: renderSize)))
+        }
+
+        // Captions sit on top of every clip and overlay layer.
         for item in instruction.captions {
             guard let layer = captionLayer(for: item, time: request.compositionTime,
                                            renderSize: renderSize) else { continue }
@@ -212,7 +297,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
 
         guard let destination = request.renderContext.newPixelBuffer() else {
-            request.finish(with: AVError(.invalidVideoComposition))
+            finishPendingRequest(requestID) {
+                request.finish(with: AVError(.invalidVideoComposition))
+            }
             return
         }
 
@@ -235,7 +322,30 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             ScopeSampler.shared.publish(sample)
         }
 
-        request.finish(withComposedVideoFrame: destination)
+        finishPendingRequest(requestID) {
+            request.finish(withComposedVideoFrame: destination)
+        }
+    }
+
+    nonisolated private func isPending(_ requestID: UUID) -> Bool {
+        pendingRequests.withLock {
+            $0[requestID] != nil
+        }
+    }
+
+    nonisolated private func finishPendingRequest(_ requestID: UUID, finish: () -> Void) {
+        let shouldFinish = pendingRequests.withLock {
+            $0.removeValue(forKey: requestID) != nil
+        }
+        guard shouldFinish else { return }
+        finish()
+    }
+
+    nonisolated private func finishCancelledRequest(_ requestID: UUID,
+                                                    request: AVAsynchronousVideoCompositionRequest) {
+        finishPendingRequest(requestID) {
+            request.finishCancelledRequest()
+        }
     }
 
     // MARK: - Render units
@@ -243,15 +353,16 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// Renders a single unit (a plain layer or a transition blend) to a CIImage.
     nonisolated private func renderedImage(
         for unit: RenderUnit,
-        request: AVAsynchronousVideoCompositionRequest) -> CIImage? {
+        request: AVAsynchronousVideoCompositionRequest,
+        frameRate: Double = 24) -> CIImage? {
 
         switch unit {
         case .layer(let layer):
-            return renderedImage(for: layer, request: request)
+            return renderedImage(for: layer, request: request, frameRate: frameRate)
 
         case .transition(let outgoing, let incoming, let type, let wipeAngle, let overlap):
-            let out = renderedImage(for: outgoing, request: request)
-            let into = renderedImage(for: incoming, request: request)
+            let out = renderedImage(for: outgoing, request: request, frameRate: frameRate)
+            let into = renderedImage(for: incoming, request: request, frameRate: frameRate)
             // If a source frame is missing, fall back to whichever is available.
             guard let out else { return into }
             guard let into else { return out }
@@ -269,7 +380,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// its source frame.
     nonisolated private func renderedImage(
         for layer: CompositorLayer,
-        request: AVAsynchronousVideoCompositionRequest) -> CIImage? {
+        request: AVAsynchronousVideoCompositionRequest,
+        frameRate: Double = 24) -> CIImage? {
 
         guard let sourceBuffer = request.sourceFrame(byTrackID: layer.trackID) else { return nil }
 
@@ -298,15 +410,23 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             // across repeated source-frame requests (speed ramps, frame
             // interpolation) and unique per source frame (no collisions
             // across pieces of the same clip).
+            let usesOutputFrameCadence = layer.effects.contains { effect in
+                if case .grain = effect { return true }
+                return false
+            }
+            let cacheTime = usesOutputFrameCadence ? request.compositionTime : sourceTime
             let cacheKey: RenderCacheKey? = layer.effects.isEmpty ? nil : {
                 return RenderCacheKey(
                     clipID: layer.clipID,
                     effectChainHash: layer.effects.renderCacheHash,
-                    time: sourceTime,
-                    renderSize: request.renderContext.size)
+                    time: cacheTime,
+                    renderSize: request.renderContext.size,
+                    frameRate: frameRate)
             }()
             image = applyEffectChain(image, effects: layer.effects,
-                                     cacheKey: cacheKey, at: clipLocalTime)
+                                     cacheKey: cacheKey, at: clipLocalTime,
+                                     grainCadenceTime: request.compositionTime,
+                                     frameRate: frameRate)
         }
 
         image = image.transformed(by: layer.transform)
@@ -321,6 +441,108 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let renderRect = CGRect(origin: .zero, size: request.renderContext.size)
         let canvas = CIImage(color: .clear).cropped(to: renderRect)
         return image.composited(over: canvas).cropped(to: renderRect)
+    }
+
+    // MARK: - Overlays
+
+    /// Frame-source registries keyed by preview/export session. Sources are
+    /// intentionally not shared globally by overlay ID: a preview rebuild and an
+    /// export can overlap with different resolved files for the same overlay ID.
+    nonisolated(unsafe) private static var overlaySourceLock = NSLock()
+    nonisolated(unsafe) private static var overlaySourceRegistries: [UUID: [UUID: any OverlayFrameSource]] = [:]
+
+    /// Registers one immutable source map for a preview/export session.
+    @discardableResult
+    nonisolated static func registerOverlaySources(_ sources: [UUID: any OverlayFrameSource]) -> UUID? {
+        guard !sources.isEmpty else { return nil }
+        let registryID = UUID()
+        overlaySourceLock.lock()
+        overlaySourceRegistries[registryID] = sources
+        overlaySourceLock.unlock()
+        return registryID
+    }
+
+    /// Releases a single preview/export source map.
+    nonisolated static func releaseOverlaySources(for registryID: UUID?) {
+        guard let registryID else { return }
+        overlaySourceLock.lock()
+        overlaySourceRegistries.removeValue(forKey: registryID)
+        overlaySourceLock.unlock()
+    }
+
+    /// Renders one overlay for the current frame: resolves the frame source,
+    /// decodes the frame at the overlay-local time, applies transform and
+    /// opacity, and crops to the render canvas.
+    nonisolated private func overlayLayer(for item: OverlayRenderItem,
+                                          time: CMTime,
+                                          registryID: UUID?,
+                                          renderSize: CGSize) async -> CIImage? {
+        // Resolve the frame source.
+        let source = Self.overlaySourceLock.withLock {
+            registryID.flatMap { Self.overlaySourceRegistries[$0]?[item.overlayID] }
+        }
+        guard let source else { return nil }
+
+        // Compute overlay-local time (relative to the overlay's start).
+        let localTime = CMTimeMaximum(time - item.range.start, .zero)
+        guard let frame = await source.frame(at: localTime, endAction: item.endAction) else {
+            return nil
+        }
+
+        var image = frame
+
+        let overlayW = source.naturalSize.width
+        let overlayH = source.naturalSize.height
+        guard let transform = Self.overlayTransform(
+            naturalSize: CGSize(width: overlayW, height: overlayH),
+            scale: item.scale,
+            rotation: item.rotation,
+            positionOffset: item.positionOffset,
+            renderSize: renderSize) else { return nil }
+        image = image.transformed(by: transform)
+
+        if item.opacity < 1 {
+            image = scaled(image, by: Float(item.opacity))
+        }
+
+        let renderRect = CGRect(origin: .zero, size: renderSize)
+        let canvas = CIImage(color: .clear).cropped(to: renderRect)
+        return image.composited(over: canvas).cropped(to: renderRect)
+    }
+
+    /// Transform from overlay source-pixel coordinates into render coordinates.
+    /// `scale == 1` preserves the source's natural pixel size; position is the
+    /// render centre plus the normalized authoring offset.
+    nonisolated static func overlayTransform(naturalSize: CGSize,
+                                             scale: CGFloat,
+                                             rotation: CGFloat,
+                                             positionOffset: CGSize,
+                                             renderSize: CGSize) -> CGAffineTransform? {
+        guard naturalSize.width.isFinite,
+              naturalSize.height.isFinite,
+              renderSize.width.isFinite,
+              renderSize.height.isFinite,
+              scale.isFinite,
+              rotation.isFinite,
+              positionOffset.width.isFinite,
+              positionOffset.height.isFinite,
+              naturalSize.width > 0,
+              naturalSize.height > 0,
+              renderSize.width > 0,
+              renderSize.height > 0,
+              scale > 0 else { return nil }
+
+        let centreX = renderSize.width / 2 + positionOffset.width * renderSize.width / 2
+        let centreY = renderSize.height / 2 - positionOffset.height * renderSize.height / 2
+
+        var transform = CGAffineTransform(translationX: centreX, y: centreY)
+        if rotation != 0 {
+            transform = transform.rotated(by: rotation)
+        }
+        transform = transform.scaledBy(x: scale, y: scale)
+        transform = transform.translatedBy(x: -naturalSize.width / 2,
+                                           y: -naturalSize.height / 2)
+        return transform
     }
 
     // MARK: - Captions
@@ -506,9 +728,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     // pass-through invariant — an empty effect chain must return the input
     // image byte-for-byte (R5.1 from feature-colour-grading / EffectsTests).
     nonisolated func applyEffectChain(_ image: CIImage,
-                                      effects: [Effect],
-                                      cacheKey: RenderCacheKey?,
-                                      at time: CMTime = .zero) -> CIImage {
+                                       effects: [Effect],
+                                       cacheKey: RenderCacheKey?,
+                                       at time: CMTime = .zero,
+                                       grainCadenceTime: CMTime? = nil,
+                                       frameRate: Double = 24) -> CIImage {
         if effects.isEmpty { return image }
         if let cacheKey, let cached = RenderCache.shared.image(for: cacheKey) {
             return cached
@@ -516,7 +740,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let sourceExtent = image.extent
         var result = image
         var allEffectsApplied = true
-        for effect in effects {
+        // Render in canonical pipeline order (colour/LUT → skin → looks) so the
+        // output is independent of the order the inspector controls were used.
+        for effect in effects.canonicalPipelineOrder() {
             switch effect {
             case .colourGrade(let grade):
                 result = applyColourGrade(result, grade: grade)
@@ -534,6 +760,14 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 // Returning nil here is deterministic (bypass, strength == 0,
                 // kernel unavailable) — safe to cache as-is.
                 result = applySkinSmooth(result, params: params, at: time) ?? result
+            case .halation(let params):
+                result = applyHalation(result, params: params, at: time)
+            case .vignette(let params):
+                result = applyVignette(result, params: params, at: time)
+            case .grain(let params):
+                result = applyGrain(result, params: params, at: time,
+                                    cadenceTime: grainCadenceTime ?? time,
+                                    frameRate: frameRate)
             }
         }
         // Materialise into a CGImage-backed CIImage before caching: a lazy
@@ -584,6 +818,132 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 filter.targetNeutral = CIVector(x: 6500 + CGFloat(grade.temperatureOffset), y: CGFloat(grade.tintOffset))
                 return filter.outputImage
             }
+    }
+
+    // MARK: - Film look effects
+
+    /// Applies procedural grain using Core Image's deterministic random source.
+    /// Grain is intentionally last in the built-in presets so halation and
+    /// vignette do not blur or reshape the pattern. The noise pattern advances
+    /// each real frame at the project's frame rate so it never appears frozen.
+    nonisolated func applyGrain(_ image: CIImage, params: GrainEffect, at time: CMTime,
+                                 cadenceTime: CMTime? = nil,
+                                 frameRate: Double = 24) -> CIImage {
+        let amount = params.amount(at: time)
+        guard amount > 0 else { return image }
+
+        let random = CIFilter.randomGenerator()
+        guard var noise = random.outputImage else { return image }
+
+        let size = max(0.25, CGFloat(params.size))
+        let grainCadence = frameRate.isFinite ? max(1, frameRate) : 1
+        let cadenceSeconds = (cadenceTime ?? time).seconds
+        let frame = cadenceSeconds.isFinite ? floor(cadenceSeconds * grainCadence) : 0
+        let seedOffset = CGFloat(params.seed % 997) + CGFloat(frame.truncatingRemainder(dividingBy: 997))
+        noise = noise
+            .transformed(by: CGAffineTransform(translationX: seedOffset, y: -seedOffset * 0.37))
+            .transformed(by: CGAffineTransform(scaleX: size, y: size))
+            .cropped(to: image.extent)
+
+        if params.monochrome {
+            let mono = CIFilter.colorMatrix()
+            mono.inputImage = noise
+            mono.rVector = CIVector(x: 0.299, y: 0.587, z: 0.114, w: 0)
+            mono.gVector = CIVector(x: 0.299, y: 0.587, z: 0.114, w: 0)
+            mono.bVector = CIVector(x: 0.299, y: 0.587, z: 0.114, w: 0)
+            mono.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+            noise = mono.outputImage ?? noise
+        }
+
+        let contrast = CGFloat(amount) * 0.42
+        let tuned = CIFilter.colorMatrix()
+        tuned.inputImage = noise
+        tuned.rVector = CIVector(x: contrast, y: 0, z: 0, w: 0)
+        tuned.gVector = CIVector(x: 0, y: contrast, z: 0, w: 0)
+        tuned.bVector = CIVector(x: 0, y: 0, z: contrast, w: 0)
+        tuned.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        tuned.biasVector = CIVector(x: 0.5 - contrast * 0.5,
+                                    y: 0.5 - contrast * 0.5,
+                                    z: 0.5 - contrast * 0.5,
+                                    w: 0)
+
+        let blend = CIFilter.softLightBlendMode()
+        blend.inputImage = tuned.outputImage?.cropped(to: image.extent) ?? noise
+        blend.backgroundImage = image
+        return (blend.outputImage ?? image).cropped(to: image.extent)
+    }
+
+    /// Adds a warm glow to highlights. `threshold` shapes a bright-pass proxy
+    /// before the blur, giving presets control over how quickly midtones bloom.
+    nonisolated func applyHalation(_ image: CIImage, params: HalationEffect, at time: CMTime) -> CIImage {
+        let strength = params.strength(at: time)
+        guard strength > 0, params.radius > 0 else { return image }
+
+        let threshold = params.threshold
+        let brightPass = CIFilter.colorControls()
+        brightPass.inputImage = image
+        brightPass.brightness = -threshold * 0.45
+        brightPass.contrast = 2.5 + threshold * 4
+        brightPass.saturation = 0.85
+
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = (brightPass.outputImage ?? image).clampedToExtent()
+        blur.radius = params.radius
+        let glow = (blur.outputImage ?? image).cropped(to: image.extent)
+
+        // Scale every colour-matrix vector by the same strength factor so the
+        // premultiplied-alpha relationship stays valid (RGB never exceeds the
+        // alpha channel). This also folds the previous redundant `scaled()` pass
+        // into a single filter — scaling alpha alone then again afterwards left
+        // an invalid premultiplied state and double-applied the strength.
+        let warm = CIFilter.colorMatrix()
+        warm.inputImage = glow
+        let redGain = CGFloat(1 + params.redBoost * strength)
+        let factor = CGFloat(strength) * 0.65
+        warm.rVector = CIVector(x: redGain * factor, y: 0, z: 0, w: 0)
+        warm.gVector = CIVector(x: 0, y: 0.42 * factor, z: 0, w: 0)
+        warm.bVector = CIVector(x: 0, y: 0, z: 0.18 * factor, w: 0)
+        warm.aVector = CIVector(x: 0, y: 0, z: 0, w: factor)
+
+        let scaledGlow = (warm.outputImage ?? glow).cropped(to: image.extent)
+        let add = CIFilter.additionCompositing()
+        add.inputImage = scaledGlow
+        add.backgroundImage = image
+        return (add.outputImage ?? image).cropped(to: image.extent)
+    }
+
+    /// Applies edge shading with Core Image's radial vignette. Negative amounts
+    /// invert into a subtle edge lift for faded-stock looks.
+    nonisolated func applyVignette(_ image: CIImage, params: VignetteEffect, at time: CMTime) -> CIImage {
+        let amount = params.amount(at: time)
+        guard amount != 0 else { return image }
+
+        let maxDimension = Float(max(image.extent.width, image.extent.height))
+        let radius = maxDimension * params.radius
+        let intensity = abs(amount) * (1 + params.softness)
+
+        if amount < 0 {
+            let gradient = CIFilter.radialGradient()
+            gradient.center = CGPoint(x: image.extent.midX, y: image.extent.midY)
+            let innerRadius = max(0, radius * (1 - params.softness))
+            gradient.radius0 = innerRadius
+            gradient.radius1 = max(innerRadius + 1, radius)
+            gradient.color0 = CIColor(red: 1, green: 1, blue: 1, alpha: 0)
+            gradient.color1 = CIColor(red: 1, green: 1, blue: 1,
+                                      alpha: CGFloat(min(0.75, intensity * 0.45)))
+            guard let lift = gradient.outputImage?.cropped(to: image.extent) else { return image }
+
+            let composite = CIFilter.sourceOverCompositing()
+            composite.inputImage = lift
+            composite.backgroundImage = image
+            return (composite.outputImage ?? image).cropped(to: image.extent)
+        }
+
+        let filter = CIFilter.vignette()
+        filter.inputImage = image
+        filter.intensity = intensity
+        filter.radius = radius
+        return (filter.outputImage ?? image).cropped(to: image.extent)
     }
 
     // MARK: - Skin smoothing kernels

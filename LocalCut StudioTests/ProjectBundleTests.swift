@@ -140,6 +140,163 @@ struct ProjectBundleTests {
         #expect(ref.bookmark == Data([0xBA, 0x5E]))
     }
 
+    @Test("Bundle save copies overlay sources under assets and strips their bookmarks")
+    func bundleSaveCopiesOverlaySources() throws {
+        let tmp = try makeTempDirectory("overlay-source")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let source = try writeAsset(
+            Array("{\"v\":\"5.7.4\",\"fr\":30,\"ip\":0,\"op\":1,\"w\":8,\"h\":8,\"layers\":[]}".utf8),
+            name: "sticker.json",
+            in: tmp)
+        let bundleURL = tmp.appendingPathComponent("OverlayProject.lcbundle")
+
+        let model = EditorModel()
+        let overlay = OverlayClip(
+            id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+            sourceType: .lottie,
+            timelineStart: time(1),
+            duration: time(2))
+        model.project.overlays = [overlay]
+        model.project.overlayBookmarks[overlay.id] = try source.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil)
+
+        #expect(model.writeSynchronously(to: bundleURL))
+
+        let contents = try ProjectBundle.read(url: bundleURL)
+        let docOverlay = try #require(contents.document.overlays.first)
+        let relativePath = try #require(docOverlay.bundleRelativePath)
+        let copiedURL = bundleURL.appendingPathComponent(relativePath)
+
+        #expect(relativePath == "assets/\(overlay.id.uuidString).json")
+        #expect(FileManager.default.fileExists(atPath: copiedURL.path))
+        #expect(try Data(contentsOf: copiedURL) == Data(contentsOf: source))
+        #expect(docOverlay.bookmark.isEmpty)
+        #expect(contents.fingerprints.entries[relativePath] != nil)
+    }
+
+    @Test("Single-file save strips stale overlay bundle paths")
+    func singleFileSaveStripsOverlayBundlePaths() {
+        let model = EditorModel()
+        let overlay = OverlayClip(
+            sourceType: .animatedImage,
+            timelineStart: .zero,
+            duration: time(1))
+        model.project.overlays = [overlay]
+        model.project.overlayBookmarks[overlay.id] = Data([0x01])
+        model.project.overlayBundlePaths[overlay.id] = "assets/\(overlay.id.uuidString).gif"
+
+        let document = model.makeDocumentForSave(forBundle: false)
+
+        #expect(document.overlays.first?.bundleRelativePath == nil)
+        #expect(document.overlays.first?.bookmark == Data([0x01]))
+    }
+
+    @Test("Single-file save converts bundled overlay paths into bookmarks")
+    func singleFileSavePreservesBundledOverlaySources() throws {
+        let tmp = try makeTempDirectory("overlay-single-file")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("OverlayProject.lcbundle")
+        let overlayID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let relativePath = "assets/\(overlayID.uuidString).json"
+        let sourceURL = bundleURL.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: sourceURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        try Data(#"{"v":"5.7.4","fr":30,"ip":0,"op":1,"w":8,"h":8,"layers":[]}"#.utf8)
+            .write(to: sourceURL, options: .atomic)
+
+        let model = EditorModel()
+        model.documentURL = bundleURL
+        model.project.overlays = [
+            OverlayClip(
+                id: overlayID,
+                sourceType: .lottie,
+                timelineStart: .zero,
+                duration: time(1)),
+        ]
+        model.project.overlayBundlePaths[overlayID] = relativePath
+
+        let document = model.makeDocumentForSave(forBundle: false)
+        let savedOverlay = try #require(document.overlays.first)
+
+        #expect(savedOverlay.bundleRelativePath == nil)
+        #expect(!savedOverlay.bookmark.isEmpty)
+    }
+
+    @Test("Single-file save promotes bundled overlay bookmarks back into the live project")
+    func singleFileSavePromotesOverlayBookmarksIntoModel() throws {
+        let tmp = try makeTempDirectory("overlay-single-file-model")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("OverlayProject.lcbundle")
+        let overlayID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        let relativePath = "assets/\(overlayID.uuidString).json"
+        let sourceURL = bundleURL.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: sourceURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        try Data(#"{"v":"5.7.4","fr":30,"ip":0,"op":1,"w":8,"h":8,"layers":[]}"#.utf8)
+            .write(to: sourceURL, options: .atomic)
+
+        let model = EditorModel()
+        model.documentURL = bundleURL
+        model.project.overlays = [
+            OverlayClip(
+                id: overlayID,
+                sourceType: .lottie,
+                timelineStart: .zero,
+                duration: time(1)),
+        ]
+        model.project.overlayBundlePaths[overlayID] = relativePath
+
+        let singleFileURL = tmp.appendingPathComponent("OverlayProject.\(ProjectDocument.fileExtension)")
+        #expect(model.writeSynchronously(to: singleFileURL))
+
+        #expect(model.project.overlayBundlePaths[overlayID] == nil)
+        #expect(!(model.project.overlayBookmarks[overlayID]?.isEmpty ?? true))
+        let saved = try ProjectDocument(data: Data(contentsOf: singleFileURL))
+        let savedOverlay = try #require(saved.overlays.first)
+        #expect(savedOverlay.bundleRelativePath == nil)
+        #expect(!savedOverlay.bookmark.isEmpty)
+    }
+
+    @Test("Queue snapshot adds bookmarks for bundled overlay sources")
+    func queueSnapshotAddsBundledOverlayBookmarks() throws {
+        let tmp = try makeTempDirectory("overlay-queue-snapshot")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let source = try writeAsset(
+            Array("{\"v\":\"5.7.4\",\"fr\":30,\"ip\":0,\"op\":1,\"w\":8,\"h\":8,\"layers\":[]}".utf8),
+            name: "sticker.json",
+            in: tmp)
+        let bundleURL = tmp.appendingPathComponent("OverlayQueue.lcbundle")
+
+        let model = EditorModel()
+        let overlay = OverlayClip(
+            id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+            sourceType: .lottie,
+            timelineStart: time(1),
+            duration: time(2))
+        model.project.overlays = [overlay]
+        model.project.overlayBookmarks[overlay.id] = try source.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil)
+
+        #expect(model.writeSynchronously(to: bundleURL))
+
+        let saved = try ProjectBundle.read(url: bundleURL).document
+        let savedOverlay = try #require(saved.overlays.first)
+        #expect(savedOverlay.bookmark.isEmpty)
+
+        model.project.overlayBookmarks.removeAll()
+        let snapshot = ProjectDocument(project: model.project, queueBundleURL: bundleURL)
+        let queuedOverlay = try #require(snapshot.overlays.first)
+
+        #expect(queuedOverlay.bundleRelativePath == savedOverlay.bundleRelativePath)
+        #expect(!queuedOverlay.bookmark.isEmpty)
+    }
+
     // MARK: - T6.2 — fingerprint detects an external edit
 
     @Test("Fingerprint detects an external edit on a tracked asset")
@@ -497,6 +654,29 @@ struct ProjectBundleTests {
         #expect(ProjectBundleLayout.isSafeAssetRelativePath("assets/sub/file.mov") == false)
         #expect(ProjectBundleLayout.isSafeAssetRelativePath("/etc/passwd") == false)
         #expect(ProjectBundleLayout.isSafeAssetRelativePath("assets/") == false)
+    }
+
+    @Test("Overlay bundle-relative paths are validated before runtime resolution")
+    func overlayBundlePathResolutionRejectsUnsafePaths() throws {
+        let tmp = try makeTempDirectory("overlay-unsafe-path")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("UnsafeOverlay.lcbundle")
+        try FileManager.default.createDirectory(at: bundleURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: bundleURL.appendingPathComponent(ProjectBundleLayout.assetsSubdirectory),
+            withIntermediateDirectories: true)
+        let escaped = tmp.appendingPathComponent("escape.gif")
+        try Data([0x47, 0x49, 0x46]).write(to: escaped, options: .atomic)
+
+        let model = EditorModel()
+        let overlay = OverlayClip(sourceType: .animatedImage,
+                                  timelineStart: .zero,
+                                  duration: time(1))
+        model.project.overlays = [overlay]
+        model.project.overlayBundlePaths[overlay.id] = "../escape.gif"
+        model.documentURL = bundleURL
+
+        #expect(model.resolveOverlayURL(for: overlay) == nil)
     }
 
     // MARK: - Fingerprint JSON shape (review P2)

@@ -82,6 +82,24 @@ final class Project {
     var videoTracks: [Track]
     var audioTracks: [Track]
     var captionTracks: [CaptionTrack] = []
+    /// Animated overlay clips. Ordered bottom-to-top; later entries render above
+    /// earlier ones, matching the video-track stacking convention.
+    var overlays: [OverlayClip] = []
+    /// Bookmark data for overlay source files, keyed by overlay ID.
+    var overlayBookmarks: [UUID: Data] = [:]
+    /// Bundle-relative paths for overlay source files, keyed by overlay ID.
+    var overlayBundlePaths: [UUID: String] = [:]
+
+    /// Creates `OverlayClipDoc` array for persistence from the runtime overlays
+    /// and their bookmark data.
+    var overlayDocs: [OverlayClipDoc] {
+        overlays.map { overlay in
+            OverlayClipDoc(
+                overlay: overlay,
+                bookmark: overlayBookmarks[overlay.id] ?? Data(),
+                bundleRelativePath: overlayBundlePaths[overlay.id])
+        }
+    }
     /// Timeline markers sorted by `time`. Mutation paths on `EditorModel`
     /// preserve the invariant so draw / lookup code can treat the list as
     /// ordered without re-sorting per frame.

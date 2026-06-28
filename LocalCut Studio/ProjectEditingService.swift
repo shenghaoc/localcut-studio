@@ -35,6 +35,7 @@ final class ProjectEditingService {
                 track.clips.removeAll { $0.id == id }
             }
             model.selectedClipID = nil
+            model.selectedOverlayID = nil
             sanitizeTransitions(model: model)
             model.statusMessage = "Deleted clip."
             model.scheduleRebuild()
@@ -52,6 +53,7 @@ final class ProjectEditingService {
             if model.selectedMediaID == itemID { model.selectedMediaID = nil }
             if let selectedClipID = model.selectedClipID, model.clip(for: selectedClipID) == nil {
                 model.selectedClipID = nil
+                model.selectedOverlayID = nil
             }
             if let selectedTransitionClipID = model.selectedTransitionClipID,
                model.clip(for: selectedTransitionClipID) == nil {
@@ -122,6 +124,7 @@ final class ProjectEditingService {
 
             track.clips.replaceSubrange(index...index, with: [left, right])
             model.selectedClipID = left.id
+            model.selectedOverlayID = nil
             model.statusMessage = "Split clip."
             model.scheduleRebuild()
         }

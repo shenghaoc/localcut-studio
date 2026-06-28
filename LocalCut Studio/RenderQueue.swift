@@ -509,11 +509,19 @@ final class RenderQueue {
         // the `startAccessing` calls and project assembly stay here
         // (Claude review).
         let resolved = await Task.detached(priority: .userInitiated) {
-            Self.resolveSourceBookmarks(from: snapshot.media)
+            (
+                media: Self.resolveSourceBookmarks(from: snapshot.media),
+                overlays: Self.resolveOverlayBookmarks(from: snapshot.overlays)
+            )
         }.value
-        let refreshedSnapshot = refreshSourceBookmarks(in: snapshot, jobID: id, resolved: resolved)
+        let refreshedSnapshot = refreshSourceBookmarks(
+            in: snapshot,
+            jobID: id,
+            resolvedMedia: resolved.media,
+            resolvedOverlays: resolved.overlays)
         let reconstructed = reconstructProject(from: refreshedSnapshot, applying: preset,
-                                               preResolved: resolved)
+                                               preResolvedMedia: resolved.media,
+                                               preResolvedOverlays: resolved.overlays)
         let project = reconstructed.project
         let heldSources = reconstructed.accessedSources
         let missingSources = reconstructed.missingBookmarks
@@ -530,7 +538,13 @@ final class RenderQueue {
         }
 
         do {
-            guard let built = try await CompositionBuilder.build(project: project) else {
+            let overlaySourceRegistryID = await registerOverlaySources(for: project)
+            defer {
+                EffectCompositor.releaseOverlaySources(for: overlaySourceRegistryID)
+            }
+            guard let built = try await CompositionBuilder.build(
+                project: project,
+                overlaySourceRegistryID: overlaySourceRegistryID) else {
                 finish(jobID: id, status: .failed,
                        message: RenderQueueError.compositionEmpty.localizedDescription,
                        startWall: startWall)
@@ -1231,6 +1245,28 @@ final class RenderQueue {
         }
     }
 
+    private nonisolated static func resolveOverlayBookmarks(
+        from overlays: [OverlayClipDoc]
+    ) -> [ResolvedSource] {
+        overlays.map { overlay in
+            guard !overlay.bookmark.isEmpty else {
+                return ResolvedSource(refID: overlay.id, url: nil, refreshedBookmark: nil)
+            }
+            var stale = false
+            let url = try? URL(resolvingBookmarkData: overlay.bookmark,
+                               options: [.withSecurityScope],
+                               relativeTo: nil,
+                               bookmarkDataIsStale: &stale)
+            let refreshed: Data?
+            if stale, let url {
+                refreshed = refreshBookmark(for: url)
+            } else {
+                refreshed = nil
+            }
+            return ResolvedSource(refID: overlay.id, url: url, refreshedBookmark: refreshed)
+        }
+    }
+
     private func resolveBookmark(_ data: Data) -> BookmarkResolution? {
         outputBookmarkResolver(data)
     }
@@ -1244,11 +1280,12 @@ final class RenderQueue {
     private func refreshSourceBookmarks(
         in snapshot: ProjectDocument,
         jobID: UUID,
-        resolved: [ResolvedSource]
+        resolvedMedia: [ResolvedSource],
+        resolvedOverlays: [ResolvedSource]
     ) -> ProjectDocument {
         var refreshedSnapshot = snapshot
         var refreshedByID: [UUID: Data] = [:]
-        for source in resolved {
+        for source in resolvedMedia + resolvedOverlays {
             if let bookmark = source.refreshedBookmark {
                 refreshedByID[source.refID] = bookmark
             }
@@ -1258,6 +1295,11 @@ final class RenderQueue {
         for index in refreshedSnapshot.media.indices {
             if let refreshed = refreshedByID[refreshedSnapshot.media[index].id] {
                 refreshedSnapshot.media[index].bookmark = refreshed
+            }
+        }
+        for index in refreshedSnapshot.overlays.indices {
+            if let refreshed = refreshedByID[refreshedSnapshot.overlays[index].id] {
+                refreshedSnapshot.overlays[index].bookmark = refreshed
             }
         }
         if let jobIndex = jobs.firstIndex(where: { $0.id == jobID }) {
@@ -1284,8 +1326,10 @@ final class RenderQueue {
     /// `preResolved` carries URLs already resolved off MainActor by
     /// `resolveSourceBookmarks`; this method only calls
     /// `startAccessingSecurityScopedResource()` and assembles `MediaItem`s.
-    private func reconstructProject(from doc: ProjectDocument, applying preset: ExportPreset,
-                                    preResolved: [ResolvedSource])
+    private func reconstructProject(from doc: ProjectDocument,
+                                    applying preset: ExportPreset,
+                                    preResolvedMedia: [ResolvedSource],
+                                    preResolvedOverlays: [ResolvedSource])
         -> (project: Project, accessedSources: [URL], missingBookmarks: Int) {
         let project = Project()
         project.name = doc.name
@@ -1297,7 +1341,9 @@ final class RenderQueue {
 
         // Index pre-resolved results by ref ID for O(1) lookup.
         var resolvedByID: [UUID: URL?] = [:]
-        for r in preResolved { resolvedByID[r.refID] = r.url }
+        for r in preResolvedMedia { resolvedByID[r.refID] = r.url }
+        var resolvedOverlayByID: [UUID: URL?] = [:]
+        for r in preResolvedOverlays { resolvedOverlayByID[r.refID] = r.url }
 
         var rebuilt: [MediaItem] = []
         var accessed: [URL] = []
@@ -1342,7 +1388,48 @@ final class RenderQueue {
         if project.audioTracks.isEmpty { project.audioTracks = [Track(name: "A1", kind: .audio)] }
 
         project.captionTracks = doc.captionTracks.map { $0.makeTrack() }
+        project.overlays = doc.overlays.map { $0.makeOverlayClip() }
+        for overlay in doc.overlays {
+            if let path = overlay.bundleRelativePath,
+               ProjectBundleLayout.isSafeAssetRelativePath(path) {
+                project.overlayBundlePaths[overlay.id] = path
+            }
+            guard !overlay.bookmark.isEmpty else {
+                missing += 1
+                continue
+            }
+            guard let url = resolvedOverlayByID[overlay.id] ?? nil else {
+                missing += 1
+                continue
+            }
+            if url.startAccessingSecurityScopedResource() {
+                accessed.append(url)
+                project.overlayBookmarks[overlay.id] = overlay.bookmark
+            } else {
+                missing += 1
+            }
+        }
         return (project, accessed, missing)
+    }
+
+    private func registerOverlaySources(for project: Project) async -> UUID? {
+        var sources: [UUID: any OverlayFrameSource] = [:]
+        for overlay in project.overlays {
+            guard let bookmark = project.overlayBookmarks[overlay.id], !bookmark.isEmpty else { continue }
+            var stale = false
+            guard let url = try? URL(resolvingBookmarkData: bookmark,
+                                     options: [.withSecurityScope],
+                                     relativeTo: nil,
+                                     bookmarkDataIsStale: &stale),
+                  !stale else { continue }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            guard let source = await OverlayFrameSourceFactory.makeSource(for: overlay, sourceURL: url) else {
+                continue
+            }
+            sources[overlay.id] = source
+        }
+        return EffectCompositor.registerOverlaySources(sources)
     }
 
     private func log(_ message: String) {
@@ -1354,9 +1441,11 @@ final class RenderQueue {
     /// Builds + enqueues a job for the toolbar's Export shortcut, then starts
     /// the runner. The toolbar handler picks the destination URL, captures
     /// a security-scoped bookmark, snapshots the project, and calls this.
-    func enqueueWithDefaultPreset(outputURL: URL, project: Project,
-                                  bookmark: Data) {
-        let snapshot = ProjectDocument(project: project)
+    func enqueueWithDefaultPreset(outputURL: URL,
+                                  project: Project,
+                                  bookmark: Data,
+                                  projectDocumentURL: URL? = nil) {
+        let snapshot = ProjectDocument(project: project, queueBundleURL: projectDocumentURL)
         let job = QueueJob(
             preset: BuiltInExportPresets.defaultPreset,
             outputBookmark: bookmark,

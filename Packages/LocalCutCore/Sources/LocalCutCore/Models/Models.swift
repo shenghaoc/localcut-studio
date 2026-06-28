@@ -128,17 +128,186 @@ public struct SkinSmoothEffect: Hashable, Codable, Sendable {
     }
 }
 
+// MARK: - Film look effects
+
+private func clamped(_ value: Float, to range: ClosedRange<Float>) -> Float {
+    guard value.isFinite else {
+        return range.contains(0) ? 0 : range.lowerBound
+    }
+    return max(range.lowerBound, min(range.upperBound, value))
+}
+
+private func clampedKeyframed(_ value: Keyframed<Float>, to range: ClosedRange<Float>) -> Keyframed<Float> {
+    let keyframes = value.keyframes.map { keyframe in
+        Keyframe(id: keyframe.id, time: keyframe.time, value: clamped(keyframe.value, to: range),
+                 incomingHandle: keyframe.incomingHandle,
+                 outgoingHandle: keyframe.outgoingHandle)
+    }
+    return Keyframed(keyframes: keyframes, defaultValue: clamped(value.defaultValue, to: range))
+}
+
+/// Procedural film-grain parameters. `amount` is keyframed in clip-local time;
+/// `size` is authored as a source-pixel scale so preview and export match.
+public struct GrainEffect: Hashable, Codable, Sendable {
+    public var amount: Keyframed<Float>
+    public var size: Float
+    public var monochrome: Bool
+    public var seed: UInt64
+
+    private enum CodingKeys: String, CodingKey {
+        case amount, size, monochrome, seed
+    }
+
+    public init(amount: Keyframed<Float> = Keyframed(defaultValue: 0),
+                size: Float = 1,
+                monochrome: Bool = true,
+                seed: UInt64 = 0) {
+        self.amount = amount
+        self.size = size
+        self.monochrome = monochrome
+        self.seed = seed
+        clamp()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        amount = try values.decodeIfPresent(Keyframed<Float>.self, forKey: .amount)
+            ?? Keyframed(defaultValue: 0)
+        size = try values.decodeIfPresent(Float.self, forKey: .size) ?? 1
+        monochrome = try values.decodeIfPresent(Bool.self, forKey: .monochrome) ?? true
+        seed = try values.decodeIfPresent(UInt64.self, forKey: .seed) ?? 0
+        clamp()
+    }
+
+    public static var neutral: GrainEffect { GrainEffect() }
+
+    public var isNeutral: Bool {
+        amount.defaultValue == 0 && amount.keyframes.allSatisfy { $0.value == 0 }
+    }
+
+    public mutating func clamp() {
+        amount = clampedKeyframed(amount, to: 0...1)
+        size = clamped(size, to: 0.25...8)
+    }
+
+    public func amount(at time: CMTime) -> Float {
+        clamped(amount.value(at: time), to: 0...1)
+    }
+}
+
+/// Bright-edge red/orange bleed used by film-emulation presets.
+public struct HalationEffect: Hashable, Codable, Sendable {
+    public var strength: Keyframed<Float>
+    public var threshold: Float
+    public var radius: Float
+    public var redBoost: Float
+
+    private enum CodingKeys: String, CodingKey {
+        case strength, threshold, radius, redBoost
+    }
+
+    public init(strength: Keyframed<Float> = Keyframed(defaultValue: 0),
+                threshold: Float = 0.72,
+                radius: Float = 16,
+                redBoost: Float = 0.85) {
+        self.strength = strength
+        self.threshold = threshold
+        self.radius = radius
+        self.redBoost = redBoost
+        clamp()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        strength = try values.decodeIfPresent(Keyframed<Float>.self, forKey: .strength)
+            ?? Keyframed(defaultValue: 0)
+        threshold = try values.decodeIfPresent(Float.self, forKey: .threshold) ?? 0.72
+        radius = try values.decodeIfPresent(Float.self, forKey: .radius) ?? 16
+        redBoost = try values.decodeIfPresent(Float.self, forKey: .redBoost) ?? 0.85
+        clamp()
+    }
+
+    public static var neutral: HalationEffect { HalationEffect() }
+
+    public var isNeutral: Bool {
+        strength.defaultValue == 0 && strength.keyframes.allSatisfy { $0.value == 0 }
+    }
+
+    public mutating func clamp() {
+        strength = clampedKeyframed(strength, to: 0...1)
+        threshold = clamped(threshold, to: 0...1)
+        radius = clamped(radius, to: 0...80)
+        redBoost = clamped(redBoost, to: 0...2)
+    }
+
+    public func strength(at time: CMTime) -> Float {
+        clamped(strength.value(at: time), to: 0...1)
+    }
+}
+
+/// Edge shading for look packs. Positive `amount` darkens edges; negative values
+/// are allowed for light-leak style looks.
+public struct VignetteEffect: Hashable, Codable, Sendable {
+    public var amount: Keyframed<Float>
+    public var radius: Float
+    public var softness: Float
+
+    private enum CodingKeys: String, CodingKey {
+        case amount, radius, softness
+    }
+
+    public init(amount: Keyframed<Float> = Keyframed(defaultValue: 0),
+                radius: Float = 0.65,
+                softness: Float = 0.35) {
+        self.amount = amount
+        self.radius = radius
+        self.softness = softness
+        clamp()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        amount = try values.decodeIfPresent(Keyframed<Float>.self, forKey: .amount)
+            ?? Keyframed(defaultValue: 0)
+        radius = try values.decodeIfPresent(Float.self, forKey: .radius) ?? 0.65
+        softness = try values.decodeIfPresent(Float.self, forKey: .softness) ?? 0.35
+        clamp()
+    }
+
+    public static var neutral: VignetteEffect { VignetteEffect() }
+
+    public var isNeutral: Bool {
+        amount.defaultValue == 0 && amount.keyframes.allSatisfy { $0.value == 0 }
+    }
+
+    public mutating func clamp() {
+        amount = clampedKeyframed(amount, to: -1...1)
+        radius = clamped(radius, to: 0.05...2)
+        softness = clamped(softness, to: 0.01...1)
+    }
+
+    public func amount(at time: CMTime) -> Float {
+        clamped(amount.value(at: time), to: -1...1)
+    }
+}
+
 /// An effect that can be applied to a video clip's source frames.
 public enum Effect: Hashable, Codable, Sendable {
     case colourGrade(ColourGrade)
     case lut(bookmark: Data)
     case skinSmooth(SkinSmoothEffect)
+    case grain(GrainEffect)
+    case halation(HalationEffect)
+    case vignette(VignetteEffect)
 
     public static func == (lhs: Effect, rhs: Effect) -> Bool {
         switch (lhs, rhs) {
         case (.colourGrade(let a), .colourGrade(let b)): a == b
         case (.lut(bookmark: let a), .lut(bookmark: let b)): a == b
         case (.skinSmooth(let a), .skinSmooth(let b)): a == b
+        case (.grain(let a), .grain(let b)): a == b
+        case (.halation(let a), .halation(let b)): a == b
+        case (.vignette(let a), .vignette(let b)): a == b
         default: false
         }
     }
@@ -148,6 +317,9 @@ public enum Effect: Hashable, Codable, Sendable {
         case .colourGrade(let g): hasher.combine(0); hasher.combine(g)
         case .lut(bookmark: let d): hasher.combine(1); hasher.combine(d)
         case .skinSmooth(let s): hasher.combine(2); hasher.combine(s)
+        case .grain(let g): hasher.combine(3); hasher.combine(g)
+        case .halation(let h): hasher.combine(4); hasher.combine(h)
+        case .vignette(let v): hasher.combine(5); hasher.combine(v)
         }
     }
 }
@@ -176,6 +348,121 @@ extension Array where Element == Effect {
 
     public func removingLUT() -> [Effect] {
         filter { if case .lut = $0 { return false }; return true }
+    }
+
+    public var hasLookEffects: Bool {
+        contains { $0.isLookEffect }
+    }
+
+    public var lookEffects: [Effect] {
+        filter(\.isLookEffect)
+    }
+
+    public func replacingLookEffect(_ effect: Effect) -> [Effect] {
+        guard let kind = effect.lookKind else { return self }
+        let nonLooks = filter { !$0.isLookEffect }
+        let looks = (lookEffects.filter { $0.lookKind != kind } + [effect])
+            .sorted { ($0.lookKind?.sortIndex ?? 0) < ($1.lookKind?.sortIndex ?? 0) }
+        return nonLooks + looks
+    }
+
+    public func removingLookEffects() -> [Effect] {
+        filter { !$0.isLookEffect }
+    }
+
+    public func applyingLookEffects(_ lookEffects: [Effect]) -> [Effect] {
+        removingLookEffects() + lookEffects.filter(\.isLookEffect)
+    }
+}
+
+public enum LookEffectKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case grain
+    case halation
+    case vignette
+
+    public var sortIndex: Int {
+        switch self {
+        case .halation: 0
+        case .vignette: 1
+        case .grain: 2
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .grain: "Grain"
+        case .halation: "Halation"
+        case .vignette: "Vignette"
+        }
+    }
+}
+
+extension Effect {
+    public var lookKind: LookEffectKind? {
+        switch self {
+        case .grain: .grain
+        case .halation: .halation
+        case .vignette: .vignette
+        case .colourGrade, .lut, .skinSmooth: nil
+        }
+    }
+
+    public var isLookEffect: Bool {
+        lookKind != nil
+    }
+
+    /// The primary keyframed parameter for look-pack effects — grain amount,
+    /// halation strength, or vignette amount. `nil` for non-look effects. Used by
+    /// the inspector's per-look keyframe editor so one code path drives all three.
+    public var lookStrength: Keyframed<Float>? {
+        switch self {
+        case .grain(let g): g.amount
+        case .halation(let h): h.strength
+        case .vignette(let v): v.amount
+        case .colourGrade, .lut, .skinSmooth: nil
+        }
+    }
+
+    /// Returns a copy of a look effect with its primary keyframed parameter
+    /// replaced (re-clamped). No-op for non-look effects.
+    public func settingLookStrength(_ track: Keyframed<Float>) -> Effect {
+        switch self {
+        case .grain(var g): g.amount = track; g.clamp(); return .grain(g)
+        case .halation(var h): h.strength = track; h.clamp(); return .halation(h)
+        case .vignette(var v): v.amount = track; v.clamp(); return .vignette(v)
+        case .colourGrade, .lut, .skinSmooth: return self
+        }
+    }
+
+    /// Fixed render-pipeline precedence so the rendered result does not depend on
+    /// the order in which inspector controls happened to be used. Colour grade and
+    /// LUT come first, then skin smoothing, then the look-pack nodes in their
+    /// documented order (halation → vignette → grain, so grain is laid down last
+    /// and is not blurred or reshaped by the glow/shading passes).
+    public var pipelineOrder: Int {
+        switch self {
+        case .colourGrade: 0
+        case .lut: 1
+        case .skinSmooth: 2
+        case .halation: 3
+        case .vignette: 4
+        case .grain: 5
+        }
+    }
+}
+
+extension Array where Element == Effect {
+    /// Returns the effects in canonical render order (`Effect.pipelineOrder`).
+    /// The sort is stable, so two effects of the same kind keep their relative
+    /// order. This is a render-time view only; the stored chain is left as-is.
+    public func canonicalPipelineOrder() -> [Effect] {
+        enumerated()
+            .sorted {
+                $0.element.pipelineOrder == $1.element.pipelineOrder
+                    ? $0.offset < $1.offset
+                    : $0.element.pipelineOrder < $1.element.pipelineOrder
+            }
+            .map(\.element)
     }
 }
 
@@ -1237,5 +1524,93 @@ public struct AudioMeterSnapshot: Hashable, Sendable {
         AudioMeterSnapshot(
             peakLeft: 0, peakRight: 0, rmsLeft: 0, rmsRight: 0,
             sampledAt: ContinuousClock.now)
+    }
+}
+
+// MARK: - Animated Overlays (Phase 38b)
+
+/// The source type for an animated overlay clip.
+public enum OverlaySourceType: String, Hashable, Codable, Sendable, CaseIterable, Identifiable {
+    /// Animated image (WebP, GIF, APNG) decoded frame-by-frame via ImageIO.
+    case animatedImage
+    /// Lottie JSON animation rendered off-screen to CIImage per frame.
+    case lottie
+    /// Video file with a premultiplied alpha channel.
+    case alphaVideo
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .animatedImage: "Animated Image"
+        case .lottie: "Lottie"
+        case .alphaVideo: "Alpha Video"
+        }
+    }
+}
+
+/// Playback behaviour when an overlay clip reaches the end of its source media.
+public enum OverlayEndAction: String, Hashable, Codable, Sendable, CaseIterable, Identifiable {
+    /// Hide the overlay (render nothing past the end).
+    case hide
+    /// Freeze on the last frame.
+    case freeze
+    /// Loop back to the first frame.
+    case loop
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .hide: "Hide"
+        case .freeze: "Freeze"
+        case .loop: "Loop"
+        }
+    }
+}
+
+/// An animated overlay clip placed on the timeline. Overlays sit above the
+/// video track stack and composite in order. Each clip references an overlay
+/// source file and carries its own timing, transform, and opacity.
+public struct OverlayClip: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    /// The type of source media.
+    public var sourceType: OverlaySourceType
+    /// Timeline start time.
+    public var timelineStart: CMTime
+    /// Timeline duration (how long the overlay is visible).
+    public var duration: CMTime
+    /// 2D position offset from the render canvas centre, in normalised
+    /// coordinates (−1…1 where 1 = canvas width/height).
+    public var positionOffset: CGSize
+    /// Uniform scale factor (1 = original size).
+    public var scale: CGFloat
+    /// Rotation in radians.
+    public var rotation: CGFloat
+    /// Per-overlay opacity (0…1).
+    public var opacity: Float
+    /// What to do when the source animation reaches its end.
+    public var endAction: OverlayEndAction
+
+    public var timelineEnd: CMTime { timelineStart + duration }
+
+    public init(id: UUID = UUID(),
+                sourceType: OverlaySourceType,
+                timelineStart: CMTime,
+                duration: CMTime,
+                positionOffset: CGSize = .zero,
+                scale: CGFloat = 1,
+                rotation: CGFloat = 0,
+                opacity: Float = 1,
+                endAction: OverlayEndAction = .loop) {
+        self.id = id
+        self.sourceType = sourceType
+        self.timelineStart = timelineStart
+        self.duration = duration
+        self.positionOffset = positionOffset
+        self.scale = scale
+        self.rotation = rotation
+        self.opacity = opacity
+        self.endAction = endAction
     }
 }

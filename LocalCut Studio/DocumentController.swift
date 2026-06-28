@@ -16,6 +16,9 @@ final class DocumentController {
         model.project.audioTracks = [Track(name: "A1", kind: .audio)]
         model.project.captionTracks = []
         model.project.markers = []
+        model.project.overlays = []
+        model.project.overlayBookmarks = [:]
+        model.project.overlayBundlePaths = [:]
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -45,6 +48,9 @@ final class DocumentController {
         model.project.mediaItems.removeAll()
         model.project.captionTracks.removeAll()
         model.project.markers.removeAll()
+        model.project.overlays.removeAll()
+        model.project.overlayBookmarks.removeAll()
+        model.project.overlayBundlePaths.removeAll()
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -52,6 +58,7 @@ final class DocumentController {
         model.selectedMediaID = nil
         model.selectedTransitionClipID = nil
         model.selectedMarkerID = nil
+        model.selectedOverlayID = nil
         model.unresolvedMedia = []
         model.undoManager.removeAllActions()
         model.coalescedCommitTask?.cancel()
@@ -174,6 +181,18 @@ final class DocumentController {
         model.project.trackInputs = document.audioBus.trackInputs.map(\.trackInput)
         model.project.voiceCleanup = document.audioBus.voiceCleanup
 
+        // Load overlays from the document.
+        model.project.overlays = document.overlays.map { $0.makeOverlayClip() }
+        model.project.overlayBookmarks = [:]
+        model.project.overlayBundlePaths = [:]
+        for doc in document.overlays {
+            model.project.overlayBookmarks[doc.id] = doc.bookmark
+            if let path = doc.bundleRelativePath,
+               ProjectBundleLayout.isSafeAssetRelativePath(path) {
+                model.project.overlayBundlePaths[doc.id] = path
+            }
+        }
+
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         model.documentURL = isNewerSchema ? nil : url
         model.unresolvedMedia = unresolved
@@ -197,6 +216,7 @@ final class DocumentController {
         if !externallyEditedAssets.isEmpty {
             notes.append("\(externallyEditedAssets.count) bundled asset(s) changed externally — re-import or accept on next save")
         }
+        notes.append(contentsOf: await lottieOverlayWarnings(model: model))
         model.statusMessage = notes.isEmpty
             ? "Opened \(model.project.name)."
             : "Opened \(model.project.name) — " + notes.joined(separator: "; ") + "."
@@ -215,6 +235,9 @@ final class DocumentController {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
+        let originalOverlayPaths = model.project.overlayBundlePaths
+        var overlayAccesses: [URL] = []
+        defer { stopOverlayAccesses(overlayAccesses) }
         do {
             if url.pathExtension == ProjectBundleLayout.fileExtension {
                 let bundledMedia: [ProjectBundle.BundledMedia] = model.project.mediaItems.compactMap { item in
@@ -225,16 +248,20 @@ final class DocumentController {
                         sourceURL: item.url,
                         bundleRelativePath: relative)
                 }
+                let overlayPlan = bundledOverlays(model: model)
+                overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
                 let projectJSON = try encodedDocument(forBundle: true, model: model)
                 let index = try ProjectBundle.write(projectJSON: projectJSON,
                                                      to: url,
-                                                     bundledMedia: bundledMedia,
+                                                     bundledMedia: bundledMedia + overlayPlan.assets,
                                                      previousFingerprints: model.lastBundleFingerprints)
                 model.lastBundleFingerprints = index
                 model.persistBeatCachesSynchronously(to: url)
             } else {
-                let data = try encodedDocument(forBundle: false, model: model)
+                let document = makeDocumentForSave(forBundle: false, model: model)
+                let data = try document.encoded()
                 try data.write(to: url, options: .atomic)
+                adoptSingleFileOverlayBookmarks(from: document.overlays, model: model)
             }
             adoptSaved(url: url, model: model)
             model.statusMessage = "Saved \(url.lastPathComponent)."
@@ -243,6 +270,7 @@ final class DocumentController {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
             }
+            model.project.overlayBundlePaths = originalOverlayPaths
             model.statusMessage = "Save failed: \(error.localizedDescription)"
             return false
         }
@@ -259,6 +287,23 @@ final class DocumentController {
             document.media = document.media.map { ref in
                 var copy = ref
                 copy.bundleRelativePath = nil
+                return copy
+            }
+            document.overlays = document.overlays.map { overlay in
+                var copy = overlay
+                if copy.bookmark.isEmpty,
+                   let bookmark = singleFileOverlayBookmark(for: copy, model: model) {
+                    copy.bookmark = bookmark
+                }
+                copy.bundleRelativePath = nil
+                return copy
+            }
+        } else {
+            document.overlays = document.overlays.map { overlay in
+                var copy = overlay
+                if copy.bundleRelativePath != nil {
+                    copy.bookmark = Data()
+                }
                 return copy
             }
         }
@@ -349,6 +394,9 @@ final class DocumentController {
             }
         }
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
+        let originalOverlayPaths = model.project.overlayBundlePaths
+        var overlayAccesses: [URL] = []
+        defer { stopOverlayAccesses(overlayAccesses) }
         do {
             let bundledMedia: [ProjectBundle.BundledMedia] = model.project.mediaItems.compactMap { item in
                 guard item.wantsBundling else {
@@ -363,12 +411,14 @@ final class DocumentController {
                     sourceURL: item.url,
                     bundleRelativePath: relative)
             }
+            let overlayPlan = bundledOverlays(model: model)
+            overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
             let projectJSON = try encodedDocument(forBundle: true, model: model)
             let bundleURLCopy = bundleURL
             let previous = model.lastBundleFingerprints
             let index = try await Task.detached {
                 try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
-                                        bundledMedia: bundledMedia,
+                                        bundledMedia: bundledMedia + overlayPlan.assets,
                                         previousFingerprints: previous)
             }.value
             model.lastBundleFingerprints = index
@@ -385,6 +435,7 @@ final class DocumentController {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
             }
+            model.project.overlayBundlePaths = originalOverlayPaths
             model.statusMessage = "Convert failed: \(error.localizedDescription)"
         }
     }
@@ -458,8 +509,10 @@ final class DocumentController {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let savedRevision = model.mutationRevision
-            let data = try encodedDocument(forBundle: false, model: model)
+            let document = makeDocumentForSave(forBundle: false, model: model)
+            let data = try document.encoded()
             try await Task.detached { try data.write(to: url, options: .atomic) }.value
+            adoptSingleFileOverlayBookmarks(from: document.overlays, model: model)
             adoptSaved(url: url, cleanIfRevision: savedRevision, model: model)
             model.statusMessage = "Saved \(url.lastPathComponent)."
         } catch {
@@ -476,6 +529,9 @@ final class DocumentController {
             }
         }
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
+        let originalOverlayPaths = model.project.overlayBundlePaths
+        var overlayAccesses: [URL] = []
+        defer { stopOverlayAccesses(overlayAccesses) }
         do {
             let savedRevision = model.mutationRevision
             let bundledMedia: [ProjectBundle.BundledMedia] = model.project.mediaItems.compactMap { item in
@@ -487,12 +543,14 @@ final class DocumentController {
                     sourceURL: item.url,
                     bundleRelativePath: relative)
             }
+            let overlayPlan = bundledOverlays(model: model)
+            overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
             let projectJSON = try encodedDocument(forBundle: true, model: model)
             let previous = model.lastBundleFingerprints
             let bundleURLCopy = bundleURL
             let index = try await Task.detached {
                 try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
-                                        bundledMedia: bundledMedia,
+                                        bundledMedia: bundledMedia + overlayPlan.assets,
                                         previousFingerprints: previous)
             }.value
             model.lastBundleFingerprints = index
@@ -508,6 +566,7 @@ final class DocumentController {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
             }
+            model.project.overlayBundlePaths = originalOverlayPaths
             model.statusMessage = "Save failed: \(error.localizedDescription)"
         }
     }
@@ -520,6 +579,83 @@ final class DocumentController {
         guard item.wantsBundling else { return nil }
         if let existing = item.bundleRelativePath { return existing }
         return ProjectBundleLayout.assetRelativePath(mediaID: item.id, sourceExtension: item.url.pathExtension)
+    }
+
+    private struct OverlayBundlePlan {
+        var assets: [ProjectBundle.BundledMedia] = []
+        var accessedURLs: [URL] = []
+    }
+
+    private func bundledOverlays(model: EditorModel) -> OverlayBundlePlan {
+        var plan = OverlayBundlePlan()
+        for overlay in model.project.overlays {
+            guard let sourceURL = model.resolveOverlayURL(for: overlay) else { continue }
+            let didAccess = sourceURL.startAccessingSecurityScopedResource()
+            if didAccess { plan.accessedURLs.append(sourceURL) }
+            let relative = overlayBundleRelativePath(for: overlay, sourceURL: sourceURL, model: model)
+            model.project.overlayBundlePaths[overlay.id] = relative
+            plan.assets.append(ProjectBundle.BundledMedia(
+                mediaID: overlay.id,
+                sourceURL: sourceURL,
+                bundleRelativePath: relative))
+        }
+        return plan
+    }
+
+    private func overlayBundleRelativePath(for overlay: OverlayClip,
+                                           sourceURL: URL,
+                                           model: EditorModel) -> String {
+        if let existing = model.project.overlayBundlePaths[overlay.id],
+           ProjectBundleLayout.isSafeAssetRelativePath(existing) {
+            return existing
+        }
+        return ProjectBundleLayout.assetRelativePath(mediaID: overlay.id,
+                                                     sourceExtension: sourceURL.pathExtension)
+    }
+
+    private func stopOverlayAccesses(_ urls: [URL]) {
+        for url in urls {
+            url.stopAccessingSecurityScopedResource()
+        }
+    }
+
+    private func singleFileOverlayBookmark(for overlay: OverlayClipDoc, model: EditorModel) -> Data? {
+        guard let relativePath = overlay.bundleRelativePath,
+              ProjectBundleLayout.isSafeAssetRelativePath(relativePath),
+              let bundleURL = model.documentURL,
+              ProjectBundle.isBundle(url: bundleURL) else {
+            return nil
+        }
+        let didAccess = bundleURL.startAccessingSecurityScopedResource()
+        defer { if didAccess { bundleURL.stopAccessingSecurityScopedResource() } }
+        let sourceURL = bundleURL.appendingPathComponent(relativePath)
+        guard FileManager.default.isReadableFile(atPath: sourceURL.path) else { return nil }
+        return try? sourceURL.bookmarkData(options: .withSecurityScope,
+                                           includingResourceValuesForKeys: nil,
+                                           relativeTo: nil)
+    }
+
+    private func adoptSingleFileOverlayBookmarks(from overlays: [OverlayClipDoc], model: EditorModel) {
+        for overlay in overlays where !overlay.bookmark.isEmpty {
+            model.project.overlayBookmarks[overlay.id] = overlay.bookmark
+            model.project.overlayBundlePaths.removeValue(forKey: overlay.id)
+        }
+    }
+
+    private func lottieOverlayWarnings(model: EditorModel) async -> [String] {
+        let entries = model.project.overlays.compactMap { overlay -> (String, URL)? in
+            guard overlay.sourceType == .lottie,
+                  let url = model.resolveOverlayURL(for: overlay) else {
+                return nil
+            }
+            return (String(overlay.id.uuidString.prefix(8)), url)
+        }
+        var warnings: [String] = []
+        for (id, url) in entries {
+            guard let warning = await LottieFrameSource.unsupportedFeatureWarningAsync(for: url) else { continue }
+            warnings.append("Lottie overlay \(id) \(warning)")
+        }
+        return warnings
     }
 
     private func adoptSaved(url: URL, cleanIfRevision revision: Int? = nil, model: EditorModel) {

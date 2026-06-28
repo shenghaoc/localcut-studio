@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		00000000000000000000A030 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A020 /* LocalCutCore */; };
 		00000000000000000000A031 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A021 /* LocalCutCore */; };
+		00000000000000000000A032 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A022 /* Lottie */; };
+		00000000000000000000A033 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A023 /* Lottie */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,12 +46,14 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				00000000000000000000A030 /* LocalCutCore in Frameworks */,
+				00000000000000000000A032 /* Lottie in Frameworks */,
 			);
 		};
 		000000000000000230000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				00000000000000000000A031 /* LocalCutCore in Frameworks */,
+				00000000000000000000A033 /* Lottie in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -92,6 +96,7 @@
 			name = "LocalCut Studio";
 			packageProductDependencies = (
 				00000000000000000000A020 /* LocalCutCore */,
+				00000000000000000000A022 /* Lottie */,
 			);
 			productName = "LocalCut Studio";
 			productReference = 000000000000000000000120 /* LocalCut Studio.app */;
@@ -116,6 +121,7 @@
 			name = "LocalCut StudioTests";
 			packageProductDependencies = (
 				00000000000000000000A021 /* LocalCutCore */,
+				00000000000000000000A023 /* Lottie */,
 			);
 			productName = "LocalCut StudioTests";
 			productReference = 000000000000000000000220 /* LocalCut StudioTests.xctest */;
@@ -151,6 +157,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				00000000000000000000A010 /* XCLocalSwiftPackageReference "Packages/LocalCutCore" */,
+				00000000000000000000A011 /* XCRemoteSwiftPackageReference "lottie-ios" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -473,6 +480,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		00000000000000000000A011 /* XCRemoteSwiftPackageReference "lottie-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/airbnb/lottie-ios.git";
+			requirement = {
+				kind = exactVersion;
+				version = 4.6.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		00000000000000000000A020 /* LocalCutCore */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -481,6 +499,16 @@
 		00000000000000000000A021 /* LocalCutCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalCutCore;
+		};
+		00000000000000000000A022 /* Lottie */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 00000000000000000000A011 /* XCRemoteSwiftPackageReference "lottie-ios" */;
+			productName = Lottie;
+		};
+		00000000000000000000A023 /* Lottie */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 00000000000000000000A011 /* XCRemoteSwiftPackageReference "lottie-ios" */;
+			productName = Lottie;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

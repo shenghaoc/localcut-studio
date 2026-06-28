@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "name": "Cool Print",
+  "nodes": [
+    {
+      "effectName": "halation",
+      "params": {
+        "strength": { "keyframes": [], "defaultValue": 0.05 },
+        "threshold": 0.82,
+        "radius": 10,
+        "redBoost": 0.9
+      }
+    },
+    {
+      "effectName": "vignette",
+      "params": {
+        "amount": { "keyframes": [], "defaultValue": 0.12 },
+        "radius": 0.72,
+        "softness": 0.35
+      }
+    },
+    {
+      "effectName": "grain",
+      "params": {
+        "amount": { "keyframes": [], "defaultValue": 0.14 },
+        "size": 1.2,
+        "monochrome": true,
+        "seed": 10039729197559831875
+      }
+    }
+  ]
+}

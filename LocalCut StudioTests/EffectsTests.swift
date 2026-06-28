@@ -181,6 +181,40 @@ func lutDisplayNameCacheRestoresWithUndoRedo() {
     #expect(model._testLUTDisplayNameCacheCount == 1)
 }
 
+@MainActor
+@Test("LUT-only clips are treated as exportable look presets")
+func lutOnlyClipHasExportableLookPreset() {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    model.project.mediaItems.append(media)
+    let lutBookmark = Data([0xC0, 0xDE])
+    var clip = Clip(mediaID: media.id,
+                    sourceStart: .zero,
+                    duration: CMTime(seconds: 5, preferredTimescale: 600),
+                    timelineStart: .zero)
+    clip.effects = [.lut(bookmark: lutBookmark)]
+    model.project.videoTracks.first!.clips = [clip]
+    model.selectedClipID = clip.id
+
+    #expect(model.selectedClipHasLookEffects)
+}
+
+@Test("Look preset LUT resolver rejects unsafe sidecar paths")
+func lookPresetLUTResolverRejectsUnsafePaths() throws {
+    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("look-lut-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    let presetURL = tmp.appendingPathComponent("look.lclook")
+    try Data("{}".utf8).write(to: presetURL, options: .atomic)
+    let unsafe = LookPresetLUTReference(relativePath: "../evil.cube", displayName: "evil.cube")
+
+    #expect(EditorModel.resolvePresetLUT(unsafe, sourceURL: presetURL) == nil)
+    #expect(!EditorModel.isSafeLookPresetLUTPath("assets/../evil.cube"))
+    #expect(!EditorModel.isSafeLookPresetLUTPath("assets/luts/not-a-lut.png"))
+    #expect(EditorModel.isSafeLookPresetLUTPath("assets/luts/look.cube"))
+}
+
 @Test("Clip has empty effects by default")
 func clipDefaultEffects() {
     let clip = Clip(mediaID: UUID(), sourceStart: .zero, duration: CMTime(seconds: 10, preferredTimescale: 600), timelineStart: .zero)
@@ -224,6 +258,175 @@ func neutralColourGradeIsIdentity() {
     #expect(samplePixelEquals(result, source, at: CGPoint(x: 8, y: 8), tolerance: 0.005))
 }
 
+@Test("EffectCompositor.applyEffectChain: neutral look effects are identity")
+@MainActor
+func neutralLookEffectsAreIdentity() {
+    let compositor = EffectCompositor()
+    let source = CIImage(color: CIColor(red: 0.4, green: 0.6, blue: 0.8, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 32, height: 32))
+    let result = compositor.applyEffectChain(
+        source,
+        effects: [.halation(.neutral), .vignette(.neutral), .grain(.neutral)],
+        cacheKey: nil)
+    #expect(result.extent == source.extent)
+    #expect(samplePixelEquals(result, source, at: CGPoint(x: 16, y: 16), tolerance: 0.005))
+}
+
+@Test("EffectCompositor.applyEffectChain: grain cadence can advance independently of source time")
+@MainActor
+func grainCadenceUsesOutputFrameTime() throws {
+    let compositor = EffectCompositor()
+    let source = CIImage(color: CIColor(red: 0.45, green: 0.45, blue: 0.45, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 32, height: 32))
+    let grain = GrainEffect(amount: Keyframed(defaultValue: 0.7),
+                            size: 1,
+                            monochrome: true,
+                            seed: 42)
+    let sourceLocalTime = CMTime(seconds: 1, preferredTimescale: 600)
+
+    let first = compositor.applyEffectChain(
+        source,
+        effects: [.grain(grain)],
+        cacheKey: nil,
+        at: sourceLocalTime,
+        grainCadenceTime: CMTime(seconds: 2, preferredTimescale: 600),
+        frameRate: 30)
+    let next = compositor.applyEffectChain(
+        source,
+        effects: [.grain(grain)],
+        cacheKey: nil,
+        at: sourceLocalTime,
+        grainCadenceTime: CMTime(seconds: 2 + 1.0 / 30.0, preferredTimescale: 600),
+        frameRate: 30)
+
+    let firstBytes = try #require(rgbaBytes(first, width: 32, height: 32))
+    let nextBytes = try #require(rgbaBytes(next, width: 32, height: 32))
+    #expect(firstBytes != nextBytes)
+}
+
+@Test("EffectCompositor.applyEffectChain: active vignette changes edge pixels")
+@MainActor
+func activeVignetteChangesEdgePixels() {
+    let compositor = EffectCompositor()
+    let source = CIImage(color: CIColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+    let result = compositor.applyEffectChain(
+        source,
+        effects: [.vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.8),
+                                           radius: 0.35,
+                                           softness: 0.4))],
+        cacheKey: nil)
+    #expect(!samplePixelEquals(result, source, at: CGPoint(x: 2, y: 2), tolerance: 0.02))
+}
+
+@Test("EffectCompositor.applyEffectChain: negative vignette lifts edge pixels")
+@MainActor
+func negativeVignetteLiftsEdgePixels() throws {
+    let compositor = EffectCompositor()
+    let source = CIImage(color: CIColor(red: 0.4, green: 0.4, blue: 0.4, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+    let result = compositor.applyEffectChain(
+        source,
+        effects: [.vignette(VignetteEffect(amount: Keyframed(defaultValue: -0.8),
+                                           radius: 0.35,
+                                           softness: 0.4))],
+        cacheKey: nil)
+
+    let original = try #require(sampleRGBA(source, at: CGPoint(x: 2, y: 2)))
+    let lifted = try #require(sampleRGBA(result, at: CGPoint(x: 2, y: 2)))
+    #expect(lifted[0] > original[0])
+    #expect(lifted[1] > original[1])
+    #expect(lifted[2] > original[2])
+}
+
+@Test("Built-in look presets render deterministic snapshots")
+@MainActor
+func builtInLookPresetSnapshots() throws {
+    let compositor = EffectCompositor()
+    let source = CIImage(color: CIColor(red: 0.52, green: 0.48, blue: 0.42, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+    let sourceBytes = try #require(rgbaBytes(source, width: 64, height: 64))
+
+    #expect(LookPresetLibrary.builtInPresets.count >= 10)
+    for preset in LookPresetLibrary.builtInPresets {
+        let first = compositor.applyEffectChain(
+            source, effects: preset.effects, cacheKey: nil,
+            at: CMTime(seconds: 0.25, preferredTimescale: 600))
+        let second = compositor.applyEffectChain(
+            source, effects: preset.effects, cacheKey: nil,
+            at: CMTime(seconds: 0.25, preferredTimescale: 600))
+        let firstBytes = try #require(rgbaBytes(first, width: 64, height: 64))
+        let secondBytes = try #require(rgbaBytes(second, width: 64, height: 64))
+
+        #expect(firstBytes == secondBytes, "\(preset.name) should render deterministically")
+        #expect(firstBytes != sourceBytes, "\(preset.name) should change the fixture image")
+    }
+}
+
+@Test("Built-in look preset resources match the in-memory library")
+func builtInLookPresetResourcesMatchLibrary() throws {
+    let root = try #require(Bundle.main.resourceURL)
+    let enumerator = FileManager.default.enumerator(
+        at: root,
+        includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles])
+    let urls = (enumerator?.compactMap { $0 as? URL } ?? [])
+        .filter { $0.pathExtension == LookPresetV1.fileExtension }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    let resourcePresets = try urls.map { try LookPresetV1(data: Data(contentsOf: $0)) }
+    let libraryByName = Dictionary(uniqueKeysWithValues: LookPresetLibrary.builtInPresets.map { ($0.name, $0) })
+
+    #expect(resourcePresets.count == LookPresetLibrary.builtInPresets.count)
+    #expect(Set(resourcePresets.map(\.name)) == Set(libraryByName.keys))
+    for preset in resourcePresets {
+        #expect(preset == libraryByName[preset.name], "\(preset.name) resource should match LookPresetLibrary")
+    }
+}
+
+@Test("Exported look presets copy LUTs under assets/luts")
+@MainActor
+func exportedLookPresetCopiesLUTUnderAssetsLuts() async throws {
+    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("look-preset-export-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tmp) }
+
+    let lutURL = tmp.appendingPathComponent("warm.cube")
+    let lutData = Data("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n".utf8)
+    try lutData.write(to: lutURL, options: .atomic)
+    let lutBookmark = try lutURL.bookmarkData(options: .withSecurityScope,
+                                              includingResourceValuesForKeys: nil,
+                                              relativeTo: nil)
+
+    let model = EditorModel()
+    let clip = Clip(mediaID: UUID(),
+                    sourceStart: .zero,
+                    duration: CMTime(seconds: 2, preferredTimescale: 600),
+                    timelineStart: .zero,
+                    effects: [
+                        .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
+                        .lut(bookmark: lutBookmark),
+                    ])
+    model.project.videoTracks.first!.clips = [clip]
+    model.selectedClipID = clip.id
+    model._testCacheLUTDisplayName("warm.cube", for: lutBookmark)
+
+    let presetURL = tmp.appendingPathComponent("Warm Look.lclook")
+    let copiedLUT = tmp.appendingPathComponent("assets/luts/Warm Look.cube")
+    model.exportLookPreset(to: presetURL)
+    for _ in 0..<300 {
+        if FileManager.default.fileExists(atPath: presetURL.path),
+           FileManager.default.fileExists(atPath: copiedLUT.path) {
+            break
+        }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+
+    let preset = try LookPresetV1(data: Data(contentsOf: presetURL))
+    #expect(preset.lut?.relativePath == "assets/luts/Warm Look.cube")
+    #expect(try Data(contentsOf: copiedLUT) == lutData)
+}
+
 /// Renders `a` and `b` to single-pixel CGImages at `point` and compares the
 /// RGBA bytes. Used by the colour-grading pass-through tests; lives near the
 /// top of the file so multiple tests can share it.
@@ -244,9 +447,34 @@ private func samplePixelEquals(_ a: CIImage, _ b: CIImage, at point: CGPoint,
     return true
 }
 
+@MainActor
+private func sampleRGBA(_ image: CIImage, at point: CGPoint) -> [UInt8]? {
+    let context = CIContext(options: nil)
+    let one = CGRect(x: point.x, y: point.y, width: 1, height: 1)
+    guard let cgImage = context.createCGImage(image, from: one),
+          let data = cgImage.dataProvider?.data,
+          let pointer = CFDataGetBytePtr(data),
+          CFDataGetLength(data) >= 4 else { return nil }
+    return Array(UnsafeBufferPointer(start: pointer, count: 4))
+}
+
+@MainActor
+private func rgbaBytes(_ image: CIImage, width: Int, height: Int) -> [UInt8]? {
+    let context = CIContext(options: nil)
+    var bytes = [UInt8](repeating: 0, count: width * height * 4)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    context.render(image,
+                   toBitmap: &bytes,
+                   rowBytes: width * 4,
+                   bounds: CGRect(x: 0, y: 0, width: width, height: height),
+                   format: .RGBA8,
+                   colorSpace: colorSpace)
+    return bytes
+}
+
 @Test("EditorModel.resetClipColourEffects preserves non-colour effects (audit fix)")
 @MainActor
-func resetColourPreservesSkinSmooth() {
+func resetColourPreservesNonColourEffects() {
     let model = EditorModel()
     let mediaID = UUID()
     let clip = Clip(
@@ -258,6 +486,9 @@ func resetColourPreservesSkinSmooth() {
     effected.effects = [
         .colourGrade(ColourGrade()),
         .skinSmooth(SkinSmoothEffect()),
+        .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
+        .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
+        .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))),
         .lut(bookmark: Data([0x1])),
     ]
     model.project.videoTracks.first!.clips = [effected]
@@ -266,10 +497,50 @@ func resetColourPreservesSkinSmooth() {
     model.resetClipColourEffects()
 
     let remaining = model.project.videoTracks.first!.clips.first!.effects
-    // SkinSmooth must survive; colour + lut must be gone.
+    // Non-colour effects must survive; colour + lut must be gone.
     #expect(remaining.contains { if case .skinSmooth = $0 { return true }; return false })
+    #expect(remaining.contains { if case .grain = $0 { return true }; return false })
+    #expect(remaining.contains { if case .halation = $0 { return true }; return false })
+    #expect(remaining.contains { if case .vignette = $0 { return true }; return false })
     #expect(!remaining.contains { if case .colourGrade = $0 { return true }; return false })
     #expect(!remaining.contains { if case .lut = $0 { return true }; return false })
+}
+
+@Test("EditorModel.resetClipLooks removes only look effects")
+@MainActor
+func resetLooksPreservesOtherEffects() {
+    let model = EditorModel()
+    let mediaID = UUID()
+    let clip = Clip(
+        mediaID: mediaID,
+        sourceStart: .zero,
+        duration: CMTime(seconds: 5, preferredTimescale: 600),
+        timelineStart: .zero)
+    var effected = clip
+    effected.effects = [
+        .colourGrade(ColourGrade(exposure: 0.2,
+                                 contrast: 1.1,
+                                 saturation: 0.9,
+                                 temperatureOffset: 50,
+                                 tintOffset: 5)),
+        .lut(bookmark: Data([0x1])),
+        .skinSmooth(SkinSmoothEffect()),
+        .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
+        .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
+        .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))),
+    ]
+    model.project.videoTracks.first!.clips = [effected]
+    model.selectedClipID = effected.id
+
+    model.resetClipLooks()
+
+    let remaining = model.project.videoTracks.first!.clips.first!.effects
+    #expect(remaining.contains { if case .colourGrade = $0 { return true }; return false })
+    #expect(remaining.contains { if case .lut = $0 { return true }; return false })
+    #expect(remaining.contains { if case .skinSmooth = $0 { return true }; return false })
+    #expect(!remaining.contains { if case .grain = $0 { return true }; return false })
+    #expect(!remaining.contains { if case .halation = $0 { return true }; return false })
+    #expect(!remaining.contains { if case .vignette = $0 { return true }; return false })
 }
 
 @Test("Effect.lut stores bookmark data")
@@ -281,4 +552,14 @@ func lutEffectStoresData() {
         return
     }
     #expect(stored == data)
+}
+
+@Test("Effect.grain stores effect")
+func grainEffectStores() {
+    let effect = Effect.grain(GrainEffect(amount: Keyframed(defaultValue: 0.25)))
+    guard case .grain(let grain) = effect else {
+        Issue.record("Expected .grain effect")
+        return
+    }
+    #expect(grain.amount.defaultValue == 0.25)
 }

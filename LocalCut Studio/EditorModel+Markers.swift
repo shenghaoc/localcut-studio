@@ -92,7 +92,7 @@ extension EditorModel {
     }
 
     /// Mutually-exclusive marker selection: clears the clip / transition /
-    /// media focus so Delete and the inspector always act on one focused thing
+    /// media / overlay focus so Delete and the inspector always act on one focused thing
     /// (Gemini review #4-#6, Codex review #2 + post-revision review).
     ///
     /// The one funnel every UI surface should call instead of setting
@@ -104,6 +104,7 @@ extension EditorModel {
         selectedClipID = nil
         selectedTransitionClipID = nil
         selectedMediaID = nil
+        selectedOverlayID = nil
     }
 
     // MARK: - Helpers

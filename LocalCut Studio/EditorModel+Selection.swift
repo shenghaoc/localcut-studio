@@ -7,6 +7,7 @@ extension EditorModel {
         selectedClipID = nil
         selectedTransitionClipID = nil
         selectedMarkerID = nil
+        selectedOverlayID = nil
     }
 
     func selectClip(id: Clip.ID) {
@@ -14,6 +15,7 @@ extension EditorModel {
         selectedMediaID = nil
         selectedTransitionClipID = nil
         selectedMarkerID = nil
+        selectedOverlayID = nil
     }
 
     func selectTransition(clipID: Clip.ID) {
@@ -21,6 +23,7 @@ extension EditorModel {
         selectedClipID = nil
         selectedMediaID = nil
         selectedMarkerID = nil
+        selectedOverlayID = nil
     }
 
     func clearSelection() {
@@ -28,5 +31,6 @@ extension EditorModel {
         selectedMediaID = nil
         selectedTransitionClipID = nil
         selectedMarkerID = nil
+        selectedOverlayID = nil
     }
 }

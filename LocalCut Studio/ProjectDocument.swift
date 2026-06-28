@@ -33,7 +33,39 @@ extension ProjectDocument {
             audioTracks: project.audioTracks.map(TrackDoc.init(track:)),
             captionTracks: project.captionTracks.map(CaptionTrackDoc.init(track:)),
             markers: project.markers,
-            audioBus: AudioBusDoc(project: project))
+            audioBus: AudioBusDoc(project: project),
+            overlays: project.overlayDocs)
+    }
+
+    /// Captures a queue snapshot. Saved bundle documents intentionally strip
+    /// bookmarks for bundled overlay assets, but the render queue persists only
+    /// the snapshot and not the enclosing bundle URL. When a live bundle project
+    /// is queued, add temporary bookmarks for those bundled overlay assets so the
+    /// background runner can resolve and render them later.
+    init(project: Project, queueBundleURL: URL?) {
+        self.init(project: project)
+        addQueueOverlayBookmarks(from: queueBundleURL)
+    }
+
+    private mutating func addQueueOverlayBookmarks(from bundleURL: URL?) {
+        guard let bundleURL,
+              ProjectBundle.isBundle(url: bundleURL) else { return }
+
+        let didAccess = bundleURL.startAccessingSecurityScopedResource()
+        defer { if didAccess { bundleURL.stopAccessingSecurityScopedResource() } }
+
+        for index in overlays.indices {
+            guard overlays[index].bookmark.isEmpty,
+                  let relative = overlays[index].bundleRelativePath,
+                  ProjectBundleLayout.isSafeAssetRelativePath(relative) else { continue }
+
+            let sourceURL = bundleURL.appendingPathComponent(relative)
+            guard FileManager.default.isReadableFile(atPath: sourceURL.path) else { continue }
+            overlays[index].bookmark = (try? sourceURL.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil)) ?? Data()
+        }
     }
 }
 

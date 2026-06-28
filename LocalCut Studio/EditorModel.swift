@@ -27,6 +27,7 @@ final class EditorModel {
     /// `Delete` only removes a marker when this is set, so the existing
     /// clip / transition delete shortcut keeps working unchanged.
     var selectedMarkerID: TimelineMarker.ID?
+    var selectedOverlayID: OverlayClip.ID?
 
     // Playback
     let player = AVPlayer()
@@ -137,6 +138,7 @@ final class EditorModel {
     @ObservationIgnored var cachedProjectedBeatTimes: [CMTime] = []
     @ObservationIgnored var projectedBeatTimesRevision: Int = 0
     @ObservationIgnored var lastProjectedBeatTimesRevision: Int = -1
+    @ObservationIgnored var activeOverlaySourceRegistryID: UUID?
 
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.
@@ -257,6 +259,7 @@ final class EditorModel {
         beatAnalysisTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        EffectCompositor.releaseOverlaySources(for: activeOverlaySourceRegistryID)
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
     }
 
@@ -373,7 +376,7 @@ final class EditorModel {
                 track.clips[index].effects.removeAll { effect in
                     switch effect {
                     case .colourGrade, .lut: true
-                    case .skinSmooth: false
+                    case .skinSmooth, .grain, .halation, .vignette: false
                     }
                 }
                 RenderCache.shared.invalidate(clipID: id)
@@ -565,6 +568,7 @@ final class EditorModel {
             }
         statusMessage = "Speed keyframe set at \(TimeFormatting.timecode(localTime.seconds))."
         selectedClipID = id
+        selectedOverlayID = nil
     }
 
     func removeSelectedClipSpeedKeyframe() {
@@ -642,7 +646,7 @@ final class EditorModel {
         clip.clampTimeRemap()
     }
 
-    private func effectiveTimelineTime(forAuthored authored: CMTime) -> CMTime {
+    func effectiveTimelineTime(forAuthored authored: CMTime) -> CMTime {
         let cuts = TransitionLayout.cuts(videoTracks: project.videoTracks.map(\.clips))
         return authored - TransitionLayout.shift(at: authored, cuts: cuts)
     }
@@ -964,6 +968,21 @@ final class EditorModel {
         return clip(for: id)?.transition
     }
 
+    /// The selected overlay clip, or `nil` if none is selected.
+    var selectedOverlay: OverlayClip? {
+        guard let id = selectedOverlayID else { return nil }
+        return project.overlays.first(where: { $0.id == id })
+    }
+
+    /// Selects an overlay by ID, clearing other selections.
+    func selectOverlay(_ id: OverlayClip.ID?) {
+        selectedOverlayID = id
+        selectedClipID = nil
+        selectedMediaID = nil
+        selectedMarkerID = nil
+        selectedTransitionClipID = nil
+    }
+
     /// The adjacent predecessor of `clipID` on the same track, if the two clips
     /// are butt-joined (a valid cut to host a transition).
     private func adjacentPredecessor(of clipID: Clip.ID) -> (track: Track, previous: Clip, clip: Clip)? {
@@ -1013,6 +1032,7 @@ final class EditorModel {
     func addTransition(toClipID id: Clip.ID) {
         selectedClipID = id
         selectedTransitionClipID = nil
+        selectedOverlayID = nil
         addTransitionToSelectedClip()
     }
 
@@ -1039,6 +1059,7 @@ final class EditorModel {
             selectedClipID = nil
             selectedMediaID = nil
             selectedMarkerID = nil
+            selectedOverlayID = nil
             selectedTransitionClipID = id
             statusMessage = "Added transition."
         }
@@ -1162,9 +1183,12 @@ final class EditorModel {
         await previewRebuildCoordinator.rebuild(model: self)
     }
 
-    func replacePreviewItem(with item: AVPlayerItem?) {
+    func replacePreviewItem(with item: AVPlayerItem?, overlaySourceRegistryID: UUID? = nil) {
+        let previousRegistryID = activeOverlaySourceRegistryID
+        activeOverlaySourceRegistryID = overlaySourceRegistryID
         player.replaceCurrentItem(with: item)
         hasPreviewItem = item != nil
+        EffectCompositor.releaseOverlaySources(for: previousRegistryID)
     }
 
     func togglePlayPause() {

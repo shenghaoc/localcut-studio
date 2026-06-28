@@ -820,6 +820,32 @@ struct TimeRemappingKeyframeRebaseTests {
         #expect(model.project.audioTracks[0].clips[0].speedCurve.keyframes.isEmpty)
     }
 
+    @Test("Look strength keyframes author in source-local time under retiming")
+    func lookStrengthKeyframesUseSourceLocalTime() {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        media.duration = trTime(10)
+        media.hasVideo = true
+        model.project.mediaItems.append(media)
+
+        var clip = Clip(mediaID: media.id, sourceStart: .zero,
+                        duration: trTime(10), timelineStart: .zero)
+        clip.speedCurve = Keyframed<Float>(defaultValue: 2)
+        clip.effects = [.grain(GrainEffect(amount: Keyframed(defaultValue: 0.4)))]
+        model.project.videoTracks[0].clips = [clip]
+        model.selectedClipID = clip.id
+        model.currentTime = 1.5
+
+        model.addOrUpdateLookStrengthKeyframe(.grain)
+
+        let keyframes = model.project.videoTracks[0].clips[0].effects
+            .compactMap(\.lookStrength)
+            .first?
+            .keyframes ?? []
+        #expect(keyframes.map(\.time) == [trTime(3)])
+        #expect(keyframes.map(\.value) == [0.4])
+    }
+
     @Test("Speed keyframe seek uses effective time after transition ripple")
     func speedKeyframeSeekUsesEffectiveTime() {
         let model = EditorModel()

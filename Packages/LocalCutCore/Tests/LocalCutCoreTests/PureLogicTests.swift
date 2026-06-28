@@ -53,6 +53,185 @@ func keyframedFloatSortedInterpolationAndReplacement() {
     #expect(approximatelyEqual(Double(value.value(at: time(3))), 0.25))
 }
 
+@Test("Look effects clamp authored and keyframed values")
+func lookEffectsClampValues() {
+    let incoming = KeyframeHandle(x: 0.2, y: 0.3)
+    let outgoing = KeyframeHandle(x: 0.4, y: 0.5)
+    var grain = GrainEffect(
+        amount: Keyframed(keyframes: [
+            Keyframe(time: time(1), value: 2,
+                     incomingHandle: incoming,
+                     outgoingHandle: outgoing),
+        ], defaultValue: -1),
+        size: 20)
+    var halation = HalationEffect(
+        strength: Keyframed(keyframes: [Keyframe(time: time(1), value: -1)], defaultValue: 2),
+        threshold: 2,
+        radius: 100,
+        redBoost: 5)
+    var vignette = VignetteEffect(
+        amount: Keyframed(keyframes: [Keyframe(time: time(1), value: 2)], defaultValue: -2),
+        radius: 0,
+        softness: 2)
+
+    grain.clamp()
+    halation.clamp()
+    vignette.clamp()
+
+    #expect(grain.amount.defaultValue == 0)
+    #expect(grain.amount.keyframes[0].value == 1)
+    #expect(grain.amount.keyframes[0].incomingHandle == incoming)
+    #expect(grain.amount.keyframes[0].outgoingHandle == outgoing)
+    #expect(grain.size == 8)
+    #expect(halation.strength.defaultValue == 1)
+    #expect(halation.strength.keyframes[0].value == 0)
+    #expect(halation.threshold == 1)
+    #expect(halation.radius == 80)
+    #expect(halation.redBoost == 2)
+    #expect(vignette.amount.defaultValue == -1)
+    #expect(vignette.amount.keyframes[0].value == 1)
+    #expect(vignette.radius == 0.05)
+    #expect(vignette.softness == 1)
+}
+
+@Test("Decoding look effect models clamps stored values")
+func lookEffectDecodeClampsStoredValues() throws {
+    let grain = try JSONDecoder().decode(GrainEffect.self, from: Data("""
+    {
+      "amount": { "keyframes": [], "defaultValue": 8 },
+      "size": 99,
+      "monochrome": true,
+      "seed": 7
+    }
+    """.utf8))
+    let halation = try JSONDecoder().decode(HalationEffect.self, from: Data("""
+    {
+      "strength": { "keyframes": [], "defaultValue": -2 },
+      "threshold": -1,
+      "radius": 999,
+      "redBoost": 9
+    }
+    """.utf8))
+    let vignette = try JSONDecoder().decode(VignetteEffect.self, from: Data("""
+    {
+      "amount": { "keyframes": [], "defaultValue": -8 },
+      "radius": 0,
+      "softness": 9
+    }
+    """.utf8))
+
+    #expect(grain.amount.defaultValue == 1)
+    #expect(grain.size == 8)
+    #expect(halation.strength.defaultValue == 0)
+    #expect(halation.threshold == 0)
+    #expect(halation.radius == 80)
+    #expect(halation.redBoost == 2)
+    #expect(vignette.amount.defaultValue == -1)
+    #expect(vignette.radius == 0.05)
+    #expect(vignette.softness == 1)
+}
+
+@Test("LookPresetV1 round-trips ordered nodes and applies only look effects")
+func lookPresetRoundTripAndApply() throws {
+    let preset = LookPresetV1(
+        name: "Round Trip",
+        nodes: [
+            .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
+            .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.3))),
+            .grain(GrainEffect(amount: Keyframed(defaultValue: 0.4))),
+        ],
+        lut: LookPresetLUTReference(relativePath: "luts/warm.cube", displayName: "warm.cube"))
+
+    let decoded = try LookPresetV1(data: preset.encoded())
+    #expect(decoded == preset)
+
+    let base: [Effect] = [
+        .colourGrade(.neutral),
+        .skinSmooth(.neutral),
+        .grain(.neutral),
+    ]
+    let applied = decoded.applying(to: base)
+    #expect(applied.count == 5)
+    #expect(applied.contains { if case .colourGrade = $0 { return true }; return false })
+    #expect(applied.contains { if case .skinSmooth = $0 { return true }; return false })
+    #expect(applied.filter(\.isLookEffect).count == 3)
+}
+
+@Test("Replacing individual look effects keeps canonical render order")
+func replacingLookEffectsKeepsCanonicalOrder() {
+    let chain: [Effect] = [.grain(GrainEffect(amount: Keyframed(defaultValue: 0.2)))]
+    let updated = chain
+        .replacingLookEffect(.halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))))
+        .replacingLookEffect(.vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))))
+
+    #expect(updated.compactMap(\.lookKind) == [.halation, .vignette, .grain])
+}
+
+@Test("canonicalPipelineOrder sorts effects into the fixed render order")
+func canonicalPipelineOrderSorts() {
+    let chain: [Effect] = [
+        .grain(.neutral),
+        .lut(bookmark: Data([0x01])),
+        .vignette(.neutral),
+        .colourGrade(.neutral),
+        .halation(.neutral),
+        .skinSmooth(.neutral),
+    ]
+    #expect(chain.canonicalPipelineOrder().map(\.pipelineOrder) == [0, 1, 2, 3, 4, 5])
+}
+
+@Test("Decoding a look preset clamps out-of-range node params")
+func lookPresetDecodeClampsParams() throws {
+    let json = """
+    {
+      "schemaVersion": 1,
+      "name": "Out Of Range",
+      "nodes": [
+        {
+          "effectName": "halation",
+          "params": {
+            "strength": { "keyframes": [], "defaultValue": 5 },
+            "threshold": 9,
+            "radius": 9999,
+            "redBoost": 8
+          }
+        }
+      ]
+    }
+    """
+    let decoded = try LookPresetV1(data: Data(json.utf8))
+    let halation = decoded.nodes.compactMap { node -> HalationEffect? in
+        if case .halation(let h) = node { return h }
+        return nil
+    }.first
+    #expect(halation?.strength.defaultValue == 1)
+    #expect(halation?.threshold == 1)
+    #expect(halation?.radius == 80)
+    #expect(halation?.redBoost == 2)
+}
+
+@Test("Look strength accessor reads and replaces the keyframed parameter")
+func lookStrengthAccessors() {
+    let grain = Effect.grain(GrainEffect(amount: Keyframed(defaultValue: 0.3)))
+    #expect(grain.lookStrength?.defaultValue == 0.3)
+
+    var track = Keyframed<Float>(defaultValue: 0.1)
+    track.addKeyframe(at: time(1), value: 0.9)
+    let updated = grain.settingLookStrength(track)
+    #expect(updated.lookStrength?.keyframes.count == 1)
+    #expect(updated.lookStrength?.defaultValue == 0.1)
+
+    let lut = Effect.lut(bookmark: Data([0x01]))
+    #expect(lut.lookStrength == nil)
+    #expect(lut.settingLookStrength(track) == lut)
+}
+
+@Test("Built-in look preset library has ten populated presets")
+func builtInLookPresetLibraryPopulated() {
+    #expect(LookPresetLibrary.builtInPresets.count >= 10)
+    #expect(LookPresetLibrary.builtInPresets.allSatisfy { !$0.nodes.isEmpty })
+}
+
 @Test("TransitionLayout: project-wide cuts ripple placements across tracks")
 func transitionLayoutRipplesPlacements() {
     let incomingTransition = LocalCutCore.Transition(type: .crossDissolve, duration: time(2))
@@ -192,4 +371,98 @@ func projectDocumentPureRoundTrip() throws {
     #expect(decoded == document)
     #expect(decoded.videoTracks[0].clips[0].makeClip().transition?.type == .wipe)
     #expect(decoded.audioBus.trackInputs[0].trackInput.gain == 1.2)
+}
+
+// MARK: - Overlay model tests (Phase 38b)
+
+@Test("OverlayClip model round-trips through OverlayClipDoc")
+func overlayClipDocRoundTrip() {
+    let overlay = OverlayClip(
+        id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+        sourceType: .animatedImage,
+        timelineStart: time(2),
+        duration: time(5),
+        positionOffset: CGSize(width: 0.3, height: -0.1),
+        scale: 1.5,
+        rotation: 0.785,
+        opacity: 0.8,
+        endAction: .freeze)
+    let doc = OverlayClipDoc(
+        overlay: overlay,
+        bookmark: Data([0xDE, 0xAD]))
+    let restored = doc.makeOverlayClip()
+
+    #expect(restored.id == overlay.id)
+    #expect(restored.sourceType == .animatedImage)
+    #expect(restored.timelineStart == overlay.timelineStart)
+    #expect(restored.duration == overlay.duration)
+    #expect(restored.positionOffset.width == overlay.positionOffset.width)
+    #expect(restored.positionOffset.height == overlay.positionOffset.height)
+    #expect(restored.scale == overlay.scale)
+    #expect(restored.rotation == overlay.rotation)
+    #expect(restored.opacity == overlay.opacity)
+    #expect(restored.endAction == .freeze)
+}
+
+@Test("OverlayClipDoc clamps malformed transform values when restoring model")
+func overlayClipDocClampsMalformedTransformValues() {
+    let doc = OverlayClipDoc(
+        sourceType: .animatedImage,
+        bookmark: Data(),
+        timelineStart: CMTimeCode(time(1)),
+        duration: CMTimeCode(time(2)),
+        scale: 0,
+        opacity: -0.25,
+        endAction: .loop)
+    let restored = doc.makeOverlayClip()
+
+    #expect(restored.scale == 0.1)
+    #expect(restored.opacity == 0)
+
+    let overOpaque = OverlayClipDoc(
+        sourceType: .animatedImage,
+        bookmark: Data(),
+        timelineStart: CMTimeCode(time(1)),
+        duration: CMTimeCode(time(2)),
+        scale: 1,
+        opacity: 1.25,
+        endAction: .loop).makeOverlayClip()
+    #expect(overOpaque.opacity == 1)
+}
+
+@Test("OverlayClipDoc round-trips through JSON encoding")
+func overlayClipDocJSONRoundTrip() throws {
+    let doc = OverlayClipDoc(
+        sourceType: .lottie,
+        bookmark: Data([0xCA, 0xFE]),
+        timelineStart: CMTimeCode(time(1)),
+        duration: CMTimeCode(time(3)),
+        positionOffsetX: 0.5,
+        positionOffsetY: -0.25,
+        scale: 2.0,
+        rotation: 1.57,
+        opacity: 0.6,
+        endAction: .hide)
+    let encoded = try JSONEncoder().encode(doc)
+    let decoded = try JSONDecoder().decode(OverlayClipDoc.self, from: encoded)
+
+    #expect(decoded.sourceType == .lottie)
+    #expect(decoded.timelineStart == doc.timelineStart)
+    #expect(decoded.duration == doc.duration)
+    #expect(decoded.positionOffsetX == 0.5)
+    #expect(decoded.endAction == .hide)
+}
+
+@Test("OverlaySourceType display names are non-empty")
+func overlaySourceTypeDisplayNames() {
+    for type in OverlaySourceType.allCases {
+        #expect(!type.displayName.isEmpty)
+    }
+}
+
+@Test("OverlayEndAction display names are non-empty")
+func overlayEndActionDisplayNames() {
+    for action in OverlayEndAction.allCases {
+        #expect(!action.displayName.isEmpty)
+    }
 }

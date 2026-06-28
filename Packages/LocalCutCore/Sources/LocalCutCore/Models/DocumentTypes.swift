@@ -6,14 +6,11 @@ import CoreGraphics
 /// Codable snapshot of a `Project`, split from the runtime model. Holds plain
 /// values plus security-scoped bookmarks instead of live `AVURLAsset`s.
 public struct ProjectDocument: Codable, Equatable, Sendable {
-    // Bumped to 5 (single-file 4) when `audioBus.voiceCleanup` was added. Both
-    // write-versions must exceed the previous release's ceiling (3); otherwise
-    // an older build opens a voiceCleanup-bearing document without the
-    // "newer format" guard, silently drops the unknown field, and overwrites it
-    // on the next save. Keeping single-file one below the bundle version
-    // preserves the prior "single-file downconverts" relationship.
-    public static let currentSchemaVersion = 5
-    public static let singleFileSchemaVersion = 4
+    // Bumped to 7 (single-file 6) in Phase 38b: `OverlayClip` persistence
+    // added to `ProjectDocument.overlays`. Prior bump (6/5) was for look
+    // effects in Phase 38a.
+    public static let currentSchemaVersion = 7
+    public static let singleFileSchemaVersion = 6
     public static let currentBundleFormat = "1"
     public static let fileExtension = "lcstudio"
 
@@ -30,6 +27,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     public var captionTracks: [CaptionTrackDoc]
     public var markers: [TimelineMarker]
     public var audioBus: AudioBusDoc
+    public var overlays: [OverlayClipDoc]
 
     public init(schemaVersion: Int = ProjectDocument.currentSchemaVersion,
                 bundleFormat: String? = nil,
@@ -43,7 +41,8 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
                 audioTracks: [TrackDoc],
                 captionTracks: [CaptionTrackDoc] = [],
                 markers: [TimelineMarker] = [],
-                audioBus: AudioBusDoc = AudioBusDoc()) {
+                audioBus: AudioBusDoc = AudioBusDoc(),
+                overlays: [OverlayClipDoc] = []) {
         self.schemaVersion = schemaVersion
         self.bundleFormat = bundleFormat
         self.name = name
@@ -57,12 +56,13 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         self.captionTracks = captionTracks
         self.markers = markers
         self.audioBus = audioBus
+        self.overlays = overlays
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, bundleFormat, name, renderWidth, renderHeight, frameRate,
              workingColourSpace, media, videoTracks, audioTracks, captionTracks,
-             markers, audioBus
+             markers, audioBus, overlays
     }
 
     public init(from decoder: any Decoder) throws {
@@ -84,6 +84,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         captionTracks = try c.decodeIfPresent([CaptionTrackDoc].self, forKey: .captionTracks) ?? []
         markers = try c.decodeIfPresent([TimelineMarker].self, forKey: .markers) ?? []
         audioBus = try c.decodeIfPresent(AudioBusDoc.self, forKey: .audioBus) ?? AudioBusDoc()
+        overlays = try c.decodeIfPresent([OverlayClipDoc].self, forKey: .overlays) ?? []
     }
 
     public func encoded() throws -> Data {
@@ -434,5 +435,100 @@ extension TransitionDoc {
         self.init(type: transition.type.rawValue,
                   duration: CMTimeCode(transition.duration),
                   wipeAngle: transition.wipeAngle)
+    }
+}
+
+// MARK: - Overlay clip persistence
+
+public struct OverlayClipDoc: Codable, Equatable, Sendable {
+    public var id: UUID
+    public var sourceType: OverlaySourceType
+    public var bookmark: Data
+    public var bundleRelativePath: String?
+    public var timelineStart: CMTimeCode
+    public var duration: CMTimeCode
+    public var positionOffsetX: Double
+    public var positionOffsetY: Double
+    public var scale: Double
+    public var rotation: Double
+    public var opacity: Float
+    public var endAction: OverlayEndAction
+
+    public init(id: UUID = UUID(),
+                sourceType: OverlaySourceType,
+                bookmark: Data,
+                bundleRelativePath: String? = nil,
+                timelineStart: CMTimeCode,
+                duration: CMTimeCode,
+                positionOffsetX: Double = 0,
+                positionOffsetY: Double = 0,
+                scale: Double = 1,
+                rotation: Double = 0,
+                opacity: Float = 1,
+                endAction: OverlayEndAction = .loop) {
+        self.id = id
+        self.sourceType = sourceType
+        self.bookmark = bookmark
+        self.bundleRelativePath = bundleRelativePath
+        self.timelineStart = timelineStart
+        self.duration = duration
+        self.positionOffsetX = positionOffsetX
+        self.positionOffsetY = positionOffsetY
+        self.scale = scale
+        self.rotation = rotation
+        self.opacity = opacity
+        self.endAction = endAction
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, sourceType, bookmark, bundleRelativePath, timelineStart, duration,
+             positionOffsetX, positionOffsetY, scale, rotation, opacity, endAction
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        sourceType = try c.decode(OverlaySourceType.self, forKey: .sourceType)
+        bookmark = try c.decodeIfPresent(Data.self, forKey: .bookmark) ?? Data()
+        bundleRelativePath = try c.decodeIfPresent(String.self, forKey: .bundleRelativePath)
+        timelineStart = try c.decode(CMTimeCode.self, forKey: .timelineStart)
+        duration = try c.decode(CMTimeCode.self, forKey: .duration)
+        positionOffsetX = try c.decodeIfPresent(Double.self, forKey: .positionOffsetX) ?? 0
+        positionOffsetY = try c.decodeIfPresent(Double.self, forKey: .positionOffsetY) ?? 0
+        scale = try c.decodeIfPresent(Double.self, forKey: .scale) ?? 1
+        rotation = try c.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
+        opacity = try c.decodeIfPresent(Float.self, forKey: .opacity) ?? 1
+        endAction = try c.decodeIfPresent(OverlayEndAction.self, forKey: .endAction) ?? .loop
+    }
+
+    public func makeOverlayClip() -> OverlayClip {
+        OverlayClip(
+            id: id,
+            sourceType: sourceType,
+            timelineStart: timelineStart.cmTime,
+            duration: duration.cmTime,
+            positionOffset: CGSize(width: positionOffsetX, height: positionOffsetY),
+            scale: max(0.1, scale),
+            rotation: rotation,
+            opacity: max(0, min(1, opacity)),
+            endAction: endAction)
+    }
+}
+
+extension OverlayClipDoc {
+    public init(overlay: OverlayClip, bookmark: Data, bundleRelativePath: String? = nil) {
+        self.init(
+            id: overlay.id,
+            sourceType: overlay.sourceType,
+            bookmark: bookmark,
+            bundleRelativePath: bundleRelativePath,
+            timelineStart: CMTimeCode(overlay.timelineStart),
+            duration: CMTimeCode(overlay.duration),
+            positionOffsetX: overlay.positionOffset.width,
+            positionOffsetY: overlay.positionOffset.height,
+            scale: overlay.scale,
+            rotation: overlay.rotation,
+            opacity: overlay.opacity,
+            endAction: overlay.endAction)
     }
 }

@@ -35,8 +35,20 @@ final class PreviewRebuildCoordinator {
     @MainActor
     func rebuild(model: EditorModel) async {
         let resumeAt = model.currentTime
+        let overlaySourceRegistryID = await model.registerOverlaySources()
+        var didInstallOverlaySourceRegistry = false
+        defer {
+            if !didInstallOverlaySourceRegistry {
+                EffectCompositor.releaseOverlaySources(for: overlaySourceRegistryID)
+            }
+        }
         do {
-            let result = try await CompositionBuilder.build(project: model.project, showSkinMask: model.showSkinMask)
+            // Register overlay frame sources before building the composition
+            // so the compositor can decode overlay frames during rendering.
+            let result = try await CompositionBuilder.build(
+                project: model.project,
+                showSkinMask: model.showSkinMask,
+                overlaySourceRegistryID: overlaySourceRegistryID)
             guard !Task.isCancelled else { return }
             guard let built = result else {
                 model.replacePreviewItem(with: nil)
@@ -74,7 +86,8 @@ final class PreviewRebuildCoordinator {
             item.audioMix = cleanupPreviewRunning
                 ? Self.mutedAudioMix(for: built.composition)
                 : built.audioMix
-            model.replacePreviewItem(with: item)
+            model.replacePreviewItem(with: item, overlaySourceRegistryID: overlaySourceRegistryID)
+            didInstallOverlaySourceRegistry = true
             model.totalDuration = built.duration
             DiagnosticsBridge.shared.setDecoderCount(
                 built.composition.tracks(withMediaType: .video).count)

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "name": "Faded Stock",
+  "nodes": [
+    {
+      "effectName": "halation",
+      "params": {
+        "strength": { "keyframes": [], "defaultValue": 0.18 },
+        "threshold": 0.72,
+        "radius": 14,
+        "redBoost": 0.9
+      }
+    },
+    {
+      "effectName": "vignette",
+      "params": {
+        "amount": { "keyframes": [], "defaultValue": -0.08 },
+        "radius": 0.72,
+        "softness": 0.35
+      }
+    },
+    {
+      "effectName": "grain",
+      "params": {
+        "amount": { "keyframes": [], "defaultValue": 0.16 },
+        "size": 1.6,
+        "monochrome": true,
+        "seed": 18344639564408149891
+      }
+    }
+  ]
+}

@@ -9,6 +9,7 @@ import LocalCutCore
 struct InspectorView: View {
     @Bindable var model: EditorModel
     @State private var showLUTImporter = false
+    @State private var showLookImporter = false
 
     var body: some View {
         // The side rail's segmented switcher (EditorSideRailView) is the sole
@@ -18,11 +19,14 @@ struct InspectorView: View {
         Form {
             if let transition = model.selectedTransition {
                 transitionSection(transition)
+            } else if let overlay = model.selectedOverlay {
+                overlaySection(overlay)
             } else if let clip = model.selectedClip {
                 clipSection(clip)
                 speedSection(clip)
                 if clipIsVideo(clip) {
                     colourSection
+                    looksSection
                     beautySection
                 } else {
                     AudioClipFadesInspectorView(model: model, clip: clip)
@@ -37,6 +41,7 @@ struct InspectorView: View {
             }
 
             projectSection
+            overlayListSection
         }
         .formStyle(.grouped)
         .fileImporter(
@@ -46,6 +51,17 @@ struct InspectorView: View {
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
                 model.importLUT(url: url)
+            }
+        }
+        .fileImporter(
+            isPresented: $showLookImporter,
+            allowedContentTypes: [.localCutLookPreset],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task {
+                    await model.importLookPreset(url: url)
+                }
             }
         }
     }
@@ -426,6 +442,252 @@ struct InspectorView: View {
         )
     }
 
+    // MARK: - Look Packs
+
+    @ViewBuilder
+    private var looksSection: some View {
+        Section("Looks") {
+            Menu {
+                ForEach(LookPresetLibrary.builtInPresets, id: \.name) { preset in
+                    Button(preset.name) {
+                        model.applyBuiltInLookPreset(preset)
+                    }
+                }
+                Divider()
+                Button("Import…", systemImage: "square.and.arrow.down") {
+                    showLookImporter = true
+                }
+                Button("Export…", systemImage: "square.and.arrow.up") {
+                    model.requestExportLookPreset()
+                }
+            } label: {
+                Label("Preset", systemImage: "wand.and.stars")
+            }
+
+            DisclosureGroup("Grain") {
+                LabeledSliderRow(
+                    label: "Amount",
+                    display: "\(Int(model.selectedClipGrain.amount.defaultValue * 100))%",
+                    value: grainBinding(\.amount.defaultValue),
+                    range: 0...1,
+                    step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: resetGrain(\.amount.defaultValue, to: 0))
+                lookKeyframeEditor(.grain)
+                LabeledSliderRow(
+                    label: "Size",
+                    display: String(format: "%.2f", model.selectedClipGrain.size),
+                    value: grainBinding(\.size),
+                    range: 0.25...8,
+                    step: 0.05,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: resetGrain(\.size, to: 1))
+                Toggle("Monochrome", isOn: Binding(
+                    get: { model.selectedClipGrain.monochrome },
+                    set: { newValue in
+                        model.updateSelectedClipGrain { $0.monochrome = newValue }
+                    }))
+            }
+
+            DisclosureGroup("Halation") {
+                LabeledSliderRow(
+                    label: "Strength",
+                    display: "\(Int(model.selectedClipHalation.strength.defaultValue * 100))%",
+                    value: halationBinding(\.strength.defaultValue),
+                    range: 0...1,
+                    step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: resetHalation(\.strength.defaultValue, to: 0))
+                lookKeyframeEditor(.halation)
+                LabeledSliderRow(
+                    label: "Threshold",
+                    display: String(format: "%.2f", model.selectedClipHalation.threshold),
+                    value: halationBinding(\.threshold),
+                    range: 0...1,
+                    step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: resetHalation(\.threshold, to: 0.72))
+                LabeledSliderRow(
+                    label: "Radius",
+                    display: String(format: "%.0f px", model.selectedClipHalation.radius),
+                    value: halationBinding(\.radius),
+                    range: 0...80,
+                    step: 1,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: resetHalation(\.radius, to: 16))
+            }
+
+            DisclosureGroup("Vignette") {
+                LabeledSliderRow(
+                    label: "Amount",
+                    display: "\(Int(model.selectedClipVignette.amount.defaultValue * 100))%",
+                    value: vignetteBinding(\.amount.defaultValue),
+                    range: -1...1,
+                    step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: resetVignette(\.amount.defaultValue, to: 0))
+                lookKeyframeEditor(.vignette)
+                LabeledSliderRow(
+                    label: "Radius",
+                    display: String(format: "%.2f", model.selectedClipVignette.radius),
+                    value: vignetteBinding(\.radius),
+                    range: 0.05...2,
+                    step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: resetVignette(\.radius, to: 0.65))
+                LabeledSliderRow(
+                    label: "Softness",
+                    display: String(format: "%.2f", model.selectedClipVignette.softness),
+                    value: vignetteBinding(\.softness),
+                    range: 0.01...1,
+                    step: 0.01,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: resetVignette(\.softness, to: 0.35))
+            }
+
+            HStack {
+                Button("Import…") { showLookImporter = true }
+                    .controlSize(.small)
+                Button("Export…") { model.requestExportLookPreset() }
+                    .controlSize(.small)
+                    .disabled(!model.selectedClipHasLookEffects)
+                Spacer()
+                Button("Reset") { model.resetClipLooks() }
+                    .controlSize(.small)
+                    .disabled(!model.selectedClipHasLookEffects)
+            }
+        }
+    }
+
+    private func resetGrain(_ keyPath: WritableKeyPath<GrainEffect, Float>, to neutral: Float) -> () -> Void {
+        {
+            grainBinding(keyPath).wrappedValue = neutral
+            model.commitCoalescedUndo()
+        }
+    }
+
+    private func resetHalation(_ keyPath: WritableKeyPath<HalationEffect, Float>, to neutral: Float) -> () -> Void {
+        {
+            halationBinding(keyPath).wrappedValue = neutral
+            model.commitCoalescedUndo()
+        }
+    }
+
+    private func resetVignette(_ keyPath: WritableKeyPath<VignetteEffect, Float>, to neutral: Float) -> () -> Void {
+        {
+            vignetteBinding(keyPath).wrappedValue = neutral
+            model.commitCoalescedUndo()
+        }
+    }
+
+    private func grainBinding(_ keyPath: WritableKeyPath<GrainEffect, Float>) -> Binding<Float> {
+        Binding(
+            get: { model.selectedClipGrain[keyPath: keyPath] },
+            set: { newValue in
+                model.updateSelectedClipGrain { $0[keyPath: keyPath] = newValue }
+            })
+    }
+
+    private func halationBinding(_ keyPath: WritableKeyPath<HalationEffect, Float>) -> Binding<Float> {
+        Binding(
+            get: { model.selectedClipHalation[keyPath: keyPath] },
+            set: { newValue in
+                model.updateSelectedClipHalation { $0[keyPath: keyPath] = newValue }
+            })
+    }
+
+    private func vignetteBinding(_ keyPath: WritableKeyPath<VignetteEffect, Float>) -> Binding<Float> {
+        Binding(
+            get: { model.selectedClipVignette[keyPath: keyPath] },
+            set: { newValue in
+                model.updateSelectedClipVignette { $0[keyPath: keyPath] = newValue }
+            })
+    }
+
+    /// Playhead-targeted keyframe editor for a look effect's strength parameter
+    /// (grain amount, halation strength, vignette amount). Mirrors the
+    /// skin-smoothing keyframe controls so all animated effects behave alike.
+    @ViewBuilder
+    private func lookKeyframeEditor(_ kind: LookEffectKind) -> some View {
+        DisclosureGroup("Keyframes") {
+            LabeledContent("Clip Time") {
+                Text(lookKeyframePlayheadLabel)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            LabeledContent("Value") {
+                Text("\(Int(model.lookStrengthAtPlayhead(kind) * 100))%")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            LabeledContent("Count") {
+                Text("\(model.lookStrengthKeyframes(kind).count)")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    model.seekToPreviousLookStrengthKeyframe(kind)
+                } label: {
+                    Image(systemName: "backward.end.fill")
+                }
+                .help("Previous keyframe")
+                .accessibilityLabel("Previous \(kind.displayName) keyframe")
+                .disabled(!hasPreviousLookKeyframe(kind))
+
+                Button {
+                    model.addOrUpdateLookStrengthKeyframe(kind)
+                } label: {
+                    Label(lookKeyframeActionTitle(kind), systemImage: lookKeyframeActionIcon(kind))
+                }
+                .disabled(model.selectedClipLookLocalPlayheadTime == nil)
+
+                Button(role: .destructive) {
+                    model.removeLookStrengthKeyframe(kind)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .help("Remove keyframe")
+                .accessibilityLabel("Remove \(kind.displayName) keyframe")
+                .disabled(model.lookStrengthKeyframeAtPlayhead(kind) == nil)
+
+                Button {
+                    model.seekToNextLookStrengthKeyframe(kind)
+                } label: {
+                    Image(systemName: "forward.end.fill")
+                }
+                .help("Next keyframe")
+                .accessibilityLabel("Next \(kind.displayName) keyframe")
+                .disabled(!hasNextLookKeyframe(kind))
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private var lookKeyframePlayheadLabel: String {
+        guard let localTime = model.selectedClipLookLocalPlayheadTime else { return "Outside clip" }
+        return TimeFormatting.timecode(localTime.seconds)
+    }
+
+    private func lookKeyframeActionTitle(_ kind: LookEffectKind) -> String {
+        model.lookStrengthKeyframeAtPlayhead(kind) == nil ? "Add" : "Update"
+    }
+
+    private func lookKeyframeActionIcon(_ kind: LookEffectKind) -> String {
+        model.lookStrengthKeyframeAtPlayhead(kind) == nil ? "plus.diamond.fill" : "diamond.fill"
+    }
+
+    private func hasPreviousLookKeyframe(_ kind: LookEffectKind) -> Bool {
+        guard let localTime = model.selectedClipLookLocalPlayheadTime else { return false }
+        return model.lookStrengthKeyframes(kind).contains { $0.time.seconds < localTime.seconds }
+    }
+
+    private func hasNextLookKeyframe(_ kind: LookEffectKind) -> Bool {
+        guard let localTime = model.selectedClipLookLocalPlayheadTime else { return false }
+        return model.lookStrengthKeyframes(kind).contains { $0.time.seconds > localTime.seconds }
+    }
+
     // MARK: - Beauty / Skin Smoothing
 
     @ViewBuilder
@@ -641,6 +903,208 @@ struct InspectorView: View {
         Binding(
             get: { model.project.workingColourSpace },
             set: { model.setWorkingColourSpace($0) })
+    }
+
+    // MARK: - Overlay inspector
+
+    @ViewBuilder
+    private func overlaySection(_ overlay: OverlayClip) -> some View {
+        let frameStep = 1 / max(1, model.project.frameRate)
+        let timelineUpper = max(60, model.totalDuration, overlay.timelineEnd.seconds)
+        let durationUpper = max(frameStep, max(60, model.totalDuration, overlay.duration.seconds))
+        Section("Overlay") {
+            LabeledContent("Type") {
+                Text(overlay.sourceType.displayName)
+            }
+
+            LabeledSliderRow(
+                label: "Start",
+                display: TimeFormatting.timecode(overlay.timelineStart.seconds),
+                value: Binding(
+                    get: { overlay.timelineStart.seconds },
+                    set: {
+                        model.setOverlayStart(
+                            overlay.id,
+                            to: CMTime(seconds: $0, preferredTimescale: 600))
+                    }),
+                range: 0...timelineUpper,
+                step: frameStep,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+
+            LabeledSliderRow(
+                label: "Duration",
+                display: TimeFormatting.timecode(overlay.duration.seconds),
+                value: Binding(
+                    get: { overlay.duration.seconds },
+                    set: {
+                        model.setOverlayDuration(
+                            overlay.id,
+                            to: CMTime(seconds: $0, preferredTimescale: 600))
+                    }),
+                range: frameStep...durationUpper,
+                step: frameStep,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+
+            LabeledSliderRow(
+                label: "Position X",
+                display: "\(Int(overlay.positionOffset.width * 100))%",
+                value: Binding(
+                    get: { overlay.positionOffset.width },
+                    set: {
+                        model.setOverlayPosition(
+                            overlay.id,
+                            to: CGSize(width: $0, height: overlay.positionOffset.height))
+                    }),
+                range: -1...1,
+                step: 0.01,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    model.setOverlayPosition(
+                        overlay.id,
+                        to: CGSize(width: 0, height: overlay.positionOffset.height))
+                    model.commitCoalescedUndo()
+                })
+
+            LabeledSliderRow(
+                label: "Position Y",
+                display: "\(Int(overlay.positionOffset.height * 100))%",
+                value: Binding(
+                    get: { overlay.positionOffset.height },
+                    set: {
+                        model.setOverlayPosition(
+                            overlay.id,
+                            to: CGSize(width: overlay.positionOffset.width, height: $0))
+                    }),
+                range: -1...1,
+                step: 0.01,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    model.setOverlayPosition(
+                        overlay.id,
+                        to: CGSize(width: overlay.positionOffset.width, height: 0))
+                    model.commitCoalescedUndo()
+                })
+
+            LabeledSliderRow(
+                label: "Opacity",
+                display: "\(Int(overlay.opacity * 100))%",
+                value: Binding(
+                    get: { Double(overlay.opacity) },
+                    set: { model.setOverlayOpacity(overlay.id, to: Float($0)) }),
+                range: 0...1,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    model.setOverlayOpacity(overlay.id, to: 1)
+                    model.commitCoalescedUndo()
+                })
+
+            LabeledSliderRow(
+                label: "Scale",
+                display: String(format: "%.1f×", overlay.scale),
+                value: Binding(
+                    get: { overlay.scale },
+                    set: { model.setOverlayScale(overlay.id, to: $0) }),
+                range: 0.1...4.0,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    model.setOverlayScale(overlay.id, to: 1)
+                    model.commitCoalescedUndo()
+                })
+
+            LabeledSliderRow(
+                label: "Rotation",
+                display: String(format: "%.0f°", overlay.rotation * 180 / .pi),
+                value: Binding(
+                    get: { overlay.rotation },
+                    set: { model.setOverlayRotation(overlay.id, to: $0) }),
+                range: -CGFloat.pi...CGFloat.pi,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    model.setOverlayRotation(overlay.id, to: 0)
+                    model.commitCoalescedUndo()
+                })
+
+            Picker("End Action", selection: Binding(
+                get: { overlay.endAction },
+                set: { model.setOverlayEndAction(overlay.id, to: $0) })) {
+                ForEach(OverlayEndAction.allCases) { action in
+                    Text(action.displayName).tag(action)
+                }
+            }
+
+            Button("Remove Overlay", role: .destructive) {
+                model.removeOverlay(id: overlay.id)
+            }
+        }
+    }
+
+    // MARK: - Overlay list
+
+    @State private var showOverlayImporter = false
+    @State private var pendingOverlayType: OverlaySourceType = .animatedImage
+
+    @ViewBuilder
+    private var overlayListSection: some View {
+        Section("Overlays") {
+            if model.project.overlays.isEmpty {
+                Text("No overlays added.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(model.project.overlays) { overlay in
+                    HStack {
+                        Circle()
+                            .fill(model.selectedOverlayID == overlay.id ? Color.accentColor : Color.clear)
+                            .frame(width: 8, height: 8)
+                        Text(overlay.sourceType.displayName)
+                        Spacer()
+                        Text(TimeFormatting.timecode(overlay.timelineStart.seconds))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        model.selectOverlay(overlay.id)
+                    }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("\(overlay.sourceType.displayName) overlay at \(TimeFormatting.timecode(overlay.timelineStart.seconds))")
+                }
+                .onDelete { indexSet in
+                    // Remove in descending order so earlier removals don't shift
+                    // the indices of later entries.
+                    for index in indexSet.sorted().reversed() {
+                        model.removeOverlay(id: model.project.overlays[index].id)
+                    }
+                }
+            }
+
+            Menu {
+                Button("Animated Image (GIF/WebP/APNG)") {
+                    pendingOverlayType = .animatedImage
+                    showOverlayImporter = true
+                }
+                Button("Alpha Video") {
+                    pendingOverlayType = .alphaVideo
+                    showOverlayImporter = true
+                }
+                Button("Lottie") {
+                    pendingOverlayType = .lottie
+                    showOverlayImporter = true
+                }
+            } label: {
+                Label("Add Overlay", systemImage: "plus")
+            }
+        }
+        .fileImporter(
+            isPresented: $showOverlayImporter,
+            allowedContentTypes: pendingOverlayType.allowedContentTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task {
+                    await model.importOverlay(from: url, sourceType: pendingOverlayType)
+                }
+            }
+        }
     }
 }
 
