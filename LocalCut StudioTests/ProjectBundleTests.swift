@@ -225,6 +225,42 @@ struct ProjectBundleTests {
         #expect(!savedOverlay.bookmark.isEmpty)
     }
 
+    @Test("Single-file save promotes bundled overlay bookmarks back into the live project")
+    func singleFileSavePromotesOverlayBookmarksIntoModel() throws {
+        let tmp = try makeTempDirectory("overlay-single-file-model")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("OverlayProject.lcbundle")
+        let overlayID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        let relativePath = "assets/\(overlayID.uuidString).json"
+        let sourceURL = bundleURL.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: sourceURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        try Data(#"{"v":"5.7.4","fr":30,"ip":0,"op":1,"w":8,"h":8,"layers":[]}"#.utf8)
+            .write(to: sourceURL, options: .atomic)
+
+        let model = EditorModel()
+        model.documentURL = bundleURL
+        model.project.overlays = [
+            OverlayClip(
+                id: overlayID,
+                sourceType: .lottie,
+                timelineStart: .zero,
+                duration: time(1)),
+        ]
+        model.project.overlayBundlePaths[overlayID] = relativePath
+
+        let singleFileURL = tmp.appendingPathComponent("OverlayProject.\(ProjectDocument.fileExtension)")
+        #expect(model.writeSynchronously(to: singleFileURL))
+
+        #expect(model.project.overlayBundlePaths[overlayID] == nil)
+        #expect(!(model.project.overlayBookmarks[overlayID]?.isEmpty ?? true))
+        let saved = try ProjectDocument(data: Data(contentsOf: singleFileURL))
+        let savedOverlay = try #require(saved.overlays.first)
+        #expect(savedOverlay.bundleRelativePath == nil)
+        #expect(!savedOverlay.bookmark.isEmpty)
+    }
+
     @Test("Queue snapshot adds bookmarks for bundled overlay sources")
     func queueSnapshotAddsBundledOverlayBookmarks() throws {
         let tmp = try makeTempDirectory("overlay-queue-snapshot")

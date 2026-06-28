@@ -23,7 +23,7 @@
 - **R3.2** Frame-accurate timeline mapping: the overlay's frame at output time `t` matches the source's frame at `t - overlayStart` mod loop, honouring per-frame durations.
 - **R3.3** Loop / freeze on end / hide on end controls.
 - **R3.4** Overlay transform uses source-natural pixel size: `scale == 1` preserves natural size, with rotation around the source centre.
-- **R3.5** Overlay-only projects and overlay tails beyond the last video clip extend the composition with filler video so preview/export render the overlay interval.
+- **R3.5** Overlay-only projects, overlay/caption gaps before or between video clips, and overlay tails beyond the last video clip extend the composition with filler video so preview/export render the full visual interval.
 - **R3.6** Overlay source file import is filtered and validated by the chosen source type; selecting another editable target clears overlay selection.
 - **R3.7** Overlay frame sources are scoped per preview/export render session so overlapping rebuilds and queued exports cannot race through a shared global source map.
 

@@ -51,7 +51,6 @@ final class DocumentController {
         model.project.overlays.removeAll()
         model.project.overlayBookmarks.removeAll()
         model.project.overlayBundlePaths.removeAll()
-        EffectCompositor.clearOverlaySources()
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -259,8 +258,10 @@ final class DocumentController {
                 model.lastBundleFingerprints = index
                 model.persistBeatCachesSynchronously(to: url)
             } else {
-                let data = try encodedDocument(forBundle: false, model: model)
+                let document = makeDocumentForSave(forBundle: false, model: model)
+                let data = try document.encoded()
                 try data.write(to: url, options: .atomic)
+                adoptSingleFileOverlayBookmarks(from: document.overlays, model: model)
             }
             adoptSaved(url: url, model: model)
             model.statusMessage = "Saved \(url.lastPathComponent)."
@@ -508,8 +509,10 @@ final class DocumentController {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let savedRevision = model.mutationRevision
-            let data = try encodedDocument(forBundle: false, model: model)
+            let document = makeDocumentForSave(forBundle: false, model: model)
+            let data = try document.encoded()
             try await Task.detached { try data.write(to: url, options: .atomic) }.value
+            adoptSingleFileOverlayBookmarks(from: document.overlays, model: model)
             adoptSaved(url: url, cleanIfRevision: savedRevision, model: model)
             model.statusMessage = "Saved \(url.lastPathComponent)."
         } catch {
@@ -623,13 +626,20 @@ final class DocumentController {
               ProjectBundle.isBundle(url: bundleURL) else {
             return nil
         }
+        let didAccess = bundleURL.startAccessingSecurityScopedResource()
+        defer { if didAccess { bundleURL.stopAccessingSecurityScopedResource() } }
         let sourceURL = bundleURL.appendingPathComponent(relativePath)
         guard FileManager.default.isReadableFile(atPath: sourceURL.path) else { return nil }
-        let didAccess = sourceURL.startAccessingSecurityScopedResource()
-        defer { if didAccess { sourceURL.stopAccessingSecurityScopedResource() } }
         return try? sourceURL.bookmarkData(options: .withSecurityScope,
                                            includingResourceValuesForKeys: nil,
                                            relativeTo: nil)
+    }
+
+    private func adoptSingleFileOverlayBookmarks(from overlays: [OverlayClipDoc], model: EditorModel) {
+        for overlay in overlays where !overlay.bookmark.isEmpty {
+            model.project.overlayBookmarks[overlay.id] = overlay.bookmark
+            model.project.overlayBundlePaths.removeValue(forKey: overlay.id)
+        }
     }
 
     private func lottieOverlayWarnings(model: EditorModel) async -> [String] {
@@ -640,14 +650,12 @@ final class DocumentController {
             }
             return (String(overlay.id.uuidString.prefix(8)), url)
         }
-        return await Task.detached(priority: .utility) {
-            entries.compactMap { id, url in
-                let didAccess = url.startAccessingSecurityScopedResource()
-                defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
-                guard let warning = LottieFrameSource.unsupportedFeatureWarning(for: url) else { return nil }
-                return "Lottie overlay \(id) \(warning)"
-            }
-        }.value
+        var warnings: [String] = []
+        for (id, url) in entries {
+            guard let warning = await LottieFrameSource.unsupportedFeatureWarningAsync(for: url) else { continue }
+            warnings.append("Lottie overlay \(id) \(warning)")
+        }
+        return warnings
     }
 
     private func adoptSaved(url: URL, cleanIfRevision revision: Int? = nil, model: EditorModel) {

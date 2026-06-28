@@ -37,27 +37,70 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
 
     @MainActor
     static func make(url: URL) async -> LottieFrameSource? {
-        guard let data = await loadAnimationData(url: url) else { return nil }
-        let animation: LottieAnimation?
-        if url.pathExtension.lowercased() == "lottie" {
-            let file = try? await DotLottieFile.loadedFrom(
-                data: data,
-                filename: url.lastPathComponent,
-                dispatchQueue: .dotLottie)
-            animation = file?.animations.first?.animation
-        } else {
-            animation = try? LottieAnimation.from(data: data)
-        }
-        guard let animation else { return nil }
+        guard let animation = await loadAnimation(url: url) else { return nil }
         return LottieFrameSource(animation: animation)
     }
 
-    private static func loadAnimationData(url: URL) async -> Data? {
-        await Task.detached(priority: .userInitiated) {
+    private static func loadAnimation(url: URL) async -> LottieAnimation? {
+        await Task.detached(priority: .userInitiated) { () async -> LottieAnimation? in
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            return try? Data(contentsOf: url)
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            if url.pathExtension.lowercased() == "lottie" {
+                let file = try? await DotLottieFile.loadedFrom(
+                    data: data,
+                    filename: url.lastPathComponent,
+                    dispatchQueue: .dotLottie)
+                return file?.animations.first?.animation
+            }
+            return try? LottieAnimation.from(data: data)
         }.value
+    }
+
+    static func unsupportedFeatureWarning(for url: URL) -> String? {
+        guard url.pathExtension.lowercased() != "lottie",
+              let data = try? Data(contentsOf: url),
+              containsAfterEffectsLayerEffects(in: data) else {
+            return nil
+        }
+        return unsupportedFeatureWarningMessage
+    }
+
+    static func unsupportedFeatureWarningAsync(for url: URL) async -> String? {
+        await Task.detached(priority: .utility) { () async -> String? in
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            if url.pathExtension.lowercased() == "lottie" {
+                let file = try? await DotLottieFile.loadedFrom(
+                    data: data,
+                    filename: url.lastPathComponent,
+                    dispatchQueue: .dotLottie)
+                guard file?.animations.contains(where: { containsAfterEffectsLayerEffects(in: $0.animation) }) == true else {
+                    return nil
+                }
+                return unsupportedFeatureWarningMessage
+            }
+            guard containsAfterEffectsLayerEffects(in: data) else { return nil }
+            return unsupportedFeatureWarningMessage
+        }.value
+    }
+
+    private static let unsupportedFeatureWarningMessage =
+        "layer effects detected; preview/export use Lottie's fallback renderer."
+
+    private static func containsAfterEffectsLayerEffects(in data: Data) -> Bool {
+        guard let json = try? JSONSerialization.jsonObject(with: data) else {
+            return false
+        }
+        return containsAfterEffectsLayerEffects(json)
+    }
+
+    private static func containsAfterEffectsLayerEffects(in animation: LottieAnimation) -> Bool {
+        guard let data = try? JSONEncoder().encode(animation) else {
+            return false
+        }
+        return containsAfterEffectsLayerEffects(in: data)
     }
 
     @MainActor
@@ -129,23 +172,6 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
         }
 
         return image
-    }
-
-    static func unsupportedFeatureWarning(for url: URL) -> String? {
-        guard let data = try? Data(contentsOf: url),
-              let json = try? JSONSerialization.jsonObject(with: data),
-              containsAfterEffectsLayerEffects(json) else {
-            return nil
-        }
-        return "layer effects detected; preview/export use Lottie's fallback renderer."
-    }
-
-    static func unsupportedFeatureWarningAsync(for url: URL) async -> String? {
-        await Task.detached(priority: .utility) {
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-            return unsupportedFeatureWarning(for: url)
-        }.value
     }
 
     private func touchCachedFrame(at index: Int) {

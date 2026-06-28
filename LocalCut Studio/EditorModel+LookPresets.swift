@@ -329,12 +329,17 @@ extension EditorModel {
     nonisolated static func resolvePresetLUT(_ reference: LookPresetLUTReference?, sourceURL: URL?) -> Data? {
         guard let reference, let sourceURL else { return nil }
         guard isSafeLookPresetLUTPath(reference.relativePath) else { return nil }
-        let lutURL = sourceURL.deletingLastPathComponent().appendingPathComponent(reference.relativePath)
-        let didAccess = lutURL.startAccessingSecurityScopedResource()
+        let directoryURL = sourceURL.deletingLastPathComponent()
+        let lutURL = directoryURL.appendingPathComponent(reference.relativePath)
+        let didAccessPreset = sourceURL.startAccessingSecurityScopedResource()
+        let didAccessDirectory = directoryURL.startAccessingSecurityScopedResource()
+        let didAccessLUT = lutURL.startAccessingSecurityScopedResource()
         defer {
-            if didAccess { lutURL.stopAccessingSecurityScopedResource() }
+            if didAccessLUT { lutURL.stopAccessingSecurityScopedResource() }
+            if didAccessDirectory { directoryURL.stopAccessingSecurityScopedResource() }
+            if didAccessPreset { sourceURL.stopAccessingSecurityScopedResource() }
         }
-        guard FileManager.default.fileExists(atPath: lutURL.path),
+        guard FileManager.default.isReadableFile(atPath: lutURL.path),
               let bookmark = try? lutURL.bookmarkData(options: .withSecurityScope,
                                                       includingResourceValuesForKeys: nil,
                                                        relativeTo: nil) else {

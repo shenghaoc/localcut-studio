@@ -410,16 +410,22 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             // across repeated source-frame requests (speed ramps, frame
             // interpolation) and unique per source frame (no collisions
             // across pieces of the same clip).
+            let usesOutputFrameCadence = layer.effects.contains { effect in
+                if case .grain = effect { return true }
+                return false
+            }
+            let cacheTime = usesOutputFrameCadence ? request.compositionTime : sourceTime
             let cacheKey: RenderCacheKey? = layer.effects.isEmpty ? nil : {
                 return RenderCacheKey(
                     clipID: layer.clipID,
                     effectChainHash: layer.effects.renderCacheHash,
-                    time: sourceTime,
+                    time: cacheTime,
                     renderSize: request.renderContext.size,
                     frameRate: frameRate)
             }()
             image = applyEffectChain(image, effects: layer.effects,
                                      cacheKey: cacheKey, at: clipLocalTime,
+                                     grainCadenceTime: request.compositionTime,
                                      frameRate: frameRate)
         }
 
@@ -461,13 +467,6 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         guard let registryID else { return }
         overlaySourceLock.lock()
         overlaySourceRegistries.removeValue(forKey: registryID)
-        overlaySourceLock.unlock()
-    }
-
-    /// Removes every registered source map. Used only on full session teardown.
-    nonisolated static func clearOverlaySources() {
-        overlaySourceLock.lock()
-        overlaySourceRegistries.removeAll()
         overlaySourceLock.unlock()
     }
 
@@ -732,6 +731,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                                        effects: [Effect],
                                        cacheKey: RenderCacheKey?,
                                        at time: CMTime = .zero,
+                                       grainCadenceTime: CMTime? = nil,
                                        frameRate: Double = 24) -> CIImage {
         if effects.isEmpty { return image }
         if let cacheKey, let cached = RenderCache.shared.image(for: cacheKey) {
@@ -765,7 +765,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             case .vignette(let params):
                 result = applyVignette(result, params: params, at: time)
             case .grain(let params):
-                result = applyGrain(result, params: params, at: time, frameRate: frameRate)
+                result = applyGrain(result, params: params, at: time,
+                                    cadenceTime: grainCadenceTime ?? time,
+                                    frameRate: frameRate)
             }
         }
         // Materialise into a CGImage-backed CIImage before caching: a lazy
@@ -825,6 +827,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// vignette do not blur or reshape the pattern. The noise pattern advances
     /// each real frame at the project's frame rate so it never appears frozen.
     nonisolated func applyGrain(_ image: CIImage, params: GrainEffect, at time: CMTime,
+                                 cadenceTime: CMTime? = nil,
                                  frameRate: Double = 24) -> CIImage {
         let amount = params.amount(at: time)
         guard amount > 0 else { return image }
@@ -834,7 +837,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         let size = max(0.25, CGFloat(params.size))
         let grainCadence = frameRate.isFinite ? max(1, frameRate) : 1
-        let frame = time.seconds.isFinite ? floor(time.seconds * grainCadence) : 0
+        let cadenceSeconds = (cadenceTime ?? time).seconds
+        let frame = cadenceSeconds.isFinite ? floor(cadenceSeconds * grainCadence) : 0
         let seedOffset = CGFloat(params.seed % 997) + CGFloat(frame.truncatingRemainder(dividingBy: 997))
         noise = noise
             .transformed(by: CGAffineTransform(translationX: seedOffset, y: -seedOffset * 0.37))

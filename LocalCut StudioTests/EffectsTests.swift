@@ -272,6 +272,38 @@ func neutralLookEffectsAreIdentity() {
     #expect(samplePixelEquals(result, source, at: CGPoint(x: 16, y: 16), tolerance: 0.005))
 }
 
+@Test("EffectCompositor.applyEffectChain: grain cadence can advance independently of source time")
+@MainActor
+func grainCadenceUsesOutputFrameTime() throws {
+    let compositor = EffectCompositor()
+    let source = CIImage(color: CIColor(red: 0.45, green: 0.45, blue: 0.45, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 32, height: 32))
+    let grain = GrainEffect(amount: Keyframed(defaultValue: 0.7),
+                            size: 1,
+                            monochrome: true,
+                            seed: 42)
+    let sourceLocalTime = CMTime(seconds: 1, preferredTimescale: 600)
+
+    let first = compositor.applyEffectChain(
+        source,
+        effects: [.grain(grain)],
+        cacheKey: nil,
+        at: sourceLocalTime,
+        grainCadenceTime: CMTime(seconds: 2, preferredTimescale: 600),
+        frameRate: 30)
+    let next = compositor.applyEffectChain(
+        source,
+        effects: [.grain(grain)],
+        cacheKey: nil,
+        at: sourceLocalTime,
+        grainCadenceTime: CMTime(seconds: 2 + 1.0 / 30.0, preferredTimescale: 600),
+        frameRate: 30)
+
+    let firstBytes = try #require(rgbaBytes(first, width: 32, height: 32))
+    let nextBytes = try #require(rgbaBytes(next, width: 32, height: 32))
+    #expect(firstBytes != nextBytes)
+}
+
 @Test("EffectCompositor.applyEffectChain: active vignette changes edge pixels")
 @MainActor
 func activeVignetteChangesEdgePixels() {

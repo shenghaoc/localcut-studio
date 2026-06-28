@@ -242,6 +242,46 @@ func compositionOverlayOnlyDuration() async throws {
     #expect(overlayInstructions.allSatisfy { !$0.units.isEmpty })
 }
 
+@Test("CompositionBuilder fills overlay gaps between video clips")
+func compositionOverlayGapBetweenVideoClipsUsesFiller() async throws {
+    let tmp = try makeOverlayTempDirectory("overlay-gap")
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let videoURL = try await makeOverlayVideoFixture(seconds: 1, in: tmp)
+    let media = try await loadedOverlayMedia(from: videoURL)
+
+    let project = Project()
+    project.renderSize = CGSize(width: 32, height: 32)
+    project.frameRate = 30
+    project.mediaItems = [media]
+    project.videoTracks[0].clips = [
+        Clip(mediaID: media.id,
+             sourceStart: .zero,
+             duration: CMTime(seconds: 1, preferredTimescale: 600),
+             timelineStart: .zero),
+        Clip(mediaID: media.id,
+             sourceStart: .zero,
+             duration: CMTime(seconds: 1, preferredTimescale: 600),
+             timelineStart: CMTime(seconds: 4, preferredTimescale: 600)),
+    ]
+    project.overlays = [
+        OverlayClip(
+            sourceType: .animatedImage,
+            timelineStart: CMTime(seconds: 2, preferredTimescale: 600),
+            duration: CMTime(seconds: 1, preferredTimescale: 600)),
+    ]
+
+    let built = try #require(try await CompositionBuilder.build(project: project))
+    let videoComposition = try #require(built.videoComposition)
+    let gapInstruction = try #require(videoComposition.instructions.compactMap {
+        $0 as? EffectCompositionInstruction
+    }.first { instruction in
+        instruction.timeRange.containsTime(CMTime(seconds: 2.5, preferredTimescale: 600))
+    })
+
+    #expect(!gapInstruction.overlays.isEmpty)
+    #expect(!gapInstruction.units.isEmpty)
+}
+
 // MARK: - Lottie verification
 
 @Test("LottieFrameSource renders deterministic pixels at sampled times")

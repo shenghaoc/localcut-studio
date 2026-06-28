@@ -152,7 +152,7 @@ extension EditorModel {
     @MainActor
     func setOverlayPosition(_ id: UUID, to offset: CGSize) {
         guard let index = project.overlays.firstIndex(where: { $0.id == id }) else { return }
-        performCoalescedUndoable("Move Overlay", target: id, rebuild: .immediate) {
+        performCoalescedUndoable("Move Overlay", target: id, rebuild: .debounced) {
             project.overlays[index].positionOffset = offset
         }
     }
@@ -161,7 +161,7 @@ extension EditorModel {
     @MainActor
     func setOverlayScale(_ id: UUID, to scale: CGFloat) {
         guard let index = project.overlays.firstIndex(where: { $0.id == id }) else { return }
-        performCoalescedUndoable("Scale Overlay", target: id, rebuild: .immediate) {
+        performCoalescedUndoable("Scale Overlay", target: id, rebuild: .debounced) {
             project.overlays[index].scale = max(0.1, scale)
         }
     }
@@ -170,7 +170,7 @@ extension EditorModel {
     @MainActor
     func setOverlayRotation(_ id: UUID, to rotation: CGFloat) {
         guard let index = project.overlays.firstIndex(where: { $0.id == id }) else { return }
-        performCoalescedUndoable("Rotate Overlay", target: id, rebuild: .immediate) {
+        performCoalescedUndoable("Rotate Overlay", target: id, rebuild: .debounced) {
             project.overlays[index].rotation = rotation
         }
     }
@@ -179,7 +179,7 @@ extension EditorModel {
     @MainActor
     func setOverlayOpacity(_ id: UUID, to opacity: Float) {
         guard let index = project.overlays.firstIndex(where: { $0.id == id }) else { return }
-        performCoalescedUndoable("Overlay Opacity", target: id, rebuild: .immediate) {
+        performCoalescedUndoable("Overlay Opacity", target: id, rebuild: .debounced) {
             project.overlays[index].opacity = max(0, min(1, opacity))
         }
     }
@@ -213,11 +213,22 @@ extension EditorModel {
         guard let url = try? URL(resolvingBookmarkData: bookmark,
                                   options: .withSecurityScope,
                                   relativeTo: nil,
-                                  bookmarkDataIsStale: &isStale),
-              !isStale else {
+                                  bookmarkDataIsStale: &isStale) else {
             return nil
         }
+        if isStale,
+           let refreshed = refreshedOverlayBookmark(for: url) {
+            project.overlayBookmarks[overlay.id] = refreshed
+        }
         return url
+    }
+
+    private func refreshedOverlayBookmark(for url: URL) -> Data? {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        return try? url.bookmarkData(options: .withSecurityScope,
+                                     includingResourceValuesForKeys: nil,
+                                     relativeTo: nil)
     }
 
     /// Registers overlay frame sources with the compositor for the current

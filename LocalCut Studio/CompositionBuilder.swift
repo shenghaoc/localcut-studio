@@ -68,6 +68,21 @@ enum CompositionBuilder {
         }
     }
 
+    private struct TimelineInterval {
+        let start: Double
+        let end: Double
+
+        var isValid: Bool {
+            start.isFinite && end.isFinite && end > start
+        }
+
+        var cmTimeRange: CMTimeRange {
+            CMTimeRange(
+                start: CMTime(seconds: start, preferredTimescale: 600),
+                end: CMTime(seconds: end, preferredTimescale: 600))
+        }
+    }
+
     // MARK: - Render planning
     //
     // VisibleSegment, PlannedUnit, and planUnits() are defined in LocalCutCore.
@@ -288,23 +303,16 @@ enum CompositionBuilder {
         // loop-insert it into the composition track so a 30-minute tail does
         // not make the editor block on writing tens of thousands of frames.
         // Codex P2 (cap filler generation).
-        let captionEnd = captionTracks.reduce(CMTime.zero) {
-            CMTimeMaximum($0, $1.endTime)
+        let visualRanges = visualActivityRanges(captionTracks: captionTracks, overlays: project.overlays)
+        let videoRanges = projectTrackSegments.flatMap { segments in
+            segments.map(\.timeRange)
         }
-        let overlayEnd = project.overlays.reduce(CMTime.zero) { current, overlay in
-            overlay.timelineEnd.isNumeric ? CMTimeMaximum(current, overlay.timelineEnd) : current
-        }
-        let visualTailEnd = CMTimeMaximum(captionEnd, overlayEnd)
-        let lastVideoEnd = projectTrackSegments.flatMap { $0 }
-            .reduce(CMTime.zero) { CMTimeMaximum($0, $1.timeRange.end) }
+        let fillerVisualRanges = visualFillerRanges(visualRanges: visualRanges, videoRanges: videoRanges)
 
-        var fillerTailRange: CMTimeRange?
         var fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
-        if visualTailEnd.isNumeric, lastVideoEnd.isNumeric, visualTailEnd > lastVideoEnd {
-            let tailStart = lastVideoEnd
-            let tailDuration = visualTailEnd - tailStart
+        if !fillerVisualRanges.isEmpty {
             // Generate at most `fillerChunkSeconds` of source media; longer
-            // tails reuse the same chunk via repeated `insertTimeRange`s.
+            // visual-only spans reuse the same chunk via repeated `insertTimeRange`s.
             let chunkSeconds = CMTime(seconds: fillerChunkSeconds,
                                       preferredTimescale: 600)
             let filler = try await CaptionTailFiller.asset(
@@ -320,21 +328,22 @@ enum CompositionBuilder {
                 preferredTrackID: kCMPersistentTrackID_Invalid) {
                 // Insert in chunks of at most `fillerAssetDuration` so the
                 // encoded source can be tiny while still covering an
-                // arbitrarily long tail.
-                var insertAt = tailStart
-                var remaining = tailDuration
-                while remaining > .zero {
-                    let chunk = CMTimeMinimum(fillerAssetDuration, remaining)
-                    guard chunk > .zero else { break }
-                    try fillerCompTrack.insertTimeRange(
-                        CMTimeRange(start: .zero, duration: chunk),
-                        of: fillerVideoSource,
-                        at: insertAt)
-                    insertAt = insertAt + chunk
-                    remaining = remaining - chunk
+                // arbitrarily long visual-only gap.
+                for range in fillerVisualRanges {
+                    var insertAt = range.start
+                    var remaining = range.duration
+                    while remaining > .zero {
+                        let chunk = CMTimeMinimum(fillerAssetDuration, remaining)
+                        guard chunk > .zero else { break }
+                        try fillerCompTrack.insertTimeRange(
+                            CMTimeRange(start: .zero, duration: chunk),
+                            of: fillerVideoSource,
+                            at: insertAt)
+                        insertAt = insertAt + chunk
+                        remaining = remaining - chunk
+                    }
                 }
                 fillerTrackID = fillerCompTrack.trackID
-                fillerTailRange = CMTimeRange(start: tailStart, duration: tailDuration)
             }
         }
 
@@ -363,7 +372,7 @@ enum CompositionBuilder {
             renderSize: renderSize,
             frameRate: project.frameRate,
             fillerTrackID: fillerTrackID,
-            fillerTailRange: fillerTailRange,
+            fillerVisualRanges: fillerVisualRanges,
             overlaySourceRegistryID: overlaySourceRegistryID,
             workingColourSpace: project.workingColourSpace)
 
@@ -415,6 +424,71 @@ enum CompositionBuilder {
             }
         }
         return remapSegments
+    }
+
+    private static func visualActivityRanges(captionTracks: [CaptionTrack],
+                                             overlays: [OverlayClip]) -> [CMTimeRange] {
+        let captionRanges = captionTracks.flatMap { track in
+            track.lines.map(\.range)
+        }
+        let overlayRanges = overlays.compactMap { overlay -> CMTimeRange? in
+            guard overlay.timelineStart.isNumeric,
+                  overlay.timelineEnd.isNumeric,
+                  overlay.timelineEnd > overlay.timelineStart else { return nil }
+            return CMTimeRange(start: overlay.timelineStart, end: overlay.timelineEnd)
+        }
+        return captionRanges + overlayRanges
+    }
+
+    private static func visualFillerRanges(visualRanges: [CMTimeRange],
+                                           videoRanges: [CMTimeRange]) -> [CMTimeRange] {
+        let visual = mergedIntervals(visualRanges)
+        let video = mergedIntervals(videoRanges)
+        guard !visual.isEmpty else { return [] }
+        guard !video.isEmpty else { return visual.map(\.cmTimeRange) }
+
+        var gaps: [TimelineInterval] = []
+        for interval in visual {
+            var cursor = interval.start
+            for occupied in video where occupied.end > cursor && occupied.start < interval.end {
+                if occupied.start > cursor {
+                    gaps.append(TimelineInterval(start: cursor, end: min(occupied.start, interval.end)))
+                }
+                cursor = max(cursor, occupied.end)
+                if cursor >= interval.end { break }
+            }
+            if cursor < interval.end {
+                gaps.append(TimelineInterval(start: cursor, end: interval.end))
+            }
+        }
+        return gaps.filter(\.isValid).map(\.cmTimeRange)
+    }
+
+    private static func mergedIntervals(_ ranges: [CMTimeRange]) -> [TimelineInterval] {
+        let intervals = ranges.compactMap { range -> TimelineInterval? in
+            guard range.start.isNumeric,
+                  range.end.isNumeric else { return nil }
+            let interval = TimelineInterval(start: range.start.seconds, end: range.end.seconds)
+            return interval.isValid ? interval : nil
+        }.sorted { lhs, rhs in
+            lhs.start == rhs.start ? lhs.end < rhs.end : lhs.start < rhs.start
+        }
+
+        var merged: [TimelineInterval] = []
+        for interval in intervals {
+            guard let last = merged.last else {
+                merged.append(interval)
+                continue
+            }
+            if interval.start <= last.end {
+                merged[merged.count - 1] = TimelineInterval(
+                    start: last.start,
+                    end: max(last.end, interval.end))
+            } else {
+                merged.append(interval)
+            }
+        }
+        return merged
     }
 
     // MARK: - Volume envelope application (P16)
@@ -540,7 +614,7 @@ enum CompositionBuilder {
         renderSize: CGSize,
         frameRate: Double,
         fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid,
-        fillerTailRange: CMTimeRange? = nil,
+        fillerVisualRanges: [CMTimeRange] = [],
         overlaySourceRegistryID: UUID? = nil,
         workingColourSpace: WorkingColourSpace) async throws -> AVVideoComposition? {
 
@@ -612,15 +686,16 @@ enum CompositionBuilder {
                 }
             }
 
-            // Tail intervals (past the last AV clip) have no clip segment, but
+            // Visual-only intervals have no clip segment, but
             // the export pipeline still needs a `requiredSourceTrackIDs` entry
             // to schedule the compositor — surface the filler as a layer so
             // its track ID flows into the instruction. The layer renders as
-            // black; captions composite on top.
+            // black; captions and overlays composite on top.
             if units.isEmpty,
-               let tail = fillerTailRange,
                fillerTrackID != kCMPersistentTrackID_Invalid,
-               tail.containsTime(CMTime(seconds: midpoint, preferredTimescale: 600)) {
+               let fillerRange = fillerVisualRanges.first(where: {
+                   $0.containsTime(CMTime(seconds: midpoint, preferredTimescale: 600))
+               }) {
                 units.append(.layer(CompositorLayer(
                     clipID: UUID(),  // filler; no real clip
                     trackID: fillerTrackID,
@@ -628,9 +703,9 @@ enum CompositionBuilder {
                     opacity: 1,
                     effects: [],
                     showSkinMask: false,
-                    clipSourceStart: tail.start,
-                    sourceRange: tail,
-                    timeRange: tail)))
+                    clipSourceStart: fillerRange.start,
+                    sourceRange: fillerRange,
+                    timeRange: fillerRange)))
             }
 
             let captionsForInterval = activeCaptionItems(
