@@ -70,7 +70,7 @@ extension EditorModel {
             try await Task.detached {
                 let didStart = url.startAccessingSecurityScopedResource()
                 defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-                try data.write(to: url, options: .atomic)
+                try data.write(to: url)
             }.value
             statusMessage = "Exported cover \(url.lastPathComponent)."
         } catch {
