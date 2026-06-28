@@ -19,6 +19,17 @@ nonisolated enum ExportAspect: String, Codable, Hashable, Sendable, CaseIterable
 
     var id: String { rawValue }
 
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        self = Self(rawValue: rawValue) ?? .widescreen
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
     var ratio: CGSize {
         switch self {
         case .widescreen: CGSize(width: 16, height: 9)

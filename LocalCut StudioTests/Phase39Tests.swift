@@ -304,4 +304,30 @@ struct Phase39Tests {
         #expect(decoded.platformMetadata == nil)
         #expect(decoded.projectAspect == .widescreen16x9)
     }
+
+    @Test("Unknown export aspect decodes to widescreen fallback")
+    func unknownExportAspectDecodesToFallback() throws {
+        let json = """
+        {
+          "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          "name": "Future",
+          "containerFormat": "\(AVFileType.mp4.rawValue)",
+          "videoCodec": "\(AVVideoCodecType.h264.rawValue)",
+          "aspect": "foldable37x64",
+          "targetSize": { "width": 1920, "height": 1080 },
+          "bitrate": "standard",
+          "audioConfig": {
+            "codec": 1633772320,
+            "bitrate": 128000,
+            "sampleRate": 48000,
+            "channels": 2
+          }
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(ExportPreset.self, from: Data(json.utf8))
+
+        #expect(decoded.aspect == .widescreen)
+        #expect(decoded.projectAspect == .widescreen16x9)
+    }
 }

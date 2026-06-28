@@ -25,7 +25,7 @@ extension EditorModel {
     func setCoverTimeToPlayhead() {
         let time = CMTime(seconds: max(0, currentTime), preferredTimescale: 600)
         performUndoable("Set Cover Frame") {
-            var cover = project.coverFrame ?? CoverFrameDoc(time: CMTimeCode(time))
+            var cover = currentCoverFrame(defaultTime: time.seconds)
             cover.time = CMTimeCode(time)
             project.coverFrame = cover
         }
@@ -38,8 +38,7 @@ extension EditorModel {
         let lastFrame = max(0, totalDuration - (1.0 / fps))
         let seconds = min(max(0, current + frameStep), lastFrame)
         performUndoable("Nudge Cover Frame") {
-            var cover = project.coverFrame
-                ?? CoverFrameDoc(time: CMTimeCode(CMTime(seconds: max(0, current), preferredTimescale: 600)))
+            var cover = currentCoverFrame(defaultTime: current)
             cover.time = CMTimeCode(CMTime(seconds: seconds, preferredTimescale: 600))
             project.coverFrame = cover
         }
@@ -47,8 +46,7 @@ extension EditorModel {
 
     func setCoverFormat(_ format: CoverFormat) {
         performUndoable("Set Cover Format") {
-            var cover = project.coverFrame
-                ?? CoverFrameDoc(time: CMTimeCode(CMTime(seconds: max(0, currentTime), preferredTimescale: 600)))
+            var cover = currentCoverFrame()
             cover.format = format
             project.coverFrame = cover
         }
@@ -57,8 +55,7 @@ extension EditorModel {
     func setCoverTitle(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         performCoalescedUndoable("Set Cover Title", target: "cover-title", rebuild: .skip) {
-            var cover = project.coverFrame
-                ?? CoverFrameDoc(time: CMTimeCode(CMTime(seconds: max(0, currentTime), preferredTimescale: 600)))
+            var cover = currentCoverFrame()
             cover.title = trimmed.isEmpty ? nil : CoverTitleDoc(text: trimmed)
             project.coverFrame = cover
         }
@@ -79,8 +76,7 @@ extension EditorModel {
     }
 
     func makeCoverImageData() async throws -> Data {
-        let cover = project.coverFrame
-            ?? CoverFrameDoc(time: CMTimeCode(CMTime(seconds: max(0, currentTime), preferredTimescale: 600)))
+        let cover = currentCoverFrame()
         let overlaySourceRegistryID = await registerOverlaySources()
         defer { EffectCompositor.releaseOverlaySources(for: overlaySourceRegistryID) }
         guard let built = try await CompositionBuilder.build(
@@ -114,6 +110,13 @@ extension EditorModel {
         return try await Task.detached {
             try Self.encodeCoverImage(imageWithTitle, format: format)
         }.value
+    }
+
+    private func currentCoverFrame(defaultTime: Double? = nil) -> CoverFrameDoc {
+        project.coverFrame ?? CoverFrameDoc(
+            time: CMTimeCode(CMTime(
+                seconds: max(0, defaultTime ?? currentTime),
+                preferredTimescale: 600)))
     }
 
     nonisolated static func snappedCoverFrameSeconds(requested: Double,

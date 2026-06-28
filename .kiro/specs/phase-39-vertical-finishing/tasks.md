@@ -87,7 +87,7 @@
   schema and semantic validator.
 - [x] **T6.4** Render queue tests: legacy `queue.json` decode, optional platform
   metadata round-trip, mismatched aspect warning state, and unsupported
-  capability errors.
+  capability errors, plus unknown export-aspect fallback.
 - [x] **T6.5** Cover tests: selected-time persistence, cover metadata
   round-trip, unsupported-format guard behavior, valid-frame snapping,
   fixture-backed generated-image smoke, and `.lcbundle` cover asset write /

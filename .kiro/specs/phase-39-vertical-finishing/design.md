@@ -198,6 +198,8 @@ nonisolated struct ExportPreset: Codable, Hashable, Sendable, Identifiable {
 If synthesized Codable is no longer enough once defaults are needed, Phase 39
 adds an explicit decoder that treats missing fields as `nil` and preserves
 legacy jobs. `BuiltInExportPresets.all` grows the platform profiles:
+Unknown future `ExportAspect` raw values decode to the widescreen fallback so
+older builds can keep queue/preset files readable.
 
 | Profile | Aspect | Baseline |
 | --- | --- | --- |

@@ -75,7 +75,8 @@
   source metadata for the platform guidance used to author it.
 - **R4.3** The render queue persists any new optional preset metadata
   losslessly. Existing `queue.json` jobs created before Phase 39 decode with
-  defaults and remain runnable.
+  defaults and remain runnable; unknown future export-aspect raw values fall
+  back to the widescreen aspect instead of failing the decode.
 - **R4.4** Capability validation happens before enqueue and again before
   execution. Unsupported codec/container/format combinations, unavailable HEVC,
   unsupported HEIC cover export, or missing output bookmarks produce explicit
@@ -97,7 +98,7 @@
   sets, duplicate ids, and aspect/profile mismatches.
 - **R5.4** Render queue tests cover mismatched project/preset aspect warnings,
   optional Phase 39 preset metadata round-trip, unsupported capability errors,
-  and legacy queue decoding.
+  legacy queue decoding, and forward-compatible export-aspect decoding.
 - **R5.5** Cover tests cover selected-time persistence, cover metadata
   round-trip, unsupported-format guard behavior, valid-frame snapping, generated
   image smoke, and `.lcbundle` cover asset writes including stale-format cleanup.
