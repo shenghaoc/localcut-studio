@@ -30,6 +30,44 @@ func overlayDefaults() {
     #expect(overlay.endAction == .loop)
 }
 
+@MainActor
+@Test("Overlay selection clears when another editable target is selected")
+func overlaySelectionClearsForOtherTargets() {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    model.project.mediaItems.append(media)
+    let clip = Clip(mediaID: media.id,
+                    sourceStart: .zero,
+                    duration: CMTime(seconds: 3, preferredTimescale: 600),
+                    timelineStart: .zero)
+    model.project.videoTracks[0].clips = [clip]
+    let marker = TimelineMarker(time: CMTime(seconds: 1, preferredTimescale: 600))
+    model.project.markers = [marker]
+    let overlay = OverlayClip(sourceType: .animatedImage,
+                              timelineStart: .zero,
+                              duration: CMTime(seconds: 1, preferredTimescale: 600))
+    model.project.overlays = [overlay]
+
+    model.selectOverlay(overlay.id)
+    model.selectMedia(id: media.id)
+    #expect(model.selectedOverlayID == nil)
+
+    model.selectOverlay(overlay.id)
+    model.selectClip(id: clip.id)
+    #expect(model.selectedOverlayID == nil)
+
+    model.selectOverlay(overlay.id)
+    model.selectMarker(id: marker.id)
+    #expect(model.selectedOverlayID == nil)
+
+    model.selectOverlay(overlay.id)
+    model.documentController.newDocument(model: model)
+    #expect(model.selectedOverlayID == nil)
+    #expect(model.project.overlays.isEmpty)
+    #expect(model.project.overlayBookmarks.isEmpty)
+    #expect(model.project.overlayBundlePaths.isEmpty)
+}
+
 // MARK: - AnimatedImageSource tests
 
 @Test("AnimatedImageSource returns nil for nonexistent file")
@@ -46,6 +84,29 @@ func alphaVideoSourceMissingFile() async {
     let url = URL(fileURLWithPath: "/nonexistent/file.mov")
     let source = await AlphaVideoSource.make(url: url)
     #expect(source == nil)
+}
+
+@MainActor
+@Test("Overlay import rejects files that do not match the chosen source type")
+func importOverlayRejectsMismatchedType() async throws {
+    let tmp = try makeOverlayTempDirectory("import-type")
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let jsonURL = tmp.appendingPathComponent("sticker.json")
+    try Data(minimalLottieJSON.utf8).write(to: jsonURL, options: .atomic)
+
+    let model = EditorModel()
+    await model.importOverlay(from: jsonURL, sourceType: .alphaVideo)
+
+    #expect(model.project.overlays.isEmpty)
+    #expect(model.statusMessage.contains("alpha video"))
+}
+
+@Test("Overlay source types expose narrow importer filters")
+func overlaySourceTypeImporterFilters() {
+    #expect(OverlaySourceType.animatedImage.acceptsSourceURL(URL(fileURLWithPath: "/tmp/sticker.apng")))
+    #expect(OverlaySourceType.lottie.acceptsSourceURL(URL(fileURLWithPath: "/tmp/sticker.lottie")))
+    #expect(!OverlaySourceType.alphaVideo.acceptsSourceURL(URL(fileURLWithPath: "/tmp/sticker.json")))
+    #expect(OverlaySourceType.lottie.allowedContentTypes.contains(.dotLottie))
 }
 
 // MARK: - Project overlay persistence
@@ -102,6 +163,35 @@ func overlayRenderItemMetadata() {
     #expect(item.scale == 2.0)
 }
 
+@Test("Overlay compositor transform preserves natural size and rotates around center")
+func overlayTransformPreservesAuthoredScale() throws {
+    let transform = try #require(EffectCompositor.overlayTransform(
+        naturalSize: CGSize(width: 20, height: 10),
+        scale: 2,
+        rotation: 0,
+        positionOffset: .zero,
+        renderSize: CGSize(width: 100, height: 80)))
+
+    let topLeft = CGPoint(x: 0, y: 0).applying(transform)
+    let center = CGPoint(x: 10, y: 5).applying(transform)
+
+    #expect(approximately(topLeft.x, 30))
+    #expect(approximately(topLeft.y, 30))
+    #expect(approximately(center.x, 50))
+    #expect(approximately(center.y, 40))
+
+    let rotated = try #require(EffectCompositor.overlayTransform(
+        naturalSize: CGSize(width: 20, height: 10),
+        scale: 1,
+        rotation: .pi / 2,
+        positionOffset: CGSize(width: 0.5, height: -0.5),
+        renderSize: CGSize(width: 100, height: 80)))
+    let rotatedCenter = CGPoint(x: 10, y: 5).applying(rotated)
+
+    #expect(approximately(rotatedCenter.x, 75))
+    #expect(approximately(rotatedCenter.y, 60))
+}
+
 // MARK: - Composition with overlays
 
 @Test("CompositionBuilder includes overlay boundaries in instructions")
@@ -129,6 +219,29 @@ func compositionOverlayBoundaries() async throws {
     // This test verifies the model wiring only.
     #expect(project.overlays.count == 1)
     #expect(project.overlays[0].timelineStart == CMTime(seconds: 3, preferredTimescale: 600))
+}
+
+@Test("CompositionBuilder extends overlay-only timelines with filler video")
+func compositionOverlayOnlyDuration() async throws {
+    let project = Project()
+    project.renderSize = CGSize(width: 32, height: 32)
+    project.frameRate = 30
+    project.overlays = [
+        OverlayClip(
+            sourceType: .animatedImage,
+            timelineStart: CMTime(seconds: 1, preferredTimescale: 600),
+            duration: CMTime(seconds: 2, preferredTimescale: 600)),
+    ]
+
+    let built = try #require(try await CompositionBuilder.build(project: project))
+    let videoComposition = try #require(built.videoComposition)
+    let overlayInstructions = videoComposition.instructions.compactMap {
+        $0 as? EffectCompositionInstruction
+    }.filter { !$0.overlays.isEmpty }
+
+    #expect(abs(built.duration - 3) < 0.05)
+    #expect(!overlayInstructions.isEmpty)
+    #expect(overlayInstructions.allSatisfy { !$0.units.isEmpty })
 }
 
 // MARK: - Lottie verification
@@ -257,6 +370,10 @@ private func makeOverlayTempDirectory(_ label: String) throws -> URL {
         .appendingPathComponent("overlay-tests-\(label)-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
+}
+
+private func approximately(_ lhs: CGFloat, _ rhs: CGFloat, tolerance: CGFloat = 0.000_1) -> Bool {
+    abs(lhs - rhs) <= tolerance
 }
 
 private func waitForFinishedOverlayJob(_ queue: RenderQueue) async throws -> QueueJob {

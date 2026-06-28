@@ -1,7 +1,42 @@
 import Foundation
 import AVFoundation
 import CoreGraphics
+import UniformTypeIdentifiers
 import LocalCutCore
+
+extension UTType {
+    static let dotLottie = UTType(filenameExtension: "lottie")
+        ?? UTType(exportedAs: "com.airbnb.lottie.dotlottie")
+    static let animatedPNG = UTType(filenameExtension: "apng")
+        ?? UTType(exportedAs: "org.mozilla.apng")
+}
+
+extension OverlaySourceType {
+    var allowedContentTypes: [UTType] {
+        switch self {
+        case .animatedImage:
+            [.image, .animatedPNG]
+        case .alphaVideo:
+            [.movie, .video]
+        case .lottie:
+            [.json, .dotLottie]
+        }
+    }
+
+    func acceptsSourceURL(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        let type = UTType(filenameExtension: ext)
+        switch self {
+        case .animatedImage:
+            return ext == "apng" || type?.conforms(to: .image) == true
+        case .alphaVideo:
+            return type?.conforms(to: .movie) == true
+                || type?.conforms(to: .video) == true
+        case .lottie:
+            return ext == "json" || ext == "lottie" || type?.conforms(to: .json) == true
+        }
+    }
+}
 
 // MARK: - Overlay management (Phase 38b)
 
@@ -11,6 +46,11 @@ extension EditorModel {
     /// playhead position with a default duration of 5 seconds.
     @MainActor
     func importOverlay(from url: URL, sourceType: OverlaySourceType) async {
+        guard sourceType.acceptsSourceURL(url) else {
+            statusMessage = "Choose a \(sourceType.displayName.lowercased()) source file."
+            return
+        }
+
         let generation = sessionGeneration
         let access = url.startAccessingSecurityScopedResource()
 
@@ -38,7 +78,7 @@ extension EditorModel {
             project.overlayBookmarks[overlay.id] = bookmark
         }
         if sourceType == .lottie,
-           let warning = LottieFrameSource.unsupportedFeatureWarning(for: url) {
+           let warning = await LottieFrameSource.unsupportedFeatureWarningAsync(for: url) {
             statusMessage = "Added Lottie overlay — \(warning)"
         } else {
             statusMessage = "Added \(sourceType.displayName) overlay."
@@ -52,6 +92,9 @@ extension EditorModel {
         guard project.overlays.contains(where: { $0.id == id }) else { return }
         performUndoable("Remove Overlay") {
             project.overlays.removeAll { $0.id == id }
+            if selectedOverlayID == id {
+                selectedOverlayID = nil
+            }
             if let bookmark = project.overlayBookmarks[id],
                let url = resolveBookmark(bookmark) {
                 if let removed = accessedURLs.remove(url) {
@@ -155,6 +198,7 @@ extension EditorModel {
     func resolveOverlayURL(for overlay: OverlayClip) -> URL? {
         // Try bundle-relative path first.
         if let relativePath = project.overlayBundlePaths[overlay.id],
+           ProjectBundleLayout.isSafeAssetRelativePath(relativePath),
            let bundleURL = documentURL {
             let url = bundleURL.appendingPathComponent(relativePath)
             if FileManager.default.fileExists(atPath: url.path) {
@@ -178,8 +222,8 @@ extension EditorModel {
     /// Registers overlay frame sources with the compositor for the current
     /// project's overlays. Called during composition rebuild.
     @MainActor
-    func registerOverlaySources() async {
-        EffectCompositor.clearOverlaySources()
+    func registerOverlaySources() async -> UUID? {
+        var sources: [UUID: any OverlayFrameSource] = [:]
         for overlay in project.overlays {
             guard let url = resolveOverlayURL(for: overlay) else { continue }
             let accessing = url.startAccessingSecurityScopedResource()
@@ -187,8 +231,9 @@ extension EditorModel {
             guard let source = await OverlayFrameSourceFactory.makeSource(for: overlay, sourceURL: url) else {
                 continue
             }
-            EffectCompositor.setOverlaySource(source, for: overlay.id)
+            sources[overlay.id] = source
         }
+        return EffectCompositor.registerOverlaySources(sources)
     }
 
     private func resolveBookmark(_ bookmark: Data) -> URL? {

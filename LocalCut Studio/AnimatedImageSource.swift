@@ -37,9 +37,15 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
             let props = CGImageSourceCopyPropertiesAtIndex(src, i, nil) as? [String: Any]
             let gifProps = props?[kCGImagePropertyGIFDictionary as String] as? [String: Any]
             let webpProps = props?[kCGImagePropertyWebPDictionary as String] as? [String: Any]
+            let apngProps = props?[kCGImagePropertyPNGDictionary as String] as? [String: Any]
             let delay = gifProps?[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double
                 ?? gifProps?[kCGImagePropertyGIFDelayTime as String] as? Double
+                ?? webpProps?[kCGImagePropertyWebPUnclampedDelayTime as String] as? Double
                 ?? webpProps?[kCGImagePropertyWebPDelayTime as String] as? Double
+                ?? apngProps?[kCGImagePropertyAPNGUnclampedDelayTime as String] as? Double
+                ?? apngProps?[kCGImagePropertyAPNGDelayTime as String] as? Double
+                ?? props?["UnclampedDelayTime"] as? Double
+                ?? props?["DelayTime"] as? Double
                 ?? 0.1
             durations.append(max(delay, 0.01))
         }

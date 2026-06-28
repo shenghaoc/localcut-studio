@@ -530,8 +530,13 @@ final class RenderQueue {
         }
 
         do {
-            await registerOverlaySources(for: project)
-            guard let built = try await CompositionBuilder.build(project: project) else {
+            let overlaySourceRegistryID = await registerOverlaySources(for: project)
+            defer {
+                EffectCompositor.releaseOverlaySources(for: overlaySourceRegistryID)
+            }
+            guard let built = try await CompositionBuilder.build(
+                project: project,
+                overlaySourceRegistryID: overlaySourceRegistryID) else {
                 finish(jobID: id, status: .failed,
                        message: RenderQueueError.compositionEmpty.localizedDescription,
                        startWall: startWall)
@@ -1377,7 +1382,8 @@ final class RenderQueue {
         project.captionTracks = doc.captionTracks.map { $0.makeTrack() }
         project.overlays = doc.overlays.map { $0.makeOverlayClip() }
         for overlay in doc.overlays {
-            if let path = overlay.bundleRelativePath {
+            if let path = overlay.bundleRelativePath,
+               ProjectBundleLayout.isSafeAssetRelativePath(path) {
                 project.overlayBundlePaths[overlay.id] = path
             }
             guard !overlay.bookmark.isEmpty else {
@@ -1398,8 +1404,8 @@ final class RenderQueue {
         return (project, accessed, missing)
     }
 
-    private func registerOverlaySources(for project: Project) async {
-        EffectCompositor.clearOverlaySources()
+    private func registerOverlaySources(for project: Project) async -> UUID? {
+        var sources: [UUID: any OverlayFrameSource] = [:]
         for overlay in project.overlays {
             guard let bookmark = project.overlayBookmarks[overlay.id], !bookmark.isEmpty else { continue }
             var stale = false
@@ -1413,8 +1419,9 @@ final class RenderQueue {
             guard let source = await OverlayFrameSourceFactory.makeSource(for: overlay, sourceURL: url) else {
                 continue
             }
-            EffectCompositor.setOverlaySource(source, for: overlay.id)
+            sources[overlay.id] = source
         }
+        return EffectCompositor.registerOverlaySources(sources)
     }
 
     private func log(_ message: String) {

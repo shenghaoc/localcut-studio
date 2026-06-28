@@ -131,12 +131,17 @@ public struct SkinSmoothEffect: Hashable, Codable, Sendable {
 // MARK: - Film look effects
 
 private func clamped(_ value: Float, to range: ClosedRange<Float>) -> Float {
-    max(range.lowerBound, min(range.upperBound, value))
+    guard value.isFinite else {
+        return range.contains(0) ? 0 : range.lowerBound
+    }
+    return max(range.lowerBound, min(range.upperBound, value))
 }
 
 private func clampedKeyframed(_ value: Keyframed<Float>, to range: ClosedRange<Float>) -> Keyframed<Float> {
     let keyframes = value.keyframes.map { keyframe in
-        Keyframe(id: keyframe.id, time: keyframe.time, value: clamped(keyframe.value, to: range))
+        Keyframe(id: keyframe.id, time: keyframe.time, value: clamped(keyframe.value, to: range),
+                 incomingHandle: keyframe.incomingHandle,
+                 outgoingHandle: keyframe.outgoingHandle)
     }
     return Keyframed(keyframes: keyframes, defaultValue: clamped(value.defaultValue, to: range))
 }
@@ -149,6 +154,10 @@ public struct GrainEffect: Hashable, Codable, Sendable {
     public var monochrome: Bool
     public var seed: UInt64
 
+    private enum CodingKeys: String, CodingKey {
+        case amount, size, monochrome, seed
+    }
+
     public init(amount: Keyframed<Float> = Keyframed(defaultValue: 0),
                 size: Float = 1,
                 monochrome: Bool = true,
@@ -157,6 +166,16 @@ public struct GrainEffect: Hashable, Codable, Sendable {
         self.size = size
         self.monochrome = monochrome
         self.seed = seed
+        clamp()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        amount = try values.decodeIfPresent(Keyframed<Float>.self, forKey: .amount)
+            ?? Keyframed(defaultValue: 0)
+        size = try values.decodeIfPresent(Float.self, forKey: .size) ?? 1
+        monochrome = try values.decodeIfPresent(Bool.self, forKey: .monochrome) ?? true
+        seed = try values.decodeIfPresent(UInt64.self, forKey: .seed) ?? 0
         clamp()
     }
 
@@ -183,6 +202,10 @@ public struct HalationEffect: Hashable, Codable, Sendable {
     public var radius: Float
     public var redBoost: Float
 
+    private enum CodingKeys: String, CodingKey {
+        case strength, threshold, radius, redBoost
+    }
+
     public init(strength: Keyframed<Float> = Keyframed(defaultValue: 0),
                 threshold: Float = 0.72,
                 radius: Float = 16,
@@ -191,6 +214,16 @@ public struct HalationEffect: Hashable, Codable, Sendable {
         self.threshold = threshold
         self.radius = radius
         self.redBoost = redBoost
+        clamp()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        strength = try values.decodeIfPresent(Keyframed<Float>.self, forKey: .strength)
+            ?? Keyframed(defaultValue: 0)
+        threshold = try values.decodeIfPresent(Float.self, forKey: .threshold) ?? 0.72
+        radius = try values.decodeIfPresent(Float.self, forKey: .radius) ?? 16
+        redBoost = try values.decodeIfPresent(Float.self, forKey: .redBoost) ?? 0.85
         clamp()
     }
 
@@ -219,12 +252,25 @@ public struct VignetteEffect: Hashable, Codable, Sendable {
     public var radius: Float
     public var softness: Float
 
+    private enum CodingKeys: String, CodingKey {
+        case amount, radius, softness
+    }
+
     public init(amount: Keyframed<Float> = Keyframed(defaultValue: 0),
                 radius: Float = 0.65,
                 softness: Float = 0.35) {
         self.amount = amount
         self.radius = radius
         self.softness = softness
+        clamp()
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        amount = try values.decodeIfPresent(Keyframed<Float>.self, forKey: .amount)
+            ?? Keyframed(defaultValue: 0)
+        radius = try values.decodeIfPresent(Float.self, forKey: .radius) ?? 0.65
+        softness = try values.decodeIfPresent(Float.self, forKey: .softness) ?? 0.35
         clamp()
     }
 

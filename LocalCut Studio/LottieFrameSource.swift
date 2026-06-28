@@ -16,12 +16,43 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
     private let totalDuration: TimeInterval
 
     @MainActor
-    init?(url: URL) {
+    convenience init?(url: URL) {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         guard let data = try? Data(contentsOf: url),
               let animation = try? LottieAnimation.from(data: data) else {
             return nil
         }
+        self.init(animation: animation)
+    }
 
+    @MainActor
+    static func make(url: URL) async -> LottieFrameSource? {
+        guard let data = await loadAnimationData(url: url) else { return nil }
+        let animation: LottieAnimation?
+        if url.pathExtension.lowercased() == "lottie" {
+            let file = try? await DotLottieFile.loadedFrom(
+                data: data,
+                filename: url.lastPathComponent,
+                dispatchQueue: .dotLottie)
+            animation = file?.animations.first?.animation
+        } else {
+            animation = try? LottieAnimation.from(data: data)
+        }
+        guard let animation else { return nil }
+        return LottieFrameSource(animation: animation)
+    }
+
+    private static func loadAnimationData(url: URL) async -> Data? {
+        await Task.detached(priority: .userInitiated) {
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            return try? Data(contentsOf: url)
+        }.value
+    }
+
+    @MainActor
+    private init?(animation: LottieAnimation) {
         let width = max(1, animation.size.width)
         let height = max(1, animation.size.height)
         let size = CGSize(width: width, height: height)
@@ -85,6 +116,14 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
             return nil
         }
         return "layer effects detected; preview/export use Lottie's fallback renderer."
+    }
+
+    static func unsupportedFeatureWarningAsync(for url: URL) async -> String? {
+        await Task.detached(priority: .utility) {
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            return unsupportedFeatureWarning(for: url)
+        }.value
     }
 
     @MainActor

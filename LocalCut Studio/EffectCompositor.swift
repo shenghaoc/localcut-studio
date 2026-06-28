@@ -92,16 +92,19 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let units: [RenderUnit]
     let captions: [CaptionRenderItem]
     let overlays: [OverlayRenderItem]
+    let overlaySourceRegistryID: UUID?
     /// Working colour space — drives the per-space `CIContext` choice and the
     /// output buffer's colour-tag attachments.
     let workingColourSpace: WorkingColourSpace
 
     init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = [],
-         overlays: [OverlayRenderItem] = [], workingColourSpace: WorkingColourSpace = .sRGB) {
+         overlays: [OverlayRenderItem] = [], overlaySourceRegistryID: UUID? = nil,
+         workingColourSpace: WorkingColourSpace = .sRGB) {
         self.timeRange = timeRange
         self.units = units
         self.captions = captions
         self.overlays = overlays
+        self.overlaySourceRegistryID = overlaySourceRegistryID
         self.workingColourSpace = workingColourSpace
         // A transition tweens its layers across the interval. Captions also tween
         // (per-frame animation transform), so any caption forces tweening too.
@@ -226,6 +229,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // first, later entries on top.
         for item in instruction.overlays {
             guard let layer = overlayLayer(for: item, time: request.compositionTime,
+                                           registryID: instruction.overlaySourceRegistryID,
                                            renderSize: renderSize) else { continue }
             result = layer.composited(over: result ?? CIImage(color: .clear)
                 .cropped(to: CGRect(origin: .zero, size: renderSize)))
@@ -353,23 +357,35 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     // MARK: - Overlays
 
-    /// Cache of overlay frame sources keyed by overlay ID. Populated lazily
-    /// on first access for each overlay. The sources are thread-safe.
+    /// Frame-source registries keyed by preview/export session. Sources are
+    /// intentionally not shared globally by overlay ID: a preview rebuild and an
+    /// export can overlap with different resolved files for the same overlay ID.
     nonisolated(unsafe) private static var overlaySourceLock = NSLock()
-    nonisolated(unsafe) private static var overlaySources: [UUID: any OverlayFrameSource] = [:]
+    nonisolated(unsafe) private static var overlaySourceRegistries: [UUID: [UUID: any OverlayFrameSource]] = [:]
 
-    /// Registers a frame source for an overlay. Called from the composition
-    /// builder when overlays are present.
-    nonisolated static func setOverlaySource(_ source: any OverlayFrameSource, for id: UUID) {
+    /// Registers one immutable source map for a preview/export session.
+    @discardableResult
+    nonisolated static func registerOverlaySources(_ sources: [UUID: any OverlayFrameSource]) -> UUID? {
+        guard !sources.isEmpty else { return nil }
+        let registryID = UUID()
         overlaySourceLock.lock()
-        overlaySources[id] = source
+        overlaySourceRegistries[registryID] = sources
+        overlaySourceLock.unlock()
+        return registryID
+    }
+
+    /// Releases a single preview/export source map.
+    nonisolated static func releaseOverlaySources(for registryID: UUID?) {
+        guard let registryID else { return }
+        overlaySourceLock.lock()
+        overlaySourceRegistries.removeValue(forKey: registryID)
         overlaySourceLock.unlock()
     }
 
-    /// Removes all cached overlay sources. Called when the project changes.
+    /// Removes every registered source map. Used only on full session teardown.
     nonisolated static func clearOverlaySources() {
         overlaySourceLock.lock()
-        overlaySources.removeAll()
+        overlaySourceRegistries.removeAll()
         overlaySourceLock.unlock()
     }
 
@@ -378,10 +394,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// opacity, and crops to the render canvas.
     nonisolated private func overlayLayer(for item: OverlayRenderItem,
                                           time: CMTime,
+                                          registryID: UUID?,
                                           renderSize: CGSize) -> CIImage? {
         // Resolve the frame source.
         Self.overlaySourceLock.lock()
-        let source = Self.overlaySources[item.overlayID]
+        let source = registryID.flatMap { Self.overlaySourceRegistries[$0]?[item.overlayID] }
         Self.overlaySourceLock.unlock()
         guard let source else { return nil }
 
@@ -393,37 +410,14 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         var image = frame
 
-        // Scale the overlay to fit within a fraction of the render canvas.
-        // The naturalSize is in pixels; we scale relative to the render size.
         let overlayW = source.naturalSize.width
         let overlayH = source.naturalSize.height
-        guard overlayW > 0, overlayH > 0 else { return nil }
-
-        // Default overlay size: 25% of the render canvas width, preserving
-        // aspect ratio. The scale parameter is a multiplier on this.
-        let targetW = renderSize.width * 0.25 * item.scale
-        let scaleFactor = targetW / overlayW
-        let targetH = overlayH * scaleFactor
-
-        // Position: centre of the canvas + normalised offset.
-        let centreX = renderSize.width / 2 + item.positionOffset.width * renderSize.width / 2
-        let centreY = renderSize.height / 2 - item.positionOffset.height * renderSize.height / 2
-
-        // Build the transform: rotate in original space, scale, then translate.
-        // Transforms compose right-to-left in CGAffineTransform, so we write
-        // them in reverse logical order.
-        var transform = CGAffineTransform.identity
-        // 1. Move the overlay so its centre sits at the target position.
-        transform = transform.translatedBy(x: centreX - targetW / 2,
-                                           y: centreY - targetH / 2)
-        // 2. Scale from original to target size.
-        transform = transform.scaledBy(x: scaleFactor, y: scaleFactor)
-        // 3. Rotate around the centre of the original image (before scaling).
-        if item.rotation != 0 {
-            transform = transform.translatedBy(x: overlayW / 2, y: overlayH / 2)
-            transform = transform.rotated(by: item.rotation)
-            transform = transform.translatedBy(x: -overlayW / 2, y: -overlayH / 2)
-        }
+        guard let transform = Self.overlayTransform(
+            naturalSize: CGSize(width: overlayW, height: overlayH),
+            scale: item.scale,
+            rotation: item.rotation,
+            positionOffset: item.positionOffset,
+            renderSize: renderSize) else { return nil }
         image = image.transformed(by: transform)
 
         if item.opacity < 1 {
@@ -433,6 +427,41 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let renderRect = CGRect(origin: .zero, size: renderSize)
         let canvas = CIImage(color: .clear).cropped(to: renderRect)
         return image.composited(over: canvas).cropped(to: renderRect)
+    }
+
+    /// Transform from overlay source-pixel coordinates into render coordinates.
+    /// `scale == 1` preserves the source's natural pixel size; position is the
+    /// render centre plus the normalized authoring offset.
+    nonisolated static func overlayTransform(naturalSize: CGSize,
+                                             scale: CGFloat,
+                                             rotation: CGFloat,
+                                             positionOffset: CGSize,
+                                             renderSize: CGSize) -> CGAffineTransform? {
+        guard naturalSize.width.isFinite,
+              naturalSize.height.isFinite,
+              renderSize.width.isFinite,
+              renderSize.height.isFinite,
+              scale.isFinite,
+              rotation.isFinite,
+              positionOffset.width.isFinite,
+              positionOffset.height.isFinite,
+              naturalSize.width > 0,
+              naturalSize.height > 0,
+              renderSize.width > 0,
+              renderSize.height > 0,
+              scale > 0 else { return nil }
+
+        let centreX = renderSize.width / 2 + positionOffset.width * renderSize.width / 2
+        let centreY = renderSize.height / 2 - positionOffset.height * renderSize.height / 2
+
+        var transform = CGAffineTransform(translationX: centreX, y: centreY)
+        if rotation != 0 {
+            transform = transform.rotated(by: rotation)
+        }
+        transform = transform.scaledBy(x: scale, y: scale)
+        transform = transform.translatedBy(x: -naturalSize.width / 2,
+                                           y: -naturalSize.height / 2)
+        return transform
     }
 
     // MARK: - Captions
@@ -799,10 +828,31 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let amount = params.amount(at: time)
         guard amount != 0 else { return image }
 
+        let maxDimension = Float(max(image.extent.width, image.extent.height))
+        let radius = maxDimension * params.radius
+        let intensity = abs(amount) * (1 + params.softness)
+
+        if amount < 0 {
+            let gradient = CIFilter.radialGradient()
+            gradient.center = CGPoint(x: image.extent.midX, y: image.extent.midY)
+            let innerRadius = max(0, radius * (1 - params.softness))
+            gradient.radius0 = innerRadius
+            gradient.radius1 = max(innerRadius + 1, radius)
+            gradient.color0 = CIColor(red: 1, green: 1, blue: 1, alpha: 0)
+            gradient.color1 = CIColor(red: 1, green: 1, blue: 1,
+                                      alpha: CGFloat(min(0.75, intensity * 0.45)))
+            guard let lift = gradient.outputImage?.cropped(to: image.extent) else { return image }
+
+            let composite = CIFilter.sourceOverCompositing()
+            composite.inputImage = lift
+            composite.backgroundImage = image
+            return (composite.outputImage ?? image).cropped(to: image.extent)
+        }
+
         let filter = CIFilter.vignette()
         filter.inputImage = image
-        filter.intensity = amount * (1 + params.softness)
-        filter.radius = Float(max(image.extent.width, image.extent.height)) * params.radius
+        filter.intensity = intensity
+        filter.radius = radius
         return (filter.outputImage ?? image).cropped(to: image.extent)
     }
 

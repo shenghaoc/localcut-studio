@@ -190,6 +190,7 @@ extension EditorModel {
             context.track.clips.sort { $0.timelineStart < $1.timelineStart }
             selectedClipID = pieces.first?.id
             selectedTransitionClipID = nil
+            selectedOverlayID = nil
             statusMessage = "Cut clip at \(cutTimes.count) beat\(cutTimes.count == 1 ? "" : "s")."
             scheduleRebuild()
         }
@@ -231,6 +232,7 @@ extension EditorModel {
             sanitizeTransitions()
             selectedClipID = moved.id
             selectedTransitionClipID = nil
+            selectedOverlayID = nil
             statusMessage = "Aligned clip to beat at \(TimeFormatting.timecode(moved.timelineStart.seconds))."
             scheduleRebuild()
         }

@@ -16,6 +16,9 @@ final class DocumentController {
         model.project.audioTracks = [Track(name: "A1", kind: .audio)]
         model.project.captionTracks = []
         model.project.markers = []
+        model.project.overlays = []
+        model.project.overlayBookmarks = [:]
+        model.project.overlayBundlePaths = [:]
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -45,6 +48,10 @@ final class DocumentController {
         model.project.mediaItems.removeAll()
         model.project.captionTracks.removeAll()
         model.project.markers.removeAll()
+        model.project.overlays.removeAll()
+        model.project.overlayBookmarks.removeAll()
+        model.project.overlayBundlePaths.removeAll()
+        EffectCompositor.clearOverlaySources()
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -52,6 +59,7 @@ final class DocumentController {
         model.selectedMediaID = nil
         model.selectedTransitionClipID = nil
         model.selectedMarkerID = nil
+        model.selectedOverlayID = nil
         model.unresolvedMedia = []
         model.undoManager.removeAllActions()
         model.coalescedCommitTask?.cancel()
@@ -180,7 +188,8 @@ final class DocumentController {
         model.project.overlayBundlePaths = [:]
         for doc in document.overlays {
             model.project.overlayBookmarks[doc.id] = doc.bookmark
-            if let path = doc.bundleRelativePath {
+            if let path = doc.bundleRelativePath,
+               ProjectBundleLayout.isSafeAssetRelativePath(path) {
                 model.project.overlayBundlePaths[doc.id] = path
             }
         }
@@ -208,7 +217,7 @@ final class DocumentController {
         if !externallyEditedAssets.isEmpty {
             notes.append("\(externallyEditedAssets.count) bundled asset(s) changed externally — re-import or accept on next save")
         }
-        notes.append(contentsOf: lottieOverlayWarnings(model: model))
+        notes.append(contentsOf: await lottieOverlayWarnings(model: model))
         model.statusMessage = notes.isEmpty
             ? "Opened \(model.project.name)."
             : "Opened \(model.project.name) — " + notes.joined(separator: "; ") + "."
@@ -281,6 +290,10 @@ final class DocumentController {
             }
             document.overlays = document.overlays.map { overlay in
                 var copy = overlay
+                if copy.bookmark.isEmpty,
+                   let bookmark = singleFileOverlayBookmark(for: copy, model: model) {
+                    copy.bookmark = bookmark
+                }
                 copy.bundleRelativePath = nil
                 return copy
             }
@@ -603,17 +616,38 @@ final class DocumentController {
         }
     }
 
-    private func lottieOverlayWarnings(model: EditorModel) -> [String] {
-        model.project.overlays.compactMap { overlay in
+    private func singleFileOverlayBookmark(for overlay: OverlayClipDoc, model: EditorModel) -> Data? {
+        guard let relativePath = overlay.bundleRelativePath,
+              ProjectBundleLayout.isSafeAssetRelativePath(relativePath),
+              let bundleURL = model.documentURL,
+              ProjectBundle.isBundle(url: bundleURL) else {
+            return nil
+        }
+        let sourceURL = bundleURL.appendingPathComponent(relativePath)
+        guard FileManager.default.isReadableFile(atPath: sourceURL.path) else { return nil }
+        let didAccess = sourceURL.startAccessingSecurityScopedResource()
+        defer { if didAccess { sourceURL.stopAccessingSecurityScopedResource() } }
+        return try? sourceURL.bookmarkData(options: .withSecurityScope,
+                                           includingResourceValuesForKeys: nil,
+                                           relativeTo: nil)
+    }
+
+    private func lottieOverlayWarnings(model: EditorModel) async -> [String] {
+        let entries = model.project.overlays.compactMap { overlay -> (String, URL)? in
             guard overlay.sourceType == .lottie,
                   let url = model.resolveOverlayURL(for: overlay) else {
                 return nil
             }
-            let didAccess = url.startAccessingSecurityScopedResource()
-            defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
-            guard let warning = LottieFrameSource.unsupportedFeatureWarning(for: url) else { return nil }
-            return "Lottie overlay \(overlay.id.uuidString.prefix(8)) \(warning)"
+            return (String(overlay.id.uuidString.prefix(8)), url)
         }
+        return await Task.detached(priority: .utility) {
+            entries.compactMap { id, url in
+                let didAccess = url.startAccessingSecurityScopedResource()
+                defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+                guard let warning = LottieFrameSource.unsupportedFeatureWarning(for: url) else { return nil }
+                return "Lottie overlay \(id) \(warning)"
+            }
+        }.value
     }
 
     private func adoptSaved(url: URL, cleanIfRevision revision: Int? = nil, model: EditorModel) {

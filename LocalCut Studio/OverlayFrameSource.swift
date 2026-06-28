@@ -23,14 +23,15 @@ protocol OverlayFrameSource: AnyObject, Sendable {
 enum OverlayFrameSourceFactory {
     /// Creates the appropriate frame source for the given overlay clip.
     /// The `sourceURL` is resolved from the bookmark or bundle-relative path.
-    @MainActor
     static func makeSource(for overlay: OverlayClip,
                            sourceURL: URL) async -> (any OverlayFrameSource)? {
         switch overlay.sourceType {
         case .animatedImage:
-            return AnimatedImageSource(url: sourceURL)
+            return await Task.detached(priority: .userInitiated) {
+                AnimatedImageSource(url: sourceURL)
+            }.value
         case .lottie:
-            return LottieFrameSource(url: sourceURL)
+            return await LottieFrameSource.make(url: sourceURL)
         case .alphaVideo:
             return await AlphaVideoSource.make(url: sourceURL)
         }

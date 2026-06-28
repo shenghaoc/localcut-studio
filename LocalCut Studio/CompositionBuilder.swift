@@ -72,7 +72,8 @@ enum CompositionBuilder {
     //
     // VisibleSegment, PlannedUnit, and planUnits() are defined in LocalCutCore.
 
-    static func build(project: Project, showSkinMask: Bool = false) async throws -> BuiltComposition? {
+    static func build(project: Project, showSkinMask: Bool = false,
+                      overlaySourceRegistryID: UUID? = nil) async throws -> BuiltComposition? {
         let composition = AVMutableComposition()
         let renderSize = project.renderSize
 
@@ -268,13 +269,13 @@ enum CompositionBuilder {
 
         let captionTracks = project.captionTracks.filter { !$0.isMuted }
 
-        // Insert a black-frame filler track wherever the project has caption
-        // activity but no video to render it over. Comparing against the last
-        // VIDEO segment end (not `composition.duration`) matters because an
-        // audio track longer than the final video clip already pushes
-        // `composition.duration` past the last video frame; without this we
-        // would silently miss every caption that sits over the audio-only
-        // gap. Codex P1.
+        // Insert a black-frame filler track wherever the project has visual
+        // activity (captions or animated overlays) but no video clip to render
+        // it over. Comparing against the last VIDEO segment end (not
+        // `composition.duration`) matters because an audio track longer than
+        // the final video clip already pushes `composition.duration` past the
+        // last video frame; without this we would silently miss captions and
+        // overlays that sit over the audio-only gap. Codex P1.
         //
         // `insertEmptyTimeRange` does not reliably push `composition.duration`
         // forward, so we insert real frames. The filler's track doubles as
@@ -282,22 +283,26 @@ enum CompositionBuilder {
         // schedules the compositor across that interval; without a required
         // source the export pipeline hangs waiting for a frame.
         //
-        // For very long tails (multi-minute captions / bad subtitle
-        // timestamps) we encode only a short filler asset and loop-insert it
-        // into the composition track so a 30-minute caption tail does not
-        // make the editor block on writing tens of thousands of frames.
+        // For very long tails (multi-minute captions / bad subtitle timestamps
+        // / overlay graphics) we encode only a short filler asset and
+        // loop-insert it into the composition track so a 30-minute tail does
+        // not make the editor block on writing tens of thousands of frames.
         // Codex P2 (cap filler generation).
         let captionEnd = captionTracks.reduce(CMTime.zero) {
             CMTimeMaximum($0, $1.endTime)
         }
+        let overlayEnd = project.overlays.reduce(CMTime.zero) { current, overlay in
+            overlay.timelineEnd.isNumeric ? CMTimeMaximum(current, overlay.timelineEnd) : current
+        }
+        let visualTailEnd = CMTimeMaximum(captionEnd, overlayEnd)
         let lastVideoEnd = projectTrackSegments.flatMap { $0 }
             .reduce(CMTime.zero) { CMTimeMaximum($0, $1.timeRange.end) }
 
         var fillerTailRange: CMTimeRange?
         var fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
-        if captionEnd.isNumeric, lastVideoEnd.isNumeric, captionEnd > lastVideoEnd {
+        if visualTailEnd.isNumeric, lastVideoEnd.isNumeric, visualTailEnd > lastVideoEnd {
             let tailStart = lastVideoEnd
-            let tailDuration = captionEnd - tailStart
+            let tailDuration = visualTailEnd - tailStart
             // Generate at most `fillerChunkSeconds` of source media; longer
             // tails reuse the same chunk via repeated `insertTimeRange`s.
             let chunkSeconds = CMTime(seconds: fillerChunkSeconds,
@@ -359,6 +364,7 @@ enum CompositionBuilder {
             frameRate: project.frameRate,
             fillerTrackID: fillerTrackID,
             fillerTailRange: fillerTailRange,
+            overlaySourceRegistryID: overlaySourceRegistryID,
             workingColourSpace: project.workingColourSpace)
 
         let audioMix: AVAudioMix?
@@ -535,6 +541,7 @@ enum CompositionBuilder {
         frameRate: Double,
         fillerTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid,
         fillerTailRange: CMTimeRange? = nil,
+        overlaySourceRegistryID: UUID? = nil,
         workingColourSpace: WorkingColourSpace) async throws -> AVVideoComposition? {
 
         // The filler counts as "something to render" for the tail interval, so
@@ -633,6 +640,7 @@ enum CompositionBuilder {
             instructions.append(EffectCompositionInstruction(
                 timeRange: range, units: units, captions: captionsForInterval,
                 overlays: overlaysForInterval,
+                overlaySourceRegistryID: overlaySourceRegistryID,
                 workingColourSpace: workingColourSpace))
         }
 

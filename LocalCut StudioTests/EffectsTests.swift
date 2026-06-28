@@ -181,6 +181,40 @@ func lutDisplayNameCacheRestoresWithUndoRedo() {
     #expect(model._testLUTDisplayNameCacheCount == 1)
 }
 
+@MainActor
+@Test("LUT-only clips are treated as exportable look presets")
+func lutOnlyClipHasExportableLookPreset() {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    model.project.mediaItems.append(media)
+    let lutBookmark = Data([0xC0, 0xDE])
+    var clip = Clip(mediaID: media.id,
+                    sourceStart: .zero,
+                    duration: CMTime(seconds: 5, preferredTimescale: 600),
+                    timelineStart: .zero)
+    clip.effects = [.lut(bookmark: lutBookmark)]
+    model.project.videoTracks.first!.clips = [clip]
+    model.selectedClipID = clip.id
+
+    #expect(model.selectedClipHasLookEffects)
+}
+
+@Test("Look preset LUT resolver rejects unsafe sidecar paths")
+func lookPresetLUTResolverRejectsUnsafePaths() throws {
+    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("look-lut-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    let presetURL = tmp.appendingPathComponent("look.lclook")
+    try Data("{}".utf8).write(to: presetURL, options: .atomic)
+    let unsafe = LookPresetLUTReference(relativePath: "../evil.cube", displayName: "evil.cube")
+
+    #expect(EditorModel.resolvePresetLUT(unsafe, sourceURL: presetURL) == nil)
+    #expect(!EditorModel.isSafeLookPresetLUTPath("assets/../evil.cube"))
+    #expect(!EditorModel.isSafeLookPresetLUTPath("assets/luts/not-a-lut.png"))
+    #expect(EditorModel.isSafeLookPresetLUTPath("assets/luts/look.cube"))
+}
+
 @Test("Clip has empty effects by default")
 func clipDefaultEffects() {
     let clip = Clip(mediaID: UUID(), sourceStart: .zero, duration: CMTime(seconds: 10, preferredTimescale: 600), timelineStart: .zero)
@@ -251,6 +285,26 @@ func activeVignetteChangesEdgePixels() {
                                            softness: 0.4))],
         cacheKey: nil)
     #expect(!samplePixelEquals(result, source, at: CGPoint(x: 2, y: 2), tolerance: 0.02))
+}
+
+@Test("EffectCompositor.applyEffectChain: negative vignette lifts edge pixels")
+@MainActor
+func negativeVignetteLiftsEdgePixels() throws {
+    let compositor = EffectCompositor()
+    let source = CIImage(color: CIColor(red: 0.4, green: 0.4, blue: 0.4, alpha: 1))
+        .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+    let result = compositor.applyEffectChain(
+        source,
+        effects: [.vignette(VignetteEffect(amount: Keyframed(defaultValue: -0.8),
+                                           radius: 0.35,
+                                           softness: 0.4))],
+        cacheKey: nil)
+
+    let original = try #require(sampleRGBA(source, at: CGPoint(x: 2, y: 2)))
+    let lifted = try #require(sampleRGBA(result, at: CGPoint(x: 2, y: 2)))
+    #expect(lifted[0] > original[0])
+    #expect(lifted[1] > original[1])
+    #expect(lifted[2] > original[2])
 }
 
 @Test("Built-in look presets render deterministic snapshots")
@@ -359,6 +413,17 @@ private func samplePixelEquals(_ a: CIImage, _ b: CIImage, at point: CGPoint,
         if diff > tolerance { return false }
     }
     return true
+}
+
+@MainActor
+private func sampleRGBA(_ image: CIImage, at point: CGPoint) -> [UInt8]? {
+    let context = CIContext(options: nil)
+    let one = CGRect(x: point.x, y: point.y, width: 1, height: 1)
+    guard let cgImage = context.createCGImage(image, from: one),
+          let data = cgImage.dataProvider?.data,
+          let pointer = CFDataGetBytePtr(data),
+          CFDataGetLength(data) >= 4 else { return nil }
+    return Array(UnsafeBufferPointer(start: pointer, count: 4))
 }
 
 @MainActor

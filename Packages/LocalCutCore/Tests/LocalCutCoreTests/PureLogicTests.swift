@@ -55,8 +55,14 @@ func keyframedFloatSortedInterpolationAndReplacement() {
 
 @Test("Look effects clamp authored and keyframed values")
 func lookEffectsClampValues() {
+    let incoming = KeyframeHandle(x: 0.2, y: 0.3)
+    let outgoing = KeyframeHandle(x: 0.4, y: 0.5)
     var grain = GrainEffect(
-        amount: Keyframed(keyframes: [Keyframe(time: time(1), value: 2)], defaultValue: -1),
+        amount: Keyframed(keyframes: [
+            Keyframe(time: time(1), value: 2,
+                     incomingHandle: incoming,
+                     outgoingHandle: outgoing),
+        ], defaultValue: -1),
         size: 20)
     var halation = HalationEffect(
         strength: Keyframed(keyframes: [Keyframe(time: time(1), value: -1)], defaultValue: 2),
@@ -74,6 +80,8 @@ func lookEffectsClampValues() {
 
     #expect(grain.amount.defaultValue == 0)
     #expect(grain.amount.keyframes[0].value == 1)
+    #expect(grain.amount.keyframes[0].incomingHandle == incoming)
+    #expect(grain.amount.keyframes[0].outgoingHandle == outgoing)
     #expect(grain.size == 8)
     #expect(halation.strength.defaultValue == 1)
     #expect(halation.strength.keyframes[0].value == 0)
@@ -82,6 +90,43 @@ func lookEffectsClampValues() {
     #expect(halation.redBoost == 2)
     #expect(vignette.amount.defaultValue == -1)
     #expect(vignette.amount.keyframes[0].value == 1)
+    #expect(vignette.radius == 0.05)
+    #expect(vignette.softness == 1)
+}
+
+@Test("Decoding look effect models clamps stored values")
+func lookEffectDecodeClampsStoredValues() throws {
+    let grain = try JSONDecoder().decode(GrainEffect.self, from: Data("""
+    {
+      "amount": { "keyframes": [], "defaultValue": 8 },
+      "size": 99,
+      "monochrome": true,
+      "seed": 7
+    }
+    """.utf8))
+    let halation = try JSONDecoder().decode(HalationEffect.self, from: Data("""
+    {
+      "strength": { "keyframes": [], "defaultValue": -2 },
+      "threshold": -1,
+      "radius": 999,
+      "redBoost": 9
+    }
+    """.utf8))
+    let vignette = try JSONDecoder().decode(VignetteEffect.self, from: Data("""
+    {
+      "amount": { "keyframes": [], "defaultValue": -8 },
+      "radius": 0,
+      "softness": 9
+    }
+    """.utf8))
+
+    #expect(grain.amount.defaultValue == 1)
+    #expect(grain.size == 8)
+    #expect(halation.strength.defaultValue == 0)
+    #expect(halation.threshold == 0)
+    #expect(halation.radius == 80)
+    #expect(halation.redBoost == 2)
+    #expect(vignette.amount.defaultValue == -1)
     #expect(vignette.radius == 0.05)
     #expect(vignette.softness == 1)
 }

@@ -13,7 +13,8 @@ extension EditorModel {
     // MARK: - Look effects
 
     var selectedClipHasLookEffects: Bool {
-        selectedClip?.effects.hasLookEffects ?? false
+        guard let clip = selectedClip else { return false }
+        return clip.effects.hasLookEffects || selectedClipLUT(clip) != nil
     }
 
     var selectedClipGrain: GrainEffect {
@@ -147,7 +148,7 @@ extension EditorModel {
             statusMessage = "Select a video clip before exporting a look preset."
             return
         }
-        guard clip.effects.hasLookEffects else {
+        guard selectedClipHasLookEffects else {
             statusMessage = "The selected clip has no look effects to export."
             return
         }
@@ -197,7 +198,7 @@ extension EditorModel {
     }
 
     private func exportLookPreset(_ preset: LookPresetV1, to url: URL, lutBookmark: Data?) {
-        guard !preset.nodes.isEmpty else {
+        guard !preset.nodes.isEmpty || preset.lut != nil else {
             statusMessage = "The selected clip has no look effects to export."
             return
         }
@@ -323,6 +324,7 @@ extension EditorModel {
 
     nonisolated static func resolvePresetLUT(_ reference: LookPresetLUTReference?, sourceURL: URL?) -> Data? {
         guard let reference, let sourceURL else { return nil }
+        guard isSafeLookPresetLUTPath(reference.relativePath) else { return nil }
         let lutURL = sourceURL.deletingLastPathComponent().appendingPathComponent(reference.relativePath)
         let didAccess = lutURL.startAccessingSecurityScopedResource()
         defer {
@@ -337,16 +339,34 @@ extension EditorModel {
         return bookmark
     }
 
+    nonisolated static func isSafeLookPresetLUTPath(_ relativePath: String) -> Bool {
+        guard !relativePath.isEmpty,
+              !relativePath.hasPrefix("/"),
+              !relativePath.contains("\\"),
+              !relativePath.contains("..") else {
+            return false
+        }
+        let components = relativePath
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard components.count == 3,
+              components[0] == "assets",
+              components[1] == "luts",
+              !components[2].isEmpty,
+              components[2] != ".",
+              components[2] != ".." else {
+            return false
+        }
+        return (components[2] as NSString).pathExtension.lowercased() == "cube"
+    }
+
     // MARK: - Look strength keyframes
 
-    /// Clip-local playhead time, or nil when the playhead is outside the selected
-    /// clip — mirrors the skin-smoothing keyframe behaviour so authoring a
-    /// clip-local keyframe is never ambiguous.
+    /// Source-local playhead time, or nil when the playhead is outside the selected
+    /// clip — mirrors the speed and skin-smoothing keyframe behaviour so authoring
+    /// a clip-local look keyframe is never ambiguous under time remapping.
     var selectedClipLookLocalPlayheadTime: CMTime? {
-        guard let clip = selectedClip else { return nil }
-        let playhead = CMTime(seconds: currentTime, preferredTimescale: 600)
-        guard playhead >= clip.timelineStart, playhead <= clip.timelineEnd else { return nil }
-        return CMTimeMaximum(.zero, CMTimeMinimum(playhead - clip.timelineStart, clip.duration))
+        selectedClipSourceLocalPlayheadTime
     }
 
     private func selectedClipLookStrength(_ kind: LookEffectKind) -> Keyframed<Float> {
@@ -414,7 +434,8 @@ extension EditorModel {
         guard let previous = selectedClipLookStrength(kind).keyframes.last(where: {
             $0.time.seconds < localTime.seconds - tolerance
         }) else { return }
-        seek(toSeconds: (clip.timelineStart + previous.time).seconds)
+        let outputOffset = clip.outputOffset(forSourceOffset: previous.time)
+        seek(toSeconds: effectiveTimelineTime(forAuthored: clip.timelineStart + outputOffset).seconds)
     }
 
     func seekToNextLookStrengthKeyframe(_ kind: LookEffectKind) {
@@ -424,7 +445,8 @@ extension EditorModel {
         guard let next = selectedClipLookStrength(kind).keyframes.first(where: {
             $0.time.seconds > localTime.seconds + tolerance
         }) else { return }
-        seek(toSeconds: (clip.timelineStart + next.time).seconds)
+        let outputOffset = clip.outputOffset(forSourceOffset: next.time)
+        seek(toSeconds: effectiveTimelineTime(forAuthored: clip.timelineStart + outputOffset).seconds)
     }
 
     private var lookKeyframeHitToleranceSeconds: Double {

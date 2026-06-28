@@ -909,16 +909,81 @@ struct InspectorView: View {
 
     @ViewBuilder
     private func overlaySection(_ overlay: OverlayClip) -> some View {
+        let frameStep = 1 / max(1, model.project.frameRate)
+        let timelineUpper = max(60, model.totalDuration, overlay.timelineEnd.seconds)
+        let durationUpper = max(frameStep, max(60, model.totalDuration, overlay.duration.seconds))
         Section("Overlay") {
             LabeledContent("Type") {
                 Text(overlay.sourceType.displayName)
             }
-            LabeledContent("Start") {
-                Text(TimeFormatting.timecode(overlay.timelineStart.seconds)).monospacedDigit()
-            }
-            LabeledContent("Duration") {
-                Text(TimeFormatting.timecode(overlay.duration.seconds)).monospacedDigit()
-            }
+
+            LabeledSliderRow(
+                label: "Start",
+                display: TimeFormatting.timecode(overlay.timelineStart.seconds),
+                value: Binding(
+                    get: { overlay.timelineStart.seconds },
+                    set: {
+                        model.setOverlayStart(
+                            overlay.id,
+                            to: CMTime(seconds: $0, preferredTimescale: 600))
+                    }),
+                range: 0...timelineUpper,
+                step: frameStep,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+
+            LabeledSliderRow(
+                label: "Duration",
+                display: TimeFormatting.timecode(overlay.duration.seconds),
+                value: Binding(
+                    get: { overlay.duration.seconds },
+                    set: {
+                        model.setOverlayDuration(
+                            overlay.id,
+                            to: CMTime(seconds: $0, preferredTimescale: 600))
+                    }),
+                range: frameStep...durationUpper,
+                step: frameStep,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } })
+
+            LabeledSliderRow(
+                label: "Position X",
+                display: "\(Int(overlay.positionOffset.width * 100))%",
+                value: Binding(
+                    get: { overlay.positionOffset.width },
+                    set: {
+                        model.setOverlayPosition(
+                            overlay.id,
+                            to: CGSize(width: $0, height: overlay.positionOffset.height))
+                    }),
+                range: -1...1,
+                step: 0.01,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    model.setOverlayPosition(
+                        overlay.id,
+                        to: CGSize(width: 0, height: overlay.positionOffset.height))
+                    model.commitCoalescedUndo()
+                })
+
+            LabeledSliderRow(
+                label: "Position Y",
+                display: "\(Int(overlay.positionOffset.height * 100))%",
+                value: Binding(
+                    get: { overlay.positionOffset.height },
+                    set: {
+                        model.setOverlayPosition(
+                            overlay.id,
+                            to: CGSize(width: overlay.positionOffset.width, height: $0))
+                    }),
+                range: -1...1,
+                step: 0.01,
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    model.setOverlayPosition(
+                        overlay.id,
+                        to: CGSize(width: overlay.positionOffset.width, height: 0))
+                    model.commitCoalescedUndo()
+                })
 
             LabeledSliderRow(
                 label: "Opacity",
@@ -927,7 +992,11 @@ struct InspectorView: View {
                     get: { Double(overlay.opacity) },
                     set: { model.setOverlayOpacity(overlay.id, to: Float($0)) }),
                 range: 0...1,
-                resetAction: { model.setOverlayOpacity(overlay.id, to: 1) })
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    model.setOverlayOpacity(overlay.id, to: 1)
+                    model.commitCoalescedUndo()
+                })
 
             LabeledSliderRow(
                 label: "Scale",
@@ -936,7 +1005,11 @@ struct InspectorView: View {
                     get: { overlay.scale },
                     set: { model.setOverlayScale(overlay.id, to: $0) }),
                 range: 0.1...4.0,
-                resetAction: { model.setOverlayScale(overlay.id, to: 1) })
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    model.setOverlayScale(overlay.id, to: 1)
+                    model.commitCoalescedUndo()
+                })
 
             LabeledSliderRow(
                 label: "Rotation",
@@ -945,7 +1018,11 @@ struct InspectorView: View {
                     get: { overlay.rotation },
                     set: { model.setOverlayRotation(overlay.id, to: $0) }),
                 range: -CGFloat.pi...CGFloat.pi,
-                resetAction: { model.setOverlayRotation(overlay.id, to: 0) })
+                onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                resetAction: {
+                    model.setOverlayRotation(overlay.id, to: 0)
+                    model.commitCoalescedUndo()
+                })
 
             Picker("End Action", selection: Binding(
                 get: { overlay.endAction },
@@ -997,7 +1074,7 @@ struct InspectorView: View {
             }
 
             Menu {
-                Button("Animated Image (WebP/GIF)") {
+                Button("Animated Image (GIF/WebP/APNG)") {
                     pendingOverlayType = .animatedImage
                     showOverlayImporter = true
                 }
@@ -1015,7 +1092,7 @@ struct InspectorView: View {
         }
         .fileImporter(
             isPresented: $showOverlayImporter,
-            allowedContentTypes: [.image, .movie, .video, .json, .data],
+            allowedContentTypes: pendingOverlayType.allowedContentTypes,
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
