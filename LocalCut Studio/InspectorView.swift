@@ -867,12 +867,15 @@ struct InspectorView: View {
                 }
                 Text("Custom").tag(ProjectAspect.custom)
             }
+            .help("Choose the project canvas aspect ratio for preview and export")
+            .accessibilityLabel("Project canvas aspect ratio")
             if model.project.aspect == .custom {
                 LabeledContent("Width") {
                     TextField("Width", value: customWidthBinding, format: .number)
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
                         .frame(width: 80)
+                        .help("Enter a custom canvas width in pixels")
                         .accessibilityLabel("Custom canvas width in pixels")
                 }
                 LabeledContent("Height") {
@@ -880,6 +883,7 @@ struct InspectorView: View {
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
                         .frame(width: 80)
+                        .help("Enter a custom canvas height in pixels")
                         .accessibilityLabel("Custom canvas height in pixels")
                 }
             } else {
@@ -893,9 +897,12 @@ struct InspectorView: View {
                 Text("30 fps").tag(30.0)
                 Text("60 fps").tag(60.0)
             }
+            .help("Choose the project frame rate in frames per second")
+            .accessibilityLabel("Project frame rate")
         }
         Section("Safe Zones") {
             Toggle("Show Safe Zones", isOn: $model.showSafeZones)
+                .help("Overlay platform-specific safe-zone guides on the preview canvas")
                 .onChange(of: model.showSafeZones) { _, newValue in
                     if newValue { model.surfaceSafeZoneLoadErrors() }
                 }
@@ -904,6 +911,7 @@ struct InspectorView: View {
                     Text(profile.displayName).tag(profile.platformID)
                 }
             }
+            .help("Choose a platform safe-zone profile (TikTok, YouTube Shorts, Instagram Reels, etc.)")
             .accessibilityLabel("Safe zone platform profile")
             if let profile = model.selectedSafeZoneProfile,
                !SafeZoneLibrary.isProfile(
@@ -978,7 +986,11 @@ struct InspectorView: View {
                     Text(format.displayName).tag(format)
                 }
             }
+            .help("Choose the cover image output format (PNG, JPEG, or HEIC)")
+            .accessibilityLabel("Cover image output format")
             TextField("Title", text: coverTitleBinding)
+                .help("Optional title text drawn onto the cover image")
+                .accessibilityLabel("Cover title text")
                 .onSubmit { model.commitCoalescedUndo() }
             HStack {
                 Button {
@@ -986,6 +998,7 @@ struct InspectorView: View {
                 } label: {
                     Label("Export Cover…", systemImage: "photo")
                 }
+                .help("Save the cover image to a file")
                 .disabled(model.totalDuration <= 0)
                 .controlSize(.small)
                 Spacer()
