@@ -37,6 +37,21 @@ private enum RecordingFolderStore {
     }
 }
 
+nonisolated struct RecordingSlotKey: Hashable, Sendable {
+    var sourceKind: CaptureSourceKind
+    var trackKind: TrackKind
+    var chunkIndex: Int
+}
+
+nonisolated struct RecordingSlot: Equatable, Sendable {
+    var key: RecordingSlotKey
+    var trackID: UUID
+    var trackIndex: Int
+    var clipID: Clip.ID
+    var mediaID: UUID
+    var timelineStart: CMTime
+}
+
 extension EditorModel {
     func requestRecorder() {
         isRecorderPresented = true
@@ -108,7 +123,8 @@ extension EditorModel {
     func startRecording(target: CaptureTarget?,
                         includeSystemAudio: Bool,
                         webcamDeviceID: String?,
-                        microphoneDeviceID: String?) async {
+                        microphoneDeviceID: String?,
+                        pipPreset: PiPPreset? = nil) async {
         guard !isRecording, !isStartingRecording, !isStoppingRecording else { return }
         isStartingRecording = true
         defer { isStartingRecording = false }
@@ -116,6 +132,11 @@ extension EditorModel {
             statusMessage = "Choose a recordings folder before recording."
             return
         }
+        let wasRecorderPresented = isRecorderPresented
+        isRecorderPresented = false
+        floatingPanelController.show(model: self)
+        let panelWindowID = floatingPanelController.windowID
+        let excludedWindowIDs: Set<CGWindowID> = panelWindowID == 0 ? [] : [panelWindowID]
         let request = CaptureStartRequest(
             target: target,
             includeSystemAudio: includeSystemAudio,
@@ -124,7 +145,11 @@ extension EditorModel {
             rootURL: root,
             frameRate: project.frameRate,
             fragmentInterval: CMTime(seconds: 2, preferredTimescale: 600),
-            capabilities: Capabilities.current)
+            capabilities: Capabilities.current,
+            excludedWindowIDs: excludedWindowIDs)
+        lastRecordingRequest = request
+        activePiPPreset = pipPreset
+        lastRecordingPiPPreset = pipPreset
         do {
             try await captureCoordinator.start(request, onStreamStopped: { [weak self] error in
                 // The screen stream ended unexpectedly mid-recording; stop and
@@ -143,6 +168,8 @@ extension EditorModel {
                 }
             })
             recordingStartedAt = Date()
+            recordingPausedDuration = 0
+            pauseStartedAt = nil
             isRecording = true
             isRecorderPresented = false
             recordingSourceCount = 0
@@ -154,10 +181,12 @@ extension EditorModel {
             recordingDiskFreeBytes = nil
             recordingDiskWarning = nil
             startRecordingMonitor(rootURL: root)
-            floatingPanelController.show(model: self)
-            try? await captureCoordinator.setFloatingPanelWindowID(floatingPanelController.windowID)
+            try? await captureCoordinator.setFloatingPanelWindowID(panelWindowID)
             statusMessage = "Recording…"
         } catch {
+            floatingPanelController.close()
+            isRecorderPresented = wasRecorderPresented
+            activePiPPreset = nil
             isRecording = false
             recordingStartedAt = nil
             statusMessage = error.localizedDescription
@@ -171,6 +200,7 @@ extension EditorModel {
             var lastDiskCheck = Date.distantPast
             while !Task.isCancelled, self.isRecording {
                 let elapsed = Date().timeIntervalSince(self.recordingStartedAt ?? Date())
+                    - self.recordingPausedDuration
                 self.recordingElapsedSeconds = elapsed
                 let now = Date()
                 if now.timeIntervalSince(lastDiskCheck) >= 5 {
@@ -224,6 +254,8 @@ extension EditorModel {
             do {
                 let result = try await captureCoordinator.stop()
                 recordingStartedAt = nil
+                recordingPausedDuration = 0
+                pauseStartedAt = nil
                 recordingElapsedSeconds = 0
                 recordingDiskFreeBytes = nil
                 recordingDiskWarning = nil
@@ -237,6 +269,8 @@ extension EditorModel {
             } catch {
                 isRecording = false
                 recordingStartedAt = nil
+                recordingPausedDuration = 0
+                pauseStartedAt = nil
                 recordingElapsedSeconds = 0
                 recordingDiskFreeBytes = nil
                 recordingDiskWarning = nil
@@ -256,9 +290,10 @@ extension EditorModel {
         target: CaptureTarget?,
         includeSystemAudio: Bool,
         webcamDeviceID: String?,
-        microphoneDeviceID: String?
+        microphoneDeviceID: String?,
+        pipPreset: PiPPreset? = nil
     ) async {
-        guard !isRecording, !isCountdownActive else { return }
+        guard !isRecording, !isCountdownActive, !isStoppingRecording else { return }
         self.countdownSeconds = countdownSeconds
         isCountdownActive = true
         isRecorderPresented = false
@@ -297,7 +332,8 @@ extension EditorModel {
             target: target,
             includeSystemAudio: includeSystemAudio,
             webcamDeviceID: webcamDeviceID,
-            microphoneDeviceID: microphoneDeviceID)
+            microphoneDeviceID: microphoneDeviceID,
+            pipPreset: pipPreset)
     }
 
     /// Cancel an in-progress countdown before recording starts.
@@ -315,11 +351,21 @@ extension EditorModel {
         guard isRecording, !isStoppingRecording else { return }
         do {
             try await captureCoordinator.pause()
+            pauseStartedAt = Date()
             isRecording = false
             isPaused = true
             statusMessage = "Recording paused."
         } catch {
-            statusMessage = "Could not pause: \(error.localizedDescription)"
+            if (error as? CaptureEngineError) == .notRecording {
+                statusMessage = "Could not pause: \(error.localizedDescription)"
+            } else {
+                recordingMonitorTask?.cancel()
+                recordingMonitorTask = nil
+                pauseStartedAt = pauseStartedAt ?? Date()
+                isRecording = false
+                isPaused = true
+                statusMessage = "Recording paused with errors: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -331,8 +377,15 @@ extension EditorModel {
         defer { isStartingRecording = false }
         do {
             try await captureCoordinator.resume()
+            if let pauseStart = pauseStartedAt {
+                recordingPausedDuration += Date().timeIntervalSince(pauseStart)
+            }
+            pauseStartedAt = nil
             isPaused = false
             isRecording = true
+            // Re-exclude the floating panel from the resumed capture session.
+            try? await captureCoordinator.setFloatingPanelWindowID(
+                floatingPanelController.windowID)
             // Restart the recording monitor (elapsed time, disk space).
             if let root = resolvedRecordingsFolder(promptIfMissing: false) {
                 startRecordingMonitor(rootURL: root)
@@ -357,12 +410,7 @@ extension EditorModel {
             statusMessage = "No recording gaps to collapse."
             return
         }
-        // Collect the track IDs that contain recording clips.
-        let recordedTrackIDs: Set<UUID> = Set(lastRecordingSlots.map { slot in
-            let tracks = slot.trackKind == .video ? project.videoTracks : project.audioTracks
-            guard slot.trackIndex < tracks.count else { return slot.clipID }
-            return tracks[slot.trackIndex].id
-        })
+        let recordedTrackIDs = Set(lastRecordingSlots.map(\.trackID))
         var collapsed = false
         performUndoable("Collapse Recording Gap") {
             for track in (project.videoTracks + project.audioTracks)
@@ -399,55 +447,57 @@ extension EditorModel {
     /// The new recording lands at the same timeline position as the original.
     /// Undoable.
     func retakeRecording() async {
-        guard let request = lastRecordingRequest, !isRecording, !isPaused, !isStoppingRecording else {
+        guard let request = lastRecordingRequest,
+              !lastRecordingSlots.isEmpty,
+              !isRecording, !isPaused, !isStoppingRecording else {
             statusMessage = "No recording to retake."
             return
         }
 
-        // Store the timeline positions of the clips being removed so the
-        // replacement recording lands in the same slots.
-        var positions: [UUID: CMTime] = [:]
-        for slot in lastRecordingSlots {
-            let tracks = slot.trackKind == .video ? project.videoTracks : project.audioTracks
-            guard slot.trackIndex < tracks.count else { continue }
-            let track = tracks[slot.trackIndex]
-            if let clip = track.clips.first(where: { $0.id == slot.clipID }) {
-                positions[slot.clipID] = clip.timelineStart
-            }
-        }
-        retakeTimelinePositions = positions
+        let previousSlots = lastRecordingSlots
+        let before = captureState()
+        retakeUndoBefore = before
+        retakePreviousSlots = previousSlots
+        retakeTimelinePositions = Dictionary(
+            previousSlots.map { ($0.key, $0.timelineStart) },
+            uniquingKeysWith: { first, _ in first })
 
-        // Remove the previous recording's tracks/clips.
-        if !lastRecordingSlots.isEmpty {
-            performUndoable("Retake Recording — Remove Previous") {
-                // Remove clips from their tracks, working in reverse to keep
-                // indices stable.
-                let sortedSlots = lastRecordingSlots.sorted {
-                    ($0.trackIndex, $0.clipID.hashValue) > ($1.trackIndex, $1.clipID.hashValue)
-                }
-                for slot in sortedSlots {
-                    let tracks = slot.trackKind == .video ? project.videoTracks : project.audioTracks
-                    guard slot.trackIndex < tracks.count else { continue }
-                    let track = tracks[slot.trackIndex]
-                    if let clipIdx = track.clips.firstIndex(where: { $0.id == slot.clipID }) {
-                        track.clips.remove(at: clipIdx)
-                    }
-                }
-                // Remove empty tracks.
-                project.videoTracks.removeAll { $0.clips.isEmpty }
-                project.audioTracks.removeAll { $0.clips.isEmpty }
-                lastRecordingSlots = []
-                scheduleRebuild()
+        let videoTrackIDs = Set(previousSlots.filter { $0.key.trackKind == .video }.map(\.trackID))
+        let audioTrackIDs = Set(previousSlots.filter { $0.key.trackKind == .audio }.map(\.trackID))
+        for slot in previousSlots {
+            switch slot.key.trackKind {
+            case .video:
+                guard let trackIndex = project.videoTracks.firstIndex(where: { $0.id == slot.trackID }) else { continue }
+                project.videoTracks[trackIndex].clips.removeAll { $0.id == slot.clipID }
+            case .audio:
+                guard let trackIndex = project.audioTracks.firstIndex(where: { $0.id == slot.trackID }) else { continue }
+                project.audioTracks[trackIndex].clips.removeAll { $0.id == slot.clipID }
             }
         }
+        project.videoTracks.removeAll { videoTrackIDs.contains($0.id) && $0.clips.isEmpty }
+        project.audioTracks.removeAll { audioTrackIDs.contains($0.id) && $0.clips.isEmpty }
+        lastRecordingSlots = []
+        scheduleRebuild()
 
         // Start a new recording with the same parameters.
-        lastRecordingSlots = []
         await startRecording(
             target: request.target,
             includeSystemAudio: request.includeSystemAudio,
             webcamDeviceID: request.webcamDeviceID,
-            microphoneDeviceID: request.microphoneDeviceID)
+            microphoneDeviceID: request.microphoneDeviceID,
+            pipPreset: lastRecordingPiPPreset)
+        // If the recording failed to start, clear stale positions so the next
+        // normal recording is not corrupted.
+        if !isRecording {
+            let failureStatus = statusMessage
+            applyState(before)
+            lastRecordingSlots = previousSlots
+            retakeUndoBefore = nil
+            retakePreviousSlots = []
+            retakeTimelinePositions = [:]
+            scheduleRebuild()
+            statusMessage = failureStatus
+        }
     }
 
     // MARK: - Phase 42: Source switching
@@ -478,14 +528,27 @@ extension EditorModel {
     private struct LoadedCapturedSource {
         var item: MediaItem
         var source: CaptureRecoveredSource
+        var chunkIndex: Int
         var didAccess: Bool
     }
 
     @discardableResult
     func landCaptureSession(_ result: CaptureSessionResult) async -> Bool {
+        func restoreFailedRetake(status: String) {
+            if let before = retakeUndoBefore {
+                applyState(before)
+                lastRecordingSlots = retakePreviousSlots
+                retakeUndoBefore = nil
+                retakePreviousSlots = []
+                retakeTimelinePositions = [:]
+                scheduleRebuild()
+            }
+            statusMessage = status
+        }
+
         let recoveredSources = result.manifest.recoveredSources
         guard !recoveredSources.isEmpty else {
-            statusMessage = "Recording stopped, but no readable sources were found."
+            restoreFailedRetake(status: "Recording stopped, but no readable sources were found.")
             return false
         }
 
@@ -501,12 +564,13 @@ extension EditorModel {
             struct ChunkInfo {
                 var url: URL
                 var ended: CaptureSourceEndedRecord?
+                var chunkIndex: Int
             }
             let chunkInfos: [ChunkInfo]
             if chunks.isEmpty {
                 let url = result.directoryURL.appendingPathComponent(source.descriptor.relativePath)
                 chunkInfos = FileManager.default.fileExists(atPath: url.path)
-                    ? [ChunkInfo(url: url, ended: nil)]
+                    ? [ChunkInfo(url: url, ended: nil, chunkIndex: 0)]
                     : []
             } else {
                 chunkInfos = chunks.compactMap { ended -> ChunkInfo? in
@@ -525,7 +589,7 @@ extension EditorModel {
                         : "\(stem)-\(resumeCountBefore).\(ext)"
                     let url = result.directoryURL.appendingPathComponent(filename)
                     guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-                    return ChunkInfo(url: url, ended: ended)
+                    return ChunkInfo(url: url, ended: ended, chunkIndex: resumeCountBefore)
                 }
             }
 
@@ -562,7 +626,11 @@ extension EditorModel {
                     if let ended = chunk.ended {
                         chunkSource.descriptor.timelineStartUs = ended.timelineStartUs
                     }
-                    loaded.append(LoadedCapturedSource(item: item, source: chunkSource, didAccess: didAccess))
+                    loaded.append(LoadedCapturedSource(
+                        item: item,
+                        source: chunkSource,
+                        chunkIndex: chunk.chunkIndex,
+                        didAccess: didAccess))
                 } catch {
                     if didAccess { chunk.url.stopAccessingSecurityScopedResource() }
                     loadErrors.append("\(chunk.url.lastPathComponent): \(error.localizedDescription)")
@@ -571,59 +639,105 @@ extension EditorModel {
         }
 
         guard !loaded.isEmpty else {
-            statusMessage = loadErrors.isEmpty
+            restoreFailedRetake(status: loadErrors.isEmpty
                 ? "Recording stopped, but no captured files could be loaded."
-                : "Recording stopped. Sources failed: \(loadErrors.joined(separator: "; "))"
+                : "Recording stopped. Sources failed: \(loadErrors.joined(separator: "; "))")
             return false
         }
 
-        var newSlots: [(trackKind: TrackKind, trackIndex: Int, clipID: Clip.ID)] = []
-        // If this is a retake landing, use the stored positions.
+        var newSlots: [RecordingSlot] = []
         let isRetake = !retakeTimelinePositions.isEmpty
 
-        performUndoable(result.wasRecovered ? "Add Recovered Recording" : "Add Recording") {
+        func slotKey(for entry: LoadedCapturedSource, trackKind: TrackKind) -> RecordingSlotKey {
+            RecordingSlotKey(
+                sourceKind: entry.source.descriptor.kind,
+                trackKind: trackKind,
+                chunkIndex: entry.chunkIndex)
+        }
+
+        func landingStart(for entry: LoadedCapturedSource, trackKind: TrackKind) -> CMTime {
+            let key = slotKey(for: entry, trackKind: trackKind)
+            return retakeTimelinePositions[key] ?? entry.source.descriptor.timelineStart
+        }
+
+        func clipGeometry(for entry: LoadedCapturedSource) -> ClipGeometry {
+            guard entry.source.descriptor.kind == .webcam,
+                  let preset = activePiPPreset else {
+                return .identity
+            }
+            return preset.clipGeometry(canvasSize: project.renderSize,
+                                       sourceSize: entry.item.naturalSize)
+        }
+
+        let addRecording = { [self] in
             project.mediaItems.append(contentsOf: loaded.map(\.item))
             for entry in loaded {
                 retainAccess(entry.item.url, didStart: entry.didAccess)
                 let duration = entry.item.duration > .zero ? entry.item.duration : entry.source.duration
                 guard duration > .zero else { continue }
-                // Use retake position if available, otherwise use capture PTS.
-                let start: CMTime
-                if isRetake, let retakePos = retakeTimelinePositions.values.first {
-                    start = retakePos
-                } else {
-                    start = entry.source.descriptor.timelineStart
-                }
-                let clip = Clip(
-                    mediaID: entry.item.id,
-                    sourceStart: .zero,
-                    duration: duration,
-                    timelineStart: start)
                 if entry.item.hasVideo {
+                    let key = slotKey(for: entry, trackKind: .video)
+                    let clip = Clip(
+                        mediaID: entry.item.id,
+                        sourceStart: .zero,
+                        duration: duration,
+                        timelineStart: landingStart(for: entry, trackKind: .video),
+                        geometry: clipGeometry(for: entry))
                     let track = Track(name: entry.source.descriptor.displayName, kind: .video)
                     track.clips = [clip]
                     project.videoTracks.append(track)
-                    newSlots.append((.video, project.videoTracks.count - 1, clip.id))
+                    newSlots.append(RecordingSlot(
+                        key: key,
+                        trackID: track.id,
+                        trackIndex: project.videoTracks.count - 1,
+                        clipID: clip.id,
+                        mediaID: entry.item.id,
+                        timelineStart: clip.timelineStart))
                 }
                 if entry.item.hasAudio {
+                    let key = slotKey(for: entry, trackKind: .audio)
+                    let clip = Clip(
+                        mediaID: entry.item.id,
+                        sourceStart: .zero,
+                        duration: duration,
+                        timelineStart: landingStart(for: entry, trackKind: .audio))
                     let track = Track(name: entry.source.descriptor.displayName, kind: .audio)
                     track.clips = [clip]
                     project.audioTracks.append(track)
-                    newSlots.append((.audio, project.audioTracks.count - 1, clip.id))
+                    newSlots.append(RecordingSlot(
+                        key: key,
+                        trackID: track.id,
+                        trackIndex: project.audioTracks.count - 1,
+                        clipID: clip.id,
+                        mediaID: entry.item.id,
+                        timelineStart: clip.timelineStart))
                 }
             }
             statusMessage = result.wasRecovered
                 ? "Added recovered recording."
-                : "Recording added to timeline."
+                : isRetake ? "Retake added to timeline." : "Recording added to timeline."
             scheduleRebuild()
+        }
+
+        if let before = retakeUndoBefore {
+            addRecording()
+            registerImportUndo(name: "Retake Recording", before: before)
+            markDirty()
+        } else {
+            performUndoable(result.wasRecovered ? "Add Recovered Recording" : "Add Recording") {
+                addRecording()
+            }
         }
 
         // Record slots for potential retake.
         if !result.wasRecovered {
             lastRecordingSlots = newSlots
+            lastRecordingPiPPreset = activePiPPreset
         }
         // Clear retake positions after use.
         retakeTimelinePositions = [:]
+        retakeUndoBefore = nil
+        retakePreviousSlots = []
 
         if !loadErrors.isEmpty {
             statusMessage += " Some sources failed: \(loadErrors.joined(separator: "; "))"

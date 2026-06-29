@@ -112,6 +112,7 @@ nonisolated struct CaptureStartRequest: Sendable {
     var frameRate: Double
     var fragmentInterval: CMTime
     var capabilities: Capabilities
+    var excludedWindowIDs: Set<CGWindowID> = []
 }
 
 nonisolated struct CaptureSessionResult: Sendable, Identifiable {

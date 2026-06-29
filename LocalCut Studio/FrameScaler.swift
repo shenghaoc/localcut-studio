@@ -1,4 +1,5 @@
 import CoreImage
+import CoreGraphics
 import CoreVideo
 import Metal
 
@@ -73,7 +74,10 @@ nonisolated final class FrameScaler: @unchecked Sendable {
             y: (scaledImage.extent.height - CGFloat(targetHeight)) / 2,
             width: CGFloat(targetWidth),
             height: CGFloat(targetHeight))
-        let croppedImage = scaledImage.cropped(to: cropRect)
+        let croppedImage = scaledImage
+            .cropped(to: cropRect)
+            .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x,
+                                               y: -cropRect.origin.y))
 
         // Allocate from the pool when available, fall back to one-shot create.
         var outputBuffer: CVPixelBuffer?

@@ -16,7 +16,7 @@ struct RecorderFloatingPanelContent: View {
             Text(formatElapsed(model.recordingElapsedSeconds))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("Recording elapsed \(formatElapsed(model.recordingElapsedSeconds))")
+                .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(formatElapsed(model.recordingElapsedSeconds))")
 
             Spacer()
 

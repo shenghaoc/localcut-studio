@@ -70,8 +70,8 @@ final class FloatingPanelController {
             return
         }
         let p = RecorderFloatingPanel(model: model)
-        p.captureWindowID()
         p.makeKeyAndOrderFront(nil)
+        p.captureWindowID()
         panel = p
     }
 

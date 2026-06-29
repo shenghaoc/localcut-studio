@@ -16,6 +16,7 @@ struct CompositorLayer {
     let trackID: CMPersistentTrackID
     let transform: CGAffineTransform
     let opacity: Float
+    let mask: ClipMaskShape
     let effects: [Effect]
     let showSkinMask: Bool
     /// The clip's source in-point, used to compute source-local time for keyframe evaluation.
@@ -442,6 +443,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         image = image.transformed(by: layer.transform)
 
+        if layer.mask != .none {
+            image = masked(image, shape: layer.mask)
+        }
+
         if layer.opacity < 1 {
             image = scaled(image, by: layer.opacity)
         }
@@ -452,6 +457,41 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let renderRect = CGRect(origin: .zero, size: request.renderContext.size)
         let canvas = CIImage(color: .clear).cropped(to: renderRect)
         return image.composited(over: canvas).cropped(to: renderRect)
+    }
+
+    nonisolated private func masked(_ image: CIImage, shape: ClipMaskShape) -> CIImage {
+        guard shape != .none else { return image }
+        let rect = image.extent
+        guard rect.width > 0, rect.height > 0 else { return image }
+        guard let mask = maskImage(extent: rect, shape: shape) else { return image }
+        let filter = CIFilter.blendWithMask()
+        filter.inputImage = image
+        filter.backgroundImage = CIImage(color: .clear).cropped(to: rect)
+        filter.maskImage = mask
+        return filter.outputImage?.cropped(to: rect) ?? image
+    }
+
+    nonisolated private func maskImage(extent: CGRect, shape: ClipMaskShape) -> CIImage? {
+        switch shape {
+        case .none:
+            return nil
+        case .circle:
+            guard let filter = CIFilter(name: "CIRadialGradient") else { return nil }
+            let radius = min(extent.width, extent.height) / 2
+            filter.setValue(CIVector(x: extent.midX, y: extent.midY), forKey: "inputCenter")
+            filter.setValue(radius, forKey: "inputRadius0")
+            filter.setValue(radius + 1, forKey: "inputRadius1")
+            filter.setValue(CIColor.white, forKey: "inputColor0")
+            filter.setValue(CIColor.clear, forKey: "inputColor1")
+            return filter.outputImage?.cropped(to: extent)
+        case .roundedRect:
+            guard let filter = CIFilter(name: "CIRoundedRectangleGenerator") else { return nil }
+            let radius = min(32, min(extent.width, extent.height) / 5)
+            filter.setValue(CIVector(cgRect: extent), forKey: "inputExtent")
+            filter.setValue(radius, forKey: "inputRadius")
+            filter.setValue(CIColor.white, forKey: "inputColor")
+            return filter.outputImage?.cropped(to: extent)
+        }
     }
 
     // MARK: - Overlays

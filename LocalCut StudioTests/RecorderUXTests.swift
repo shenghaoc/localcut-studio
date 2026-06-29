@@ -204,6 +204,24 @@ struct PiPPresetLayoutTests {
             #expect(layout.origin.y >= 0)
         }
     }
+
+    @Test("Preset clip geometry matches layout and mask")
+    func presetClipGeometryMatchesLayout() {
+        let preset = PiPPreset(corner: .bottomRight, size: .medium, mask: .roundedRect)
+        let canvas = CGSize(width: 1920, height: 1080)
+        let source = CGSize(width: 1280, height: 720)
+        let layout = preset.layout(canvasSize: canvas, sourceSize: source)
+        let geometry = preset.clipGeometry(canvasSize: canvas, sourceSize: source)
+
+        let scaledSize = CGSize(width: source.width * layout.scale,
+                                height: source.height * layout.scale)
+        let expectedCenter = CGPoint(x: layout.origin.x + scaledSize.width / 2,
+                                     y: layout.origin.y + scaledSize.height / 2)
+        #expect(abs(geometry.positionOffset.width - (expectedCenter.x - canvas.width / 2)) < 1)
+        #expect(abs(geometry.positionOffset.height - (expectedCenter.y - canvas.height / 2)) < 1)
+        #expect(abs(geometry.scale - layout.scale) < 0.01)
+        #expect(geometry.mask == .roundedRect)
+    }
 }
 
 // MARK: - FrameScaler (T2.1)

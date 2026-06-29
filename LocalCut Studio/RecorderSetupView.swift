@@ -17,6 +17,7 @@ struct RecorderSetupView: View {
     @State private var isLoadingSources = true
     @State private var loadError: String?
     @State private var countdownDuration = 3
+    @State private var selectedPiPPresetID: String? = PiPPreset.standardPresets.first?.id
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -49,6 +50,17 @@ struct RecorderSetupView: View {
                         }
                     }
                     .disabled(!includeWebcam || webcamOptions.isEmpty)
+                }
+
+                if includeScreen && includeWebcam {
+                    Section("Picture in Picture") {
+                        Picker("Layout", selection: $selectedPiPPresetID) {
+                            Text("None").tag(Optional<String>.none)
+                            ForEach(PiPPreset.standardPresets) { preset in
+                                Text(preset.displayName).tag(Optional(preset.id))
+                            }
+                        }
+                    }
                 }
 
                 Section("Audio") {
@@ -172,6 +184,9 @@ struct RecorderSetupView: View {
             : nil
         let webcam = includeWebcam ? selectedWebcamID : nil
         let mic = includeMicrophone ? selectedMicrophoneID : nil
+        let pipPreset = target != nil && webcam != nil
+            ? PiPPreset.standardPresets.first(where: { $0.id == selectedPiPPresetID })
+            : nil
         Task {
             await model.startRecordingWithCountdown(
                 countdownSeconds: countdownDuration,
@@ -180,7 +195,8 @@ struct RecorderSetupView: View {
                 // exists; otherwise its writer would never receive data.
                 includeSystemAudio: target != nil && includeSystemAudio,
                 webcamDeviceID: webcam,
-                microphoneDeviceID: mic)
+                microphoneDeviceID: mic,
+                pipPreset: pipPreset)
         }
     }
 }

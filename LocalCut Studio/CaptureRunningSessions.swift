@@ -1,7 +1,8 @@
 import Foundation
 import AVFoundation
 import CoreMedia
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
+import LocalCutCore
 
 protocol CaptureRunningSession: Sendable {
     func start() async throws
@@ -36,6 +37,8 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     private let frameRate: Double
     private var videoWriter: ContinuousCaptureWriter?
     private var audioWriter: ContinuousCaptureWriter?
+    private let writerCanvasSize: (width: Int, height: Int)?
+    private let frameScaler: FrameScaler?
     private let outputQueue = DispatchQueue(label: "com.localcutstudio.capture.screen.output")
     private let onStop: (@Sendable (Error) -> Void)?
     private var stream: SCStream?
@@ -49,11 +52,21 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
          frameRate: Double,
          videoWriter: ContinuousCaptureWriter?,
          audioWriter: ContinuousCaptureWriter?,
+         excludingWindowIDs: Set<CGWindowID> = [],
          onStop: (@Sendable (Error) -> Void)? = nil) {
         self.target = target
         self.frameRate = frameRate
         self.videoWriter = videoWriter
         self.audioWriter = audioWriter
+        if let width = videoWriter?.source.width,
+           let height = videoWriter?.source.height {
+            self.writerCanvasSize = (width, height)
+            self.frameScaler = FrameScaler(targetWidth: width, targetHeight: height)
+        } else {
+            self.writerCanvasSize = nil
+            self.frameScaler = nil
+        }
+        self.excludingWindowIDs = Set(excludingWindowIDs.filter { $0 != 0 })
         self.onStop = onStop
     }
 
@@ -155,6 +168,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     /// Add a window ID to the exclusion list and update the live capture filter.
     /// Used to exclude the floating control panel from screen capture.
     func excludeWindow(_ windowID: CGWindowID) async throws {
+        guard windowID != 0 else { return }
         excludingWindowIDs.insert(windowID)
         // If the stream is running, update the filter in-place.
         guard let stream else { return }
@@ -172,7 +186,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     }
 
     private func makeConfiguration() -> SCStreamConfiguration {
-        let size = target.outputSize
+        let size = writerCanvasSize ?? target.outputSize
         let configuration = SCStreamConfiguration()
         configuration.width = size.width
         configuration.height = size.height
@@ -202,7 +216,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
                 dropNextScreenFrame = false
                 return
             }
-            videoWriter?.append(sampleBuffer)
+            appendScreenSample(sampleBuffer)
         case .audio:
             audioWriter?.append(sampleBuffer)
         case .microphone:
@@ -216,6 +230,53 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         // The stream stopped unexpectedly (window closed, permission revoked,
         // etc.). Surface it so the UI can stop the recording and inform the user.
         onStop?(error)
+    }
+
+    private func appendScreenSample(_ sampleBuffer: CMSampleBuffer) {
+        guard let videoWriter else { return }
+        guard let sourceBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            videoWriter.append(sampleBuffer)
+            return
+        }
+        guard let writerCanvasSize else {
+            videoWriter.append(sampleBuffer)
+            return
+        }
+        let width = CVPixelBufferGetWidth(sourceBuffer)
+        let height = CVPixelBufferGetHeight(sourceBuffer)
+        guard width != writerCanvasSize.width || height != writerCanvasSize.height else {
+            videoWriter.append(sampleBuffer)
+            return
+        }
+        guard let scaledBuffer = frameScaler?.scale(sourceBuffer),
+              let scaledSample = Self.makeSampleBuffer(from: scaledBuffer, timingFrom: sampleBuffer) else {
+            return
+        }
+        videoWriter.append(scaledSample)
+    }
+
+    private static func makeSampleBuffer(from imageBuffer: CVPixelBuffer,
+                                         timingFrom source: CMSampleBuffer) -> CMSampleBuffer? {
+        var formatDescription: CMVideoFormatDescription?
+        let formatStatus = CMVideoFormatDescriptionCreateForImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: imageBuffer,
+            formatDescriptionOut: &formatDescription)
+        guard formatStatus == noErr, let formatDescription else { return nil }
+
+        var timing = CMSampleTimingInfo(
+            duration: CMSampleBufferGetDuration(source),
+            presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(source),
+            decodeTimeStamp: CMSampleBufferGetDecodeTimeStamp(source))
+        var output: CMSampleBuffer?
+        let sampleStatus = CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: imageBuffer,
+            formatDescription: formatDescription,
+            sampleTiming: &timing,
+            sampleBufferOut: &output)
+        guard sampleStatus == noErr else { return nil }
+        return output
     }
 }
 

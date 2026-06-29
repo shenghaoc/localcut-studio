@@ -423,6 +423,7 @@ public struct ClipDoc: Codable, Equatable, Sendable {
     public var duration: CMTimeCode
     public var timelineStart: CMTimeCode
     public var opacity: Float
+    public var geometry: ClipGeometry
     public var effects: [Effect]
     public var transition: TransitionDoc?
     public var volumeEnvelope: VolumeEnvelope
@@ -435,6 +436,7 @@ public struct ClipDoc: Codable, Equatable, Sendable {
                 duration: CMTimeCode,
                 timelineStart: CMTimeCode,
                 opacity: Float,
+                geometry: ClipGeometry = .identity,
                 effects: [Effect],
                 transition: TransitionDoc?,
                 volumeEnvelope: VolumeEnvelope = VolumeEnvelope(),
@@ -446,6 +448,7 @@ public struct ClipDoc: Codable, Equatable, Sendable {
         self.duration = duration
         self.timelineStart = timelineStart
         self.opacity = opacity
+        self.geometry = geometry
         self.effects = effects
         self.transition = transition
         self.volumeEnvelope = volumeEnvelope
@@ -456,7 +459,7 @@ public struct ClipDoc: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case mediaID, sourceStart, duration, timelineStart, opacity, effects,
-             transition, volumeEnvelope, speedCurve, preservePitch, pitchAlgorithm
+             geometry, transition, volumeEnvelope, speedCurve, preservePitch, pitchAlgorithm
     }
 
     public init(from decoder: any Decoder) throws {
@@ -466,6 +469,7 @@ public struct ClipDoc: Codable, Equatable, Sendable {
         duration = try c.decode(CMTimeCode.self, forKey: .duration)
         timelineStart = try c.decode(CMTimeCode.self, forKey: .timelineStart)
         opacity = try c.decodeIfPresent(Float.self, forKey: .opacity) ?? 1
+        geometry = try c.decodeIfPresent(ClipGeometry.self, forKey: .geometry) ?? .identity
         effects = try c.decodeIfPresent([Effect].self, forKey: .effects) ?? []
         transition = try c.decodeIfPresent(TransitionDoc.self, forKey: .transition)
         volumeEnvelope = try c.decodeIfPresent(VolumeEnvelope.self, forKey: .volumeEnvelope) ?? VolumeEnvelope()
@@ -480,6 +484,7 @@ public struct ClipDoc: Codable, Equatable, Sendable {
              duration: duration.cmTime,
              timelineStart: timelineStart.cmTime,
              opacity: opacity,
+             geometry: geometry,
              effects: effects,
              transition: transition?.makeTransition(),
              volumeEnvelope: volumeEnvelope,
@@ -550,6 +555,7 @@ extension ClipDoc {
             duration: CMTimeCode(clip.duration),
             timelineStart: CMTimeCode(clip.timelineStart),
             opacity: clip.opacity,
+            geometry: clip.geometry,
             effects: clip.effects,
             transition: clip.transition.map(TransitionDoc.init(transition:)),
             volumeEnvelope: clip.volumeEnvelope,

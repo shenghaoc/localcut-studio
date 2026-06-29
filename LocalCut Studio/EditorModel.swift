@@ -145,6 +145,10 @@ final class EditorModel {
     var recoveredCaptureSessions: [CaptureSessionResult] = []
     @ObservationIgnored nonisolated(unsafe) var recordingsFolderAccessURL: URL?
     @ObservationIgnored nonisolated(unsafe) var recordingMonitorTask: Task<Void, Never>?
+    /// Accumulated wall-clock time spent paused, subtracted from elapsed display.
+    @ObservationIgnored nonisolated(unsafe) var recordingPausedDuration: TimeInterval = 0
+    /// Wall-clock time when the current pause started, or nil if not paused.
+    @ObservationIgnored nonisolated(unsafe) var pauseStartedAt: Date?
 
     // Phase 42 — Recorder UX
     var isCountdownActive = false
@@ -153,14 +157,19 @@ final class EditorModel {
     /// Stored request for retake: replaces the most recent chunk-set in the same
     /// timeline slot.
     @ObservationIgnored nonisolated(unsafe) var lastRecordingRequest: CaptureStartRequest?
-    /// Tracks the timeline slots (track indices + clip IDs) occupied by the most
-    /// recent recording landing, so retake can replace them.
-    @ObservationIgnored var lastRecordingSlots: [(trackKind: TrackKind, trackIndex: Int, clipID: Clip.ID)] = []
+    /// Tracks the timeline slots occupied by the most recent recording landing,
+    /// so retake can replace them without touching unrelated tracks.
+    @ObservationIgnored var lastRecordingSlots: [RecordingSlot] = []
     /// When set, `landCaptureSession` uses these positions instead of capture PTS
     /// so a retake lands in the original timeline slot.
-    @ObservationIgnored var retakeTimelinePositions: [UUID: CMTime] = [:]
+    @ObservationIgnored var retakeTimelinePositions: [RecordingSlotKey: CMTime] = [:]
+    /// Captured before a retake removes the old chunk set; landing registers one
+    /// undo step spanning both removal and replacement.
+    @ObservationIgnored var retakeUndoBefore: ProjectState?
+    @ObservationIgnored var retakePreviousSlots: [RecordingSlot] = []
     /// PiP preset applied to webcam tracks.
     var activePiPPreset: PiPPreset?
+    @ObservationIgnored var lastRecordingPiPPreset: PiPPreset?
     /// Floating control panel controller.
     @ObservationIgnored let floatingPanelController = FloatingPanelController()
 

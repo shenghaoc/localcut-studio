@@ -523,6 +523,32 @@ public struct Transition: Identifiable, Hashable, Sendable {
 }
 
 /// A single placement of (part of) a media item on a track's timeline.
+public enum ClipMaskShape: String, Hashable, Codable, Sendable {
+    case none
+    case circle
+    case roundedRect
+}
+
+public struct ClipGeometry: Hashable, Codable, Sendable {
+    public var positionOffset: CGSize
+    public var scale: CGFloat
+    public var mask: ClipMaskShape
+
+    public static let identity = ClipGeometry()
+
+    public var isIdentity: Bool {
+        positionOffset == .zero && scale == 1 && mask == .none
+    }
+
+    public init(positionOffset: CGSize = .zero,
+                scale: CGFloat = 1,
+                mask: ClipMaskShape = .none) {
+        self.positionOffset = positionOffset
+        self.scale = min(10, max(0.01, scale))
+        self.mask = mask
+    }
+}
+
 public struct Clip: Identifiable, Hashable, Sendable {
     public let id = UUID()
     public var mediaID: UUID
@@ -530,6 +556,7 @@ public struct Clip: Identifiable, Hashable, Sendable {
     public var duration: CMTime
     public var timelineStart: CMTime
     public var opacity: Float = 1
+    public var geometry: ClipGeometry = .identity
     public var effects: [Effect] = []
     public var transition: Transition?
     public var volumeEnvelope: VolumeEnvelope = VolumeEnvelope()
@@ -581,6 +608,7 @@ public struct Clip: Identifiable, Hashable, Sendable {
                 duration: CMTime,
                 timelineStart: CMTime,
                 opacity: Float = 1,
+                geometry: ClipGeometry = .identity,
                 effects: [Effect] = [],
                 transition: Transition? = nil,
                 volumeEnvelope: VolumeEnvelope = VolumeEnvelope(),
@@ -592,6 +620,7 @@ public struct Clip: Identifiable, Hashable, Sendable {
         self.duration = duration
         self.timelineStart = timelineStart
         self.opacity = opacity
+        self.geometry = geometry
         self.effects = effects
         self.transition = transition
         self.volumeEnvelope = volumeEnvelope

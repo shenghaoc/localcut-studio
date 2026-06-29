@@ -119,6 +119,8 @@ actor CaptureCoordinator {
         var encoders: [UUID: CaptureEncoderConfig] = [:]
         var writers: [ContinuousCaptureWriter] = []
         var sessions: [CaptureRunningSession] = []
+        let excludedWindowIDs = request.excludedWindowIDs.union(
+            floatingPanelWindowID == 0 ? [] : [floatingPanelWindowID])
 
         var screenVideoWriter: ContinuousCaptureWriter?
         var screenAudioWriter: ContinuousCaptureWriter?
@@ -185,6 +187,7 @@ actor CaptureCoordinator {
                 frameRate: request.frameRate,
                 videoWriter: screenVideoWriter,
                 audioWriter: screenAudioWriter,
+                excludingWindowIDs: excludedWindowIDs,
                 onStop: onStreamStopped))
         }
 
@@ -316,11 +319,10 @@ actor CaptureCoordinator {
         // performs async disk I/O and fragment flushing, and sequential execution
         // can noticeably delay stop responsiveness with multiple sources.
         //
-        // Include both the current chunk's writers and any previously finished
-        // writers from pause/resume cycles. Only the current chunk's writers need
-        // finishing; the others are already done.
+        // Only the current chunk's writers need finishing; previously finished
+        // writers from pause/resume cycles already have their sourceEnded records
+        // appended to the manifest during pause().
         let activeWriters = active.writers
-        let finishedWriters = active.allFinishedWriters
         var finishErrors: [Error] = []
         var allEndedRecords: [CaptureSourceEndedRecord] = []
 
@@ -388,7 +390,6 @@ actor CaptureCoordinator {
         guard state == .recording, var active = activeSession else {
             throw CaptureEngineError.notRecording
         }
-        state = .paused
 
         // Stop all capture streams.
         for session in active.sessions {
@@ -427,8 +428,12 @@ actor CaptureCoordinator {
         active.writers = []
         active.sessions = []
         activeSession = active
+        state = .paused
 
         // Surface any writer finish failures so the UI can report them.
+        // The streams are already stopped and the active session has no live
+        // writers, so keep the coordinator paused even while reporting the
+        // partial pause failure to the UI.
         if !pauseErrors.isEmpty {
             throw CaptureEngineError.captureSessionFailed(
                 "Pause encountered writer errors: \(pauseErrors.joined(separator: "; "))")
@@ -458,16 +463,18 @@ actor CaptureCoordinator {
 
         var writers: [ContinuousCaptureWriter] = []
         var sessions: [CaptureRunningSession] = []
+        let excludedWindowIDs = request.excludedWindowIDs.union(
+            floatingPanelWindowID == 0 ? [] : [floatingPanelWindowID])
         var screenVideoWriter: ContinuousCaptureWriter?
         var screenAudioWriter: ContinuousCaptureWriter?
 
         // Create new writer chunks with unique file names. All sources in one
         // resume cycle share the same chunk index.
         if let target {
-            let size = target.outputSize
+            let size = request.target?.outputSize ?? target.outputSize
             let filename = "screen-\(chunkIndex).mov"
             // Reuse the source ID from the header so ended records match.
-            let sourceID = active.sourceIDs[target.sourceKind] ?? UUID()
+            let sourceID = Self.screenSourceID(for: target, in: active)
             let source = CaptureSourceDescriptor(
                 id: sourceID,
                 kind: target.sourceKind,
@@ -522,6 +529,7 @@ actor CaptureCoordinator {
                 frameRate: request.frameRate,
                 videoWriter: screenVideoWriter,
                 audioWriter: screenAudioWriter,
+                excludingWindowIDs: excludedWindowIDs,
                 onStop: active.onStreamStopped))
         }
 
@@ -589,11 +597,17 @@ actor CaptureCoordinator {
         updated.chunkIndex = chunkIndex + 1
         activeSession = updated
 
+        var startedSessions: [CaptureRunningSession] = []
         do {
             for session in sessions {
                 try await session.start()
+                startedSessions.append(session)
             }
         } catch {
+            // Stop any sessions that were already started before the failure.
+            for started in startedSessions {
+                await started.stop()
+            }
             for writer in writers {
                 _ = try? await writer.finish()
             }
@@ -635,7 +649,12 @@ actor CaptureCoordinator {
 
     /// Update the floating panel window ID for capture exclusion.
     func setFloatingPanelWindowID(_ windowID: CGWindowID) async throws {
+        guard windowID != 0 else { return }
         floatingPanelWindowID = windowID
+        if var active = activeSession {
+            active.startRequest?.excludedWindowIDs.insert(windowID)
+            activeSession = active
+        }
         // Update the live screen capture session to exclude the panel.
         guard state == .recording, let active = activeSession else { return }
         for session in active.sessions {
@@ -674,6 +693,15 @@ actor CaptureCoordinator {
     /// Refuse to start a capture when the recordings volume has less than this
     /// much important-usage space available.
     private static let minimumFreeBytes: Int64 = 2_000_000_000
+
+    private static func screenSourceID(for target: CaptureTarget,
+                                       in active: ActiveSession) -> UUID {
+        active.sourceIDs[target.sourceKind]
+            ?? active.sourceIDs[.display]
+            ?? active.sourceIDs[.window]
+            ?? active.sourceIDs[.application]
+            ?? UUID()
+    }
 
     private static func preflightPermissions(for request: CaptureStartRequest) async throws {
         if request.target != nil, !CapturePermissionAuthorizer.requestScreenRecordingAccess() {

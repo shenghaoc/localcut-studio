@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import LocalCutCore
 
 /// Corner position for a picture-in-picture overlay.
 nonisolated enum PiPCorner: String, Codable, Hashable, Sendable, CaseIterable {
@@ -99,5 +100,29 @@ nonisolated struct PiPPreset: Codable, Hashable, Sendable, Identifiable {
         }
 
         return (CGPoint(x: x, y: y), scale)
+    }
+
+    func clipGeometry(canvasSize: CGSize, sourceSize: CGSize) -> ClipGeometry {
+        let layout = layout(canvasSize: canvasSize, sourceSize: sourceSize)
+        let scaledSize = CGSize(width: sourceSize.width * layout.scale,
+                                height: sourceSize.height * layout.scale)
+        let center = CGPoint(x: layout.origin.x + scaledSize.width / 2,
+                             y: layout.origin.y + scaledSize.height / 2)
+        let canvasCenter = CGPoint(x: canvasSize.width / 2,
+                                   y: canvasSize.height / 2)
+        let maskShape: ClipMaskShape
+        switch mask {
+        case .none:
+            maskShape = .none
+        case .circle:
+            maskShape = .circle
+        case .roundedRect:
+            maskShape = .roundedRect
+        }
+        return ClipGeometry(
+            positionOffset: CGSize(width: center.x - canvasCenter.x,
+                                   height: center.y - canvasCenter.y),
+            scale: layout.scale,
+            mask: maskShape)
     }
 }
