@@ -194,6 +194,9 @@ struct PersistenceTests {
             duration: CMTimeCode(time(3)),
             timelineStart: CMTimeCode(time(5)),
             opacity: 0.75,
+            geometry: ClipGeometry(positionOffset: CGSize(width: 120, height: -80),
+                                   scale: 0.42,
+                                   mask: .circle),
             effects: [.lut(bookmark: Data([0x01]))],
             transition: TransitionDoc(type: TransitionType.crossDissolve.rawValue,
                                       duration: CMTimeCode(time(1)),
@@ -204,6 +207,9 @@ struct PersistenceTests {
         #expect(clip.duration == time(3))
         #expect(clip.timelineStart == time(5))
         #expect(clip.opacity == 0.75)
+        #expect(clip.geometry.positionOffset == CGSize(width: 120, height: -80))
+        #expect(clip.geometry.scale == 0.42)
+        #expect(clip.geometry.mask == .circle)
         #expect(clip.effects == [.lut(bookmark: Data([0x01]))])
         #expect(clip.transition?.type == .crossDissolve)
         #expect(clip.transition?.duration == time(1))

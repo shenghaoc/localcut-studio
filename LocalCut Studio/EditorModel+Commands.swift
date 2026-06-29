@@ -178,12 +178,8 @@ extension EditorModel {
     /// immediately. Returns `true` if the window may close.
     func confirmClose(window: NSWindow) -> Bool {
         guard !blockDocumentCommandDuringCloseSave() else { return false }
-        guard !isRecording, !isStartingRecording, !isStoppingRecording else {
-            statusMessage = isStartingRecording
-                ? "Wait for the recording to start before closing the window."
-                : isStoppingRecording
-                    ? "Finish stopping the recording before closing the window."
-                    : "Stop the recording before closing the window."
+        guard !hasActiveRecordingLifecycle else {
+            statusMessage = recordingLifecycleBlockMessage(action: "closing the window")
             return false
         }
         guard isDirty else { return true }
@@ -228,12 +224,31 @@ extension EditorModel {
     /// session reset would tear down media access while capture writers keep
     /// running, and a later Stop could land the take into the wrong project.
     private func blockDocumentCommandWhileRecording() -> Bool {
-        guard isRecording || isStartingRecording || isStoppingRecording else { return false }
-        statusMessage = isStartingRecording
-            ? "Wait for the recording to start before switching projects."
-            : isStoppingRecording
-                ? "Finish stopping the recording before switching projects."
-                : "Stop the recording before switching projects."
+        guard hasActiveRecordingLifecycle else { return false }
+        statusMessage = recordingLifecycleBlockMessage(action: "switching projects")
         return true
+    }
+
+    private var hasActiveRecordingLifecycle: Bool {
+        isCountdownActive || isRecording || isPaused || isStartingRecording || isPausingRecording || isStoppingRecording
+    }
+
+    private func recordingLifecycleBlockMessage(action: String) -> String {
+        if isCountdownActive {
+            return "Cancel the countdown before \(action)."
+        }
+        if isStartingRecording {
+            return "Wait for the recording to start before \(action)."
+        }
+        if isPausingRecording {
+            return "Finish pausing the recording before \(action)."
+        }
+        if isStoppingRecording {
+            return "Finish stopping the recording before \(action)."
+        }
+        if isPaused {
+            return "Resume and stop the recording before \(action)."
+        }
+        return "Stop the recording before \(action)."
     }
 }

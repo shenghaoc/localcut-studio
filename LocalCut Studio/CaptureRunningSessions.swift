@@ -1,11 +1,26 @@
 import Foundation
 import AVFoundation
 import CoreMedia
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
+import LocalCutCore
 
 protocol CaptureRunningSession: Sendable {
+    nonisolated var supportsSourceSwitching: Bool { get }
+
     func start() async throws
     func stop() async
+    func updateTarget(_ newTarget: CaptureTarget) async throws
+    func excludeWindow(_ windowID: CGWindowID) async throws
+}
+
+extension CaptureRunningSession {
+    nonisolated var supportsSourceSwitching: Bool { false }
+
+    func updateTarget(_ newTarget: CaptureTarget) async throws {
+        throw CaptureEngineError.captureSessionFailed("This capture session cannot switch sources.")
+    }
+
+    func excludeWindow(_ windowID: CGWindowID) async throws {}
 }
 
 nonisolated enum CapturePermissionAuthorizer {
@@ -32,23 +47,52 @@ nonisolated enum CapturePermissionAuthorizer {
 }
 
 nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    private let target: CaptureTarget
+    nonisolated var supportsSourceSwitching: Bool { true }
+
+    private let stateLock = NSLock()
+    private var target: CaptureTarget
     private let frameRate: Double
-    private let videoWriter: ContinuousCaptureWriter?
-    private let audioWriter: ContinuousCaptureWriter?
+    private var videoWriter: ContinuousCaptureWriter?
+    private var audioWriter: ContinuousCaptureWriter?
+    private var captureRegion: CaptureRegion?
+    private let writerCanvasSize: (width: Int, height: Int)?
+    private let frameScaler: FrameScaler?
     private let outputQueue = DispatchQueue(label: "com.localcutstudio.capture.screen.output")
     private let onStop: (@Sendable (Error) -> Void)?
     private var stream: SCStream?
+    /// When true, the next `.screen` frame is dropped (used after source switch
+    /// to discard the transitional frame).
+    private var dropNextScreenFrame = false
+    /// Window IDs to exclude from capture (e.g. the floating control panel).
+    private var excludingWindowIDs: Set<CGWindowID> = []
+
+    private func withLockedState<T>(_ body: () throws -> T) rethrows -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return try body()
+    }
 
     init(target: CaptureTarget,
          frameRate: Double,
          videoWriter: ContinuousCaptureWriter?,
          audioWriter: ContinuousCaptureWriter?,
+         captureRegion: CaptureRegion? = nil,
+         excludingWindowIDs: Set<CGWindowID> = [],
          onStop: (@Sendable (Error) -> Void)? = nil) {
         self.target = target
         self.frameRate = frameRate
         self.videoWriter = videoWriter
         self.audioWriter = audioWriter
+        self.captureRegion = captureRegion
+        if let width = videoWriter?.source.width,
+           let height = videoWriter?.source.height {
+            self.writerCanvasSize = (width, height)
+            self.frameScaler = FrameScaler(targetWidth: width, targetHeight: height)
+        } else {
+            self.writerCanvasSize = nil
+            self.frameScaler = nil
+        }
+        self.excludingWindowIDs = Set(excludingWindowIDs.filter { $0 != 0 })
         self.onStop = onStop
     }
 
@@ -76,24 +120,71 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
                 }
             }
         }
-        self.stream = stream
+        withLockedState {
+            self.stream = stream
+        }
     }
 
     func stop() async {
-        guard let stream else { return }
+        guard let stream = withLockedState({ self.stream }) else { return }
         await withCheckedContinuation { continuation in
             stream.stopCapture { _ in continuation.resume() }
         }
-        self.stream = nil
+        withLockedState {
+            self.stream = nil
+        }
+    }
+
+    /// Update the capture target mid-session. The stream's content filter and
+    /// configuration are updated in-place; the first frame after the switch is
+    /// dropped to avoid a transitional artifact.
+    func updateTarget(_ newTarget: CaptureTarget) async throws {
+        guard let stream = withLockedState({ self.stream }) else { throw CaptureEngineError.notRecording }
+        withLockedState {
+            self.target = newTarget
+            self.captureRegion = nil
+        }
+
+        let content = try await SCShareableContent.current
+        let newFilter = try makeFilter(from: content)
+        let newConfig = makeConfiguration()
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            stream.updateContentFilter(newFilter) { error in
+                if let error {
+                    continuation.resume(throwing: CaptureEngineError.captureSessionFailed(error.localizedDescription))
+                } else {
+                    stream.updateConfiguration(newConfig) { error in
+                        if let error {
+                            continuation.resume(throwing: CaptureEngineError.captureSessionFailed(error.localizedDescription))
+                        } else {
+                            // Set the drop flag AFTER the update completes so the
+                            // next frame from the new source (not an in-flight frame
+                            // from the old source) is the one dropped.
+                            self.outputQueue.async { self.dropNextScreenFrame = true }
+                            continuation.resume()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func makeFilter(from content: SCShareableContent) throws -> SCContentFilter {
-        switch target {
+        let state = withLockedState {
+            (target: target, excludingWindowIDs: excludingWindowIDs)
+        }
+        // Resolve window IDs to SCWindow objects for exclusion.
+        let excludedWindows = state.excludingWindowIDs.compactMap { windowID in
+            content.windows.first(where: { $0.windowID == windowID })
+        }
+
+        switch state.target {
         case .display(let displayID, _, _):
             guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                 throw CaptureEngineError.targetUnavailable
             }
-            return SCContentFilter(display: display, excludingWindows: [])
+            return SCContentFilter(display: display, excludingWindows: excludedWindows)
 
         case .window(let windowID, _, _, _, _):
             guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
@@ -108,18 +199,45 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
                   }) else {
                 throw CaptureEngineError.targetUnavailable
             }
-            return SCContentFilter(display: display, including: [app], exceptingWindows: [])
+            return SCContentFilter(display: display, including: [app], exceptingWindows: excludedWindows)
+        }
+    }
+
+    /// Add a window ID to the exclusion list and update the live capture filter.
+    /// Used to exclude the floating control panel from screen capture.
+    func excludeWindow(_ windowID: CGWindowID) async throws {
+        guard windowID != 0 else { return }
+        let runningStream = withLockedState {
+            excludingWindowIDs.insert(windowID)
+            return stream
+        }
+        // If the stream is running, update the filter in-place.
+        guard let stream = runningStream else { return }
+        let content = try await SCShareableContent.current
+        let newFilter = try makeFilter(from: content)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            stream.updateContentFilter(newFilter) { error in
+                if let error {
+                    continuation.resume(throwing: CaptureEngineError.captureSessionFailed(error.localizedDescription))
+                } else {
+                    continuation.resume()
+                }
+            }
         }
     }
 
     private func makeConfiguration() -> SCStreamConfiguration {
-        let size = target.outputSize
+        let size = writerCanvasSize ?? withLockedState { target.outputSize }
         let configuration = SCStreamConfiguration()
         configuration.width = size.width
         configuration.height = size.height
         configuration.minimumFrameInterval = CMTime(seconds: 1.0 / max(1, frameRate), preferredTimescale: 600)
         configuration.queueDepth = 5
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        if let region = withLockedState({ captureRegion }),
+           region.applies(to: withLockedState({ target })) {
+            configuration.sourceRect = region.sourceRect
+        }
         configuration.showsCursor = true
         configuration.capturesAudio = audioWriter != nil
         configuration.sampleRate = 48_000
@@ -138,7 +256,12 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
             if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
                let status = attachments.first?[.status] as? Int,
                status != 0 { return }  // 0 = SCFrameStatus.complete
-            videoWriter?.append(sampleBuffer)
+            // Drop the first frame after a source switch to avoid transitional artifacts.
+            if dropNextScreenFrame {
+                dropNextScreenFrame = false
+                return
+            }
+            appendScreenSample(sampleBuffer)
         case .audio:
             audioWriter?.append(sampleBuffer)
         case .microphone:
@@ -153,6 +276,53 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         // etc.). Surface it so the UI can stop the recording and inform the user.
         onStop?(error)
     }
+
+    private func appendScreenSample(_ sampleBuffer: CMSampleBuffer) {
+        guard let videoWriter else { return }
+        guard let sourceBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            videoWriter.append(sampleBuffer)
+            return
+        }
+        guard let writerCanvasSize else {
+            videoWriter.append(sampleBuffer)
+            return
+        }
+        let width = CVPixelBufferGetWidth(sourceBuffer)
+        let height = CVPixelBufferGetHeight(sourceBuffer)
+        guard width != writerCanvasSize.width || height != writerCanvasSize.height else {
+            videoWriter.append(sampleBuffer)
+            return
+        }
+        guard let scaledBuffer = frameScaler?.scale(sourceBuffer),
+              let scaledSample = Self.makeSampleBuffer(from: scaledBuffer, timingFrom: sampleBuffer) else {
+            return
+        }
+        videoWriter.append(scaledSample)
+    }
+
+    private static func makeSampleBuffer(from imageBuffer: CVPixelBuffer,
+                                         timingFrom source: CMSampleBuffer) -> CMSampleBuffer? {
+        var formatDescription: CMVideoFormatDescription?
+        let formatStatus = CMVideoFormatDescriptionCreateForImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: imageBuffer,
+            formatDescriptionOut: &formatDescription)
+        guard formatStatus == noErr, let formatDescription else { return nil }
+
+        var timing = CMSampleTimingInfo(
+            duration: CMSampleBufferGetDuration(source),
+            presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(source),
+            decodeTimeStamp: CMSampleBufferGetDecodeTimeStamp(source))
+        var output: CMSampleBuffer?
+        let sampleStatus = CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: imageBuffer,
+            formatDescription: formatDescription,
+            sampleTiming: &timing,
+            sampleBufferOut: &output)
+        guard sampleStatus == noErr else { return nil }
+        return output
+    }
 }
 
 nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
@@ -161,11 +331,17 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
     private let writer: ContinuousCaptureWriter
     private let session = AVCaptureSession()
     private let queue: DispatchQueue
+    private let onAudioLevel: (@Sendable (Float) -> Void)?
+    private var lastAudioLevelEmission = CFAbsoluteTimeGetCurrent()
 
-    init(deviceID: String, mediaType: AVMediaType, writer: ContinuousCaptureWriter) {
+    init(deviceID: String,
+         mediaType: AVMediaType,
+         writer: ContinuousCaptureWriter,
+         onAudioLevel: (@Sendable (Float) -> Void)? = nil) {
         self.deviceID = deviceID
         self.mediaType = mediaType
         self.writer = writer
+        self.onAudioLevel = onAudioLevel
         self.queue = DispatchQueue(label: "com.localcutstudio.capture.av.\(deviceID)")
         super.init()
     }
@@ -243,6 +419,69 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
+        if mediaType == .audio,
+           let onAudioLevel,
+           let level = Self.audioPeakLevel(from: sampleBuffer) {
+            let now = CFAbsoluteTimeGetCurrent()
+            if now - lastAudioLevelEmission >= 0.05 {
+                lastAudioLevelEmission = now
+                onAudioLevel(level)
+            }
+        }
         writer.append(sampleBuffer)
+    }
+
+    nonisolated static func audioPeakLevel(from sampleBuffer: CMSampleBuffer) -> Float? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+            return nil
+        }
+        let format = AVAudioFormat(cmAudioFormatDescription: formatDescription)
+        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frameCount > 0,
+              let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            return nil
+        }
+        pcmBuffer.frameLength = frameCount
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(frameCount),
+            into: pcmBuffer.mutableAudioBufferList)
+        guard status == noErr else { return nil }
+        return normalizedPeak(from: pcmBuffer)
+    }
+
+    nonisolated static func normalizedPeak(from buffer: AVAudioPCMBuffer) -> Float? {
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        guard frameCount > 0, channelCount > 0 else { return nil }
+
+        var peak: Float = 0
+        switch buffer.format.commonFormat {
+        case .pcmFormatFloat32:
+            guard let channelData = buffer.floatChannelData else { return nil }
+            for channel in 0..<channelCount {
+                for frame in 0..<frameCount {
+                    peak = max(peak, abs(channelData[channel][frame]))
+                }
+            }
+        case .pcmFormatInt16:
+            guard let channelData = buffer.int16ChannelData else { return nil }
+            for channel in 0..<channelCount {
+                for frame in 0..<frameCount {
+                    peak = max(peak, abs(Float(channelData[channel][frame])) / Float(Int16.max))
+                }
+            }
+        case .pcmFormatInt32:
+            guard let channelData = buffer.int32ChannelData else { return nil }
+            for channel in 0..<channelCount {
+                for frame in 0..<frameCount {
+                    peak = max(peak, abs(Float(channelData[channel][frame])) / Float(Int32.max))
+                }
+            }
+        default:
+            return nil
+        }
+        return min(1, peak)
     }
 }

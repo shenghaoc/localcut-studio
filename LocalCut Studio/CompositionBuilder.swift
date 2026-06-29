@@ -39,6 +39,7 @@ enum CompositionBuilder {
         let timeRange: CMTimeRange
         let transform: CGAffineTransform
         let opacity: Float
+        let mask: ClipMaskShape
         let effects: [Effect]
         let transitionRange: CMTimeRange?
         let transitionType: TransitionType?
@@ -49,7 +50,7 @@ enum CompositionBuilder {
         let orderingStart: CMTime
 
         var layer: CompositorLayer {
-            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, effects: effects, showSkinMask: showSkinMask, clipSourceStart: clipSourceStart, sourceRange: sourceRange, timeRange: timeRange)
+            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, mask: mask, effects: effects, showSkinMask: showSkinMask, clipSourceStart: clipSourceStart, sourceRange: sourceRange, timeRange: timeRange)
         }
 
         func contains(_ seconds: Double) -> Bool {
@@ -117,10 +118,16 @@ enum CompositionBuilder {
                 guard let sourceTrack = sourceTracks.first else { continue }
                 let sourceSampleDuration = try? await sourceTrack.load(.minFrameDuration)
 
-                let transform = fitTransform(
-                    naturalSize: media.naturalSize,
-                    preferredTransform: media.preferredTransform,
-                    into: renderSize)
+                let transform = clip.geometry.isIdentity
+                    ? fitTransform(
+                        naturalSize: media.naturalSize,
+                        preferredTransform: media.preferredTransform,
+                        into: renderSize)
+                    : geometryTransform(
+                        naturalSize: media.naturalSize,
+                        preferredTransform: media.preferredTransform,
+                        geometry: clip.geometry,
+                        into: renderSize)
 
                 // A clip may be split into pieces where it spans another track's
                 // transition cut; the tail piece ripples left under the head, so
@@ -158,6 +165,7 @@ enum CompositionBuilder {
                                                    duration: remapSegment.outputDuration),
                             transform: transform,
                             opacity: clip.opacity,
+                            mask: clip.geometry.mask,
                             effects: clip.effects,
                             transitionRange: piece.transitionRange,
                             transitionType: piece.overlap > .zero ? clip.transition?.type : nil,
@@ -601,6 +609,25 @@ enum CompositionBuilder {
     //
     // subRampVolumes() and fitTransform() are defined in LocalCutCore.
 
+    static func geometryTransform(naturalSize: CGSize,
+                                  preferredTransform: CGAffineTransform,
+                                  geometry: ClipGeometry,
+                                  into renderSize: CGSize) -> CGAffineTransform {
+        let orientedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
+        let orientedSize = CGSize(width: abs(orientedRect.width), height: abs(orientedRect.height))
+        guard orientedSize.width > 0, orientedSize.height > 0 else { return preferredTransform }
+
+        var transform = preferredTransform.concatenating(
+            CGAffineTransform(translationX: -orientedRect.minX, y: -orientedRect.minY))
+        transform = transform.concatenating(CGAffineTransform(scaleX: geometry.scale, y: geometry.scale))
+
+        let scaledSize = CGSize(width: orientedSize.width * geometry.scale,
+                                height: orientedSize.height * geometry.scale)
+        let tx = (renderSize.width - scaledSize.width) / 2 + geometry.positionOffset.width
+        let ty = (renderSize.height - scaledSize.height) / 2 - geometry.positionOffset.height
+        return transform.concatenating(CGAffineTransform(translationX: tx, y: ty))
+    }
+
     /// Builds non-overlapping custom instructions covering the timeline. For
     /// each interval between segment boundaries we emit one instruction whose
     /// render units describe what each project track shows — a single layer, or
@@ -701,6 +728,7 @@ enum CompositionBuilder {
                     trackID: fillerTrackID,
                     transform: .identity,
                     opacity: 1,
+                    mask: .none,
                     effects: [],
                     showSkinMask: false,
                     clipSourceStart: fillerRange.start,

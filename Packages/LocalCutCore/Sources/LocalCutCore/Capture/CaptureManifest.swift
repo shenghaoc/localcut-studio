@@ -161,11 +161,33 @@ public struct CaptureFinalizeRecord: Codable, Hashable, Sendable {
     }
 }
 
+/// Recorded when the user pauses a capture session. The gap between pause and
+/// the subsequent resume is a PTS jump on every source — the timeline shows the
+/// gap, not a stitched continuous clip.
+public struct CapturePauseRecord: Codable, Hashable, Sendable {
+    public var atUs: Int64
+
+    public init(atUs: Int64) {
+        self.atUs = atUs
+    }
+}
+
+/// Recorded when the user resumes a capture session after a pause.
+public struct CaptureResumeRecord: Codable, Hashable, Sendable {
+    public var atUs: Int64
+
+    public init(atUs: Int64) {
+        self.atUs = atUs
+    }
+}
+
 public enum CaptureManifestRecord: Hashable, Sendable {
     case header(CaptureManifestHeader)
     case epoch(CaptureEpochRecord)
     case sourceEnded(CaptureSourceEndedRecord)
     case backpressure(CaptureBackpressureRecord)
+    case pause(CapturePauseRecord)
+    case resume(CaptureResumeRecord)
     case finalize(CaptureFinalizeRecord)
     case unknown(kind: String)
 
@@ -175,6 +197,8 @@ public enum CaptureManifestRecord: Hashable, Sendable {
         case .epoch: "epoch"
         case .sourceEnded: "source-ended"
         case .backpressure: "backpressure"
+        case .pause: "pause"
+        case .resume: "resume"
         case .finalize: "finalize"
         case .unknown(let kind): kind
         }
@@ -212,6 +236,10 @@ extension CaptureManifestRecord: Codable {
             self = .sourceEnded(try CaptureSourceEndedRecord(from: decoder))
         case "backpressure":
             self = .backpressure(try CaptureBackpressureRecord(from: decoder))
+        case "pause":
+            self = .pause(try CapturePauseRecord(from: decoder))
+        case "resume":
+            self = .resume(try CaptureResumeRecord(from: decoder))
         case "finalize":
             self = .finalize(try CaptureFinalizeRecord(from: decoder))
         default:
@@ -244,6 +272,10 @@ extension CaptureManifestRecord: Codable {
             try container.encode(value.atUs, forKey: .atUs)
             try container.encode(value.droppedSamples, forKey: .droppedSamples)
             try container.encode(value.reason, forKey: .reason)
+        case .pause(let value):
+            try container.encode(value.atUs, forKey: .atUs)
+        case .resume(let value):
+            try container.encode(value.atUs, forKey: .atUs)
         case .finalize(let value):
             try container.encode(value.atUs, forKey: .atUs)
             try container.encode(value.durationUs, forKey: .durationUs)
@@ -296,28 +328,41 @@ public struct CaptureManifest: Hashable, Sendable {
 
     public var isFinalized: Bool { finalize != nil }
 
+    /// All source-ended records grouped by source ID. With pause/resume, a single
+    /// source can have multiple ended records (one per chunk).
+    public var endedRecordsBySourceID: [UUID: [CaptureSourceEndedRecord]] {
+        records.reduce(into: [UUID: [CaptureSourceEndedRecord]]()) { result, record in
+            guard case .sourceEnded(let ended) = record else { return }
+            result[ended.sourceID, default: []].append(ended)
+        }
+    }
+
     public var recoveredSources: [CaptureRecoveredSource] {
         guard let header else { return [] }
-        let endedByID = Dictionary(
-            records.compactMap {
-                if case .sourceEnded(let ended) = $0 { (ended.sourceID, ended) } else { nil }
-            },
-            uniquingKeysWith: { _, latest in latest })
+        // A pause/resume cycle creates multiple source-ended records per source
+        // (one per chunk). Aggregate duration and sample count across all chunks;
+        // use the earliest timelineStartUs.
+        let endedBySourceID = records.reduce(into: [UUID: [CaptureSourceEndedRecord]]()) { result, record in
+            guard case .sourceEnded(let ended) = record else { return }
+            result[ended.sourceID, default: []].append(ended)
+        }
         let droppedByID = records.reduce(into: [UUID: Int]()) { result, record in
             guard case .backpressure(let backpressure) = record else { return }
             result[backpressure.sourceID, default: 0] += backpressure.droppedSamples
         }
 
         return header.sources.map { source in
-            let ended = endedByID[source.id]
+            let chunks = endedBySourceID[source.id] ?? []
             var descriptor = source
-            if let ended {
-                descriptor.timelineStartUs = ended.timelineStartUs
+            if let earliest = chunks.min(by: { $0.timelineStartUs < $1.timelineStartUs }) {
+                descriptor.timelineStartUs = earliest.timelineStartUs
             }
+            let totalDurationUs = chunks.reduce(Int64(0)) { $0 + $1.durationUs }
+            let totalSamples = chunks.reduce(0) { $0 + $1.sampleCount }
             return CaptureRecoveredSource(
                 descriptor: descriptor,
-                duration: ended?.duration ?? .zero,
-                sampleCount: ended?.sampleCount ?? 0,
+                duration: CMTime(value: totalDurationUs, timescale: CaptureManifest.microsecondTimescale),
+                sampleCount: totalSamples,
                 droppedSamples: droppedByID[source.id, default: 0])
         }
     }

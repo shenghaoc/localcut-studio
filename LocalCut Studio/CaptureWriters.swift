@@ -57,6 +57,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private var didRecordBackpressure = false
     private var didNotifyBackpressure = false
     private var writeStartupError: String?
+    private var manifestAppendError: String?
 
     init(source: CaptureSourceDescriptor,
          outputURL: URL,
@@ -145,7 +146,11 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
             atUs: atUs,
             droppedSamples: max(1, droppedSamples),
             reason: reason)
-        try? manifest.append(.backpressure(record))
+        do {
+            try manifest.append(.backpressure(record))
+        } catch {
+            manifestAppendError = error.localizedDescription
+        }
     }
 
     func finish() async throws -> CaptureSourceEndedRecord {
@@ -173,6 +178,8 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
             writer.finishWriting {
                 if let error = self.writer.error {
                     continuation.resume(throwing: CaptureEngineError.writerFinishFailed(error.localizedDescription))
+                } else if let manifestAppendError = self.manifestAppendError {
+                    continuation.resume(throwing: CaptureEngineError.manifestWriteFailed(manifestAppendError))
                 } else {
                     continuation.resume(returning: record)
                 }

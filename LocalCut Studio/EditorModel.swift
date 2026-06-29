@@ -135,16 +135,52 @@ final class EditorModel {
     var isRecorderPresented = false
     var isStartingRecording = false
     var isRecording = false
+    var isPausingRecording = false
     var isStoppingRecording = false
+    var hideFloatingPanelWhileRecording = false
     var recordingStartedAt: Date?
     var recordingElapsedSeconds: Double = 0
     var recordingDiskFreeBytes: Int64?
     var recordingDiskWarning: RecordingDiskWarning?
     var recordingSourceCount: Int = 0
     var recordingBackpressureCount: Int = 0
+    var recordingIncludesMicrophone = false
+    var recordingMicLevel: Float = 0
     var recoveredCaptureSessions: [CaptureSessionResult] = []
     @ObservationIgnored nonisolated(unsafe) var recordingsFolderAccessURL: URL?
     @ObservationIgnored nonisolated(unsafe) var recordingMonitorTask: Task<Void, Never>?
+    /// Accumulated wall-clock time spent paused, subtracted from elapsed display.
+    @ObservationIgnored nonisolated(unsafe) var recordingPausedDuration: TimeInterval = 0
+    /// Wall-clock time when the current pause started, or nil if not paused.
+    @ObservationIgnored nonisolated(unsafe) var pauseStartedAt: Date?
+
+    // Phase 42 — Recorder UX
+    var isCountdownActive = false
+    var countdownSeconds = 3
+    var countdownRemaining = 0
+    var isPaused = false
+    var hasLastRecordingTake = false
+    /// Stored request for retake: replaces the most recent chunk-set in the same
+    /// timeline slot.
+    @ObservationIgnored nonisolated(unsafe) var lastRecordingRequest: CaptureStartRequest?
+    /// Tracks the timeline slots occupied by the most recent recording landing,
+    /// so retake can replace them without touching unrelated tracks.
+    @ObservationIgnored var lastRecordingSlots: [RecordingSlot] = []
+    /// When set, `landCaptureSession` uses these positions instead of capture PTS
+    /// so a retake lands in the original timeline slot.
+    @ObservationIgnored var retakeTimelinePositions: [RecordingSlotKey: CMTime] = [:]
+    /// Captured before a retake removes the old chunk set; landing registers one
+    /// undo step spanning both removal and replacement.
+    @ObservationIgnored var retakeUndoBefore: ProjectState?
+    @ObservationIgnored var retakePreviousSlots: [RecordingSlot] = []
+    /// Track indices from the original recording, keyed by source/chunk, so
+    /// retake can reinsert each replacement track at the same stack position.
+    @ObservationIgnored var retakeTrackIndices: [RecordingSlotKey: Int] = [:]
+    /// PiP preset applied to webcam tracks.
+    var activePiPPreset: PiPPreset?
+    @ObservationIgnored var lastRecordingPiPPreset: PiPPreset?
+    /// Floating control panel controller.
+    @ObservationIgnored let floatingPanelController = FloatingPanelController()
 
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?

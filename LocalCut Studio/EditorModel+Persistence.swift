@@ -86,6 +86,12 @@ struct ProjectState: Equatable {
     }
 }
 
+struct RecordingUndoState: Equatable {
+    var lastRecordingSlots: [RecordingSlot]
+    var hasLastRecordingTake: Bool
+    var lastRecordingPiPPreset: PiPPreset?
+}
+
 // MARK: - Undo / redo
 
 extension EditorModel {
@@ -250,10 +256,41 @@ extension EditorModel {
 
     /// Registers undo for an asynchronous mutation whose `before` snapshot was
     /// captured at the start (e.g. media import, which appends incrementally).
-    func registerImportUndo(name: String, before: ProjectState) {
+    @discardableResult
+    func registerImportUndo(name: String, before: ProjectState) -> Bool {
         let after = captureState()
-        guard before != after else { return }
+        guard before != after else { return false }
         registerUndo(name: name, before: before, after: after)
+        return true
+    }
+
+    func captureRecordingUndoState() -> RecordingUndoState {
+        RecordingUndoState(
+            lastRecordingSlots: lastRecordingSlots,
+            hasLastRecordingTake: hasLastRecordingTake,
+            lastRecordingPiPPreset: lastRecordingPiPPreset)
+    }
+
+    func applyRecordingUndoState(_ state: RecordingUndoState) {
+        lastRecordingSlots = state.lastRecordingSlots
+        hasLastRecordingTake = state.hasLastRecordingTake
+        lastRecordingPiPPreset = state.lastRecordingPiPPreset
+    }
+
+    @discardableResult
+    func registerRecordingImportUndo(name: String,
+                                     before: ProjectState,
+                                     beforeRecording: RecordingUndoState) -> Bool {
+        let after = captureState()
+        let afterRecording = captureRecordingUndoState()
+        guard before != after || beforeRecording != afterRecording else { return false }
+        registerUndo(
+            name: name,
+            before: before,
+            after: after,
+            beforeRecording: beforeRecording,
+            afterRecording: afterRecording)
+        return true
     }
 
     /// Performs one step of a continuous gesture (slider drag, edge trim, clip
@@ -315,7 +352,11 @@ extension EditorModel {
 
     /// Registers a reversible swap between two snapshots, re-registering its
     /// inverse on invocation so redo works (the standard recursive pattern).
-    private func registerUndo(name: String, before: ProjectState, after: ProjectState) {
+    private func registerUndo(name: String,
+                              before: ProjectState,
+                              after: ProjectState,
+                              beforeRecording: RecordingUndoState? = nil,
+                              afterRecording: RecordingUndoState? = nil) {
         // `groupsByEvent` is disabled (see init), so each top-level action gets
         // its own explicit group — one user action = one undo step regardless of
         // run-loop timing. While undoing/redoing, UndoManager already manages the
@@ -325,8 +366,16 @@ extension EditorModel {
         undoManager.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated {
                 model.applyState(before)
+                if let beforeRecording {
+                    model.applyRecordingUndoState(beforeRecording)
+                }
                 model.markDirty()
-                model.registerUndo(name: name, before: after, after: before)
+                model.registerUndo(
+                    name: name,
+                    before: after,
+                    after: before,
+                    beforeRecording: afterRecording,
+                    afterRecording: beforeRecording)
                 model.scheduleRebuild()
                 model.refreshUndoFlags()
             }

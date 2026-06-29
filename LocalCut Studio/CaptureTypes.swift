@@ -98,6 +98,43 @@ nonisolated enum CaptureTarget: Hashable, Sendable {
     }
 }
 
+nonisolated struct CaptureRegion: Hashable, Sendable {
+    var displayID: UInt32
+    var sourceRect: CGRect
+    var outputWidth: Int
+    var outputHeight: Int
+
+    init?(displayID: UInt32,
+          selectionInScreen: CGRect,
+          screenFrame: CGRect,
+          displayPixelWidth: Int,
+          displayPixelHeight: Int) {
+        guard !selectionInScreen.isNull, !screenFrame.isEmpty else { return nil }
+        let clipped = selectionInScreen.intersection(screenFrame)
+        guard clipped.width > 0, clipped.height > 0 else { return nil }
+
+        let pixelScaleX = CGFloat(displayPixelWidth) / max(1, screenFrame.width)
+        let pixelScaleY = CGFloat(displayPixelHeight) / max(1, screenFrame.height)
+        let width = max(16, Int((clipped.width * pixelScaleX).rounded(.down))) & ~1
+        let height = max(16, Int((clipped.height * pixelScaleY).rounded(.down))) & ~1
+        guard width >= 16, height >= 16 else { return nil }
+
+        self.displayID = displayID
+        self.outputWidth = width
+        self.outputHeight = height
+        self.sourceRect = CGRect(
+            x: clipped.minX - screenFrame.minX,
+            y: screenFrame.maxY - clipped.maxY,
+            width: clipped.width,
+            height: clipped.height).integral
+    }
+
+    func applies(to target: CaptureTarget) -> Bool {
+        guard case .display(let targetDisplayID, _, _) = target else { return false }
+        return targetDisplayID == displayID
+    }
+}
+
 nonisolated struct CaptureDeviceOption: Identifiable, Hashable, Sendable {
     let id: String
     var title: String
@@ -112,6 +149,8 @@ nonisolated struct CaptureStartRequest: Sendable {
     var frameRate: Double
     var fragmentInterval: CMTime
     var capabilities: Capabilities
+    var captureRegion: CaptureRegion? = nil
+    var excludedWindowIDs: Set<CGWindowID> = []
 }
 
 nonisolated struct CaptureSessionResult: Sendable, Identifiable {
@@ -120,9 +159,13 @@ nonisolated struct CaptureSessionResult: Sendable, Identifiable {
     var manifestURL: URL
     var manifest: CaptureManifest
     var wasRecovered: Bool
-    /// Set when the manifest's finalize record could not be written (disk full,
-    /// volume disappeared, etc.). The UI surfaces this; the manifest remains
-    /// unfinalized so the session can still be discovered by crash recovery, but
-    /// the warning prevents silent double-landing.
-    var _manifestFinalizeFailed: Bool = false
+    /// Non-nil when the manifest's finalize record could not be written (disk
+    /// full, volume disappeared, prior critical manifest write failed, etc.).
+    /// The UI surfaces this; the manifest remains unfinalized so crash recovery
+    /// can still discover the session.
+    var manifestFinalizationError: String?
+
+    var manifestFinalizeFailed: Bool {
+        manifestFinalizationError != nil
+    }
 }
