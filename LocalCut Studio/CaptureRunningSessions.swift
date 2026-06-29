@@ -33,6 +33,7 @@ nonisolated enum CapturePermissionAuthorizer {
 }
 
 nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    private let stateLock = NSLock()
     private var target: CaptureTarget
     private let frameRate: Double
     private var videoWriter: ContinuousCaptureWriter?
@@ -47,6 +48,12 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     private var dropNextScreenFrame = false
     /// Window IDs to exclude from capture (e.g. the floating control panel).
     private var excludingWindowIDs: Set<CGWindowID> = []
+
+    private func withLockedState<T>(_ body: () throws -> T) rethrows -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return try body()
+    }
 
     init(target: CaptureTarget,
          frameRate: Double,
@@ -94,23 +101,29 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
                 }
             }
         }
-        self.stream = stream
+        withLockedState {
+            self.stream = stream
+        }
     }
 
     func stop() async {
-        guard let stream else { return }
+        guard let stream = withLockedState({ self.stream }) else { return }
         await withCheckedContinuation { continuation in
             stream.stopCapture { _ in continuation.resume() }
         }
-        self.stream = nil
+        withLockedState {
+            self.stream = nil
+        }
     }
 
     /// Update the capture target mid-session. The stream's content filter and
     /// configuration are updated in-place; the first frame after the switch is
     /// dropped to avoid a transitional artifact.
     func updateTarget(_ newTarget: CaptureTarget) async throws {
-        guard let stream else { throw CaptureEngineError.notRecording }
-        self.target = newTarget
+        guard let stream = withLockedState({ self.stream }) else { throw CaptureEngineError.notRecording }
+        withLockedState {
+            self.target = newTarget
+        }
         // Dispatch to outputQueue to avoid racing with the stream output callback.
         outputQueue.async { self.dropNextScreenFrame = true }
 
@@ -136,12 +149,15 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     }
 
     private func makeFilter(from content: SCShareableContent) throws -> SCContentFilter {
+        let state = withLockedState {
+            (target: target, excludingWindowIDs: excludingWindowIDs)
+        }
         // Resolve window IDs to SCWindow objects for exclusion.
-        let excludedWindows = excludingWindowIDs.compactMap { windowID in
+        let excludedWindows = state.excludingWindowIDs.compactMap { windowID in
             content.windows.first(where: { $0.windowID == windowID })
         }
 
-        switch target {
+        switch state.target {
         case .display(let displayID, _, _):
             guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                 throw CaptureEngineError.targetUnavailable
@@ -169,9 +185,12 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     /// Used to exclude the floating control panel from screen capture.
     func excludeWindow(_ windowID: CGWindowID) async throws {
         guard windowID != 0 else { return }
-        excludingWindowIDs.insert(windowID)
+        let runningStream = withLockedState {
+            excludingWindowIDs.insert(windowID)
+            return stream
+        }
         // If the stream is running, update the filter in-place.
-        guard let stream else { return }
+        guard let stream = runningStream else { return }
         let content = try await SCShareableContent.current
         let newFilter = try makeFilter(from: content)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -186,7 +205,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     }
 
     private func makeConfiguration() -> SCStreamConfiguration {
-        let size = writerCanvasSize ?? target.outputSize
+        let size = writerCanvasSize ?? withLockedState { target.outputSize }
         let configuration = SCStreamConfiguration()
         configuration.width = size.width
         configuration.height = size.height

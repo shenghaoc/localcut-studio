@@ -4,15 +4,11 @@ import SwiftUI
 /// Shown as a sheet or overlay from the recorder setup or main content view.
 struct RecordingCountdownView: View {
     @Bindable var model: EditorModel
-    let totalSeconds: Int
 
-    @State private var remaining: Int
     @State private var scale: CGFloat = 1.0
 
-    init(model: EditorModel, totalSeconds: Int) {
+    init(model: EditorModel) {
         self.model = model
-        self.totalSeconds = totalSeconds
-        _remaining = State(initialValue: totalSeconds)
     }
 
     var body: some View {
@@ -22,16 +18,16 @@ struct RecordingCountdownView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 24) {
-                Text(remaining > 0 ? "\(remaining)" : "Recording")
+                Text(model.countdownRemaining > 0 ? "\(model.countdownRemaining)" : "Recording")
                     .font(.system(size: 96, weight: .bold, design: .rounded))
-                    .foregroundStyle(remaining > 0 ? .white : .red)
+                    .foregroundStyle(model.countdownRemaining > 0 ? .white : .red)
                     .scaleEffect(scale)
                     .animation(.easeInOut(duration: 0.3), value: scale)
-                    .accessibilityLabel(remaining > 0
-                        ? "Starting in \(remaining) seconds"
+                    .accessibilityLabel(model.countdownRemaining > 0
+                        ? "Starting in \(model.countdownRemaining) seconds"
                         : "Recording started")
 
-                if remaining > 0 {
+                if model.countdownRemaining > 0 {
                     Button("Cancel") {
                         model.cancelCountdown()
                     }
@@ -42,25 +38,16 @@ struct RecordingCountdownView: View {
             }
         }
         .onAppear {
-            remaining = totalSeconds
-            startCountdown()
+            pulse()
+        }
+        .onChange(of: model.countdownRemaining) { _, newValue in
+            guard newValue > 0 else { return }
+            pulse()
         }
     }
 
-    private func startCountdown() {
-        Task { @MainActor in
-            for second in (1...totalSeconds).reversed() {
-                remaining = second
-                // Pulse animation.
-                withAnimation(.easeInOut(duration: 0.15)) { scale = 1.2 }
-                try? await Task.sleep(for: .milliseconds(150))
-                withAnimation(.easeInOut(duration: 0.15)) { scale = 1.0 }
-                try? await Task.sleep(for: .milliseconds(850))
-            }
-            // "Recording" flash.
-            remaining = 0
-            withAnimation(.easeInOut(duration: 0.2)) { scale = 1.1 }
-            try? await Task.sleep(for: .milliseconds(600))
-        }
+    private func pulse() {
+        withAnimation(.easeInOut(duration: 0.15)) { scale = 1.2 }
+        withAnimation(.easeInOut(duration: 0.2).delay(0.15)) { scale = 1.0 }
     }
 }

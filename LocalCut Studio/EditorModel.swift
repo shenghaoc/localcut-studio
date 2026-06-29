@@ -153,6 +153,7 @@ final class EditorModel {
     // Phase 42 — Recorder UX
     var isCountdownActive = false
     var countdownSeconds = 3
+    var countdownRemaining = 0
     var isPaused = false
     /// Stored request for retake: replaces the most recent chunk-set in the same
     /// timeline slot.

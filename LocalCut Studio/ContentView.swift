@@ -228,7 +228,7 @@ struct EditorView: View {
         }
         .overlay {
             if model.isCountdownActive {
-                RecordingCountdownView(model: model, totalSeconds: model.countdownSeconds)
+                RecordingCountdownView(model: model)
                     .transition(.opacity)
             }
         }

@@ -283,8 +283,7 @@ extension EditorModel {
 
     // MARK: - Phase 42: Countdown
 
-    /// Begin recording after a user-selected countdown delay. The countdown runs
-    /// in the UI layer; this method is called when it reaches zero.
+    /// Begin recording after a user-selected countdown delay.
     func startRecordingWithCountdown(
         countdownSeconds: Int,
         target: CaptureTarget?,
@@ -294,25 +293,32 @@ extension EditorModel {
         pipPreset: PiPPreset? = nil
     ) async {
         guard !isRecording, !isCountdownActive, !isStoppingRecording else { return }
+        let countdownSeconds = max(0, countdownSeconds)
         self.countdownSeconds = countdownSeconds
+        countdownRemaining = countdownSeconds
         isCountdownActive = true
         isRecorderPresented = false
 
-        // Run the countdown. Each second, update the UI; cancellation is handled
-        // by the view setting `isCountdownActive = false` or Task cancellation.
-        for remaining in (1...countdownSeconds).reversed() {
-            guard isCountdownActive else { return }
+        for remaining in stride(from: countdownSeconds, through: 1, by: -1) {
+            guard isCountdownActive else {
+                countdownRemaining = 0
+                return
+            }
+            countdownRemaining = remaining
             statusMessage = "Recording in \(remaining)…"
             do {
                 try await Task.sleep(for: .seconds(1))
             } catch {
-                // Task was cancelled (e.g. user dismissed the view). Don't spin
-                // to completion — stop the countdown immediately.
                 isCountdownActive = false
+                countdownRemaining = 0
                 return
             }
         }
-        guard isCountdownActive else { return }
+        guard isCountdownActive else {
+            countdownRemaining = 0
+            return
+        }
+        countdownRemaining = 0
         isCountdownActive = false
 
         // Store the request for potential retake.
@@ -340,6 +346,7 @@ extension EditorModel {
     func cancelCountdown() {
         guard isCountdownActive else { return }
         isCountdownActive = false
+        countdownRemaining = 0
         statusMessage = "Countdown cancelled."
     }
 
@@ -411,24 +418,32 @@ extension EditorModel {
             return
         }
         let recordedTrackIDs = Set(lastRecordingSlots.map(\.trackID))
+        let recordedClipIDsByTrack = Dictionary(grouping: lastRecordingSlots, by: \.trackID)
+            .mapValues { Set($0.map(\.clipID)) }
         var collapsed = false
         performUndoable("Collapse Recording Gap") {
             for track in (project.videoTracks + project.audioTracks)
                 where recordedTrackIDs.contains(track.id) {
-                let sorted = track.clips.sorted { $0.timelineStart < $1.timelineStart }
+                let recordedClipIDs = recordedClipIDsByTrack[track.id] ?? []
+                let sorted = track.clips
+                    .filter { recordedClipIDs.contains($0.id) }
+                    .sorted { $0.timelineStart < $1.timelineStart }
                 guard sorted.count >= 2 else { continue }
-                for i in 1..<sorted.count {
-                    let prevEnd = sorted[i - 1].timelineStart + sorted[i - 1].duration
-                    let gap = sorted[i].timelineStart - prevEnd
-                    guard gap > .zero else { continue }
-                    if let idx = track.clips.firstIndex(where: { $0.id == sorted[i].id }) {
-                        track.clips[idx].timelineStart = prevEnd
-                        for j in (idx + 1)..<track.clips.count {
-                            track.clips[j].timelineStart = CMTimeMaximum(
-                                .zero,
-                                track.clips[j].timelineStart - gap)
-                        }
+                var nextStart = sorted[0].timelineEnd
+                var timelineStartsByClipID: [Clip.ID: CMTime] = [:]
+                for clip in sorted.dropFirst() {
+                    var updatedClip = clip
+                    if clip.timelineStart > nextStart {
+                        updatedClip.timelineStart = nextStart
+                        timelineStartsByClipID[clip.id] = nextStart
                         collapsed = true
+                    }
+                    nextStart = CMTimeMaximum(nextStart, updatedClip.timelineEnd)
+                }
+                guard !timelineStartsByClipID.isEmpty else { continue }
+                for index in track.clips.indices {
+                    if let timelineStart = timelineStartsByClipID[track.clips[index].id] {
+                        track.clips[index].timelineStart = timelineStart
                     }
                 }
             }

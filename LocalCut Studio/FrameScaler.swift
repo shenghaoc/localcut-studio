@@ -68,12 +68,10 @@ nonisolated final class FrameScaler: @unchecked Sendable {
         scaleFilter.setValue(1.0, forKey: kCIInputAspectRatioKey)
         guard let scaledImage = scaleFilter.outputImage else { return nil }
 
-        // Center-crop to exact target dimensions.
-        let cropRect = CGRect(
-            x: (scaledImage.extent.width - CGFloat(targetWidth)) / 2,
-            y: (scaledImage.extent.height - CGFloat(targetHeight)) / 2,
-            width: CGFloat(targetWidth),
-            height: CGFloat(targetHeight))
+        let cropRect = Self.centerCropRect(
+            forScaledExtent: scaledImage.extent,
+            targetWidth: targetWidth,
+            targetHeight: targetHeight)
         let croppedImage = scaledImage
             .cropped(to: cropRect)
             .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x,
@@ -92,5 +90,15 @@ nonisolated final class FrameScaler: @unchecked Sendable {
 
         ciContext.render(croppedImage, to: output)
         return output
+    }
+
+    static func centerCropRect(forScaledExtent extent: CGRect,
+                               targetWidth: Int,
+                               targetHeight: Int) -> CGRect {
+        CGRect(
+            x: extent.origin.x + (extent.width - CGFloat(targetWidth)) / 2,
+            y: extent.origin.y + (extent.height - CGFloat(targetHeight)) / 2,
+            width: CGFloat(targetWidth),
+            height: CGFloat(targetHeight))
     }
 }

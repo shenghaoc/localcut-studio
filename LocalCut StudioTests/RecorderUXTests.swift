@@ -259,6 +259,18 @@ struct FrameScalerTests {
         #expect(CVPixelBufferGetWidth(result) == 640)
         #expect(CVPixelBufferGetHeight(result) == 480)
     }
+
+    @Test("Center crop includes scaled image origin")
+    func centerCropIncludesScaledImageOrigin() {
+        let crop = FrameScaler.centerCropRect(
+            forScaledExtent: CGRect(x: 12, y: -8, width: 800, height: 600),
+            targetWidth: 640,
+            targetHeight: 480)
+
+        #expect(crop.origin.x == 92)
+        #expect(crop.origin.y == 52)
+        #expect(crop.size == CGSize(width: 640, height: 480))
+    }
 }
 
 // MARK: - Countdown state (T1.1)
@@ -270,8 +282,52 @@ struct CountdownStateTests {
     func cancelCountdown() {
         let model = EditorModel()
         model.isCountdownActive = true
+        model.countdownRemaining = 3
         model.cancelCountdown()
         #expect(!model.isCountdownActive)
+        #expect(model.countdownRemaining == 0)
         #expect(model.statusMessage == "Countdown cancelled.")
+    }
+}
+
+// MARK: - Recording gap collapse (T1.3)
+
+@Suite("Recording gap collapse")
+@MainActor
+struct RecordingGapCollapseTests {
+
+    @Test("Collapse uses chronological order rather than storage order")
+    func collapseUsesChronologicalOrder() {
+        let model = EditorModel()
+        let mediaID = UUID()
+        let duration = CMTime(seconds: 2, preferredTimescale: 600)
+        let first = Clip(mediaID: mediaID, sourceStart: .zero, duration: duration,
+                         timelineStart: .zero)
+        let second = Clip(mediaID: mediaID, sourceStart: .zero, duration: duration,
+                          timelineStart: CMTime(seconds: 5, preferredTimescale: 600))
+        let third = Clip(mediaID: mediaID, sourceStart: .zero, duration: duration,
+                         timelineStart: CMTime(seconds: 12, preferredTimescale: 600))
+        let unrelated = Clip(mediaID: mediaID, sourceStart: .zero, duration: duration,
+                             timelineStart: CMTime(seconds: 30, preferredTimescale: 600))
+        let track = Track(name: "Screen", kind: .video)
+        track.clips = [second, unrelated, first, third]
+        model.project.videoTracks = [track]
+        model.lastRecordingSlots = [first, second, third].map { clip in
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .display, trackKind: .video, chunkIndex: 0),
+                trackID: track.id,
+                trackIndex: 0,
+                clipID: clip.id,
+                mediaID: clip.mediaID,
+                timelineStart: clip.timelineStart)
+        }
+
+        model.collapseRecordingGap()
+
+        let startsByID = Dictionary(uniqueKeysWithValues: track.clips.map { ($0.id, $0.timelineStart.seconds) })
+        #expect(startsByID[first.id] == 0)
+        #expect(startsByID[second.id] == 2)
+        #expect(startsByID[third.id] == 4)
+        #expect(startsByID[unrelated.id] == 30)
     }
 }
