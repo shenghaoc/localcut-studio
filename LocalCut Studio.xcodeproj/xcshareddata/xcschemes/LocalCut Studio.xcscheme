@@ -41,6 +41,17 @@
                ReferencedContainer = "container:LocalCut Studio.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "000000000000000300000000"
+               BuildableName = "LocalCut StudioUITests.xctest"
+               BlueprintName = "LocalCut StudioUITests"
+               ReferencedContainer = "container:LocalCut Studio.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

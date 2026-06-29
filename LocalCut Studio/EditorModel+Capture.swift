@@ -52,9 +52,87 @@ nonisolated struct RecordingSlot: Equatable, Sendable {
     var timelineStart: CMTime
 }
 
+nonisolated struct CaptureLandingChunk: Equatable, Sendable {
+    var url: URL
+    var ended: CaptureSourceEndedRecord?
+    var chunkIndex: Int
+}
+
+nonisolated enum CaptureChunkResolver {
+    static func chunks(for source: CaptureRecoveredSource,
+                       result: CaptureSessionResult,
+                       fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> [CaptureLandingChunk] {
+        let endedRecords = result.manifest.endedRecordsBySourceID[source.id] ?? []
+        var chunks = endedRecords.compactMap { ended -> CaptureLandingChunk? in
+            let chunkIndex = resumeCount(beforeOrAt: ended.atUs, in: result.manifest)
+            let url = chunkURL(
+                directoryURL: result.directoryURL,
+                baseRelativePath: source.descriptor.relativePath,
+                chunkIndex: chunkIndex)
+            guard fileExists(url) else { return nil }
+            return CaptureLandingChunk(url: url, ended: ended, chunkIndex: chunkIndex)
+        }
+
+        if chunks.isEmpty {
+            let baseURL = chunkURL(
+                directoryURL: result.directoryURL,
+                baseRelativePath: source.descriptor.relativePath,
+                chunkIndex: 0)
+            if fileExists(baseURL) {
+                chunks.append(CaptureLandingChunk(url: baseURL, ended: nil, chunkIndex: 0))
+            }
+        }
+
+        if !result.manifest.isFinalized {
+            let openChunkIndex = resumeCount(in: result.manifest)
+            let openURL = chunkURL(
+                directoryURL: result.directoryURL,
+                baseRelativePath: source.descriptor.relativePath,
+                chunkIndex: openChunkIndex)
+            if fileExists(openURL), !chunks.contains(where: { $0.url == openURL }) {
+                chunks.append(CaptureLandingChunk(url: openURL, ended: nil, chunkIndex: openChunkIndex))
+            }
+        }
+
+        return chunks.sorted { $0.chunkIndex < $1.chunkIndex }
+    }
+
+    static func chunkURL(directoryURL: URL, baseRelativePath: String, chunkIndex: Int) -> URL {
+        let baseURL = URL(fileURLWithPath: baseRelativePath)
+        let ext = baseURL.pathExtension
+        let stem = baseURL.deletingPathExtension().lastPathComponent
+        let filename = chunkIndex == 0 ? "\(stem).\(ext)" : "\(stem)-\(chunkIndex).\(ext)"
+        return directoryURL.appendingPathComponent(filename)
+    }
+
+    private static func resumeCount(in manifest: CaptureManifest) -> Int {
+        manifest.records.reduce(0) { count, record in
+            if case .resume = record { return count + 1 }
+            return count
+        }
+    }
+
+    private static func resumeCount(beforeOrAt atUs: Int64, in manifest: CaptureManifest) -> Int {
+        manifest.records.reduce(0) { count, record in
+            if case .resume(let resume) = record, resume.atUs <= atUs {
+                return count + 1
+            }
+            return count
+        }
+    }
+}
+
 extension EditorModel {
     func requestRecorder() {
         isRecorderPresented = true
+    }
+
+    var canCollapseRecordingGaps: Bool {
+        hasLastRecordingTake && !isRecording && !isPaused && !isStartingRecording && !isPausingRecording && !isStoppingRecording
+    }
+
+    var canRetakeRecording: Bool {
+        hasLastRecordingTake && lastRecordingRequest != nil && !isRecording && !isPaused && !isStartingRecording && !isPausingRecording && !isStoppingRecording
     }
 
     func chooseRecordingsFolder() -> URL? {
@@ -126,7 +204,7 @@ extension EditorModel {
                         microphoneDeviceID: String?,
                         captureRegion: CaptureRegion? = nil,
                         pipPreset: PiPPreset? = nil) async {
-        guard !isRecording, !isStartingRecording, !isStoppingRecording else { return }
+        guard !isRecording, !isPaused, !isCountdownActive, !isStartingRecording, !isPausingRecording, !isStoppingRecording else { return }
         isStartingRecording = true
         defer { isStartingRecording = false }
         guard let root = resolvedRecordingsFolder(promptIfMissing: true) else {
@@ -255,7 +333,12 @@ extension EditorModel {
     }
 
     func stopRecording(statusMessage stopStatusMessage: String = "Stopping recording…") {
-        guard isRecording || isPaused, !isStoppingRecording else { return }
+        guard isRecording || isPaused,
+              !isStartingRecording,
+              !isPausingRecording,
+              !isStoppingRecording else {
+            return
+        }
         isRecording = false
         isPaused = false
         isStoppingRecording = true
@@ -311,7 +394,7 @@ extension EditorModel {
         captureRegion: CaptureRegion? = nil,
         pipPreset: PiPPreset? = nil
     ) async {
-        guard !isRecording, !isCountdownActive, !isStoppingRecording else { return }
+        guard !isRecording, !isPaused, !isCountdownActive, !isStartingRecording, !isPausingRecording, !isStoppingRecording else { return }
         let countdownSeconds = max(0, countdownSeconds)
         self.countdownSeconds = countdownSeconds
         countdownRemaining = countdownSeconds
@@ -353,6 +436,7 @@ extension EditorModel {
             capabilities: Capabilities.current,
             captureRegion: captureRegion)
         lastRecordingSlots = []
+        hasLastRecordingTake = false
 
         await startRecording(
             target: target,
@@ -376,7 +460,10 @@ extension EditorModel {
     /// Pause the current recording. Stops capture streams and finishes the
     /// current writer chunks. The PTS gap is preserved on the timeline.
     func pauseRecording() async {
-        guard isRecording, !isStoppingRecording else { return }
+        guard isRecording, !isPausingRecording, !isStoppingRecording else { return }
+        isPausingRecording = true
+        statusMessage = "Pausing recording…"
+        defer { isPausingRecording = false }
         do {
             try await captureCoordinator.pause()
             pauseStartedAt = Date()
@@ -402,7 +489,7 @@ extension EditorModel {
     /// Resume a paused recording. Creates new writer chunks and restarts
     /// capture streams. The PTS gap since pause is preserved.
     func resumeRecording() async {
-        guard isPaused, !isStartingRecording else { return }
+        guard isPaused, !isStartingRecording, !isPausingRecording, !isStoppingRecording else { return }
         isStartingRecording = true
         defer { isStartingRecording = false }
         do {
@@ -524,7 +611,7 @@ extension EditorModel {
     func retakeRecording() async {
         guard let request = lastRecordingRequest,
               !lastRecordingSlots.isEmpty,
-              !isRecording, !isPaused, !isStoppingRecording else {
+              !isRecording, !isPaused, !isStartingRecording, !isPausingRecording, !isStoppingRecording else {
             statusMessage = "No recording to retake."
             return
         }
@@ -553,6 +640,7 @@ extension EditorModel {
         project.videoTracks.removeAll { videoTrackIDs.contains($0.id) && $0.clips.isEmpty }
         project.audioTracks.removeAll { audioTrackIDs.contains($0.id) && $0.clips.isEmpty }
         lastRecordingSlots = []
+        hasLastRecordingTake = false
         scheduleRebuild()
 
         // Start a new recording with the same parameters.
@@ -569,6 +657,7 @@ extension EditorModel {
             let failureStatus = statusMessage
             applyState(before)
             lastRecordingSlots = previousSlots
+            hasLastRecordingTake = !previousSlots.isEmpty
             retakeUndoBefore = nil
             retakePreviousSlots = []
             retakeTimelinePositions = [:]
@@ -623,6 +712,7 @@ extension EditorModel {
             if let before = retakeUndoBefore {
                 applyState(before)
                 lastRecordingSlots = retakePreviousSlots
+                hasLastRecordingTake = !retakePreviousSlots.isEmpty
                 retakeUndoBefore = nil
                 retakePreviousSlots = []
                 retakeTimelinePositions = [:]
@@ -638,46 +728,10 @@ extension EditorModel {
             return false
         }
 
-        // With pause/resume, a single source can produce multiple chunk files
-        // (e.g. screen.mov, screen-1.mov). Collect all chunk URLs per source.
-        let endedBySource = result.manifest.endedRecordsBySourceID
-
         var loaded: [LoadedCapturedSource] = []
         var loadErrors: [String] = []
         for source in recoveredSources {
-            let chunks = endedBySource[source.id] ?? []
-            // Collect (URL, ended-record) pairs for each chunk.
-            struct ChunkInfo {
-                var url: URL
-                var ended: CaptureSourceEndedRecord?
-                var chunkIndex: Int
-            }
-            let chunkInfos: [ChunkInfo]
-            if chunks.isEmpty {
-                let url = result.directoryURL.appendingPathComponent(source.descriptor.relativePath)
-                chunkInfos = FileManager.default.fileExists(atPath: url.path)
-                    ? [ChunkInfo(url: url, ended: nil, chunkIndex: 0)]
-                    : []
-            } else {
-                chunkInfos = chunks.compactMap { ended -> ChunkInfo? in
-                    let resumeCountBefore = result.manifest.records.filter { record in
-                        if case .resume(let resume) = record, resume.atUs <= ended.atUs {
-                            return true
-                        }
-                        return false
-                    }.count
-                    let basePath = source.descriptor.relativePath
-                    let baseURL = URL(fileURLWithPath: basePath)
-                    let ext = baseURL.pathExtension
-                    let stem = baseURL.deletingPathExtension().lastPathComponent
-                    let filename = resumeCountBefore == 0
-                        ? "\(stem).\(ext)"
-                        : "\(stem)-\(resumeCountBefore).\(ext)"
-                    let url = result.directoryURL.appendingPathComponent(filename)
-                    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-                    return ChunkInfo(url: url, ended: ended, chunkIndex: resumeCountBefore)
-                }
-            }
+            let chunkInfos = CaptureChunkResolver.chunks(for: source, result: result)
 
             guard !chunkInfos.isEmpty else { continue }
 
@@ -836,6 +890,7 @@ extension EditorModel {
         // Record slots for potential retake.
         if !result.wasRecovered {
             lastRecordingSlots = newSlots
+            hasLastRecordingTake = !newSlots.isEmpty
             lastRecordingPiPPreset = landingPiPPreset
         }
         // Clear retake state and PiP preset after use so stale values don't

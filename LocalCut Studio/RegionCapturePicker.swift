@@ -1,5 +1,37 @@
 import AppKit
 
+nonisolated enum RegionCaptureOverlayGeometry {
+    static let minimumSelectionSize: CGFloat = 20
+
+    static func selectionRect(start: CGPoint?, current: CGPoint?) -> CGRect? {
+        guard let start, let current else { return nil }
+        return CGRect(
+            x: min(start.x, current.x),
+            y: min(start.y, current.y),
+            width: abs(current.x - start.x),
+            height: abs(current.y - start.y))
+    }
+
+    static func captureRegion(selectionRect: CGRect?,
+                              screenFrame: CGRect,
+                              displayID: UInt32,
+                              displayPixelWidth: Int,
+                              displayPixelHeight: Int) -> CaptureRegion? {
+        guard let selectionRect,
+              selectionRect.width >= minimumSelectionSize,
+              selectionRect.height >= minimumSelectionSize else {
+            return nil
+        }
+        let screenSelection = selectionRect.offsetBy(dx: screenFrame.minX, dy: screenFrame.minY)
+        return CaptureRegion(
+            displayID: displayID,
+            selectionInScreen: screenSelection,
+            screenFrame: screenFrame,
+            displayPixelWidth: displayPixelWidth,
+            displayPixelHeight: displayPixelHeight)
+    }
+}
+
 @MainActor
 final class RegionCapturePicker {
     private static var activeController: RegionCaptureWindowController?
@@ -145,19 +177,10 @@ private final class RegionSelectionView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         currentPoint = convert(event.locationInWindow, from: nil)
-        guard let selectionRect,
-              selectionRect.width >= 20,
-              selectionRect.height >= 20 else {
-            startPoint = nil
-            currentPoint = nil
-            needsDisplay = true
-            return
-        }
-        let screenSelection = selectionRect.offsetBy(dx: screenFrame.minX, dy: screenFrame.minY)
-        guard let region = CaptureRegion(
-            displayID: displayID,
-            selectionInScreen: screenSelection,
+        guard let region = RegionCaptureOverlayGeometry.captureRegion(
+            selectionRect: selectionRect,
             screenFrame: screenFrame,
+            displayID: displayID,
             displayPixelWidth: displayPixelWidth,
             displayPixelHeight: displayPixelHeight) else {
             startPoint = nil
@@ -189,12 +212,7 @@ private final class RegionSelectionView: NSView {
     }
 
     private var selectionRect: CGRect? {
-        guard let startPoint, let currentPoint else { return nil }
-        return CGRect(
-            x: min(startPoint.x, currentPoint.x),
-            y: min(startPoint.y, currentPoint.y),
-            width: abs(currentPoint.x - startPoint.x),
-            height: abs(currentPoint.y - startPoint.y))
+        RegionCaptureOverlayGeometry.selectionRect(start: startPoint, current: currentPoint)
     }
 
     private func drawInstructionText() {

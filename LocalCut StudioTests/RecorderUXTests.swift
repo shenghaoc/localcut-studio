@@ -118,6 +118,52 @@ struct ManifestPauseResumeTests {
         #expect(grouped.count == 1)
         #expect(grouped[sourceID]?.count == 2)
     }
+
+    @Test("Unfinalized resumed sessions probe the open chunk without an ended record")
+    func unfinalizedResumedSessionProbesOpenChunk() throws {
+        let sourceID = UUID()
+        let source = CaptureSourceDescriptor(
+            id: sourceID,
+            kind: .display,
+            displayName: "Screen",
+            relativePath: "screen.mov")
+        let directoryURL = URL(fileURLWithPath: "/tmp/LocalCutRecorderProbe", isDirectory: true)
+        let manifest = CaptureManifest(records: [
+            .header(CaptureManifestHeader(
+                sessionID: UUID(),
+                createdAt: Date(),
+                sessionStartHostTimeUs: 0,
+                sources: [source],
+                encoders: [:])),
+            .sourceEnded(CaptureSourceEndedRecord(
+                sourceID: sourceID,
+                atUs: 3_000_000,
+                durationUs: 3_000_000,
+                sampleCount: 90)),
+            .pause(CapturePauseRecord(atUs: 3_000_000)),
+            .resume(CaptureResumeRecord(atUs: 5_000_000)),
+        ])
+        let result = CaptureSessionResult(
+            id: UUID(),
+            directoryURL: directoryURL,
+            manifestURL: directoryURL.appendingPathComponent("manifest.ndjson"),
+            manifest: manifest,
+            wasRecovered: true)
+        let recovered = try #require(result.manifest.recoveredSources.first)
+        let existingURLs: Set<URL> = [
+            directoryURL.appendingPathComponent("screen.mov"),
+            directoryURL.appendingPathComponent("screen-1.mov"),
+        ]
+
+        let chunks = CaptureChunkResolver.chunks(for: recovered, result: result) { url in
+            existingURLs.contains(url)
+        }
+
+        #expect(chunks.map(\.chunkIndex) == [0, 1])
+        #expect(chunks[0].ended != nil)
+        #expect(chunks[1].ended == nil)
+        #expect(chunks[1].url.lastPathComponent == "screen-1.mov")
+    }
 }
 
 // MARK: - CaptureCoordinator pause/resume state (T6.1)
@@ -339,6 +385,53 @@ struct RegionCaptureGeometryTests {
         #expect(region.outputWidth == 1280)
         #expect(region.outputHeight == 720)
     }
+
+    @Test("Capture region applies only to matching display captures")
+    func regionAppliesOnlyToMatchingDisplay() throws {
+        let region = try #require(CaptureRegion(
+            displayID: 7,
+            selectionInScreen: CGRect(x: 100, y: 200, width: 640, height: 360),
+            screenFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            displayPixelWidth: 2880,
+            displayPixelHeight: 1800))
+
+        #expect(region.applies(to: .display(displayID: 7, width: 2880, height: 1800)))
+        #expect(!region.applies(to: .display(displayID: 8, width: 2880, height: 1800)))
+        #expect(!region.applies(to: .window(
+            windowID: 11,
+            title: "Window",
+            owner: "App",
+            width: 1280,
+            height: 720)))
+        #expect(!region.applies(to: .application(
+            processID: 22,
+            bundleIdentifier: "com.example.App",
+            name: "App",
+            displayID: 7,
+            width: 1280,
+            height: 720)))
+    }
+
+    @Test("Overlay geometry normalizes reversed drags")
+    func overlayGeometryNormalizesReversedDrag() throws {
+        let rect = try #require(RegionCaptureOverlayGeometry.selectionRect(
+            start: CGPoint(x: 740, y: 560),
+            current: CGPoint(x: 100, y: 200)))
+
+        #expect(rect == CGRect(x: 100, y: 200, width: 640, height: 360))
+    }
+
+    @Test("Overlay geometry rejects tiny selections")
+    func overlayGeometryRejectsTinySelections() {
+        let region = RegionCaptureOverlayGeometry.captureRegion(
+            selectionRect: CGRect(x: 10, y: 10, width: 12, height: 18),
+            screenFrame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            displayID: 7,
+            displayPixelWidth: 2880,
+            displayPixelHeight: 1800)
+
+        #expect(region == nil)
+    }
 }
 
 // MARK: - Countdown state (T1.1)
@@ -389,6 +482,8 @@ struct RecordingGapCollapseTests {
                 mediaID: clip.mediaID,
                 timelineStart: clip.timelineStart)
         }
+        model.hasLastRecordingTake = true
+        #expect(model.canCollapseRecordingGaps)
 
         model.collapseRecordingGap()
 
@@ -516,6 +611,16 @@ struct RecordingDocumentCommandGuardTests {
 
         #expect(model.confirmClose(window: window) == false)
         #expect(model.statusMessage == "Resume and stop the recording before closing the window.")
+    }
+
+    @Test("Window close is blocked while countdown is active")
+    func closeBlockedDuringCountdown() {
+        let model = EditorModel()
+        let window = NSWindow()
+        model.isCountdownActive = true
+
+        #expect(model.confirmClose(window: window) == false)
+        #expect(model.statusMessage == "Cancel the countdown before closing the window.")
     }
 }
 

@@ -219,8 +219,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         configuration.queueDepth = 5
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
         if let region = withLockedState({ captureRegion }),
-           case .display(let displayID, _, _) = withLockedState({ target }),
-           region.displayID == displayID {
+           region.applies(to: withLockedState({ target })) {
             configuration.sourceRect = region.sourceRect
         }
         configuration.showsCursor = true

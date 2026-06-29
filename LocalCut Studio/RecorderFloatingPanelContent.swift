@@ -50,7 +50,7 @@ struct RecorderFloatingPanelContent: View {
             }
             .menuStyle(.button)
             .buttonStyle(.borderless)
-            .disabled(!model.isRecording || screenOptions.isEmpty)
+            .disabled(!model.isRecording || model.isPausingRecording || model.isStartingRecording || screenOptions.isEmpty)
             .help(sourceSwitchHelp)
             .accessibilityLabel("Switch capture source")
 
@@ -62,6 +62,7 @@ struct RecorderFloatingPanelContent: View {
                     Image(systemName: "play.fill")
                 }
                 .buttonStyle(.borderless)
+                .disabled(model.isStartingRecording || model.isStoppingRecording)
                 .help("Resume recording")
                 .accessibilityLabel("Resume recording")
             } else if model.isRecording {
@@ -71,6 +72,7 @@ struct RecorderFloatingPanelContent: View {
                     Image(systemName: "pause.fill")
                 }
                 .buttonStyle(.borderless)
+                .disabled(model.isPausingRecording || model.isStoppingRecording)
                 .help("Pause recording")
                 .accessibilityLabel("Pause recording")
             }
@@ -83,6 +85,7 @@ struct RecorderFloatingPanelContent: View {
                     .foregroundStyle(.red)
             }
             .buttonStyle(.borderless)
+            .disabled(model.isStartingRecording || model.isPausingRecording || model.isStoppingRecording)
             .help("Stop recording")
             .accessibilityLabel("Stop recording")
         }
@@ -118,6 +121,7 @@ struct RecorderFloatingPanelContent: View {
 
     private var sourceSwitchHelp: String {
         if !model.isRecording { return "Start recording before switching sources" }
+        if model.isPausingRecording || model.isStartingRecording { return "Finish the recording transition before switching sources" }
         if sourceLoadFailed { return "Screen sources are unavailable" }
         if screenOptions.isEmpty { return "No screen sources available" }
         return "Switch capture source"

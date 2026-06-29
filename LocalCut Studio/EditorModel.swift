@@ -135,6 +135,7 @@ final class EditorModel {
     var isRecorderPresented = false
     var isStartingRecording = false
     var isRecording = false
+    var isPausingRecording = false
     var isStoppingRecording = false
     var hideFloatingPanelWhileRecording = false
     var recordingStartedAt: Date?
@@ -158,6 +159,7 @@ final class EditorModel {
     var countdownSeconds = 3
     var countdownRemaining = 0
     var isPaused = false
+    var hasLastRecordingTake = false
     /// Stored request for retake: replaces the most recent chunk-set in the same
     /// timeline slot.
     @ObservationIgnored nonisolated(unsafe) var lastRecordingRequest: CaptureStartRequest?

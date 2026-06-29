@@ -9,6 +9,7 @@ actor CaptureCoordinator {
         case idle
         case starting
         case recording
+        case pausing
         case paused
         case stopping
     }
@@ -40,6 +41,9 @@ actor CaptureCoordinator {
         /// Source IDs from the original header, reused for resumed chunks so
         /// `source-ended` records are keyed to header sources.
         var sourceIDs: [CaptureSourceKind: UUID] = [:]
+        /// Once a critical manifest append fails, the session must remain
+        /// unfinalized so recovery can inspect the fragmented files on next launch.
+        var manifestWriteFailed = false
     }
 
     private var state: State = .idle
@@ -356,16 +360,23 @@ actor CaptureCoordinator {
             }
         }
 
-        // Append all ended records (current chunk + previously finished chunks).
-        for ended in allEndedRecords {
-            try? active.manifest.append(.sourceEnded(ended))
-        }
-        // Only finalize a clean stop. If a writer failed, leave the manifest
+        // Only finalize a clean stop. If a writer failed or a source-ended record
+        // cannot be persisted, leave the manifest
         // unfinalized so the session is still re-offered by crash recovery on the
         // next launch — but always return a partial result here so the UI can
         // land the sources that did finish, rather than throwing them away.
+        var manifestErrors: [Error] = []
+        for ended in allEndedRecords {
+            do {
+                try active.manifest.append(.sourceEnded(ended))
+            } catch {
+                manifestErrors.append(error)
+            }
+        }
+        finishErrors.append(contentsOf: manifestErrors)
+
         var manifestFinalized = false
-        if finishErrors.isEmpty {
+        if finishErrors.isEmpty, !active.manifestWriteFailed {
             let durationUs = max(
                 0,
                 CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock())) - active.startHostTimeUs)
@@ -398,6 +409,7 @@ actor CaptureCoordinator {
         guard state == .recording, var active = activeSession else {
             throw CaptureEngineError.notRecording
         }
+        state = .pausing
 
         // Stop all capture streams.
         for session in active.sessions {
@@ -407,6 +419,7 @@ actor CaptureCoordinator {
         // Finish the current chunk's writers and collect ended records.
         let chunkWriters = active.writers
         var pauseErrors: [String] = []
+        var manifestErrors: [String] = []
         await withTaskGroup(of: (UUID, Result<CaptureSourceEndedRecord, Error>).self) { group in
             for writer in chunkWriters {
                 let sourceID = writer.source.id
@@ -422,7 +435,11 @@ actor CaptureCoordinator {
             for await (_, result) in group {
                 switch result {
                 case .success(let ended):
-                    try? active.manifest.append(.sourceEnded(ended))
+                    do {
+                        try active.manifest.append(.sourceEnded(ended))
+                    } catch {
+                        manifestErrors.append(error.localizedDescription)
+                    }
                 case .failure(let error):
                     pauseErrors.append(error.localizedDescription)
                 }
@@ -431,10 +448,17 @@ actor CaptureCoordinator {
 
         // Record the pause event and accumulate finished writers.
         let pauseHostTimeUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
-        try? active.manifest.append(.pause(CapturePauseRecord(atUs: pauseHostTimeUs)))
+        do {
+            try active.manifest.append(.pause(CapturePauseRecord(atUs: pauseHostTimeUs)))
+        } catch {
+            manifestErrors.append(error.localizedDescription)
+        }
         active.allFinishedWriters.append(contentsOf: chunkWriters)
         active.writers = []
         active.sessions = []
+        if !manifestErrors.isEmpty {
+            active.manifestWriteFailed = true
+        }
         activeSession = active
         state = .paused
 
@@ -442,9 +466,10 @@ actor CaptureCoordinator {
         // The streams are already stopped and the active session has no live
         // writers, so keep the coordinator paused even while reporting the
         // partial pause failure to the UI.
-        if !pauseErrors.isEmpty {
+        let errors = pauseErrors + manifestErrors
+        if !errors.isEmpty {
             throw CaptureEngineError.captureSessionFailed(
-                "Pause encountered writer errors: \(pauseErrors.joined(separator: "; "))")
+                "Pause encountered capture errors: \(errors.joined(separator: "; "))")
         }
     }
 
@@ -600,7 +625,17 @@ actor CaptureCoordinator {
 
         // Record resume event.
         let resumeHostTimeUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
-        try? manifest.append(.resume(CaptureResumeRecord(atUs: resumeHostTimeUs)))
+        do {
+            try manifest.append(.resume(CaptureResumeRecord(atUs: resumeHostTimeUs)))
+        } catch {
+            for writer in writers {
+                _ = try? await writer.finish()
+            }
+            var restored = active
+            restored.manifestWriteFailed = true
+            activeSession = restored
+            throw error
+        }
 
         // Update the active session with new writers and sessions.
         // Increment chunk index once for the whole resume cycle.

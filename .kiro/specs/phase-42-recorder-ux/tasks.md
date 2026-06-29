@@ -5,8 +5,8 @@
 ## Countdown + transport
 
 - [x] **T1.1** Countdown modal with 3 / 5 / 10 s options + cancel.
-- [x] **T1.2** Pause / resume wiring: stop stream + writer, open new chunk on resume; preserve PTS gap.
-- [x] **T1.3** Documented "ripple-collapse gap" command.
+- [x] **T1.2** Pause / resume wiring: stop stream + writer, open new chunk on resume; preserve PTS gap; serialize pause/resume/stop transitions and keep failed manifest writes recoverable.
+- [x] **T1.3** Visible "ripple-collapse gap" command in the Record menu / toolbar.
 
 ## Source switching
 
@@ -26,12 +26,12 @@
 
 ## Region capture + retake
 
-- [x] **T5.1** Transparent overlay window for region drag; lock-and-record with `SCStreamConfiguration.sourceRect`.
-- [x] **T5.2** Retake command: replace most-recent chunk-set in the same timeline slot.
+- [x] **T5.1** Transparent overlay window for display-region drag; lock-and-record with `SCStreamConfiguration.sourceRect`. Window/app captures keep their content-filter bounds and disable the region picker.
+- [x] **T5.2** Visible retake command: replace most-recent chunk-set in the same timeline slot and track stack position.
 
 ## Verification
 
-- [x] **T6.1** Swift Testing coverage: record → pause → resume → stop manifest semantics and timeline gap/collapse behavior.
+- [x] **T6.1** XCUITest target coverage for the recorder start → pause → resume → stop → collapse UX flow, plus Swift Testing coverage for manifest semantics, unfinalized resumed-chunk recovery, region-overlay geometry, display-only `sourceRect`, and timeline gap/collapse behavior.
 - [x] **T6.2** Floating-panel fallback verification: hidden panel still leaves main-window recording controls available.
 - [x] **T6.3** Retake replacement, per-source track-index, and stale-PiP regression coverage; retake landing remains one undoable import operation.
 - [x] **T6.4** `xcodebuild` (Debug, macOS) green.

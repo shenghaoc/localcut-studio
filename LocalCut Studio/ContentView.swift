@@ -9,10 +9,27 @@ struct LocalCutStudioApp: App {
     // at app scope so the menu commands and window can share it.
     @State private var model = EditorModel()
 
+#if DEBUG
+    private var runsRecorderUITestHarness: Bool {
+        ProcessInfo.processInfo.arguments.contains("--localcut-ui-test-recorder-harness")
+            || ProcessInfo.processInfo.environment["LOCALCUT_UI_TEST_RECORDER_HARNESS"] == "1"
+    }
+#endif
+
     var body: some Scene {
         WindowGroup {
+#if DEBUG
+            if runsRecorderUITestHarness {
+                RecorderUITestHarnessView()
+                    .frame(minWidth: 420, minHeight: 320)
+            } else {
+                EditorView(model: model)
+                    .frame(minWidth: 1000, minHeight: 640)
+            }
+#else
             EditorView(model: model)
                 .frame(minWidth: 1000, minHeight: 640)
+#endif
         }
         .defaultSize(width: 1360, height: 860)
         .windowStyle(.titleBar)
@@ -26,14 +43,31 @@ struct LocalCutStudioApp: App {
 }
 
 struct RecorderCommands: Commands {
-    let model: EditorModel
+    @Bindable var model: EditorModel
 
     var body: some Commands {
-        CommandGroup(after: .appSettings) {
+        CommandMenu("Record") {
+            Button("Open Recorder") {
+                model.requestRecorder()
+            }
+            .disabled(model.isRecording || model.isPaused || model.isCountdownActive || model.isStartingRecording || model.isPausingRecording || model.isStoppingRecording)
+
             Button("Choose Recordings Folder…") {
                 _ = model.chooseRecordingsFolder()
             }
-            .disabled(model.isRecording || model.isStartingRecording || model.isStoppingRecording)
+            .disabled(model.isRecording || model.isPaused || model.isCountdownActive || model.isStartingRecording || model.isPausingRecording || model.isStoppingRecording)
+
+            Divider()
+
+            Button("Collapse Recording Gaps") {
+                model.collapseRecordingGap()
+            }
+            .disabled(!model.canCollapseRecordingGaps)
+
+            Button("Retake Last Recording") {
+                Task { await model.retakeRecording() }
+            }
+            .disabled(!model.canRetakeRecording)
         }
     }
 }
@@ -300,6 +334,7 @@ struct EditorView: View {
                 } label: {
                     Label("Stop", systemImage: "stop.circle.fill")
                 }
+                .disabled(model.isStartingRecording || model.isPausingRecording || model.isStoppingRecording)
                 .help("Stop recording")
             } else {
                 Button {
@@ -307,8 +342,26 @@ struct EditorView: View {
                 } label: {
                     Label("Record", systemImage: "record.circle")
                 }
-                .disabled(model.isStartingRecording || model.isStoppingRecording)
+                .disabled(model.isCountdownActive || model.isStartingRecording || model.isPausingRecording || model.isStoppingRecording)
                 .help("Open recorder")
+
+                if model.hasLastRecordingTake {
+                    Button {
+                        model.collapseRecordingGap()
+                    } label: {
+                        Label("Collapse Recording Gaps", systemImage: "arrow.left.and.right")
+                    }
+                    .disabled(!model.canCollapseRecordingGaps)
+                    .help("Collapse pause gaps in the last recording")
+
+                    Button {
+                        Task { await model.retakeRecording() }
+                    } label: {
+                        Label("Retake Last Recording", systemImage: "arrow.counterclockwise")
+                    }
+                    .disabled(!model.canRetakeRecording)
+                    .help("Retake the last recording in the same timeline slot")
+                }
             }
 
             Button {

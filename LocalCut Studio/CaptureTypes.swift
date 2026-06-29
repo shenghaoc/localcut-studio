@@ -128,6 +128,11 @@ nonisolated struct CaptureRegion: Hashable, Sendable {
             width: clipped.width,
             height: clipped.height).integral
     }
+
+    func applies(to target: CaptureTarget) -> Bool {
+        guard case .display(let targetDisplayID, _, _) = target else { return false }
+        return targetDisplayID == displayID
+    }
 }
 
 nonisolated struct CaptureDeviceOption: Identifiable, Hashable, Sendable {
