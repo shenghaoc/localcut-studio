@@ -75,7 +75,9 @@ public struct CMTimeCode: Codable, Equatable, Sendable {
     }
 
     public var cmTime: CMTime {
-        CMTime(value: value, timescale: timescale > 0 ? timescale : 600)
+        // timescale is guaranteed > 0: init(_:) stores from a numeric CMTime
+        // and init(from:) clamps nonpositive values to 600.
+        CMTime(value: value, timescale: timescale)
     }
 }
 
