@@ -17,6 +17,7 @@ enum LocalCutAppIntentRouter {
     enum RouterError: LocalizedError, Equatable {
         case modelUnavailable
         case emptyTimeline
+        case actionCancelled
 
         var errorDescription: String? {
             switch self {
@@ -24,6 +25,8 @@ enum LocalCutAppIntentRouter {
                 "The editor is not ready. Please ensure LocalCut Studio is open."
             case .emptyTimeline:
                 "Add media to the timeline before exporting."
+            case .actionCancelled:
+                "The action was cancelled."
             }
         }
     }
@@ -48,26 +51,34 @@ enum LocalCutAppIntentRouter {
         let predecessor = actionChain
         let actionTask = Task { @MainActor in
             await predecessor?.value
+            try Task.checkCancellation()
             try await perform(action, on: model)
         }
         actionChain = Task {
             _ = await actionTask.result
         }
-        try await actionTask.value
+        try await withTaskCancellationHandler {
+            try await actionTask.value
+        } onCancel: {
+            actionTask.cancel()
+        }
     }
 
     private static func perform(_ action: Action, on model: EditorModel) async throws {
         switch action {
         case .newProject:
-            await model.performNewProjectCommand()
+            let succeeded = await model.performNewProjectCommand()
+            if !succeeded { throw RouterError.actionCancelled }
         case .importMedia:
-            await model.performImportMediaCommand()
+            let succeeded = await model.performImportMediaCommand()
+            if !succeeded { throw RouterError.actionCancelled }
         case .exportProject:
             guard model.totalDuration > 0 else {
                 model.statusMessage = RouterError.emptyTimeline.errorDescription ?? ""
                 throw RouterError.emptyTimeline
             }
-            await model.performExportProjectCommand()
+            let succeeded = await model.performExportProjectCommand()
+            if !succeeded { throw RouterError.actionCancelled }
         case .showDiagnostics:
             model.isDiagnosticsVisible = true
             model.statusMessage = "Diagnostics opened from Shortcuts."
