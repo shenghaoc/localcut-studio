@@ -6,6 +6,54 @@ import CoreMedia
 import LocalCutCore
 @testable import LocalCut_Studio
 
+nonisolated private final class RecorderSwitchingSession: CaptureRunningSession, @unchecked Sendable {
+    private let lock = NSLock()
+    private let switchable: Bool
+    private let updateError: CaptureEngineError?
+    private var _updatedTargets: [CaptureTarget] = []
+    private var _excludedWindows: [CGWindowID] = []
+
+    init(supportsSourceSwitching: Bool, updateError: CaptureEngineError? = nil) {
+        self.switchable = supportsSourceSwitching
+        self.updateError = updateError
+    }
+
+    nonisolated var supportsSourceSwitching: Bool { switchable }
+
+    var updatedTargets: [CaptureTarget] {
+        withLock { _updatedTargets }
+    }
+
+    var excludedWindows: [CGWindowID] {
+        withLock { _excludedWindows }
+    }
+
+    func start() async throws {}
+
+    func stop() async {}
+
+    func updateTarget(_ newTarget: CaptureTarget) async throws {
+        if let updateError {
+            throw updateError
+        }
+        withLock {
+            _updatedTargets.append(newTarget)
+        }
+    }
+
+    func excludeWindow(_ windowID: CGWindowID) async throws {
+        withLock {
+            _excludedWindows.append(windowID)
+        }
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
 // MARK: - Pause/resume manifest records (T6.1)
 
 @Suite("Recorder UX — Manifest pause/resume records")
@@ -213,6 +261,59 @@ struct CoordinatorPauseResumeTests {
         await #expect(throws: CaptureEngineError.notRecording) {
             _ = try await coordinator.stop()
         }
+    }
+}
+
+// MARK: - Source switching routing (T2.1)
+
+@Suite("CaptureCoordinator source-switch routing")
+struct CoordinatorSourceSwitchRoutingTests {
+
+    @Test("Source switching uses the first switch-capable session")
+    func sourceSwitchingUsesFirstSwitchCapableSession() async throws {
+        let passive = RecorderSwitchingSession(supportsSourceSwitching: false)
+        let switching = RecorderSwitchingSession(supportsSourceSwitching: true)
+        let target = CaptureTarget.window(
+            windowID: 42,
+            title: "Editor",
+            owner: "LocalCut Studio",
+            width: 1280,
+            height: 720)
+
+        let didUpdate = try await CaptureCoordinator.updateFirstSwitchableSession(
+            [passive, switching],
+            to: target)
+
+        #expect(didUpdate)
+        #expect(passive.updatedTargets.isEmpty)
+        #expect(switching.updatedTargets == [target])
+    }
+
+    @Test("Source switching reports no-op when no session supports switching")
+    func sourceSwitchingReportsNoSwitchableSession() async throws {
+        let passive = RecorderSwitchingSession(supportsSourceSwitching: false)
+        let target = CaptureTarget.display(displayID: 1, width: 1920, height: 1080)
+
+        let didUpdate = try await CaptureCoordinator.updateFirstSwitchableSession(
+            [passive],
+            to: target)
+
+        #expect(!didUpdate)
+        #expect(passive.updatedTargets.isEmpty)
+    }
+
+    @Test("Floating panel exclusion uses the switch-capable session")
+    func floatingPanelExclusionUsesSwitchCapableSession() async throws {
+        let passive = RecorderSwitchingSession(supportsSourceSwitching: false)
+        let switching = RecorderSwitchingSession(supportsSourceSwitching: true)
+
+        let didExclude = try await CaptureCoordinator.excludeWindowFromFirstSwitchableSession(
+            [passive, switching],
+            windowID: 99)
+
+        #expect(didExclude)
+        #expect(passive.excludedWindows.isEmpty)
+        #expect(switching.excludedWindows == [99])
     }
 }
 
@@ -668,6 +769,254 @@ struct RecordingGapCollapseTests {
         #expect(indices[slots[1].key] == 1)
         #expect(indices[slots[2].key] == 0)
         #expect(indices[slots[3].key] == 1)
+    }
+
+    @Test("Retake landing undo and redo restore timeline and recorder slots")
+    func retakeLandingUndoRedoRestoresTimelineAndRecorderSlots() async throws {
+        let model = EditorModel()
+        let duration = CMTime(seconds: 1, preferredTimescale: 600)
+        let previousStart = CMTime(seconds: 7, preferredTimescale: 600)
+        let previousMedia = MediaItem(url: URL(fileURLWithPath: "/tmp/previous-recording.mov"))
+        previousMedia.duration = duration
+        previousMedia.hasVideo = true
+        let previousClip = Clip(
+            mediaID: previousMedia.id,
+            sourceStart: .zero,
+            duration: duration,
+            timelineStart: previousStart)
+        let previousTrack = Track(name: "Previous Screen", kind: .video)
+        previousTrack.clips = [previousClip]
+        model.project.mediaItems = [previousMedia]
+        model.project.videoTracks = [previousTrack]
+        model.project.audioTracks = []
+
+        let key = RecordingSlotKey(sourceKind: .display, trackKind: .video, chunkIndex: 0)
+        let previousSlot = RecordingSlot(
+            key: key,
+            trackID: previousTrack.id,
+            trackIndex: 0,
+            clipID: previousClip.id,
+            mediaID: previousMedia.id,
+            timelineStart: previousStart)
+        model.lastRecordingSlots = [previousSlot]
+        model.hasLastRecordingTake = true
+        let beforeRetake = model.captureState()
+
+        model.project.mediaItems = []
+        model.project.videoTracks = []
+        model.lastRecordingSlots = []
+        model.hasLastRecordingTake = false
+        model.retakeUndoBefore = beforeRetake
+        model.retakePreviousSlots = [previousSlot]
+        model.retakeTimelinePositions = [key: previousStart]
+        model.retakeTrackIndices = [key: 0]
+
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RetakeUndoRedo-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        _ = try await makeVideoFixture(
+            in: directoryURL,
+            name: "screen.mov",
+            duration: duration)
+        let sourceID = UUID()
+        let source = CaptureSourceDescriptor(
+            id: sourceID,
+            kind: .display,
+            displayName: "Display 1",
+            relativePath: "screen.mov",
+            width: 64,
+            height: 64,
+            frameRate: 30)
+        let manifest = CaptureManifest(records: [
+            .header(CaptureManifestHeader(
+                sessionID: UUID(),
+                createdAt: Date(),
+                sessionStartHostTimeUs: 0,
+                sources: [source],
+                encoders: [:])),
+            .sourceEnded(CaptureSourceEndedRecord(
+                sourceID: sourceID,
+                atUs: 1_000_000,
+                durationUs: 1_000_000,
+                timelineStartUs: 0,
+                sampleCount: 30)),
+            .finalize(CaptureFinalizeRecord(atUs: 1_000_000, durationUs: 1_000_000)),
+        ])
+        let result = CaptureSessionResult(
+            id: UUID(),
+            directoryURL: directoryURL,
+            manifestURL: directoryURL.appendingPathComponent("manifest.ndjson"),
+            manifest: manifest,
+            wasRecovered: false)
+
+        let landed = await model.landCaptureSession(result)
+
+        #expect(landed)
+        #expect(model.statusMessage == "Retake added to timeline.")
+        #expect(model.undoTitle.contains("Retake Recording"))
+        let replacementMediaID = try #require(model.project.mediaItems.first?.id)
+        let replacementSlots = model.lastRecordingSlots
+        #expect(replacementSlots.count == 1)
+        #expect(replacementSlots.first?.timelineStart == previousStart)
+        #expect(model.project.videoTracks.first?.clips.first?.timelineStart == previousStart)
+
+        model.undo()
+
+        #expect(model.project.mediaItems.map(\.id) == [previousMedia.id])
+        #expect(model.project.videoTracks.first?.clips.map(\.id) == [previousClip.id])
+        #expect(model.lastRecordingSlots == [previousSlot])
+        #expect(model.hasLastRecordingTake)
+        #expect(model.canRedo)
+
+        model.redo()
+
+        #expect(model.project.mediaItems.map(\.id) == [replacementMediaID])
+        #expect(model.lastRecordingSlots == replacementSlots)
+        #expect(model.hasLastRecordingTake)
+        #expect(model.project.videoTracks.first?.clips.first?.timelineStart == previousStart)
+    }
+
+    private func makeVideoFixture(in directoryURL: URL,
+                                  name: String,
+                                  duration: CMTime,
+                                  fps: Int32 = 30) async throws -> URL {
+        let url = directoryURL.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: url)
+
+        let size = CGSize(width: 64, height: 64)
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(size.width),
+            AVVideoHeightKey: Int(size.height),
+        ])
+        input.expectsMediaDataInRealTime = false
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+                kCVPixelBufferWidthKey as String: Int(size.width),
+                kCVPixelBufferHeightKey as String: Int(size.height),
+            ])
+        writer.add(input)
+        try #require(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+
+        let frameCount = max(1, Int(duration.seconds * Double(fps)))
+        for frame in 0..<frameCount {
+            while !input.isReadyForMoreMediaData {
+                guard writer.status == .writing else {
+                    throw writer.error ?? NSError(domain: "RecorderUXTests", code: -1)
+                }
+                await Task.yield()
+            }
+            let buffer = try makePixelBuffer(size: size, adaptor: adaptor)
+            let lockStatus = CVPixelBufferLockBaseAddress(buffer, [])
+            guard lockStatus == kCVReturnSuccess else {
+                throw NSError(domain: "RecorderUXTests", code: Int(lockStatus))
+            }
+            defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+            guard let baseAddress = CVPixelBufferGetBaseAddress(buffer) else {
+                throw NSError(domain: "RecorderUXTests", code: -2)
+            }
+            memset(baseAddress, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
+            guard adaptor.append(
+                buffer,
+                withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else {
+                throw writer.error ?? NSError(domain: "RecorderUXTests", code: -3)
+            }
+        }
+
+        input.markAsFinished()
+        await writer.finishWriting()
+        try #require(writer.status == .completed)
+        return url
+    }
+
+    private func makePixelBuffer(size: CGSize,
+                                 adaptor: AVAssetWriterInputPixelBufferAdaptor) throws -> CVPixelBuffer {
+        var pixelBuffer: CVPixelBuffer?
+        if let pool = adaptor.pixelBufferPool {
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+        }
+        if pixelBuffer == nil {
+            CVPixelBufferCreate(
+                kCFAllocatorDefault,
+                Int(size.width),
+                Int(size.height),
+                kCVPixelFormatType_32ARGB,
+                nil,
+                &pixelBuffer)
+        }
+        return try #require(pixelBuffer)
+    }
+}
+
+// MARK: - Recording transport error handling
+
+@Suite("Recording transport error handling")
+@MainActor
+struct RecordingTransportErrorHandlingTests {
+
+    @Test("Pause error from stale coordinator state resets recording UI")
+    func pauseErrorFromStaleCoordinatorStateResetsRecordingUI() async {
+        let model = EditorModel()
+        model.isRecording = true
+        model.recordingMicLevel = 0.5
+
+        await model.pauseRecording()
+
+        #expect(!model.isRecording)
+        #expect(!model.isPaused)
+        #expect(!model.isPausingRecording)
+        #expect(model.recordingMicLevel == 0)
+        #expect(model.statusMessage == "Could not pause: No recording is running.")
+    }
+
+    @Test("Resume error is surfaced while keeping paused state retryable")
+    func resumeErrorKeepsPausedStateRetryable() async {
+        let model = EditorModel()
+        model.isPaused = true
+
+        await model.resumeRecording()
+
+        #expect(model.isPaused)
+        #expect(!model.isRecording)
+        #expect(!model.isStartingRecording)
+        #expect(model.statusMessage == "Could not resume: Capture failed: No paused recording to resume.")
+    }
+
+    @Test("Stop error clears stale recording UI state")
+    func stopErrorClearsStaleRecordingUIState() async throws {
+        let model = EditorModel()
+        model.isRecording = true
+        model.recordingStartedAt = Date()
+        model.recordingElapsedSeconds = 12
+        model.recordingDiskFreeBytes = 100
+        model.recordingDiskWarning = .warn
+        model.recordingSourceCount = 2
+        model.recordingBackpressureCount = 1
+        model.recordingIncludesMicrophone = true
+        model.recordingMicLevel = 0.8
+
+        model.stopRecording()
+        for _ in 0..<50 where model.isStoppingRecording {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(!model.isStoppingRecording)
+        #expect(!model.isRecording)
+        #expect(!model.isPaused)
+        #expect(model.recordingStartedAt == nil)
+        #expect(model.recordingElapsedSeconds == 0)
+        #expect(model.recordingDiskFreeBytes == nil)
+        #expect(model.recordingDiskWarning == nil)
+        #expect(model.recordingSourceCount == 0)
+        #expect(model.recordingBackpressureCount == 0)
+        #expect(!model.recordingIncludesMicrophone)
+        #expect(model.recordingMicLevel == 0)
+        #expect(model.statusMessage == "No recording is running.")
     }
 }
 

@@ -701,15 +701,13 @@ actor CaptureCoordinator {
         guard state == .recording, var active = activeSession else {
             throw CaptureEngineError.notRecording
         }
-        for session in active.sessions where session.supportsSourceSwitching {
-            try await session.updateTarget(newTarget)
-            // Persist the switched target so resume() uses it.
-            active.currentTarget = newTarget
-            active.startRequest?.captureRegion = nil
-            activeSession = active
-            return
+        guard try await Self.updateFirstSwitchableSession(active.sessions, to: newTarget) else {
+            throw CaptureEngineError.captureSessionFailed("No screen capture session to update.")
         }
-        throw CaptureEngineError.captureSessionFailed("No screen capture session to update.")
+        // Persist the switched target so resume() uses it.
+        active.currentTarget = newTarget
+        active.startRequest?.captureRegion = nil
+        activeSession = active
     }
 
     /// The CGWindowID of the floating control panel, used to exclude it from
@@ -726,10 +724,7 @@ actor CaptureCoordinator {
         }
         // Update the live screen-capture filter to exclude the panel.
         guard state == .recording, let active = activeSession else { return }
-        for session in active.sessions where session.supportsSourceSwitching {
-            try await session.excludeWindow(windowID)
-            return
-        }
+        _ = try await Self.excludeWindowFromFirstSwitchableSession(active.sessions, windowID: windowID)
     }
 
     func scanRecoveredSessions(rootURL: URL) throws -> [CaptureSessionResult] {
@@ -791,6 +786,26 @@ actor CaptureCoordinator {
             }
             return errors
         }
+    }
+
+    @discardableResult
+    static func updateFirstSwitchableSession(_ sessions: [CaptureRunningSession],
+                                             to newTarget: CaptureTarget) async throws -> Bool {
+        for session in sessions where session.supportsSourceSwitching {
+            try await session.updateTarget(newTarget)
+            return true
+        }
+        return false
+    }
+
+    @discardableResult
+    static func excludeWindowFromFirstSwitchableSession(_ sessions: [CaptureRunningSession],
+                                                       windowID: CGWindowID) async throws -> Bool {
+        for session in sessions where session.supportsSourceSwitching {
+            try await session.excludeWindow(windowID)
+            return true
+        }
+        return false
     }
 
     private static func preflightPermissions(for request: CaptureStartRequest) async throws {

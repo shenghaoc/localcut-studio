@@ -466,6 +466,11 @@ extension EditorModel {
             statusMessage = "Recording paused."
         } catch {
             if (error as? CaptureEngineError) == .notRecording {
+                recordingMonitorTask?.cancel()
+                recordingMonitorTask = nil
+                isRecording = false
+                isPaused = false
+                recordingMicLevel = 0
                 statusMessage = "Could not pause: \(error.localizedDescription)"
             } else {
                 recordingMonitorTask?.cancel()
@@ -785,6 +790,12 @@ extension EditorModel {
 
         var newSlots: [RecordingSlot] = []
         let isRetake = !retakeTimelinePositions.isEmpty
+        let recordingUndoBefore = isRetake
+            ? RecordingUndoState(
+                lastRecordingSlots: retakePreviousSlots,
+                hasLastRecordingTake: !retakePreviousSlots.isEmpty,
+                lastRecordingPiPPreset: lastRecordingPiPPreset)
+            : captureRecordingUndoState()
 
         func slotKey(for entry: LoadedCapturedSource, trackKind: TrackKind) -> RecordingSlotKey {
             RecordingSlotKey(
@@ -875,22 +886,28 @@ extension EditorModel {
             scheduleRebuild()
         }
 
-        if let before = retakeUndoBefore {
-            addRecording()
-            registerImportUndo(name: "Retake Recording", before: before)
-            markDirty()
-        } else {
-            performUndoable(result.wasRecovered ? "Add Recovered Recording" : "Add Recording") {
-                addRecording()
-            }
-        }
+        let projectUndoBefore = retakeUndoBefore ?? captureState()
+        invalidateLoudnessMeasurement()
+        addRecording()
 
-        // Record slots for potential retake.
+        // Record slots for potential retake before registering undo, so undo and
+        // redo keep the recorder metadata aligned with the restored timeline.
         if !result.wasRecovered {
             lastRecordingSlots = newSlots
             hasLastRecordingTake = !newSlots.isEmpty
             lastRecordingPiPPreset = landingPiPPreset
         }
+
+        let actionName = result.wasRecovered
+            ? "Add Recovered Recording"
+            : isRetake ? "Retake Recording" : "Add Recording"
+        if registerRecordingImportUndo(
+            name: actionName,
+            before: projectUndoBefore,
+            beforeRecording: recordingUndoBefore) {
+            markDirty()
+        }
+
         // Clear retake state and PiP preset after use so stale values don't
         // affect future recovered-session imports.
         retakeTimelinePositions = [:]

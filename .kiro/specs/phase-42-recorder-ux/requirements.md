@@ -39,8 +39,8 @@
 
 ## R7 — Verification
 
-- **R7.1** Swift Testing regression coverage for record → pause → resume → stop manifest semantics, finalization failure state, unfinalized resumed-chunk recovery, region-overlay geometry, display-only `sourceRect` application, command guards, retake availability, and timeline gap/collapse behavior.
+- **R7.1** Swift Testing regression coverage for record → pause → resume → stop manifest semantics, finalization failure state, unfinalized resumed-chunk recovery, source-switch routing, region-overlay geometry, display-only `sourceRect` application, command guards, recorder transport error states, retake availability/undo-redo metadata, and timeline gap/collapse behavior.
 - **R7.1a** XCUITest coverage launches a debug-only recorder harness and drives start → pause → resume → stop → collapse through accessible controls without requiring live ScreenCaptureKit permissions in CI.
 - **R7.2** Floating-panel fallback verification: panel hidden → main-window toolbar controls remain the canonical start / stop / pause path.
-- **R7.3** Retake verification covers same-slot replacement and per-source track ordering; the retake import remains registered as one undoable operation.
+- **R7.3** Retake verification covers same-slot replacement, per-source track ordering, and undo/redo restoration of the timeline plus recorder-slot metadata; the retake import remains registered as one undoable operation.
 - **R7.4** `xcodebuild` (Debug, macOS) green; no test count regression.

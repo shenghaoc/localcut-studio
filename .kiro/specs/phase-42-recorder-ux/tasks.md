@@ -31,7 +31,7 @@
 
 ## Verification
 
-- [x] **T6.1** XCUITest target coverage for the recorder start → pause → resume → stop → collapse UX flow, plus Swift Testing coverage for manifest semantics, finalization failure state, unfinalized resumed-chunk recovery, region-overlay geometry, display-only `sourceRect`, command guards, retake availability, and timeline gap/collapse behavior.
+- [x] **T6.1** XCUITest target coverage for the recorder start → pause → resume → stop → collapse UX flow, plus Swift Testing coverage for manifest semantics, finalization failure state, unfinalized resumed-chunk recovery, source-switch routing, region-overlay geometry, display-only `sourceRect`, command guards, recorder transport error states, retake availability/undo-redo metadata, and timeline gap/collapse behavior.
 - [x] **T6.2** Floating-panel fallback verification: hidden panel still leaves main-window recording controls available.
-- [x] **T6.3** Retake replacement, per-source track-index, and stale-PiP regression coverage; retake landing remains one undoable import operation.
+- [x] **T6.3** Retake replacement, per-source track-index, undo/redo slot restoration, and stale-PiP regression coverage; retake landing remains one undoable import operation.
 - [x] **T6.4** `xcodebuild` (Debug, macOS) green.
