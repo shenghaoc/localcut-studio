@@ -67,14 +67,15 @@ public struct CMTimeCode: Codable, Equatable, Sendable {
         }
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.value = try container.decode(Int64.self, forKey: .value)
+        let rawTimescale = try container.decode(Int32.self, forKey: .timescale)
+        self.timescale = rawTimescale > 0 ? rawTimescale : 600
+    }
+
     public var cmTime: CMTime {
-        // A nonpositive timescale is always corrupt metadata; return an invalid
-        // CMTime so downstream `.sanitized` rejects it rather than silently
-        // rewriting the timescale and accepting a bogus duration.
-        guard timescale > 0 else {
-            return CMTime(value: 0, timescale: 0) // invalid
-        }
-        return CMTime(value: value, timescale: timescale)
+        CMTime(value: value, timescale: timescale)
     }
 }
 
