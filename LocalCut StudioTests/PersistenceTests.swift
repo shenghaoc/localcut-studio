@@ -32,19 +32,19 @@ struct PersistenceTests {
     func cmTimeCodeHandlesIndefinite() {
         #expect(CMTimeCode(.indefinite).cmTime == .zero)
         #expect(CMTimeCode(.invalid).cmTime == .zero)
+        #expect(CMTimeCode(CMTime(value: 1000, timescale: -600)).cmTime == .zero)
     }
 
-    @Test("Decoded CMTimeCode uses a safe timescale for corrupt documents")
-    func decodedCMTimeCodeUsesSafeTimescale() throws {
+    @Test("Decoded CMTimeCode rejects corrupt timescales")
+    func decodedCMTimeCodeRejectsCorruptTimescale() throws {
         for rawTimescale in [0, -600] {
             let data = Data(#"{"value":1000,"timescale":\#(rawTimescale)}"#.utf8)
             let decoded = try JSONDecoder().decode(CMTimeCode.self, from: data)
             let time = decoded.cmTime
 
-            #expect(time.value == 1000)
-            #expect(time.timescale == 600)
-            #expect(time.isNumeric)
-            #expect(time.seconds.isFinite)
+            #expect(decoded.value == 0)
+            #expect(decoded.timescale == 600)
+            #expect(time == .zero)
         }
     }
 

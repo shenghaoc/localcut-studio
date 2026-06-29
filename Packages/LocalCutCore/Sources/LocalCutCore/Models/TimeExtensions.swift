@@ -58,7 +58,7 @@ public struct CMTimeCode: Codable, Equatable, Sendable {
     public var timescale: Int32
 
     public init(_ time: CMTime) {
-        if time.isNumeric {
+        if time.isNumeric, time.timescale > 0 {
             self.value = time.value
             self.timescale = time.timescale
         } else {
@@ -69,15 +69,22 @@ public struct CMTimeCode: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.value = try container.decode(Int64.self, forKey: .value)
+        let rawValue = try container.decode(Int64.self, forKey: .value)
         let rawTimescale = try container.decode(Int32.self, forKey: .timescale)
-        self.timescale = rawTimescale > 0 ? rawTimescale : 600
+        if rawTimescale > 0 {
+            self.value = rawValue
+            self.timescale = rawTimescale
+        } else {
+            self.value = 0
+            self.timescale = 600
+        }
     }
 
     public var cmTime: CMTime {
-        // timescale is guaranteed > 0: init(_:) stores from a numeric CMTime
-        // and init(from:) clamps nonpositive values to 600.
-        CMTime(value: value, timescale: timescale)
+        // The stored fields are public for Codable/model compatibility, so keep
+        // this conversion defensive even though our initializers normalize them.
+        guard timescale > 0 else { return .zero }
+        return CMTime(value: value, timescale: timescale)
     }
 }
 

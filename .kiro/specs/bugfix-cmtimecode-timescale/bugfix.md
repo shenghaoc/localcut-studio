@@ -26,10 +26,10 @@ That invalid value can then flow into project-level time surfaces:
 Downstream code commonly converts time to seconds at UI and playback boundaries,
 so a `NaN` can reach timeline layout, marker seeking, or CoreMedia comparisons.
 
-- **Fix**: In `CMTimeCode.cmTime`, fall back to the project default timescale
-  `600` whenever the decoded timescale is `<= 0`. Preserve the decoded `value`
-  so valid rational values still round-trip exactly and corrupt documents
-  degrade predictably.
+- **Fix**: Treat any non-positive stored timescale as corrupt input before
+  constructing a `CMTime`: decoded wrappers normalize to zero at the project
+  default timescale, and `CMTimeCode.cmTime` defensively returns `.zero` if a
+  mutable wrapper ever carries a non-positive timescale. Valid rational values
+  still round-trip exactly.
 - **Regression**: Decode zero and negative timescales in `PersistenceTests` and
-  assert the resulting `CMTime` is numeric and finite.
-
+  assert they collapse to `.zero` instead of preserving the corrupt value.
