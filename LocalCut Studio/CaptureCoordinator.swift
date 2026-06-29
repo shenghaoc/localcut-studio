@@ -22,10 +22,6 @@ actor CaptureCoordinator {
         var sessions: [CaptureRunningSession]
         var writers: [ContinuousCaptureWriter]
         var startHostTimeUs: Int64
-        /// Accumulated finished writers from previous chunks (pause/resume cycles).
-        /// Each pause finishes the current chunk's writers; they are collected here
-        /// so `stop()` can finalize everything.
-        var allFinishedWriters: [ContinuousCaptureWriter] = []
         /// The original `CaptureStartRequest` so `resume()` can recreate writers.
         var startRequest: CaptureStartRequest?
         /// Callbacks for stream events, stored for resume().
@@ -108,10 +104,17 @@ actor CaptureCoordinator {
 
         // Preflight free space so a capture doesn't begin only to fail once
         // samples are already being written and the take is half-recorded.
-        if let available = try? directoryURL.resourceValues(
-            forKeys: [.volumeAvailableCapacityForImportantUsageKey]
-        ).volumeAvailableCapacityForImportantUsage,
-           available < Self.minimumFreeBytes {
+        let availableCapacity: Int64
+        do {
+            availableCapacity = try directoryURL.resourceValues(
+                forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+            ).volumeAvailableCapacityForImportantUsage ?? 0
+        } catch {
+            try? FileManager.default.removeItem(at: directoryURL)
+            throw CaptureEngineError.captureSessionFailed(
+                "Could not check free space on the recordings volume: \(error.localizedDescription)")
+        }
+        if availableCapacity < Self.minimumFreeBytes {
             try? FileManager.default.removeItem(at: directoryURL)
             throw CaptureEngineError.captureSessionFailed(
                 "Not enough free space on the recordings volume — free at least \(Self.minimumFreeBytes / 1_000_000_000) GB and try again.")
@@ -297,9 +300,7 @@ actor CaptureCoordinator {
             for session in sessions {
                 await session.stop()
             }
-            for writer in writers {
-                _ = try? await writer.finish()
-            }
+            let cleanupErrors = await Self.finishWritersCollectingErrors(writers)
             manifest.close()
             // Clean up the session directory so a failed start (permission denied,
             // camera in use, etc.) doesn't appear as a crash-recovery candidate on
@@ -308,6 +309,10 @@ actor CaptureCoordinator {
             try? FileManager.default.removeItem(at: directoryURL)
             activeSession = nil
             state = .idle
+            if !cleanupErrors.isEmpty {
+                throw CaptureEngineError.captureSessionFailed(
+                    "\(error.localizedDescription); cleanup errors: \(cleanupErrors.joined(separator: "; "))")
+            }
             throw error
         }
         state = .recording
@@ -376,13 +381,25 @@ actor CaptureCoordinator {
         finishErrors.append(contentsOf: manifestErrors)
 
         var manifestFinalized = false
+        var manifestFinalizationError: String?
         if finishErrors.isEmpty, !active.manifestWriteFailed {
             let durationUs = max(
                 0,
                 CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock())) - active.startHostTimeUs)
-            manifestFinalized = (try? active.manifest.append(.finalize(CaptureFinalizeRecord(
-                atUs: active.startHostTimeUs + durationUs,
-                durationUs: durationUs)))) != nil
+            do {
+                try active.manifest.append(.finalize(CaptureFinalizeRecord(
+                    atUs: active.startHostTimeUs + durationUs,
+                    durationUs: durationUs)))
+                manifestFinalized = true
+            } catch {
+                manifestFinalizationError = error.localizedDescription
+            }
+        } else if active.manifestWriteFailed {
+            manifestFinalizationError = "Earlier manifest writes failed."
+        } else if !finishErrors.isEmpty {
+            manifestFinalizationError = finishErrors
+                .map(\.localizedDescription)
+                .joined(separator: "; ")
         }
         active.manifest.close()
         state = .idle
@@ -396,7 +413,8 @@ actor CaptureCoordinator {
             manifest: parsed,
             wasRecovered: false)
         if !manifestFinalized {
-            result._manifestFinalizeFailed = true
+            result.manifestFinalizationError = manifestFinalizationError
+                ?? "The recording manifest was not finalized."
         }
         return result
     }
@@ -453,7 +471,6 @@ actor CaptureCoordinator {
         } catch {
             manifestErrors.append(error.localizedDescription)
         }
-        active.allFinishedWriters.append(contentsOf: chunkWriters)
         active.writers = []
         active.sessions = []
         if !manifestErrors.isEmpty {
@@ -628,13 +645,14 @@ actor CaptureCoordinator {
         do {
             try manifest.append(.resume(CaptureResumeRecord(atUs: resumeHostTimeUs)))
         } catch {
-            for writer in writers {
-                _ = try? await writer.finish()
-            }
+            let cleanupErrors = await Self.finishWritersCollectingErrors(writers)
             var restored = active
             restored.manifestWriteFailed = true
             activeSession = restored
-            throw error
+            let cleanupSuffix = cleanupErrors.isEmpty
+                ? ""
+                : "; cleanup errors: \(cleanupErrors.joined(separator: "; "))"
+            throw CaptureEngineError.manifestWriteFailed("\(error.localizedDescription)\(cleanupSuffix)")
         }
 
         // Update the active session with new writers and sessions.
@@ -656,15 +674,20 @@ actor CaptureCoordinator {
             for started in startedSessions {
                 await started.stop()
             }
-            for writer in writers {
-                _ = try? await writer.finish()
-            }
+            let cleanupErrors = await Self.finishWritersCollectingErrors(writers)
             // Restore paused state so user can retry or stop.
             var restored = updated
             restored.writers = []
             restored.sessions = []
+            if !cleanupErrors.isEmpty {
+                restored.manifestWriteFailed = true
+            }
             activeSession = restored
             state = .paused
+            if !cleanupErrors.isEmpty {
+                throw CaptureEngineError.captureSessionFailed(
+                    "\(error.localizedDescription); cleanup errors: \(cleanupErrors.joined(separator: "; "))")
+            }
             throw error
         }
         state = .recording
@@ -678,16 +701,13 @@ actor CaptureCoordinator {
         guard state == .recording, var active = activeSession else {
             throw CaptureEngineError.notRecording
         }
-        // Find the ScreenCaptureSession and update it.
-        for session in active.sessions {
-            if let screenSession = session as? ScreenCaptureSession {
-                try await screenSession.updateTarget(newTarget)
-                // Persist the switched target so resume() uses it.
-                active.currentTarget = newTarget
-                active.startRequest?.captureRegion = nil
-                activeSession = active
-                return
-            }
+        for session in active.sessions where session.supportsSourceSwitching {
+            try await session.updateTarget(newTarget)
+            // Persist the switched target so resume() uses it.
+            active.currentTarget = newTarget
+            active.startRequest?.captureRegion = nil
+            activeSession = active
+            return
         }
         throw CaptureEngineError.captureSessionFailed("No screen capture session to update.")
     }
@@ -704,13 +724,11 @@ actor CaptureCoordinator {
             active.startRequest?.excludedWindowIDs.insert(windowID)
             activeSession = active
         }
-        // Update the live screen capture session to exclude the panel.
+        // Update the live screen-capture filter to exclude the panel.
         guard state == .recording, let active = activeSession else { return }
-        for session in active.sessions {
-            if let screenSession = session as? ScreenCaptureSession {
-                try await screenSession.excludeWindow(windowID)
-                return
-            }
+        for session in active.sessions where session.supportsSourceSwitching {
+            try await session.excludeWindow(windowID)
+            return
         }
     }
 
@@ -752,6 +770,29 @@ actor CaptureCoordinator {
             ?? UUID()
     }
 
+    private static func finishWritersCollectingErrors(_ writers: [ContinuousCaptureWriter]) async -> [String] {
+        await withTaskGroup(of: String?.self) { group in
+            for writer in writers {
+                group.addTask {
+                    do {
+                        _ = try await writer.finish()
+                        return nil
+                    } catch {
+                        return error.localizedDescription
+                    }
+                }
+            }
+
+            var errors: [String] = []
+            for await error in group {
+                if let error {
+                    errors.append(error)
+                }
+            }
+            return errors
+        }
+    }
+
     private static func preflightPermissions(for request: CaptureStartRequest) async throws {
         if request.target != nil, !CapturePermissionAuthorizer.requestScreenRecordingAccess() {
             throw CaptureEngineError.screenRecordingDenied
@@ -781,6 +822,7 @@ actor CaptureCoordinator {
         let fallback = (width: 1280, height: 720)
         guard let device = AVCaptureDevice(uniqueID: deviceID) else { return fallback }
         let dims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+        // H.264 hardware encoders require even dimensions.
         let width = Int(dims.width) & ~1
         let height = Int(dims.height) & ~1
         guard width >= 16, height >= 16 else { return fallback }
@@ -789,6 +831,8 @@ actor CaptureCoordinator {
 
     private static func videoBitrate(width: Int, height: Int, frameRate: Double) -> Int {
         let pixels = Double(max(1, width * height))
+        // Keep roughly 0.08 bits per pixel per frame for real-time H.264,
+        // bounded to avoid unusably low 720p output or excessive 4K rates.
         let base = pixels * max(1, frameRate) * 0.08
         return max(4_000_000, min(80_000_000, Int(base)))
     }
@@ -810,6 +854,7 @@ actor CaptureCoordinator {
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
             AVSampleRateKey: sampleRate,
             AVNumberOfChannelsKey: channels,
+            // Stereo system audio gets more headroom; mono mic chunks stay small.
             AVEncoderBitRateKey: channels > 1 ? 192_000 : 96_000,
         ]
     }

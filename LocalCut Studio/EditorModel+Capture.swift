@@ -28,7 +28,7 @@ private enum RecordingFolderStore {
             relativeTo: nil,
             bookmarkDataIsStale: &stale)
         let refreshed = stale
-            ? try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            ? try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
             : nil
         if let refreshed {
             UserDefaults.standard.set(refreshed, forKey: bookmarkKey)
@@ -147,7 +147,10 @@ extension EditorModel {
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         do {
             try RecordingFolderStore.store(url)
-            adoptRecordingsFolderAccess(url)
+            guard adoptRecordingsFolderAccess(url) else {
+                statusMessage = "Could not access recordings folder."
+                return nil
+            }
             statusMessage = "Recordings folder set to \(url.lastPathComponent)."
             return url
         } catch {
@@ -268,11 +271,16 @@ extension EditorModel {
             recordingDiskFreeBytes = nil
             recordingDiskWarning = nil
             startRecordingMonitor(rootURL: root)
-            try? await captureCoordinator.setFloatingPanelWindowID(panelWindowID)
+            var panelExclusionWarning: String?
+            do {
+                try await captureCoordinator.setFloatingPanelWindowID(panelWindowID)
+            } catch {
+                panelExclusionWarning = "Recording started, but floating controls may appear in capture: \(error.localizedDescription)"
+            }
             if hideFloatingPanelWhileRecording {
                 floatingPanelController.hide()
             }
-            statusMessage = "Recording…"
+            statusMessage = panelExclusionWarning ?? "Recording…"
         } catch {
             floatingPanelController.close()
             isRecorderPresented = wasRecorderPresented
@@ -346,40 +354,37 @@ extension EditorModel {
         recordingMonitorTask = nil
         floatingPanelController.close()
         statusMessage = stopStatusMessage
-        Task {
-            defer { isStoppingRecording = false }
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isStoppingRecording = false }
             do {
-                let result = try await captureCoordinator.stop()
-                recordingStartedAt = nil
-                recordingPausedDuration = 0
-                pauseStartedAt = nil
-                recordingElapsedSeconds = 0
-                recordingDiskFreeBytes = nil
-                recordingDiskWarning = nil
-                recordingSourceCount = 0
-                recordingBackpressureCount = 0
-                recordingIncludesMicrophone = false
-                recordingMicLevel = 0
-                let manifestFinalizeFailed = result._manifestFinalizeFailed
-                _ = await landCaptureSession(result)
-                if manifestFinalizeFailed {
-                    statusMessage += " Manifest could not be finalized; this session may be re-offered for recovery on next launch."
+                let result = try await self.captureCoordinator.stop()
+                self.resetRecordingRuntimeState()
+                let manifestFinalizationError = result.manifestFinalizationError
+                _ = await self.landCaptureSession(result)
+                if let manifestFinalizationError {
+                    self.statusMessage += " Manifest could not be finalized: \(manifestFinalizationError). This session may be re-offered for recovery on next launch."
                 }
             } catch {
-                isRecording = false
-                recordingStartedAt = nil
-                recordingPausedDuration = 0
-                pauseStartedAt = nil
-                recordingElapsedSeconds = 0
-                recordingDiskFreeBytes = nil
-                recordingDiskWarning = nil
-                recordingSourceCount = 0
-                recordingBackpressureCount = 0
-                recordingIncludesMicrophone = false
-                recordingMicLevel = 0
-                statusMessage = error.localizedDescription
+                self.isRecording = false
+                self.isPaused = false
+                self.resetRecordingRuntimeState()
+                self.statusMessage = error.localizedDescription
             }
         }
+    }
+
+    private func resetRecordingRuntimeState() {
+        recordingStartedAt = nil
+        recordingPausedDuration = 0
+        pauseStartedAt = nil
+        recordingElapsedSeconds = 0
+        recordingDiskFreeBytes = nil
+        recordingDiskWarning = nil
+        recordingSourceCount = 0
+        recordingBackpressureCount = 0
+        recordingIncludesMicrophone = false
+        recordingMicLevel = 0
     }
 
     // MARK: - Phase 42: Countdown
@@ -423,18 +428,6 @@ extension EditorModel {
         countdownRemaining = 0
         isCountdownActive = false
 
-        // Store the request for potential retake.
-        lastRecordingRequest = CaptureStartRequest(
-            target: target,
-            includeSystemAudio: includeSystemAudio,
-            webcamDeviceID: webcamDeviceID,
-            microphoneDeviceID: microphoneDeviceID,
-            rootURL: resolvedRecordingsFolder(promptIfMissing: false)
-                ?? FileManager.default.temporaryDirectory,
-            frameRate: project.frameRate,
-            fragmentInterval: CMTime(seconds: 2, preferredTimescale: 600),
-            capabilities: Capabilities.current,
-            captureRegion: captureRegion)
         lastRecordingSlots = []
         hasLastRecordingTake = false
 
@@ -502,13 +495,18 @@ extension EditorModel {
             isRecording = true
             recordingMicLevel = 0
             // Re-exclude the floating panel from the resumed capture session.
-            try? await captureCoordinator.setFloatingPanelWindowID(
-                floatingPanelController.windowID)
+            var panelExclusionWarning: String?
+            do {
+                try await captureCoordinator.setFloatingPanelWindowID(
+                    floatingPanelController.windowID)
+            } catch {
+                panelExclusionWarning = "Recording resumed, but floating controls may appear in capture: \(error.localizedDescription)"
+            }
             // Restart the recording monitor (elapsed time, disk space).
             if let root = resolvedRecordingsFolder(promptIfMissing: false) {
                 startRecordingMonitor(rootURL: root)
             }
-            statusMessage = "Recording…"
+            statusMessage = panelExclusionWarning ?? "Recording…"
         } catch {
             statusMessage = "Could not resume: \(error.localizedDescription)"
         }

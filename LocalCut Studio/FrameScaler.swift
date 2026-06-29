@@ -6,6 +6,9 @@ import Metal
 /// GPU-accelerated frame scaler using Core Image. Scales and crops captured
 /// frames to the writer's fixed canvas dimensions when the source resolution
 /// changes mid-session (source switching).
+/// Instances are owned by one `ScreenCaptureSession` and used only from that
+/// session's serial output queue; `CIContext` supports concurrent rendering, but
+/// queue affinity keeps the buffer-pool use ordered.
 nonisolated final class FrameScaler: @unchecked Sendable {
     private let ciContext: CIContext
     private let targetWidth: Int

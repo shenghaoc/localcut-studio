@@ -19,8 +19,8 @@ struct RecordingCountdownView: View {
 
             VStack(spacing: 24) {
                 Text(model.countdownRemaining > 0 ? "\(model.countdownRemaining)" : "Recording")
-                    .font(.system(size: 96, weight: .bold, design: .rounded))
-                    .foregroundStyle(model.countdownRemaining > 0 ? .white : .red)
+                    .font(.largeTitle.weight(.bold))
+                    .foregroundStyle(.white)
                     .scaleEffect(scale)
                     .animation(.easeInOut(duration: 0.3), value: scale)
                     .accessibilityLabel(model.countdownRemaining > 0
@@ -38,12 +38,21 @@ struct RecordingCountdownView: View {
             }
         }
         .onAppear {
+            announceCountdown(model.countdownRemaining)
             pulse()
         }
         .onChange(of: model.countdownRemaining) { _, newValue in
+            announceCountdown(newValue)
             guard newValue > 0 else { return }
             pulse()
         }
+    }
+
+    private func announceCountdown(_ value: Int) {
+        let message = value > 0
+            ? "Starting in \(value) seconds"
+            : "Recording started"
+        AccessibilityNotification.Announcement(message).post()
     }
 
     private func pulse() {

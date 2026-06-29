@@ -4,8 +4,8 @@
 
 ## Countdown + transport
 
-- [x] **T1.1** Countdown modal with 3 / 5 / 10 s options + cancel.
-- [x] **T1.2** Pause / resume wiring: stop stream + writer, open new chunk on resume; preserve PTS gap; serialize pause/resume/stop transitions and keep failed manifest writes recoverable.
+- [x] **T1.1** Countdown modal with 3 / 5 / 10 s options + cancel; VoiceOver announces each countdown tick.
+- [x] **T1.2** Pause / resume wiring: stop stream + writer, open new chunk on resume; preserve PTS gap; serialize pause/resume/stop transitions and keep failed manifest/finalize writes recoverable.
 - [x] **T1.3** Visible "ripple-collapse gap" command in the Record menu / toolbar.
 
 ## Source switching
@@ -31,7 +31,7 @@
 
 ## Verification
 
-- [x] **T6.1** XCUITest target coverage for the recorder start → pause → resume → stop → collapse UX flow, plus Swift Testing coverage for manifest semantics, unfinalized resumed-chunk recovery, region-overlay geometry, display-only `sourceRect`, and timeline gap/collapse behavior.
+- [x] **T6.1** XCUITest target coverage for the recorder start → pause → resume → stop → collapse UX flow, plus Swift Testing coverage for manifest semantics, finalization failure state, unfinalized resumed-chunk recovery, region-overlay geometry, display-only `sourceRect`, command guards, retake availability, and timeline gap/collapse behavior.
 - [x] **T6.2** Floating-panel fallback verification: hidden panel still leaves main-window recording controls available.
 - [x] **T6.3** Retake replacement, per-source track-index, and stale-PiP regression coverage; retake landing remains one undoable import operation.
 - [x] **T6.4** `xcodebuild` (Debug, macOS) green.

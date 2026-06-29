@@ -13,7 +13,7 @@
 - **R2.2** Resulting track preserves the wall-clock gap (clips land at their captured PTS); the timeline displays the gap explicitly.
 - **R2.3** A visible "ripple-collapse gap" command merges the two segments to a single continuous clip if the user requests it.
 - **R2.4** Pause/resume/stop transitions are serialized so Stop and source switching cannot race writer finalization or stream startup.
-- **R2.5** Critical manifest append failures during pause/resume keep the session unfinalized and recoverable instead of silently dropping chunks.
+- **R2.5** Critical manifest append/finalize failures during pause/resume/stop keep the session unfinalized and recoverable instead of silently dropping chunks.
 
 ## R3 — Source switching
 
@@ -39,7 +39,7 @@
 
 ## R7 — Verification
 
-- **R7.1** Swift Testing regression coverage for record → pause → resume → stop manifest semantics, unfinalized resumed-chunk recovery, region-overlay geometry, display-only `sourceRect` application, and timeline gap/collapse behavior.
+- **R7.1** Swift Testing regression coverage for record → pause → resume → stop manifest semantics, finalization failure state, unfinalized resumed-chunk recovery, region-overlay geometry, display-only `sourceRect` application, command guards, retake availability, and timeline gap/collapse behavior.
 - **R7.1a** XCUITest coverage launches a debug-only recorder harness and drives start → pause → resume → stop → collapse through accessible controls without requiring live ScreenCaptureKit permissions in CI.
 - **R7.2** Floating-panel fallback verification: panel hidden → main-window toolbar controls remain the canonical start / stop / pause path.
 - **R7.3** Retake verification covers same-slot replacement and per-source track ordering; the retake import remains registered as one undoable operation.

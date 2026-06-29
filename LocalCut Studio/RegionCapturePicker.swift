@@ -1,6 +1,10 @@
 import AppKit
 
+private let regionPickerEscapeKeyCode: UInt16 = 53
+
 nonisolated enum RegionCaptureOverlayGeometry {
+    /// Ignore accidental clicks or tiny drags that are too small to be a useful
+    /// ScreenCaptureKit crop.
     static let minimumSelectionSize: CGFloat = 20
 
     static func selectionRect(start: CGPoint?, current: CGPoint?) -> CGRect? {
@@ -97,7 +101,7 @@ private final class RegionCaptureWindowController {
 
     func begin() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 {
+            if event.keyCode == regionPickerEscapeKeyCode {
                 self?.finish(nil)
                 return nil
             }
@@ -148,6 +152,9 @@ private final class RegionSelectionView: NSView {
         self.displayPixelHeight = displayPixelHeight
         super.init(frame: CGRect(origin: .zero, size: screenFrame.size))
         wantsLayer = true
+        setAccessibilityElement(true)
+        setAccessibilityLabel("Capture region selection overlay")
+        setAccessibilityHelp("Drag to select a display capture region. Press Escape to cancel.")
     }
 
     required init?(coder: NSCoder) {
@@ -157,7 +164,7 @@ private final class RegionSelectionView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
+        if event.keyCode == regionPickerEscapeKeyCode {
             onCancel?()
         } else {
             super.keyDown(with: event)

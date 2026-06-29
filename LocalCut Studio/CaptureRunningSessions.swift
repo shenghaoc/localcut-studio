@@ -5,8 +5,22 @@ import CoreMedia
 import LocalCutCore
 
 protocol CaptureRunningSession: Sendable {
+    nonisolated var supportsSourceSwitching: Bool { get }
+
     func start() async throws
     func stop() async
+    func updateTarget(_ newTarget: CaptureTarget) async throws
+    func excludeWindow(_ windowID: CGWindowID) async throws
+}
+
+extension CaptureRunningSession {
+    nonisolated var supportsSourceSwitching: Bool { false }
+
+    func updateTarget(_ newTarget: CaptureTarget) async throws {
+        throw CaptureEngineError.captureSessionFailed("This capture session cannot switch sources.")
+    }
+
+    func excludeWindow(_ windowID: CGWindowID) async throws {}
 }
 
 nonisolated enum CapturePermissionAuthorizer {
@@ -33,6 +47,8 @@ nonisolated enum CapturePermissionAuthorizer {
 }
 
 nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    nonisolated var supportsSourceSwitching: Bool { true }
+
     private let stateLock = NSLock()
     private var target: CaptureTarget
     private let frameRate: Double

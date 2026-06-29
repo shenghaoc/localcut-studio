@@ -164,6 +164,20 @@ struct ManifestPauseResumeTests {
         #expect(chunks[1].ended == nil)
         #expect(chunks[1].url.lastPathComponent == "screen-1.mov")
     }
+
+    @Test("Capture session result exposes manifest finalization failures")
+    func sessionResultManifestFinalizationFailure() {
+        var result = CaptureSessionResult(
+            id: UUID(),
+            directoryURL: URL(fileURLWithPath: "/tmp/LocalCutRecorderProbe", isDirectory: true),
+            manifestURL: URL(fileURLWithPath: "/tmp/LocalCutRecorderProbe/manifest.ndjson"),
+            manifest: CaptureManifest(),
+            wasRecovered: false)
+
+        #expect(!result.manifestFinalizeFailed)
+        result.manifestFinalizationError = "Disk full"
+        #expect(result.manifestFinalizeFailed)
+    }
 }
 
 // MARK: - CaptureCoordinator pause/resume state (T6.1)
@@ -432,6 +446,16 @@ struct RegionCaptureGeometryTests {
 
         #expect(region == nil)
     }
+
+    @Test("Overlay geometry returns nil until both drag endpoints exist")
+    func overlayGeometryNilUntilDragEndpointsExist() {
+        #expect(RegionCaptureOverlayGeometry.selectionRect(
+            start: nil,
+            current: CGPoint(x: 100, y: 200)) == nil)
+        #expect(RegionCaptureOverlayGeometry.selectionRect(
+            start: CGPoint(x: 100, y: 200),
+            current: nil) == nil)
+    }
 }
 
 // MARK: - Countdown state (T1.1)
@@ -548,6 +572,56 @@ struct RecordingGapCollapseTests {
         #expect(webcamTrack.clips[1].timelineStart.seconds == 2)
     }
 
+    @Test("Collapse without gaps does not register undo")
+    func collapseWithoutGapsDoesNotRegisterUndo() {
+        let model = EditorModel()
+        let mediaID = UUID()
+        let duration = CMTime(seconds: 2, preferredTimescale: 600)
+        let first = Clip(mediaID: mediaID, sourceStart: .zero, duration: duration,
+                         timelineStart: .zero)
+        let second = Clip(mediaID: mediaID, sourceStart: .zero, duration: duration,
+                          timelineStart: duration)
+        let track = Track(name: "Screen", kind: .video)
+        track.clips = [first, second]
+        model.project.videoTracks = [track]
+        model.lastRecordingSlots = [first, second].map { clip in
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .display, trackKind: .video, chunkIndex: 0),
+                trackID: track.id,
+                trackIndex: 0,
+                clipID: clip.id,
+                mediaID: clip.mediaID,
+                timelineStart: clip.timelineStart)
+        }
+        model.hasLastRecordingTake = true
+
+        model.collapseRecordingGap()
+
+        #expect(model.statusMessage == "No recording gaps to collapse.")
+        #expect(!model.canUndo)
+    }
+
+    @Test("Retake availability requires a stored request and idle recorder")
+    func retakeAvailabilityRequiresRequestAndIdleRecorder() {
+        let model = EditorModel()
+        model.hasLastRecordingTake = true
+        #expect(!model.canRetakeRecording)
+
+        model.lastRecordingRequest = CaptureStartRequest(
+            target: nil,
+            includeSystemAudio: true,
+            webcamDeviceID: nil,
+            microphoneDeviceID: nil,
+            rootURL: URL(fileURLWithPath: "/tmp/LocalCutRecorderProbe", isDirectory: true),
+            frameRate: 30,
+            fragmentInterval: CMTime(seconds: 2, preferredTimescale: 600),
+            capabilities: Capabilities.current)
+        #expect(model.canRetakeRecording)
+
+        model.isStartingRecording = true
+        #expect(!model.canRetakeRecording)
+    }
+
     @Test("Retake track indices are keyed per recording slot")
     func retakeTrackIndicesKeyedPerSlot() {
         let model = EditorModel()
@@ -621,6 +695,36 @@ struct RecordingDocumentCommandGuardTests {
 
         #expect(model.confirmClose(window: window) == false)
         #expect(model.statusMessage == "Cancel the countdown before closing the window.")
+    }
+
+    @Test("Window close is blocked while recording is starting")
+    func closeBlockedWhileStarting() {
+        let model = EditorModel()
+        let window = NSWindow()
+        model.isStartingRecording = true
+
+        #expect(model.confirmClose(window: window) == false)
+        #expect(model.statusMessage == "Wait for the recording to start before closing the window.")
+    }
+
+    @Test("Window close is blocked while recording is pausing")
+    func closeBlockedWhilePausing() {
+        let model = EditorModel()
+        let window = NSWindow()
+        model.isPausingRecording = true
+
+        #expect(model.confirmClose(window: window) == false)
+        #expect(model.statusMessage == "Finish pausing the recording before closing the window.")
+    }
+
+    @Test("Window close is blocked while recording is stopping")
+    func closeBlockedWhileStopping() {
+        let model = EditorModel()
+        let window = NSWindow()
+        model.isStoppingRecording = true
+
+        #expect(model.confirmClose(window: window) == false)
+        #expect(model.statusMessage == "Finish stopping the recording before closing the window.")
     }
 }
 
