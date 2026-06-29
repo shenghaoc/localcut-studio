@@ -22,11 +22,11 @@ enum LocalCutAppIntentRouter {
         var errorDescription: String? {
             switch self {
             case .modelUnavailable:
-                "The editor is not ready. Please ensure LocalCut Studio is open."
+                String(localized: "The editor is not ready. Please ensure LocalCut Studio is open.")
             case .emptyTimeline:
-                "Add media to the timeline before exporting."
+                String(localized: "Add media to the timeline before exporting.")
             case .actionCancelled:
-                "The action was cancelled."
+                String(localized: "The action was cancelled.")
             }
         }
     }
@@ -81,7 +81,7 @@ enum LocalCutAppIntentRouter {
             if !succeeded { throw RouterError.actionCancelled }
         case .showDiagnostics:
             model.isDiagnosticsVisible = true
-            model.statusMessage = "Diagnostics opened from Shortcuts."
+            model.statusMessage = String(localized: "Diagnostics opened from Shortcuts.")
         }
     }
 }

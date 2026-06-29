@@ -80,9 +80,15 @@ extension EditorModel {
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        let response = await withCheckedContinuation { continuation in
-            panel.begin { response in
-                continuation.resume(returning: response)
+        let response = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                panel.begin { response in
+                    continuation.resume(returning: response)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                panel.cancel(nil)
             }
         }
         guard response == .OK, !panel.urls.isEmpty else { return false }
