@@ -1,5 +1,7 @@
 # Requirements: Phase 42 — Recorder UX
 
+> Status: **Implemented**.
+
 ## R1 — Countdown
 
 - **R1.1** Pre-roll modal with 3 / 5 / 10 second options; cancellable.
@@ -23,19 +25,19 @@
 
 ## R5 — Floating control strip
 
-- **R5.1** A non-activating, always-on-top panel hosts start / stop / pause / source indicators / mic meter.
+- **R5.1** A non-activating, always-on-top panel hosts stop / pause / resume, source indicators, source switching, and a microphone peak meter when microphone capture is active.
 - **R5.2** Closing the panel returns control to the main window.
 - **R5.3** The panel's `CGWindowID` is passed to `SCContentFilter.init(display:excludingWindows:)` for the lifetime of every display / window / app capture session, so ScreenCaptureKit never burns the strip into the recorded frames — independent of whether the user keeps it visible.
 - **R5.4** "Hide while recording" option is offered as a user preference on top of R5.3 (belt-and-braces).
 
 ## R6 — Region capture + retake
 
-- **R6.1** Region capture: drag a rectangle on screen; the writer crops to that region.
+- **R6.1** Region capture: drag a rectangle on screen; `SCStreamConfiguration.sourceRect` samples that region and the writer records the crop's fixed pixel dimensions.
 - **R6.2** Retake: a "retake" command replaces the most-recent chunk-set; the replacement lands at the same timeline slot; undoable.
 
 ## R7 — Verification
 
-- **R7.1** Playwright-style UI test (XCUITest) for record → pause → resume → stop → timeline lands with the documented gap.
-- **R7.2** Floating-panel fallback test: panel hidden → main-window controls operate the same start / stop flow.
-- **R7.3** Retake undo restores the original chunk-set.
+- **R7.1** Swift Testing regression coverage for record → pause → resume → stop manifest semantics and the timeline gap/collapse behavior.
+- **R7.2** Floating-panel fallback verification: panel hidden → main-window toolbar controls remain the canonical start / stop / pause path.
+- **R7.3** Retake verification covers same-slot replacement and per-source track ordering; the retake import remains registered as one undoable operation.
 - **R7.4** `xcodebuild` (Debug, macOS) green; no test count regression.

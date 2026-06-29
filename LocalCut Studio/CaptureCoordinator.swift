@@ -30,6 +30,7 @@ actor CaptureCoordinator {
         /// Callbacks for stream events, stored for resume().
         var onStreamStopped: (@Sendable (Error) -> Void)?
         var onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)?
+        var onMicrophoneLevel: (@Sendable (Float) -> Void)?
         /// Monotonically increasing chunk counter for unique file names. Incremented
         /// once per resume cycle (not per source).
         var chunkIndex: Int = 1
@@ -46,7 +47,8 @@ actor CaptureCoordinator {
 
     func start(_ request: CaptureStartRequest,
                onStreamStopped: (@Sendable (Error) -> Void)? = nil,
-               onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil) async throws {
+               onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil,
+               onMicrophoneLevel: (@Sendable (Float) -> Void)? = nil) async throws {
         guard state == .idle else { throw CaptureEngineError.alreadyRecording }
         state = .starting
         var didStartRecording = false
@@ -187,6 +189,7 @@ actor CaptureCoordinator {
                 frameRate: request.frameRate,
                 videoWriter: screenVideoWriter,
                 audioWriter: screenAudioWriter,
+                captureRegion: request.captureRegion,
                 excludingWindowIDs: excludedWindowIDs,
                 onStop: onStreamStopped))
         }
@@ -246,7 +249,11 @@ actor CaptureCoordinator {
                 bitrate: 96_000,
                 fragmentIntervalUs: CaptureManifest.microseconds(from: fragment))
             writers.append(writer)
-            sessions.append(AVCaptureSampleSession(deviceID: microphoneDeviceID, mediaType: .audio, writer: writer))
+            sessions.append(AVCaptureSampleSession(
+                deviceID: microphoneDeviceID,
+                mediaType: .audio,
+                writer: writer,
+                onAudioLevel: onMicrophoneLevel))
         }
 
         try manifest.append(.header(CaptureManifestHeader(
@@ -273,6 +280,7 @@ actor CaptureCoordinator {
             startRequest: request,
             onStreamStopped: onStreamStopped,
             onBackpressure: onBackpressure,
+            onMicrophoneLevel: onMicrophoneLevel,
             currentTarget: request.target,
             sourceIDs: sourceIDs)
         activeSession = active
@@ -529,6 +537,7 @@ actor CaptureCoordinator {
                 frameRate: request.frameRate,
                 videoWriter: screenVideoWriter,
                 audioWriter: screenAudioWriter,
+                captureRegion: request.captureRegion,
                 excludingWindowIDs: excludedWindowIDs,
                 onStop: active.onStreamStopped))
         }
@@ -582,7 +591,11 @@ actor CaptureCoordinator {
                 manifest: manifest,
                 onSustainedBackpressure: active.onBackpressure)
             writers.append(writer)
-            sessions.append(AVCaptureSampleSession(deviceID: microphoneDeviceID, mediaType: .audio, writer: writer))
+            sessions.append(AVCaptureSampleSession(
+                deviceID: microphoneDeviceID,
+                mediaType: .audio,
+                writer: writer,
+                onAudioLevel: active.onMicrophoneLevel))
         }
 
         // Record resume event.
@@ -636,6 +649,7 @@ actor CaptureCoordinator {
                 try await screenSession.updateTarget(newTarget)
                 // Persist the switched target so resume() uses it.
                 active.currentTarget = newTarget
+                active.startRequest?.captureRegion = nil
                 activeSession = active
                 return
             }

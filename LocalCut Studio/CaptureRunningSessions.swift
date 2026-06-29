@@ -38,6 +38,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     private let frameRate: Double
     private var videoWriter: ContinuousCaptureWriter?
     private var audioWriter: ContinuousCaptureWriter?
+    private var captureRegion: CaptureRegion?
     private let writerCanvasSize: (width: Int, height: Int)?
     private let frameScaler: FrameScaler?
     private let outputQueue = DispatchQueue(label: "com.localcutstudio.capture.screen.output")
@@ -59,12 +60,14 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
          frameRate: Double,
          videoWriter: ContinuousCaptureWriter?,
          audioWriter: ContinuousCaptureWriter?,
+         captureRegion: CaptureRegion? = nil,
          excludingWindowIDs: Set<CGWindowID> = [],
          onStop: (@Sendable (Error) -> Void)? = nil) {
         self.target = target
         self.frameRate = frameRate
         self.videoWriter = videoWriter
         self.audioWriter = audioWriter
+        self.captureRegion = captureRegion
         if let width = videoWriter?.source.width,
            let height = videoWriter?.source.height {
             self.writerCanvasSize = (width, height)
@@ -123,6 +126,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         guard let stream = withLockedState({ self.stream }) else { throw CaptureEngineError.notRecording }
         withLockedState {
             self.target = newTarget
+            self.captureRegion = nil
         }
 
         let content = try await SCShareableContent.current
@@ -214,6 +218,11 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         configuration.minimumFrameInterval = CMTime(seconds: 1.0 / max(1, frameRate), preferredTimescale: 600)
         configuration.queueDepth = 5
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        if let region = withLockedState({ captureRegion }),
+           case .display(let displayID, _, _) = withLockedState({ target }),
+           region.displayID == displayID {
+            configuration.sourceRect = region.sourceRect
+        }
         configuration.showsCursor = true
         configuration.capturesAudio = audioWriter != nil
         configuration.sampleRate = 48_000
@@ -307,11 +316,17 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
     private let writer: ContinuousCaptureWriter
     private let session = AVCaptureSession()
     private let queue: DispatchQueue
+    private let onAudioLevel: (@Sendable (Float) -> Void)?
+    private var lastAudioLevelEmission = CFAbsoluteTimeGetCurrent()
 
-    init(deviceID: String, mediaType: AVMediaType, writer: ContinuousCaptureWriter) {
+    init(deviceID: String,
+         mediaType: AVMediaType,
+         writer: ContinuousCaptureWriter,
+         onAudioLevel: (@Sendable (Float) -> Void)? = nil) {
         self.deviceID = deviceID
         self.mediaType = mediaType
         self.writer = writer
+        self.onAudioLevel = onAudioLevel
         self.queue = DispatchQueue(label: "com.localcutstudio.capture.av.\(deviceID)")
         super.init()
     }
@@ -389,6 +404,69 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
+        if mediaType == .audio,
+           let onAudioLevel,
+           let level = Self.audioPeakLevel(from: sampleBuffer) {
+            let now = CFAbsoluteTimeGetCurrent()
+            if now - lastAudioLevelEmission >= 0.05 {
+                lastAudioLevelEmission = now
+                onAudioLevel(level)
+            }
+        }
         writer.append(sampleBuffer)
+    }
+
+    nonisolated static func audioPeakLevel(from sampleBuffer: CMSampleBuffer) -> Float? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+            return nil
+        }
+        let format = AVAudioFormat(cmAudioFormatDescription: formatDescription)
+        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frameCount > 0,
+              let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            return nil
+        }
+        pcmBuffer.frameLength = frameCount
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(frameCount),
+            into: pcmBuffer.mutableAudioBufferList)
+        guard status == noErr else { return nil }
+        return normalizedPeak(from: pcmBuffer)
+    }
+
+    nonisolated static func normalizedPeak(from buffer: AVAudioPCMBuffer) -> Float? {
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        guard frameCount > 0, channelCount > 0 else { return nil }
+
+        var peak: Float = 0
+        switch buffer.format.commonFormat {
+        case .pcmFormatFloat32:
+            guard let channelData = buffer.floatChannelData else { return nil }
+            for channel in 0..<channelCount {
+                for frame in 0..<frameCount {
+                    peak = max(peak, abs(channelData[channel][frame]))
+                }
+            }
+        case .pcmFormatInt16:
+            guard let channelData = buffer.int16ChannelData else { return nil }
+            for channel in 0..<channelCount {
+                for frame in 0..<frameCount {
+                    peak = max(peak, abs(Float(channelData[channel][frame])) / Float(Int16.max))
+                }
+            }
+        case .pcmFormatInt32:
+            guard let channelData = buffer.int32ChannelData else { return nil }
+            for channel in 0..<channelCount {
+                for frame in 0..<frameCount {
+                    peak = max(peak, abs(Float(channelData[channel][frame])) / Float(Int32.max))
+                }
+            }
+        default:
+            return nil
+        }
+        return min(1, peak)
     }
 }

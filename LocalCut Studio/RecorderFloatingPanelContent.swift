@@ -4,7 +4,7 @@ import SwiftUI
 struct RecorderFloatingPanelContent: View {
     @Bindable var model: EditorModel
     @State private var screenOptions: [CaptureSourceOption] = []
-    @State private var showSourcePicker = false
+    @State private var sourceLoadFailed = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -19,37 +19,40 @@ struct RecorderFloatingPanelContent: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(formatElapsed(model.recordingElapsedSeconds))")
+            sourceIndicator
+            if model.recordingIncludesMicrophone {
+                MicLevelMeter(level: model.recordingMicLevel)
+                    .frame(width: 36, height: 8)
+                    .help("Microphone level")
+                    .accessibilityLabel("Microphone level")
+                    .accessibilityValue("\(Int(model.recordingMicLevel * 100)) percent")
+            }
 
             Spacer()
 
-            // Source switcher (only while actively recording).
-            if model.isRecording && !screenOptions.isEmpty {
-                Button {
-                    showSourcePicker.toggle()
-                } label: {
-                    Image(systemName: "rectangle.on.rectangle")
-                }
-                .buttonStyle(.borderless)
-                .help("Switch capture source")
-                .accessibilityLabel("Switch capture source")
-                .popover(isPresented: $showSourcePicker) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Switch Source")
-                            .font(.caption.weight(.semibold))
-                            .padding(.bottom, 4)
-                        ForEach(screenOptions) { option in
-                            Button(option.title) {
-                                showSourcePicker = false
-                                Task { await model.switchCaptureSource(to: option.target) }
-                            }
-                            .buttonStyle(.plain)
-                            .font(.caption)
+            // Source switcher.
+            Menu {
+                if sourceLoadFailed {
+                    Text("Sources unavailable")
+                } else if screenOptions.isEmpty {
+                    Text("No screen sources")
+                } else {
+                    ForEach(screenOptions) { option in
+                        Button {
+                            Task { await model.switchCaptureSource(to: option.target) }
+                        } label: {
+                            Label(option.title, systemImage: iconName(for: option.target))
                         }
                     }
-                    .padding(8)
-                    .frame(minWidth: 160)
                 }
+            } label: {
+                Image(systemName: "rectangle.on.rectangle")
             }
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
+            .disabled(!model.isRecording || screenOptions.isEmpty)
+            .help(sourceSwitchHelp)
+            .accessibilityLabel("Switch capture source")
 
             // Pause / Resume.
             if model.isPaused {
@@ -84,14 +87,50 @@ struct RecorderFloatingPanelContent: View {
             .accessibilityLabel("Stop recording")
         }
         .padding(12)
-        .task { await loadScreenSources() }
+        .task(id: model.isRecording) {
+            guard model.isRecording else { return }
+            await loadScreenSources()
+        }
     }
 
     private func loadScreenSources() async {
         do {
             screenOptions = try await CaptureSourceCatalog.screenOptions()
+            sourceLoadFailed = false
         } catch {
             screenOptions = []
+            sourceLoadFailed = true
+        }
+    }
+
+    private var sourceIndicator: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "rectangle.stack")
+                .font(.caption2)
+            Text("\(model.recordingSourceCount)")
+                .font(.caption.monospacedDigit())
+        }
+        .foregroundStyle(.secondary)
+        .help("Recording sources")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(model.recordingSourceCount) recording source\(model.recordingSourceCount == 1 ? "" : "s")")
+    }
+
+    private var sourceSwitchHelp: String {
+        if !model.isRecording { return "Start recording before switching sources" }
+        if sourceLoadFailed { return "Screen sources are unavailable" }
+        if screenOptions.isEmpty { return "No screen sources available" }
+        return "Switch capture source"
+    }
+
+    private func iconName(for target: CaptureTarget) -> String {
+        switch target {
+        case .display:
+            "display"
+        case .window:
+            "macwindow"
+        case .application:
+            "app"
         }
     }
 
@@ -99,5 +138,21 @@ struct RecorderFloatingPanelContent: View {
         let m = (Int(seconds) % 3600) / 60
         let s = Int(seconds) % 60
         return String(format: "%02d:%02d", m, s)
+    }
+}
+
+private struct MicLevelMeter: View {
+    let level: Float
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.quaternary)
+                Capsule()
+                    .fill(.green)
+                    .frame(width: proxy.size.width * CGFloat(min(1, max(0, level))))
+            }
+        }
     }
 }

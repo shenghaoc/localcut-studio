@@ -14,6 +14,9 @@ struct RecorderSetupView: View {
     @State private var includeSystemAudio = false
     @State private var includeWebcam = false
     @State private var includeMicrophone = false
+    @State private var includeRegionCapture = false
+    @State private var selectedRegion: CaptureRegion?
+    @State private var isPickingRegion = false
     @State private var isLoadingSources = true
     @State private var loadError: String?
     @State private var countdownDuration = 3
@@ -32,6 +35,25 @@ struct RecorderSetupView: View {
                         }
                     }
                     .disabled(!includeScreen || screenOptions.isEmpty)
+                    .onChange(of: selectedScreenID) { _, _ in
+                        selectedRegion = nil
+                        if !canPickRegion { includeRegionCapture = false }
+                    }
+                    Toggle("Region capture", isOn: $includeRegionCapture)
+                        .disabled(!canPickRegion)
+                    HStack {
+                        Button {
+                            pickRegion()
+                        } label: {
+                            Label(regionButtonTitle, systemImage: "crop")
+                        }
+                        .disabled(!includeRegionCapture || !canPickRegion || isPickingRegion)
+                        if let selectedRegion, includeRegionCapture {
+                            Text("\(selectedRegion.outputWidth) x \(selectedRegion.outputHeight)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     Toggle("System audio", isOn: $includeSystemAudio)
                         .disabled(!includeScreen || !CaptureSourceCatalog.isSystemAudioAvailable)
                     if !CaptureSourceCatalog.isSystemAudioAvailable {
@@ -80,6 +102,11 @@ struct RecorderSetupView: View {
                         Text("5 seconds").tag(5)
                         Text("10 seconds").tag(10)
                     }
+                }
+
+                Section("Controls") {
+                    Toggle("Hide floating controls while recording",
+                           isOn: $model.hideFloatingPanelWhileRecording)
                 }
 
                 Section("Storage") {
@@ -151,10 +178,26 @@ struct RecorderSetupView: View {
 
     private var canStart: Bool {
         if isLoadingSources || model.isRecording || model.isStartingRecording || model.isStoppingRecording { return false }
-        if includeScreen && selectedScreenID != nil { return true }
+        if includeScreen && selectedScreenID != nil {
+            return !includeRegionCapture || selectedRegion != nil
+        }
         if includeWebcam && selectedWebcamID != nil { return true }
         if includeMicrophone && selectedMicrophoneID != nil { return true }
         return false
+    }
+
+    private var selectedScreenOption: CaptureSourceOption? {
+        screenOptions.first(where: { $0.id == selectedScreenID })
+    }
+
+    private var canPickRegion: Bool {
+        guard includeScreen, let target = selectedScreenOption?.target else { return false }
+        if case .display = target { return true }
+        return false
+    }
+
+    private var regionButtonTitle: String {
+        selectedRegion == nil ? "Select Region..." : "Change Region..."
     }
 
     private func loadSources() async {
@@ -179,9 +222,18 @@ struct RecorderSetupView: View {
     }
 
     private func start() {
-        let target = includeScreen
-            ? screenOptions.first(where: { $0.id == selectedScreenID })?.target
-            : nil
+        var target = includeScreen ? selectedScreenOption?.target : nil
+        var captureRegion: CaptureRegion?
+        if includeRegionCapture,
+           let selectedRegion,
+           case .display(let displayID, _, _) = target,
+           selectedRegion.displayID == displayID {
+            target = .display(
+                displayID: displayID,
+                width: selectedRegion.outputWidth,
+                height: selectedRegion.outputHeight)
+            captureRegion = selectedRegion
+        }
         let webcam = includeWebcam ? selectedWebcamID : nil
         let mic = includeMicrophone ? selectedMicrophoneID : nil
         let pipPreset = target != nil && webcam != nil
@@ -196,7 +248,18 @@ struct RecorderSetupView: View {
                 includeSystemAudio: target != nil && includeSystemAudio,
                 webcamDeviceID: webcam,
                 microphoneDeviceID: mic,
+                captureRegion: captureRegion,
                 pipPreset: pipPreset)
+        }
+    }
+
+    private func pickRegion() {
+        guard let target = selectedScreenOption?.target else { return }
+        isPickingRegion = true
+        Task {
+            let region = await RegionCapturePicker.pickRegion(for: target)
+            selectedRegion = region ?? selectedRegion
+            isPickingRegion = false
         }
     }
 }

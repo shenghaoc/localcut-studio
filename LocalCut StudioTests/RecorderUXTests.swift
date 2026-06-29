@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AppKit
 import AVFoundation
 import CoreMedia
 import LocalCutCore
@@ -222,6 +223,26 @@ struct PiPPresetLayoutTests {
         #expect(abs(geometry.scale - layout.scale) < 0.01)
         #expect(geometry.mask == .roundedRect)
     }
+
+    @Test("Composition transform converts PiP Y offset to render coordinates")
+    func compositionTransformConvertsPiPYOffset() {
+        let preset = PiPPreset(corner: .bottomRight, size: .medium, mask: .roundedRect)
+        let canvas = CGSize(width: 1920, height: 1080)
+        let source = CGSize(width: 1280, height: 720)
+        let layout = preset.layout(canvasSize: canvas, sourceSize: source)
+        let geometry = preset.clipGeometry(canvasSize: canvas, sourceSize: source)
+        let transform = CompositionBuilder.geometryTransform(
+            naturalSize: source,
+            preferredTransform: .identity,
+            geometry: geometry,
+            into: canvas)
+
+        let renderedOrigin = CGPoint.zero.applying(transform)
+        let scaledHeight = source.height * layout.scale
+        let renderedTopY = canvas.height - renderedOrigin.y - scaledHeight
+        #expect(abs(renderedOrigin.x - layout.origin.x) < 1)
+        #expect(abs(renderedTopY - layout.origin.y) < 1)
+    }
 }
 
 // MARK: - FrameScaler (T2.1)
@@ -270,6 +291,53 @@ struct FrameScalerTests {
         #expect(crop.origin.x == 92)
         #expect(crop.origin.y == 52)
         #expect(crop.size == CGSize(width: 640, height: 480))
+    }
+}
+
+// MARK: - Recorder mic meter (T4.2)
+
+@Suite("Recorder mic meter")
+struct RecorderMicMeterTests {
+
+    @Test("Normalized peak reads float PCM samples")
+    func normalizedPeakReadsFloatPCM() throws {
+        let format = try #require(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false))
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4))
+        buffer.frameLength = 4
+        let channel = try #require(buffer.floatChannelData?[0])
+        channel[0] = 0
+        channel[1] = 0.25
+        channel[2] = -0.5
+        channel[3] = 0.1
+
+        #expect(AVCaptureSampleSession.normalizedPeak(from: buffer) == 0.5)
+    }
+}
+
+// MARK: - Region capture (T5.1)
+
+@Suite("Region capture geometry")
+struct RegionCaptureGeometryTests {
+
+    @Test("Selection converts to top-left ScreenCaptureKit source rect")
+    func selectionConvertsToSourceRect() throws {
+        let screenFrame = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let selection = CGRect(x: 100, y: 200, width: 640, height: 360)
+        let region = try #require(CaptureRegion(
+            displayID: 7,
+            selectionInScreen: selection,
+            screenFrame: screenFrame,
+            displayPixelWidth: 2880,
+            displayPixelHeight: 1800))
+
+        #expect(region.displayID == 7)
+        #expect(region.sourceRect == CGRect(x: 100, y: 340, width: 640, height: 360))
+        #expect(region.outputWidth == 1280)
+        #expect(region.outputHeight == 720)
     }
 }
 
@@ -329,5 +397,124 @@ struct RecordingGapCollapseTests {
         #expect(startsByID[second.id] == 2)
         #expect(startsByID[third.id] == 4)
         #expect(startsByID[unrelated.id] == 30)
+    }
+
+    @Test("Collapse keeps simultaneous sources independent")
+    func collapseKeepsSimultaneousSourcesIndependent() {
+        let model = EditorModel()
+        let duration = CMTime(seconds: 2, preferredTimescale: 600)
+        let screenFirst = Clip(mediaID: UUID(), sourceStart: .zero, duration: duration,
+                               timelineStart: .zero)
+        let screenSecond = Clip(mediaID: UUID(), sourceStart: .zero, duration: duration,
+                                timelineStart: CMTime(seconds: 5, preferredTimescale: 600))
+        let webcamFirst = Clip(mediaID: UUID(), sourceStart: .zero, duration: duration,
+                               timelineStart: .zero)
+        let webcamSecond = Clip(mediaID: UUID(), sourceStart: .zero, duration: duration,
+                                timelineStart: CMTime(seconds: 5, preferredTimescale: 600))
+        let screenTrack = Track(name: "Screen", kind: .video)
+        screenTrack.clips = [screenFirst, screenSecond]
+        let webcamTrack = Track(name: "Webcam", kind: .video)
+        webcamTrack.clips = [webcamFirst, webcamSecond]
+        model.project.videoTracks = [screenTrack, webcamTrack]
+        model.lastRecordingSlots = [
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .display, trackKind: .video, chunkIndex: 0),
+                trackID: screenTrack.id,
+                trackIndex: 0,
+                clipID: screenFirst.id,
+                mediaID: screenFirst.mediaID,
+                timelineStart: screenFirst.timelineStart),
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .display, trackKind: .video, chunkIndex: 1),
+                trackID: screenTrack.id,
+                trackIndex: 0,
+                clipID: screenSecond.id,
+                mediaID: screenSecond.mediaID,
+                timelineStart: screenSecond.timelineStart),
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .webcam, trackKind: .video, chunkIndex: 0),
+                trackID: webcamTrack.id,
+                trackIndex: 1,
+                clipID: webcamFirst.id,
+                mediaID: webcamFirst.mediaID,
+                timelineStart: webcamFirst.timelineStart),
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .webcam, trackKind: .video, chunkIndex: 1),
+                trackID: webcamTrack.id,
+                trackIndex: 1,
+                clipID: webcamSecond.id,
+                mediaID: webcamSecond.mediaID,
+                timelineStart: webcamSecond.timelineStart),
+        ]
+
+        model.collapseRecordingGap()
+
+        #expect(screenTrack.clips[1].timelineStart.seconds == 2)
+        #expect(webcamTrack.clips[1].timelineStart.seconds == 2)
+    }
+
+    @Test("Retake track indices are keyed per recording slot")
+    func retakeTrackIndicesKeyedPerSlot() {
+        let model = EditorModel()
+        let screenTrack = Track(name: "Screen", kind: .video)
+        let webcamTrack = Track(name: "Webcam", kind: .video)
+        let systemAudioTrack = Track(name: "System Audio", kind: .audio)
+        let micTrack = Track(name: "Microphone", kind: .audio)
+        model.project.videoTracks = [screenTrack, webcamTrack]
+        model.project.audioTracks = [systemAudioTrack, micTrack]
+        let slots = [
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .display, trackKind: .video, chunkIndex: 0),
+                trackID: screenTrack.id,
+                trackIndex: 0,
+                clipID: UUID(),
+                mediaID: UUID(),
+                timelineStart: .zero),
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .webcam, trackKind: .video, chunkIndex: 0),
+                trackID: webcamTrack.id,
+                trackIndex: 1,
+                clipID: UUID(),
+                mediaID: UUID(),
+                timelineStart: .zero),
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .systemAudio, trackKind: .audio, chunkIndex: 0),
+                trackID: systemAudioTrack.id,
+                trackIndex: 0,
+                clipID: UUID(),
+                mediaID: UUID(),
+                timelineStart: .zero),
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .microphone, trackKind: .audio, chunkIndex: 0),
+                trackID: micTrack.id,
+                trackIndex: 1,
+                clipID: UUID(),
+                mediaID: UUID(),
+                timelineStart: .zero),
+        ]
+
+        let indices = model.currentTrackIndicesBySlot(slots)
+
+        #expect(indices[slots[0].key] == 0)
+        #expect(indices[slots[1].key] == 1)
+        #expect(indices[slots[2].key] == 0)
+        #expect(indices[slots[3].key] == 1)
+    }
+}
+
+// MARK: - Recording document command guards
+
+@Suite("Recording document command guards")
+@MainActor
+struct RecordingDocumentCommandGuardTests {
+
+    @Test("Window close is blocked while recording is paused")
+    func closeBlockedWhilePaused() {
+        let model = EditorModel()
+        let window = NSWindow()
+        model.isPaused = true
+
+        #expect(model.confirmClose(window: window) == false)
+        #expect(model.statusMessage == "Resume and stop the recording before closing the window.")
     }
 }

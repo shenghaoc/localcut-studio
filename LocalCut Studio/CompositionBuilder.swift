@@ -609,10 +609,10 @@ enum CompositionBuilder {
     //
     // subRampVolumes() and fitTransform() are defined in LocalCutCore.
 
-    private static func geometryTransform(naturalSize: CGSize,
-                                          preferredTransform: CGAffineTransform,
-                                          geometry: ClipGeometry,
-                                          into renderSize: CGSize) -> CGAffineTransform {
+    static func geometryTransform(naturalSize: CGSize,
+                                  preferredTransform: CGAffineTransform,
+                                  geometry: ClipGeometry,
+                                  into renderSize: CGSize) -> CGAffineTransform {
         let orientedRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
         let orientedSize = CGSize(width: abs(orientedRect.width), height: abs(orientedRect.height))
         guard orientedSize.width > 0, orientedSize.height > 0 else { return preferredTransform }
@@ -624,7 +624,7 @@ enum CompositionBuilder {
         let scaledSize = CGSize(width: orientedSize.width * geometry.scale,
                                 height: orientedSize.height * geometry.scale)
         let tx = (renderSize.width - scaledSize.width) / 2 + geometry.positionOffset.width
-        let ty = (renderSize.height - scaledSize.height) / 2 + geometry.positionOffset.height
+        let ty = (renderSize.height - scaledSize.height) / 2 - geometry.positionOffset.height
         return transform.concatenating(CGAffineTransform(translationX: tx, y: ty))
     }
 

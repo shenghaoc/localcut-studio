@@ -124,6 +124,7 @@ extension EditorModel {
                         includeSystemAudio: Bool,
                         webcamDeviceID: String?,
                         microphoneDeviceID: String?,
+                        captureRegion: CaptureRegion? = nil,
                         pipPreset: PiPPreset? = nil) async {
         guard !isRecording, !isStartingRecording, !isStoppingRecording else { return }
         isStartingRecording = true
@@ -146,6 +147,7 @@ extension EditorModel {
             frameRate: project.frameRate,
             fragmentInterval: CMTime(seconds: 2, preferredTimescale: 600),
             capabilities: Capabilities.current,
+            captureRegion: captureRegion,
             excludedWindowIDs: excludedWindowIDs)
         lastRecordingRequest = request
         activePiPPreset = pipPreset
@@ -166,6 +168,11 @@ extension EditorModel {
                     self.recordingBackpressureCount += 1
                     self.statusMessage = "Recording can't keep up — dropping data from \(source.displayName). Free disk space or lower the frame rate."
                 }
+            }, onMicrophoneLevel: { [weak self] level in
+                Task { @MainActor in
+                    guard let self, self.isRecording || self.isPaused else { return }
+                    self.recordingMicLevel = level
+                }
             })
             recordingStartedAt = Date()
             recordingPausedDuration = 0
@@ -178,10 +185,15 @@ extension EditorModel {
             if webcamDeviceID != nil { recordingSourceCount += 1 }
             if microphoneDeviceID != nil { recordingSourceCount += 1 }
             recordingBackpressureCount = 0
+            recordingIncludesMicrophone = microphoneDeviceID != nil
+            recordingMicLevel = 0
             recordingDiskFreeBytes = nil
             recordingDiskWarning = nil
             startRecordingMonitor(rootURL: root)
             try? await captureCoordinator.setFloatingPanelWindowID(panelWindowID)
+            if hideFloatingPanelWhileRecording {
+                floatingPanelController.hide()
+            }
             statusMessage = "Recording…"
         } catch {
             floatingPanelController.close()
@@ -189,6 +201,8 @@ extension EditorModel {
             activePiPPreset = nil
             isRecording = false
             recordingStartedAt = nil
+            recordingIncludesMicrophone = false
+            recordingMicLevel = 0
             statusMessage = error.localizedDescription
         }
     }
@@ -261,6 +275,8 @@ extension EditorModel {
                 recordingDiskWarning = nil
                 recordingSourceCount = 0
                 recordingBackpressureCount = 0
+                recordingIncludesMicrophone = false
+                recordingMicLevel = 0
                 let manifestFinalizeFailed = result._manifestFinalizeFailed
                 _ = await landCaptureSession(result)
                 if manifestFinalizeFailed {
@@ -276,6 +292,8 @@ extension EditorModel {
                 recordingDiskWarning = nil
                 recordingSourceCount = 0
                 recordingBackpressureCount = 0
+                recordingIncludesMicrophone = false
+                recordingMicLevel = 0
                 statusMessage = error.localizedDescription
             }
         }
@@ -290,6 +308,7 @@ extension EditorModel {
         includeSystemAudio: Bool,
         webcamDeviceID: String?,
         microphoneDeviceID: String?,
+        captureRegion: CaptureRegion? = nil,
         pipPreset: PiPPreset? = nil
     ) async {
         guard !isRecording, !isCountdownActive, !isStoppingRecording else { return }
@@ -331,7 +350,8 @@ extension EditorModel {
                 ?? FileManager.default.temporaryDirectory,
             frameRate: project.frameRate,
             fragmentInterval: CMTime(seconds: 2, preferredTimescale: 600),
-            capabilities: Capabilities.current)
+            capabilities: Capabilities.current,
+            captureRegion: captureRegion)
         lastRecordingSlots = []
 
         await startRecording(
@@ -339,6 +359,7 @@ extension EditorModel {
             includeSystemAudio: includeSystemAudio,
             webcamDeviceID: webcamDeviceID,
             microphoneDeviceID: microphoneDeviceID,
+            captureRegion: captureRegion,
             pipPreset: pipPreset)
     }
 
@@ -361,6 +382,7 @@ extension EditorModel {
             pauseStartedAt = Date()
             isRecording = false
             isPaused = true
+            recordingMicLevel = 0
             statusMessage = "Recording paused."
         } catch {
             if (error as? CaptureEngineError) == .notRecording {
@@ -371,6 +393,7 @@ extension EditorModel {
                 pauseStartedAt = pauseStartedAt ?? Date()
                 isRecording = false
                 isPaused = true
+                recordingMicLevel = 0
                 statusMessage = "Recording paused with errors: \(error.localizedDescription)"
             }
         }
@@ -390,6 +413,7 @@ extension EditorModel {
             pauseStartedAt = nil
             isPaused = false
             isRecording = true
+            recordingMicLevel = 0
             // Re-exclude the floating panel from the resumed capture session.
             try? await captureCoordinator.setFloatingPanelWindowID(
                 floatingPanelController.windowID)
@@ -417,42 +441,43 @@ extension EditorModel {
             statusMessage = "No recording gaps to collapse."
             return
         }
-        // Group recorded clips by track kind (video/audio) so chunks on
-        // separate tracks are collapsed together. Within each kind, collect
-        // all recorded clips across all tracks, sort chronologically, and
-        // close gaps.
+        // Group recorded clips by source + track kind so pause/resume chunks
+        // for screen, webcam, system audio, and microphone collapse
+        // independently without cross-source timeline drift.
+        struct CollapseGroupKey: Hashable {
+            var sourceKind: CaptureSourceKind
+            var trackKind: TrackKind
+        }
+        let slotsByGroup = Dictionary(grouping: lastRecordingSlots) { slot in
+            CollapseGroupKey(
+                sourceKind: slot.key.sourceKind,
+                trackKind: slot.key.trackKind)
+        }
         let recordedClipIDs = Set(lastRecordingSlots.map(\.clipID))
         var collapsed = false
         performUndoable("Collapse Recording Gap") {
-            for kind in [TrackKind.video, .audio] {
-                let tracks = kind == .video ? project.videoTracks : project.audioTracks
-                // Collect all recorded clips across all tracks of this kind.
-                struct TaggedClip {
-                    var clip: Clip
-                    var trackID: UUID
-                    var clipIndex: Int
-                }
-                var allClips: [TaggedClip] = []
+            for (group, slots) in slotsByGroup {
+                let tracks = group.trackKind == .video ? project.videoTracks : project.audioTracks
+                let groupClipIDs = Set(slots.map(\.clipID))
+                var allClips: [Clip] = []
                 for track in tracks {
-                    for (index, clip) in track.clips.enumerated()
-                        where recordedClipIDs.contains(clip.id) {
-                        allClips.append(TaggedClip(clip: clip, trackID: track.id, clipIndex: index))
+                    for clip in track.clips where recordedClipIDs.contains(clip.id) && groupClipIDs.contains(clip.id) {
+                        allClips.append(clip)
                     }
                 }
-                allClips.sort { $0.clip.timelineStart < $1.clip.timelineStart }
+                allClips.sort { $0.timelineStart < $1.timelineStart }
                 guard allClips.count >= 2 else { continue }
 
-                // Compute accumulated gap across all recorded clips of this kind.
-                var nextStart = allClips[0].clip.timelineEnd
+                // Compute accumulated gap across all recorded chunks for this source.
+                var nextStart = allClips[0].timelineEnd
                 var timelineStartsByClipID: [Clip.ID: CMTime] = [:]
-                for tagged in allClips.dropFirst() {
-                    if tagged.clip.timelineStart > nextStart {
-                        timelineStartsByClipID[tagged.clip.id] = nextStart
+                for clip in allClips.dropFirst() {
+                    if clip.timelineStart > nextStart {
+                        timelineStartsByClipID[clip.id] = nextStart
                         collapsed = true
                     }
-                    nextStart = CMTimeMaximum(nextStart,
-                        timelineStartsByClipID[tagged.clip.id].map { $0 + tagged.clip.duration }
-                            ?? tagged.clip.timelineEnd)
+                    let adjustedEnd = (timelineStartsByClipID[clip.id] ?? clip.timelineStart) + clip.duration
+                    nextStart = CMTimeMaximum(nextStart, adjustedEnd)
                 }
 
                 // Apply the computed positions to the actual tracks.
@@ -472,6 +497,23 @@ extension EditorModel {
                 statusMessage = "No recording gaps to collapse."
             }
         }
+    }
+
+    func currentTrackIndicesBySlot(_ slots: [RecordingSlot]) -> [RecordingSlotKey: Int] {
+        var trackIndices: [RecordingSlotKey: Int] = [:]
+        for slot in slots {
+            switch slot.key.trackKind {
+            case .video:
+                if let index = project.videoTracks.firstIndex(where: { $0.id == slot.trackID }) {
+                    trackIndices[slot.key] = index
+                }
+            case .audio:
+                if let index = project.audioTracks.firstIndex(where: { $0.id == slot.trackID }) {
+                    trackIndices[slot.key] = index
+                }
+            }
+        }
+        return trackIndices
     }
 
     // MARK: - Phase 42: Retake
@@ -494,23 +536,7 @@ extension EditorModel {
         retakeTimelinePositions = Dictionary(
             previousSlots.map { ($0.key, $0.timelineStart) },
             uniquingKeysWith: { first, _ in first })
-        // Store original track indices so the replacement lands at the same
-        // position in the track stack (preserving z-order).
-        var trackIndices: [TrackKind: Int] = [:]
-        for slot in previousSlots {
-            guard trackIndices[slot.key.trackKind] == nil else { continue }
-            switch slot.key.trackKind {
-            case .video:
-                if let idx = project.videoTracks.firstIndex(where: { $0.id == slot.trackID }) {
-                    trackIndices[.video] = idx
-                }
-            case .audio:
-                if let idx = project.audioTracks.firstIndex(where: { $0.id == slot.trackID }) {
-                    trackIndices[.audio] = idx
-                }
-            }
-        }
-        retakeTrackIndices = trackIndices
+        retakeTrackIndices = currentTrackIndicesBySlot(previousSlots)
 
         let videoTrackIDs = Set(previousSlots.filter { $0.key.trackKind == .video }.map(\.trackID))
         let audioTrackIDs = Set(previousSlots.filter { $0.key.trackKind == .audio }.map(\.trackID))
@@ -535,6 +561,7 @@ extension EditorModel {
             includeSystemAudio: request.includeSystemAudio,
             webcamDeviceID: request.webcamDeviceID,
             microphoneDeviceID: request.microphoneDeviceID,
+            captureRegion: request.captureRegion,
             pipPreset: lastRecordingPiPPreset)
         // If the recording failed to start, clear stale positions so the next
         // normal recording is not corrupted.
@@ -545,6 +572,7 @@ extension EditorModel {
             retakeUndoBefore = nil
             retakePreviousSlots = []
             retakeTimelinePositions = [:]
+            retakeTrackIndices = [:]
             scheduleRebuild()
             statusMessage = failureStatus
         }
@@ -584,6 +612,13 @@ extension EditorModel {
 
     @discardableResult
     func landCaptureSession(_ result: CaptureSessionResult) async -> Bool {
+        let landingPiPPreset = result.wasRecovered ? nil : activePiPPreset
+        defer {
+            if !result.wasRecovered {
+                activePiPPreset = nil
+            }
+        }
+
         func restoreFailedRetake(status: String) {
             if let before = retakeUndoBefore {
                 applyState(before)
@@ -591,6 +626,7 @@ extension EditorModel {
                 retakeUndoBefore = nil
                 retakePreviousSlots = []
                 retakeTimelinePositions = [:]
+                retakeTrackIndices = [:]
                 scheduleRebuild()
             }
             statusMessage = status
@@ -712,7 +748,7 @@ extension EditorModel {
 
         func clipGeometry(for entry: LoadedCapturedSource) -> ClipGeometry {
             guard entry.source.descriptor.kind == .webcam,
-                  let preset = activePiPPreset else {
+                  let preset = landingPiPPreset else {
                 return .identity
             }
             return preset.clipGeometry(canvasSize: project.renderSize,
@@ -738,7 +774,7 @@ extension EditorModel {
                     // For retakes, insert at the original track index to preserve
                     // z-order; otherwise append.
                     let trackIndex: Int
-                    if isRetake, let retakeIdx = retakeTrackIndices[.video] {
+                    if isRetake, let retakeIdx = retakeTrackIndices[key] {
                         let insertIdx = min(retakeIdx, project.videoTracks.count)
                         project.videoTracks.insert(track, at: insertIdx)
                         trackIndex = insertIdx
@@ -764,7 +800,7 @@ extension EditorModel {
                     let track = Track(name: entry.source.descriptor.displayName, kind: .audio)
                     track.clips = [clip]
                     let audioTrackIndex: Int
-                    if isRetake, let retakeIdx = retakeTrackIndices[.audio] {
+                    if isRetake, let retakeIdx = retakeTrackIndices[key] {
                         let insertIdx = min(retakeIdx, project.audioTracks.count)
                         project.audioTracks.insert(track, at: insertIdx)
                         audioTrackIndex = insertIdx
@@ -800,14 +836,13 @@ extension EditorModel {
         // Record slots for potential retake.
         if !result.wasRecovered {
             lastRecordingSlots = newSlots
-            lastRecordingPiPPreset = activePiPPreset
+            lastRecordingPiPPreset = landingPiPPreset
         }
         // Clear retake state and PiP preset after use so stale values don't
         // affect future recovered-session imports.
         retakeTimelinePositions = [:]
         retakeTrackIndices = [:]
         retakeUndoBefore = nil
-        activePiPPreset = nil
         retakePreviousSlots = []
 
         if !loadErrors.isEmpty {

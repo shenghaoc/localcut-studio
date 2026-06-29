@@ -136,12 +136,15 @@ final class EditorModel {
     var isStartingRecording = false
     var isRecording = false
     var isStoppingRecording = false
+    var hideFloatingPanelWhileRecording = false
     var recordingStartedAt: Date?
     var recordingElapsedSeconds: Double = 0
     var recordingDiskFreeBytes: Int64?
     var recordingDiskWarning: RecordingDiskWarning?
     var recordingSourceCount: Int = 0
     var recordingBackpressureCount: Int = 0
+    var recordingIncludesMicrophone = false
+    var recordingMicLevel: Float = 0
     var recoveredCaptureSessions: [CaptureSessionResult] = []
     @ObservationIgnored nonisolated(unsafe) var recordingsFolderAccessURL: URL?
     @ObservationIgnored nonisolated(unsafe) var recordingMonitorTask: Task<Void, Never>?
@@ -168,9 +171,9 @@ final class EditorModel {
     /// undo step spanning both removal and replacement.
     @ObservationIgnored var retakeUndoBefore: ProjectState?
     @ObservationIgnored var retakePreviousSlots: [RecordingSlot] = []
-    /// Track indices from the original recording, used by retake to reinsert
-    /// replacement tracks at the same position in the track stack.
-    @ObservationIgnored var retakeTrackIndices: [TrackKind: Int] = [:]
+    /// Track indices from the original recording, keyed by source/chunk, so
+    /// retake can reinsert each replacement track at the same stack position.
+    @ObservationIgnored var retakeTrackIndices: [RecordingSlotKey: Int] = [:]
     /// PiP preset applied to webcam tracks.
     var activePiPPreset: PiPPreset?
     @ObservationIgnored var lastRecordingPiPPreset: PiPPreset?
