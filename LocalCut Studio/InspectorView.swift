@@ -1284,17 +1284,15 @@ struct InspectorView: View {
     private var overlayListSection: some View {
         Section("Overlays") {
             if model.project.overlays.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
+                ContentUnavailableView {
                     Label("No Overlays", systemImage: "square.3.layers.3d")
-                        .font(.headline)
+                } description: {
                     Text("Add an animated image, alpha video, or Lottie overlay to the project.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                } actions: {
                     addOverlayMenu
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                 }
-                .padding(.vertical, 4)
             } else {
                 HStack {
                     addOverlayMenu
