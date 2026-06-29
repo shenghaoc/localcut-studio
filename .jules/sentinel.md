@@ -25,7 +25,7 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Vulnerability:** Found a force unwrap (`!`) when accessing values from a dictionary using its sorted keys in `ProjectBundle.swift`.
 **Learning:** While iterating over `.keys` usually guarantees presence, force unwraps violate the "never force-unwrap" project security philosophy and pose a crash (Denial of Service) risk in Swift.
 **Prevention:** Iterate dictionary entries directly with `entries.sorted(by:)` instead of subscripting by sorted keys, eliminating both the force-unwrap and any possibility of a silent skip.
-## 2024-06-28 - Sanitize Media Metadata Before Use
+## 2026-06-28 — Sanitize Media Metadata Before Use
 **Vulnerability:** Untrusted user input via media metadata was not fully validated upon project reconstruction from document or queues, creating potential vector for crash via negative/infinite durations or huge canvas sizes.
 **Learning:** App Sandbox security extends beyond file access—it means treating media parameters as adversarial input that must be bounded to avoid crashing rendering pipeline/timecode string conversion.
 **Prevention:** Always use `.sanitized` property defined in `LocalCutCore` on `CMTime`, `CGSize`, and `CGAffineTransform` before ingesting media values into model domain.
