@@ -518,3 +518,48 @@ struct RecordingDocumentCommandGuardTests {
         #expect(model.statusMessage == "Resume and stop the recording before closing the window.")
     }
 }
+
+// MARK: - Floating-panel fallback (R7.2)
+
+@Suite("Floating-panel fallback")
+@MainActor
+struct FloatingPanelFallbackTests {
+
+    @Test("Main-window recording state is independent of floating panel visibility")
+    func mainWindowStateIndependentOfPanel() {
+        let model = EditorModel()
+        model.isRecording = true
+        model.isPaused = false
+        model.floatingPanelController.hide()
+        #expect(model.isRecording)
+        #expect(!model.isPaused)
+    }
+
+    @Test("Hide-while-recording defaults to false")
+    func hideWhileRecordingDefaultsToFalse() {
+        let model = EditorModel()
+        #expect(!model.hideFloatingPanelWhileRecording)
+    }
+
+    @Test("Floating panel show/hide/close lifecycle does not affect recording state")
+    func panelLifecycleDoesNotAffectRecording() {
+        let model = EditorModel()
+        model.isRecording = true
+        model.recordingSourceCount = 1
+        model.recordingMicLevel = 0.3
+
+        model.floatingPanelController.show(model: model)
+        #expect(model.floatingPanelController.isShown)
+        #expect(model.isRecording)
+
+        model.floatingPanelController.hide()
+        #expect(!model.floatingPanelController.isShown)
+        #expect(model.isRecording)
+        #expect(model.recordingSourceCount == 1)
+        #expect(model.recordingMicLevel == 0.3)
+
+        model.floatingPanelController.close()
+        #expect(!model.floatingPanelController.isShown)
+        #expect(model.isRecording)
+    }
+}
