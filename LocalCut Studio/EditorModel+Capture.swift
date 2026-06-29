@@ -417,33 +417,51 @@ extension EditorModel {
             statusMessage = "No recording gaps to collapse."
             return
         }
-        let recordedTrackIDs = Set(lastRecordingSlots.map(\.trackID))
-        let recordedClipIDsByTrack = Dictionary(grouping: lastRecordingSlots, by: \.trackID)
-            .mapValues { Set($0.map(\.clipID)) }
+        // Group recorded clips by track kind (video/audio) so chunks on
+        // separate tracks are collapsed together. Within each kind, collect
+        // all recorded clips across all tracks, sort chronologically, and
+        // close gaps.
+        let recordedClipIDs = Set(lastRecordingSlots.map(\.clipID))
         var collapsed = false
         performUndoable("Collapse Recording Gap") {
-            for track in (project.videoTracks + project.audioTracks)
-                where recordedTrackIDs.contains(track.id) {
-                let recordedClipIDs = recordedClipIDsByTrack[track.id] ?? []
-                let sorted = track.clips
-                    .filter { recordedClipIDs.contains($0.id) }
-                    .sorted { $0.timelineStart < $1.timelineStart }
-                guard sorted.count >= 2 else { continue }
-                var nextStart = sorted[0].timelineEnd
+            for kind in [TrackKind.video, .audio] {
+                let tracks = kind == .video ? project.videoTracks : project.audioTracks
+                // Collect all recorded clips across all tracks of this kind.
+                struct TaggedClip {
+                    var clip: Clip
+                    var trackID: UUID
+                    var clipIndex: Int
+                }
+                var allClips: [TaggedClip] = []
+                for track in tracks {
+                    for (index, clip) in track.clips.enumerated()
+                        where recordedClipIDs.contains(clip.id) {
+                        allClips.append(TaggedClip(clip: clip, trackID: track.id, clipIndex: index))
+                    }
+                }
+                allClips.sort { $0.clip.timelineStart < $1.clip.timelineStart }
+                guard allClips.count >= 2 else { continue }
+
+                // Compute accumulated gap across all recorded clips of this kind.
+                var nextStart = allClips[0].clip.timelineEnd
                 var timelineStartsByClipID: [Clip.ID: CMTime] = [:]
-                for clip in sorted.dropFirst() {
-                    var updatedClip = clip
-                    if clip.timelineStart > nextStart {
-                        updatedClip.timelineStart = nextStart
-                        timelineStartsByClipID[clip.id] = nextStart
+                for tagged in allClips.dropFirst() {
+                    if tagged.clip.timelineStart > nextStart {
+                        timelineStartsByClipID[tagged.clip.id] = nextStart
                         collapsed = true
                     }
-                    nextStart = CMTimeMaximum(nextStart, updatedClip.timelineEnd)
+                    nextStart = CMTimeMaximum(nextStart,
+                        timelineStartsByClipID[tagged.clip.id].map { $0 + tagged.clip.duration }
+                            ?? tagged.clip.timelineEnd)
                 }
+
+                // Apply the computed positions to the actual tracks.
                 guard !timelineStartsByClipID.isEmpty else { continue }
-                for index in track.clips.indices {
-                    if let timelineStart = timelineStartsByClipID[track.clips[index].id] {
-                        track.clips[index].timelineStart = timelineStart
+                for track in tracks {
+                    for index in track.clips.indices {
+                        if let newStart = timelineStartsByClipID[track.clips[index].id] {
+                            track.clips[index].timelineStart = newStart
+                        }
                     }
                 }
             }
@@ -476,6 +494,23 @@ extension EditorModel {
         retakeTimelinePositions = Dictionary(
             previousSlots.map { ($0.key, $0.timelineStart) },
             uniquingKeysWith: { first, _ in first })
+        // Store original track indices so the replacement lands at the same
+        // position in the track stack (preserving z-order).
+        var trackIndices: [TrackKind: Int] = [:]
+        for slot in previousSlots {
+            guard trackIndices[slot.key.trackKind] == nil else { continue }
+            switch slot.key.trackKind {
+            case .video:
+                if let idx = project.videoTracks.firstIndex(where: { $0.id == slot.trackID }) {
+                    trackIndices[.video] = idx
+                }
+            case .audio:
+                if let idx = project.audioTracks.firstIndex(where: { $0.id == slot.trackID }) {
+                    trackIndices[.audio] = idx
+                }
+            }
+        }
+        retakeTrackIndices = trackIndices
 
         let videoTrackIDs = Set(previousSlots.filter { $0.key.trackKind == .video }.map(\.trackID))
         let audioTrackIDs = Set(previousSlots.filter { $0.key.trackKind == .audio }.map(\.trackID))
@@ -700,11 +735,21 @@ extension EditorModel {
                         geometry: clipGeometry(for: entry))
                     let track = Track(name: entry.source.descriptor.displayName, kind: .video)
                     track.clips = [clip]
-                    project.videoTracks.append(track)
+                    // For retakes, insert at the original track index to preserve
+                    // z-order; otherwise append.
+                    let trackIndex: Int
+                    if isRetake, let retakeIdx = retakeTrackIndices[.video] {
+                        let insertIdx = min(retakeIdx, project.videoTracks.count)
+                        project.videoTracks.insert(track, at: insertIdx)
+                        trackIndex = insertIdx
+                    } else {
+                        project.videoTracks.append(track)
+                        trackIndex = project.videoTracks.count - 1
+                    }
                     newSlots.append(RecordingSlot(
                         key: key,
                         trackID: track.id,
-                        trackIndex: project.videoTracks.count - 1,
+                        trackIndex: trackIndex,
                         clipID: clip.id,
                         mediaID: entry.item.id,
                         timelineStart: clip.timelineStart))
@@ -718,11 +763,19 @@ extension EditorModel {
                         timelineStart: landingStart(for: entry, trackKind: .audio))
                     let track = Track(name: entry.source.descriptor.displayName, kind: .audio)
                     track.clips = [clip]
-                    project.audioTracks.append(track)
+                    let audioTrackIndex: Int
+                    if isRetake, let retakeIdx = retakeTrackIndices[.audio] {
+                        let insertIdx = min(retakeIdx, project.audioTracks.count)
+                        project.audioTracks.insert(track, at: insertIdx)
+                        audioTrackIndex = insertIdx
+                    } else {
+                        project.audioTracks.append(track)
+                        audioTrackIndex = project.audioTracks.count - 1
+                    }
                     newSlots.append(RecordingSlot(
                         key: key,
                         trackID: track.id,
-                        trackIndex: project.audioTracks.count - 1,
+                        trackIndex: audioTrackIndex,
                         clipID: clip.id,
                         mediaID: entry.item.id,
                         timelineStart: clip.timelineStart))
@@ -749,9 +802,12 @@ extension EditorModel {
             lastRecordingSlots = newSlots
             lastRecordingPiPPreset = activePiPPreset
         }
-        // Clear retake positions after use.
+        // Clear retake state and PiP preset after use so stale values don't
+        // affect future recovered-session imports.
         retakeTimelinePositions = [:]
+        retakeTrackIndices = [:]
         retakeUndoBefore = nil
+        activePiPPreset = nil
         retakePreviousSlots = []
 
         if !loadErrors.isEmpty {

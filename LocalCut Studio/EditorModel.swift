@@ -168,6 +168,9 @@ final class EditorModel {
     /// undo step spanning both removal and replacement.
     @ObservationIgnored var retakeUndoBefore: ProjectState?
     @ObservationIgnored var retakePreviousSlots: [RecordingSlot] = []
+    /// Track indices from the original recording, used by retake to reinsert
+    /// replacement tracks at the same position in the track stack.
+    @ObservationIgnored var retakeTrackIndices: [TrackKind: Int] = [:]
     /// PiP preset applied to webcam tracks.
     var activePiPPreset: PiPPreset?
     @ObservationIgnored var lastRecordingPiPPreset: PiPPreset?

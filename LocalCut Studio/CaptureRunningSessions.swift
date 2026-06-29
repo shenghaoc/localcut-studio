@@ -124,8 +124,6 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         withLockedState {
             self.target = newTarget
         }
-        // Dispatch to outputQueue to avoid racing with the stream output callback.
-        outputQueue.async { self.dropNextScreenFrame = true }
 
         let content = try await SCShareableContent.current
         let newFilter = try makeFilter(from: content)
@@ -140,6 +138,10 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
                         if let error {
                             continuation.resume(throwing: CaptureEngineError.captureSessionFailed(error.localizedDescription))
                         } else {
+                            // Set the drop flag AFTER the update completes so the
+                            // next frame from the new source (not an in-flight frame
+                            // from the old source) is the one dropped.
+                            self.outputQueue.async { self.dropNextScreenFrame = true }
                             continuation.resume()
                         }
                     }

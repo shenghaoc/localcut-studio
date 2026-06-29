@@ -3,6 +3,8 @@ import SwiftUI
 /// SwiftUI content displayed inside the floating recorder control panel.
 struct RecorderFloatingPanelContent: View {
     @Bindable var model: EditorModel
+    @State private var screenOptions: [CaptureSourceOption] = []
+    @State private var showSourcePicker = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -19,6 +21,35 @@ struct RecorderFloatingPanelContent: View {
                 .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(formatElapsed(model.recordingElapsedSeconds))")
 
             Spacer()
+
+            // Source switcher (only while actively recording).
+            if model.isRecording && !screenOptions.isEmpty {
+                Button {
+                    showSourcePicker.toggle()
+                } label: {
+                    Image(systemName: "rectangle.on.rectangle")
+                }
+                .buttonStyle(.borderless)
+                .help("Switch capture source")
+                .accessibilityLabel("Switch capture source")
+                .popover(isPresented: $showSourcePicker) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Switch Source")
+                            .font(.caption.weight(.semibold))
+                            .padding(.bottom, 4)
+                        ForEach(screenOptions) { option in
+                            Button(option.title) {
+                                showSourcePicker = false
+                                Task { await model.switchCaptureSource(to: option.target) }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                        }
+                    }
+                    .padding(8)
+                    .frame(minWidth: 160)
+                }
+            }
 
             // Pause / Resume.
             if model.isPaused {
@@ -53,6 +84,15 @@ struct RecorderFloatingPanelContent: View {
             .accessibilityLabel("Stop recording")
         }
         .padding(12)
+        .task { await loadScreenSources() }
+    }
+
+    private func loadScreenSources() async {
+        do {
+            screenOptions = try await CaptureSourceCatalog.screenOptions()
+        } catch {
+            screenOptions = []
+        }
     }
 
     private func formatElapsed(_ seconds: Double) -> String {
