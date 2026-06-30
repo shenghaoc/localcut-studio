@@ -64,9 +64,11 @@ public enum BeatDetectionCore {
             // Pack windowed samples into split complex (interleaved → split).
             windowed.withUnsafeBufferPointer { buf in
                 if let baseAddress = buf.baseAddress {
-                    baseAddress.withMemoryRebound(to: DSPComplex.self, capacity: halfN) { complexP in
-                        vDSP_ctoz(complexP, 2, &split, 1, vDSP_Length(halfN))
-                    }
+                    // Use raw-pointer cast rather than withMemoryRebound
+                    // because Float (4 B) and DSPComplex (8 B) differ in stride.
+                    let complexP = UnsafeRawPointer(baseAddress)
+                        .assumingMemoryBound(to: DSPComplex.self)
+                    vDSP_ctoz(complexP, 2, &split, 1, vDSP_Length(halfN))
                 }
             }
 
@@ -181,11 +183,7 @@ public enum BeatDetectionCore {
                 var pick: (lag: Int, energy: Float)?
                 for candidate in candidates where candidate >= minLag && candidate <= maxLag {
                     let energy = cachedAutocorrelation(at: candidate)
-                    if let currentPick = pick {
-                        if energy > currentPick.energy {
-                            pick = (candidate, energy)
-                        }
-                    } else {
+                    if energy > (pick?.energy ?? -.infinity) {
                         pick = (candidate, energy)
                     }
                 }
