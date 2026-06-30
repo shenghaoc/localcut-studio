@@ -234,6 +234,7 @@ struct ZoomPanBoundsTests {
     @Test("Bounds are positive and finite")
     func boundsPositive() {
         #expect(ZoomPanBounds.maxVelocity > 0)
+        #expect(ZoomPanBounds.referenceRenderWidth > 0)
         #expect(ZoomPanBounds.maxScaleVelocity > 0)
         #expect(ZoomPanBounds.maxAcceleration > 0)
         #expect(ZoomPanBounds.maxScaleAcceleration > 0)
@@ -289,7 +290,11 @@ struct ZoomPanPresetGeneratorTests {
     func velocityBoundsEnforced() {
         // Create a preset that would exceed velocity bounds
         let shortDuration = CMTime(seconds: 0.1, preferredTimescale: 600)
-        let preset = ZoomPanPreset(kind: .slowZoomIn, endScale: 5, duration: shortDuration)
+        let preset = ZoomPanPreset(
+            kind: .slowZoomIn,
+            targetPoint: CGPoint(x: 0, y: 0),
+            endScale: 5,
+            duration: shortDuration)
         let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clipDuration)
         // Should still produce valid keyframes (bounds enforcement adjusts values)
         #expect(keyframes.count == 2)
@@ -297,7 +302,7 @@ struct ZoomPanPresetGeneratorTests {
         guard dt > 0 else { return }
         let dx = keyframes[1].value.tx - keyframes[0].value.tx
         let dy = keyframes[1].value.ty - keyframes[0].value.ty
-        let velocity = sqrt(dx * dx + dy * dy) / Float(dt)
+        let velocity = sqrt(dx * dx + dy * dy) * ZoomPanBounds.referenceRenderWidth / Float(dt)
         #expect(velocity <= ZoomPanBounds.maxVelocity + 0.01)
     }
 

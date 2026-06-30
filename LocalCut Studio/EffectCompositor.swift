@@ -282,10 +282,16 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             }
         }
 
+        var foregroundResult: CIImage?
         for unit in instruction.units {
             guard let image = renderedImage(for: unit, request: request,
                                             frameRate: instruction.frameRate,
                                             workingColourSpace: space) else { continue }
+            if paddedBackgroundImage != nil {
+                let foregroundCanvas = foregroundResult ?? CIImage(color: .clear)
+                    .cropped(to: CGRect(origin: .zero, size: renderSize))
+                foregroundResult = image.composited(over: foregroundCanvas)
+            }
             if let existing = result {
                 result = image.composited(over: existing)
             } else {
@@ -298,41 +304,12 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // visible around them.
         if let bgImage = paddedBackgroundImage, instruction.paddedInsetMargin > 0,
            let preset = instruction.paddedBackground {
-            let margin = CGFloat(instruction.paddedInsetMargin)
-            let insetRect = CGRect(x: margin, y: margin,
-                                   width: renderSize.width - margin * 2,
-                                   height: renderSize.height - margin * 2)
-            let cornerRadius = CGFloat(preset.cornerRadius)
-            let mask = CalloutRenderer.createRoundedRectMask(
-                rect: insetRect, cornerRadius: cornerRadius, renderSize: renderSize)
-            // Isolate the foreground (everything over the background).
-            if let composite = result {
-                let clear = CIImage(color: .clear).cropped(to: CGRect(origin: .zero, size: renderSize))
-                if let maskedFg = CIFilter(name: "CIBlendWithMask", parameters: [
-                    kCIInputImageKey: composite,
-                    kCIInputBackgroundImageKey: clear,
-                    kCIInputMaskImageKey: mask,
-                ])?.outputImage {
-                    var foreground = maskedFg
-                    // Apply drop shadow if configured.
-                    if preset.shadowOpacity > 0, preset.shadowRadius > 0 {
-                        if let shadow = CIFilter(name: "CIDropShadow", parameters: [
-                            kCIInputImageKey: foreground,
-                            "inputOffset": CIVector(
-                                x: CGFloat(preset.shadowOffset.width),
-                                y: CGFloat(preset.shadowOffset.height)),
-                            "inputRadius": CGFloat(preset.shadowRadius),
-                            "inputColor": CIColor(
-                                red: 0, green: 0, blue: 0,
-                                alpha: CGFloat(preset.shadowOpacity)),
-                        ])?.outputImage {
-                            foreground = shadow.cropped(to: CGRect(origin: .zero, size: renderSize))
-                        }
-                    }
-                    // Composite the (optionally shadowed) foreground over the background.
-                    result = foreground.composited(over: bgImage)
-                }
-            }
+            result = Self.paddedBackgroundComposite(
+                foreground: foregroundResult,
+                background: bgImage,
+                preset: preset,
+                insetMargin: CGFloat(instruction.paddedInsetMargin),
+                renderSize: renderSize)
         }
 
         // Overlays sit between video layers and captions. Earlier entries draw
@@ -400,6 +377,70 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         finishPendingRequest(requestID) {
             request.finish(withComposedVideoFrame: destination)
         }
+    }
+
+    nonisolated static func paddedBackgroundComposite(
+        foreground: CIImage?,
+        background: CIImage,
+        preset: PaddedBackgroundPreset,
+        insetMargin: CGFloat,
+        renderSize: CGSize
+    ) -> CIImage {
+        let renderRect = CGRect(origin: .zero, size: renderSize)
+        let background = background.cropped(to: renderRect)
+        guard let foreground, renderSize.width > 0, renderSize.height > 0 else {
+            return background
+        }
+
+        let maxMargin = max(0, min(renderSize.width, renderSize.height) / 2 - 1)
+        let margin = min(max(0, insetMargin), maxMargin)
+        let insetRect = renderRect.insetBy(dx: margin, dy: margin)
+        guard insetRect.width > 0, insetRect.height > 0 else { return background }
+
+        let scale = min(insetRect.width / renderSize.width, insetRect.height / renderSize.height)
+        let fittedSize = CGSize(width: renderSize.width * scale, height: renderSize.height * scale)
+        let fittedRect = CGRect(
+            x: insetRect.midX - fittedSize.width / 2,
+            y: insetRect.midY - fittedSize.height / 2,
+            width: fittedSize.width,
+            height: fittedSize.height)
+        let transform = CGAffineTransform(
+            a: scale, b: 0,
+            c: 0, d: scale,
+            tx: fittedRect.minX,
+            ty: fittedRect.minY)
+        let fittedForeground = foreground
+            .cropped(to: renderRect)
+            .transformed(by: transform)
+            .cropped(to: renderRect)
+        let mask = CalloutRenderer.createRoundedRectMask(
+            rect: fittedRect,
+            cornerRadius: CGFloat(preset.cornerRadius),
+            renderSize: renderSize)
+        let clear = CIImage(color: .clear).cropped(to: renderRect)
+        guard let masked = CIFilter(name: "CIBlendWithMask", parameters: [
+            kCIInputImageKey: fittedForeground,
+            kCIInputBackgroundImageKey: clear,
+            kCIInputMaskImageKey: mask,
+        ])?.outputImage else {
+            return fittedForeground.composited(over: background).cropped(to: renderRect)
+        }
+
+        var foregroundLayer = masked
+        if preset.shadowOpacity > 0, preset.shadowRadius > 0,
+           let shadow = CIFilter(name: "CIDropShadow", parameters: [
+               kCIInputImageKey: foregroundLayer,
+               "inputOffset": CIVector(
+                   x: CGFloat(preset.shadowOffset.width),
+                   y: CGFloat(preset.shadowOffset.height)),
+               "inputRadius": CGFloat(preset.shadowRadius),
+               "inputColor": CIColor(
+                   red: 0, green: 0, blue: 0,
+                   alpha: CGFloat(preset.shadowOpacity)),
+           ])?.outputImage {
+            foregroundLayer = shadow.cropped(to: renderRect)
+        }
+        return foregroundLayer.composited(over: background).cropped(to: renderRect)
     }
 
     nonisolated private func isPending(_ requestID: UUID) -> Bool {

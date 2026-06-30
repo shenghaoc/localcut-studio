@@ -199,19 +199,6 @@ extension EditorModel {
         }
     }
 
-    /// Clear all transform keyframes from a clip.
-    @MainActor
-    func clearClipTransformKeyframes(clipID: UUID) {
-        guard let trackIndex = project.videoTracks.firstIndex(where: { $0.clips.contains(where: { $0.id == clipID }) }),
-              let clipIndex = project.videoTracks[trackIndex].clips.firstIndex(where: { $0.id == clipID }) else { return }
-        performUndoable("Clear Clip Transform Keyframes") {
-            project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes =
-                Keyframed(defaultValue: .identity)
-        }
-        statusMessage = "Cleared clip transform keyframes."
-        Task { await rebuild() }
-    }
-
     /// Remove the padded background preset.
     @MainActor
     func removePaddedBackground() {

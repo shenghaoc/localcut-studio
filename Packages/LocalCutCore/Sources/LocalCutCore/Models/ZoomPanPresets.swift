@@ -143,7 +143,7 @@ public enum ZoomPanPresetGenerator {
             let dx = curr.tx - prev.tx
             let dy = curr.ty - prev.ty
             let dist = sqrt(dx * dx + dy * dy)
-            let velocity = dist / Float(dt)
+            let velocity = dist * ZoomPanBounds.referenceRenderWidth / Float(dt)
 
             if velocity > ZoomPanBounds.maxVelocity {
                 let velocityScale = ZoomPanBounds.maxVelocity / velocity
@@ -219,6 +219,6 @@ public enum ZoomPanPresetGenerator {
     ) -> Float {
         let dx = b.tx - a.tx
         let dy = b.ty - a.ty
-        return sqrt(dx * dx + dy * dy) / max(0.001, dt)
+        return sqrt(dx * dx + dy * dy) * ZoomPanBounds.referenceRenderWidth / max(0.001, dt)
     }
 }

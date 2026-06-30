@@ -153,6 +153,10 @@ public struct ZoomPanPreset: Hashable, Codable, Sendable {
 /// These prevent whip-pan and jarring motion by capping how fast and how
 /// abruptly the transform can change between keyframes.
 public enum ZoomPanBounds {
+    /// Reference width used to convert normalised transform translations into
+    /// render-space points for preset-time bounds enforcement.
+    public static let referenceRenderWidth: Float = 1920
+
     /// Maximum translation velocity in points per second.
     /// At 1920 px width, 600 pt/s feels like a controlled pan; anything
     /// faster reads as a jump cut.

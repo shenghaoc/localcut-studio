@@ -46,6 +46,40 @@ struct ScreencastCalloutTransformKeyframeTests {
         #expect(abs(keyframe.value.decomposedRotation - Float.pi / 6) < 0.001)
     }
 
+    @Test("Clip transform keyframes can be added edited and removed at the playhead")
+    func clipTransformKeyframesAreEditable() throws {
+        let model = EditorModel()
+        let clip = Clip(
+            mediaID: UUID(),
+            sourceStart: .zero,
+            duration: CMTime(seconds: 5, preferredTimescale: 600),
+            timelineStart: .zero)
+        model.project.videoTracks[0].clips = [clip]
+        model.selectedClipID = clip.id
+        model.currentTime = 2
+
+        model.addOrUpdateSelectedClipTransformKeyframe()
+        var edited = Transform2D(translateX: 0.125, translateY: -0.08, scale: 1.4, rotation: 0.1)
+        model.updateSelectedClipTransformKeyframeValue(edited)
+
+        var updatedClip = try #require(model.project.videoTracks.first?.clips.first)
+        var keyframe = try #require(updatedClip.transformKeyframes.keyframes.first)
+        #expect(abs(keyframe.time.seconds - 2) < 0.001)
+        #expect(abs(keyframe.value.tx - edited.tx) < 0.001)
+        #expect(abs(keyframe.value.ty - edited.ty) < 0.001)
+        #expect(abs(keyframe.value.decomposedScale - edited.decomposedScale) < 0.001)
+
+        edited = Transform2D(translateX: -0.1, translateY: 0.05, scale: 1.2, rotation: 0)
+        model.updateSelectedClipTransformKeyframeValue(edited)
+        updatedClip = try #require(model.project.videoTracks.first?.clips.first)
+        keyframe = try #require(updatedClip.transformKeyframes.keyframes.first)
+        #expect(abs(keyframe.value.tx - edited.tx) < 0.001)
+
+        model.removeSelectedClipTransformKeyframe()
+        updatedClip = try #require(model.project.videoTracks.first?.clips.first)
+        #expect(updatedClip.transformKeyframes.keyframes.isEmpty)
+    }
+
     @Test("Each callout kind renders a deterministic non-empty snapshot")
     func eachCalloutKindRendersSnapshot() throws {
         let size = CGSize(width: 96, height: 64)
@@ -89,6 +123,40 @@ struct ScreencastCalloutTransformKeyframeTests {
                 #expect(bytes != sourceBytes, "\(kind.displayName) snapshot should change the fixture image")
             }
         }
+    }
+
+    @Test("Padded background fits the full foreground into the inset frame")
+    func paddedBackgroundFitsForegroundInsteadOfCropping() throws {
+        let size = CGSize(width: 100, height: 100)
+        let renderRect = CGRect(origin: .zero, size: size)
+        let base = CIImage(color: CIColor(red: 0, green: 0, blue: 1, alpha: 1))
+            .cropped(to: renderRect)
+        let leftEdge = CIImage(color: CIColor(red: 1, green: 0, blue: 0, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 10, height: 100))
+        let foreground = leftEdge.composited(over: base)
+        let background = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1))
+            .cropped(to: renderRect)
+        let preset = PaddedBackgroundPreset(
+            cornerRadius: 0,
+            shadowOpacity: 0,
+            shadowRadius: 0,
+            insetMargin: 20)
+
+        let image = EffectCompositor.paddedBackgroundComposite(
+            foreground: foreground,
+            background: background,
+            preset: preset,
+            insetMargin: 20,
+            renderSize: size)
+        let bytes = try #require(rgbaBytes(image, size: size))
+        let edgePixel = try #require(pixel(bytes, width: 100, x: 21, y: 50))
+        let backgroundPixel = try #require(pixel(bytes, width: 100, x: 10, y: 50))
+
+        #expect(edgePixel[0] > 200)
+        #expect(edgePixel[2] < 80)
+        #expect(backgroundPixel[0] < 20)
+        #expect(backgroundPixel[1] < 20)
+        #expect(backgroundPixel[2] < 20)
     }
 
     @Test("Imported event log can propose, apply, and export")
@@ -182,6 +250,12 @@ struct ScreencastCalloutTransformKeyframeTests {
         stride(from: 3, to: bytes.count, by: 4).reduce(0) { count, index in
             count + (bytes[index] > 0 ? 1 : 0)
         }
+    }
+
+    private func pixel(_ bytes: [UInt8], width: Int, x: Int, y: Int) -> [UInt8]? {
+        let index = (y * width + x) * 4
+        guard index >= 0, index + 3 < bytes.count else { return nil }
+        return Array(bytes[index..<(index + 4)])
     }
 
     private func makeVideoFixture(seconds: Double,

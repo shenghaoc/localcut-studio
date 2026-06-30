@@ -51,10 +51,12 @@ final class ScreencastEventLogWriter {
                 let modifiers = event.modifierFlags
                 let locationInWindow = event.locationInWindow
                 let windowSize = event.window?.frame.size
+                let screenLocation = NSEvent.mouseLocation
                 MainActor.assumeIsolated {
                     self?.recordFromMonitor(
                         eventType: eventType,
                         locationInWindow: locationInWindow,
+                        screenLocation: screenLocation,
                         windowSize: windowSize,
                         keyCode: keyCode,
                         modifierFlags: modifiers,
@@ -68,10 +70,12 @@ final class ScreencastEventLogWriter {
                 let eventType = event.type
                 let locationInWindow = event.locationInWindow
                 let windowSize = event.window?.frame.size
+                let screenLocation = NSEvent.mouseLocation
                 MainActor.assumeIsolated {
                     self?.recordFromMonitor(
                         eventType: eventType,
                         locationInWindow: locationInWindow,
+                        screenLocation: screenLocation,
                         windowSize: windowSize,
                         keyCode: 0,
                         modifierFlags: [],
@@ -145,11 +149,6 @@ final class ScreencastEventLogWriter {
 
     // MARK: - Private
 
-    private enum EventSource: Equatable {
-        case ownAppLocal
-        case globalTarget
-    }
-
     private static let localEventMask: NSEvent.EventTypeMask = [
         .leftMouseDown, .leftMouseUp,
         .rightMouseDown, .rightMouseUp,
@@ -165,58 +164,17 @@ final class ScreencastEventLogWriter {
         .scrollWheel,
     ]
 
-    private func record(_ event: NSEvent, source: EventSource) {
-        let nowUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
-        let relativeUs = nowUs - startHostTimeUs
-        guard relativeUs >= 0 else { return }
-        let time = CMTime(value: relativeUs, timescale: CaptureManifest.microsecondTimescale)
-
-        let kind: ScreencastEventKind
-        var position: CGPoint?
-        var keyCode: UInt16?
-        var modifierFlagsRaw: UInt?
-
-        switch event.type {
-        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
-            kind = .mouseDown
-            position = normalizedPosition(from: event, source: source)
-        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
-            kind = .mouseUp
-            position = normalizedPosition(from: event, source: source)
-        case .scrollWheel:
-            kind = .scroll
-            position = normalizedPosition(from: event, source: source)
-        case .keyDown where source == .ownAppLocal,
-             .keyUp where source == .ownAppLocal:
-            kind = .key
-            keyCode = event.keyCode
-            modifierFlagsRaw = event.modifierFlags.rawValue
-        default:
-            return
-        }
-
-        if source == .globalTarget, position == nil {
-            return
-        }
-
-        events.append(ScreencastEvent(
-            time: time,
-            kind: kind,
-            position: position,
-            keyCode: keyCode,
-            modifierFlagsRaw: modifierFlagsRaw))
-    }
-
     /// Record an event using pre-extracted Sendable values so the caller can
     /// pass them through `MainActor.assumeIsolated` without capturing the
     /// non-Sendable `NSEvent`.
     private func recordFromMonitor(
         eventType: NSEvent.EventType,
         locationInWindow: CGPoint,
+        screenLocation: CGPoint,
         windowSize: CGSize?,
         keyCode: UInt16,
         modifierFlags: NSEvent.ModifierFlags,
-        source: EventSource
+        source: ScreencastEventMonitorSource
     ) {
         let nowUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
         let relativeUs = nowUs - startHostTimeUs
@@ -231,18 +189,21 @@ final class ScreencastEventLogWriter {
             kind = .mouseDown
             position = normalizedPositionFromMonitor(
                 locationInWindow: locationInWindow,
+                screenLocation: screenLocation,
                 windowSize: windowSize,
                 source: source)
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             kind = .mouseUp
             position = normalizedPositionFromMonitor(
                 locationInWindow: locationInWindow,
+                screenLocation: screenLocation,
                 windowSize: windowSize,
                 source: source)
         case .scrollWheel:
             kind = .scroll
             position = normalizedPositionFromMonitor(
                 locationInWindow: locationInWindow,
+                screenLocation: screenLocation,
                 windowSize: windowSize,
                 source: source)
         case .keyDown where source == .ownAppLocal,
@@ -267,131 +228,17 @@ final class ScreencastEventLogWriter {
     /// Compute normalised position from pre-extracted Sendable values.
     private func normalizedPositionFromMonitor(
         locationInWindow: CGPoint,
+        screenLocation: CGPoint,
         windowSize: CGSize?,
-        source: EventSource
+        source: ScreencastEventMonitorSource
     ) -> CGPoint? {
-        if source == .ownAppLocal {
-            guard let size = windowSize, size.width > 0, size.height > 0 else { return nil }
-            let clampedX = max(0, min(locationInWindow.x, size.width))
-            let clampedY = max(0, min(locationInWindow.y, size.height))
-            // AppKit window coordinates have Y=0 at bottom; flip to top-left
-            // to match the rendering pipeline convention.
-            return CGPoint(x: clampedX / size.width, y: 1.0 - clampedY / size.height)
-        }
-
-        switch target {
-        case .display(let displayID, _, _):
-            if let region = captureRegion, region.displayID == displayID {
-                return Self.normalizedRegionPosition(region: region, point: NSEvent.mouseLocation)
-            }
-            return Self.normalizedScreenPosition(displayID: displayID, point: NSEvent.mouseLocation)
-        case .window(_, _, _, let width, let height):
-            return Self.normalizedWindowPosition(
-                location: locationInWindow,
-                width: CGFloat(width),
-                height: CGFloat(height))
-        case .application(_, _, _, let displayID, _, _):
-            if let region = captureRegion, region.displayID == displayID {
-                return Self.normalizedRegionPosition(region: region, point: NSEvent.mouseLocation)
-            }
-            // Without a cropped region we cannot determine which display
-            // events belong to the captured application (Accessibility is
-            // not requested). Drop the event to respect the privacy boundary.
-            return nil
-        }
-    }
-
-    private func normalizedPosition(from event: NSEvent, source: EventSource) -> CGPoint? {
-        if source == .ownAppLocal {
-            return Self.normalizedWindowPosition(from: event)
-        }
-
-        switch target {
-        case .display(let displayID, _, _):
-            if let region = captureRegion, region.displayID == displayID {
-                return Self.normalizedRegionPosition(region: region, point: NSEvent.mouseLocation)
-            }
-            return Self.normalizedScreenPosition(displayID: displayID, point: NSEvent.mouseLocation)
-        case .window(_, _, _, let width, let height):
-            // Note: event.windowNumber (AppKit) and CGWindowID use different
-            // numbering schemes, so we cannot filter by window ID here. The
-            // global monitor receives system-wide events; we normalise to the
-            // target window's dimensions.
-            return Self.normalizedWindowPosition(
-                location: event.locationInWindow,
-                width: CGFloat(width),
-                height: CGFloat(height))
-        case .application(_, _, _, let displayID, _, _):
-            if let region = captureRegion, region.displayID == displayID {
-                return Self.normalizedRegionPosition(region: region, point: NSEvent.mouseLocation)
-            }
-            // Without a cropped region we cannot determine which display
-            // events belong to the captured application. Drop the event.
-            return nil
-        }
-    }
-
-    private static func normalizedWindowPosition(from event: NSEvent) -> CGPoint? {
-        guard let window = event.window else { return nil }
-        return normalizedWindowPosition(
-            location: event.locationInWindow,
-            width: window.frame.width,
-            height: window.frame.height)
-    }
-
-    /// Normalise window-local coordinates to 0…1 with top-left origin.
-    /// AppKit window coordinates have Y=0 at the bottom, so we flip Y
-    /// to match screen-space convention (Y=0 at top) used by the rendering
-    /// pipeline and callout coordinate system.
-    private static func normalizedWindowPosition(location: CGPoint,
-                                                 width: CGFloat,
-                                                 height: CGFloat) -> CGPoint? {
-        guard width > 0, height > 0 else { return nil }
-        let clampedX = max(0, min(location.x, width))
-        let clampedY = max(0, min(location.y, height))
-        return CGPoint(x: clampedX / width, y: 1.0 - clampedY / height)
-    }
-
-    /// Normalise screen-space coordinates to 0…1 with top-left origin.
-    /// `NSScreen.frame` has Y=0 at the bottom of the primary display, so we
-    /// flip Y to match the top-left convention used by the rendering pipeline.
-    private static func normalizedScreenPosition(displayID: UInt32, point: CGPoint) -> CGPoint? {
-        guard let screen = NSScreen.screens.first(where: { screen in
-            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
-                return false
-            }
-            return number.uint32Value == displayID
-        }) else { return nil }
-        let frame = screen.frame
-        guard frame.width > 0, frame.height > 0, frame.contains(point) else { return nil }
-        return CGPoint(
-            x: (point.x - frame.minX) / frame.width,
-            y: 1.0 - (point.y - frame.minY) / frame.height)
-    }
-
-    /// Normalise a screen-space point to 0…1 with top-left origin relative to
-    /// the captured region within the display. Points outside the region return
-    /// nil. `sourceRect` uses bottom-left origin (CoreGraphics convention), so
-    /// we convert to screen coordinates then flip Y.
-    private static func normalizedRegionPosition(region: CaptureRegion, point: CGPoint) -> CGPoint? {
-        guard let screen = NSScreen.screens.first(where: { screen in
-            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
-                return false
-            }
-            return number.uint32Value == region.displayID
-        }) else { return nil }
-        let screenFrame = screen.frame
-        // Convert sourceRect (origin bottom-left) to screen coordinates.
-        let regionRect = CGRect(
-            x: screenFrame.minX + region.sourceRect.minX,
-            y: screenFrame.maxY - region.sourceRect.maxY,
-            width: region.sourceRect.width,
-            height: region.sourceRect.height)
-        guard regionRect.width > 0, regionRect.height > 0 else { return nil }
-        let nx = (point.x - regionRect.minX) / regionRect.width
-        let ny = 1.0 - (point.y - regionRect.minY) / regionRect.height
-        guard nx >= 0, nx <= 1, ny >= 0, ny <= 1 else { return nil }
-        return CGPoint(x: nx, y: ny)
+        ScreencastEventCoordinateMapper.normalizedPosition(
+            target: target,
+            captureRegion: captureRegion,
+            monitorSource: source,
+            screenLocation: screenLocation,
+            locationInWindow: locationInWindow,
+            windowSize: windowSize)
     }
 }
 

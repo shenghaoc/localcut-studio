@@ -35,7 +35,13 @@ enum CaptureSourceCatalog {
                 id: "window-\(window.windowID)",
                 title: title.isEmpty ? owner : title,
                 subtitle: owner,
-                target: .window(windowID: window.windowID, title: title, owner: owner, width: width, height: height),
+                target: .window(
+                    windowID: window.windowID,
+                    title: title,
+                    owner: owner,
+                    width: width,
+                    height: height,
+                    frame: window.frame),
                 width: width,
                 height: height))
         }
