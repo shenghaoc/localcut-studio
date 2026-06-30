@@ -115,3 +115,73 @@ extension Float: Interpolatable {
         a + (b - a) * t
     }
 }
+
+/// A 2-D affine transform stored as six `Float` components, conforming to
+/// `Interpolatable` so it can be used with `Keyframed<Transform2D>` for
+/// zoom-n-pan and callout transform animation.
+///
+/// Interpolation is component-wise (matrix lerp). This is exact for
+/// translation-only and scale-only segments; for rotations the result
+/// approximates the shortest arc — acceptable at typical screencast
+/// zoom/pan magnitudes.
+public struct Transform2D: Hashable, Codable, Sendable {
+    public var a: Float
+    public var b: Float
+    public var c: Float
+    public var d: Float
+    public var tx: Float
+    public var ty: Float
+
+    public static let identity = Transform2D(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0)
+
+    public init(a: Float, b: Float, c: Float, d: Float, tx: Float, ty: Float) {
+        self.a = a; self.b = b; self.c = c; self.d = d; self.tx = tx; self.ty = ty
+    }
+
+    public init(_ t: CGAffineTransform) {
+        a = Float(t.a); b = Float(t.b); c = Float(t.c)
+        d = Float(t.d); tx = Float(t.tx); ty = Float(t.ty)
+    }
+
+    /// Build a transform from decomposed parameters: translation, uniform
+    /// scale, and rotation (radians). Shear is not represented.
+    public init(translateX: Float, translateY: Float, scale: Float, rotation: Float) {
+        let cosR = cos(rotation)
+        let sinR = sin(rotation)
+        a = scale * cosR
+        b = scale * sinR
+        c = -scale * sinR
+        d = scale * cosR
+        tx = translateX
+        ty = translateY
+    }
+
+    public var cgTransform: CGAffineTransform {
+        CGAffineTransform(a: CGFloat(a), b: CGFloat(b), c: CGFloat(c),
+                          d: CGFloat(d), tx: CGFloat(tx), ty: CGFloat(ty))
+    }
+
+    /// Decomposed uniform scale (geometric mean of the two axis scales).
+    public var decomposedScale: Float {
+        sqrt(max(0, a * a + b * b))
+    }
+
+    /// Decomposed rotation in radians.
+    public var decomposedRotation: Float {
+        atan2(b, a)
+    }
+
+    /// Decomposed translation.
+    public var decomposedTranslation: (x: Float, y: Float) { (tx, ty) }
+}
+
+extension Transform2D: Interpolatable {
+    public static func lerp(_ lhs: Transform2D, _ rhs: Transform2D, t: Float) -> Transform2D {
+        Transform2D(a: lhs.a + (rhs.a - lhs.a) * t,
+                    b: lhs.b + (rhs.b - lhs.b) * t,
+                    c: lhs.c + (rhs.c - lhs.c) * t,
+                    d: lhs.d + (rhs.d - lhs.d) * t,
+                    tx: lhs.tx + (rhs.tx - lhs.tx) * t,
+                    ty: lhs.ty + (rhs.ty - lhs.ty) * t)
+    }
+}
