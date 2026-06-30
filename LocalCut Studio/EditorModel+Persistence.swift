@@ -58,6 +58,8 @@ struct ProjectState: Equatable {
     var callouts: [CalloutClip]
     /// Phase 43 padded background preset.
     var paddedBackground: PaddedBackgroundPreset?
+    /// Phase 43 screencast event logs persisted with the project.
+    var screencastEventLogs: [ScreencastEventLog]
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
@@ -85,6 +87,7 @@ struct ProjectState: Equatable {
             && lhs.overlayBundlePaths == rhs.overlayBundlePaths
             && lhs.callouts == rhs.callouts
             && lhs.paddedBackground == rhs.paddedBackground
+            && lhs.screencastEventLogs == rhs.screencastEventLogs
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
@@ -139,6 +142,7 @@ extension EditorModel {
             overlayBundlePaths: project.overlayBundlePaths,
             callouts: project.callouts,
             paddedBackground: project.paddedBackground,
+            screencastEventLogs: project.screencastEventLogs,
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID,
             selectedMarkerID: selectedMarkerID,
@@ -211,6 +215,7 @@ extension EditorModel {
         project.overlayBundlePaths = state.overlayBundlePaths
         project.callouts = state.callouts
         project.paddedBackground = state.paddedBackground
+        project.screencastEventLogs = state.screencastEventLogs
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID

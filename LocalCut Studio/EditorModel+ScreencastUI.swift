@@ -141,15 +141,23 @@ extension EditorModel {
                 statusMessage = "Event log uses an unsupported schema."
                 return
             }
+            storeScreencastEventLog(log)
             autoZoomProposals = AutoZoomProposalGenerator.generateProposals(
                 from: log,
                 canvasSize: project.renderSize)
+            markDirty()
             statusMessage = autoZoomProposals.isEmpty
                 ? "Imported event log; no auto-zoom proposals found."
                 : "Imported event log; \(autoZoomProposals.count) auto-zoom proposals available."
         } catch {
             statusMessage = "Could not import event log: \(error.localizedDescription)"
         }
+    }
+
+    @MainActor
+    func storeScreencastEventLog(_ log: ScreencastEventLog) {
+        project.screencastEventLogs.removeAll { $0.sessionID == log.sessionID }
+        project.screencastEventLogs.append(log)
     }
 
     // MARK: - Padded Background

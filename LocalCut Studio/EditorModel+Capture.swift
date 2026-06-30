@@ -925,6 +925,7 @@ extension EditorModel {
         if let data = try? Data(contentsOf: eventsURL),
            let log = try? JSONDecoder().decode(ScreencastEventLog.self, from: data),
            log.isSupportedSchema {
+            storeScreencastEventLog(log)
             let canvasSize = project.renderSize
             autoZoomProposals = AutoZoomProposalGenerator.generateProposals(
                 from: log, canvasSize: canvasSize)

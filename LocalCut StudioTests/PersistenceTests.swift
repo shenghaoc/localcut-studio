@@ -97,6 +97,24 @@ struct PersistenceTests {
         #expect(decoded.schemaVersion == ProjectDocument.currentSchemaVersion)
     }
 
+    @Test("ProjectDocument round-trips screencast event logs")
+    func documentRoundTripsScreencastEventLogs() throws {
+        let project = Project()
+        let log = ScreencastEventLog(
+            sessionID: UUID(),
+            events: [
+                ScreencastEvent(
+                    time: time(0.25),
+                    kind: .mouseDown,
+                    position: CGPoint(x: 0.4, y: 0.45)),
+            ])
+        project.screencastEventLogs = [log]
+
+        let decoded = try ProjectDocument(data: ProjectDocument(project: project).encoded())
+
+        #expect(decoded.screencastEventLogs == [log])
+    }
+
     // MARK: - Forward-compatible decoding (R4.2)
 
     @Test("Unknown keys and a higher schema version still decode")

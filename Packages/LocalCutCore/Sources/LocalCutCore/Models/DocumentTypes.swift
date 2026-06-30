@@ -34,6 +34,8 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     public var callouts: [CalloutClip]
     /// Phase 43 padded background preset.
     public var paddedBackground: PaddedBackgroundPreset?
+    /// Phase 43 screencast event logs persisted with the project.
+    public var screencastEventLogs: [ScreencastEventLog]
     public var aspect: ProjectAspect
     public var coverFrame: CoverFrameDoc?
 
@@ -53,6 +55,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
                 overlays: [OverlayClipDoc] = [],
                 callouts: [CalloutClip] = [],
                 paddedBackground: PaddedBackgroundPreset? = nil,
+                screencastEventLogs: [ScreencastEventLog] = [],
                 aspect: ProjectAspect? = nil,
                 coverFrame: CoverFrameDoc? = nil) {
         self.schemaVersion = schemaVersion
@@ -71,6 +74,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         self.overlays = overlays
         self.callouts = callouts
         self.paddedBackground = paddedBackground
+        self.screencastEventLogs = screencastEventLogs
         self.aspect = aspect ?? ProjectAspect.infer(width: renderWidth, height: renderHeight)
         self.coverFrame = coverFrame
     }
@@ -78,7 +82,8 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, bundleFormat, name, renderWidth, renderHeight, frameRate,
              workingColourSpace, media, videoTracks, audioTracks, captionTracks,
-             markers, audioBus, overlays, callouts, paddedBackground, aspect, coverFrame
+             markers, audioBus, overlays, callouts, paddedBackground, screencastEventLogs,
+             aspect, coverFrame
     }
 
     public init(from decoder: any Decoder) throws {
@@ -103,6 +108,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         overlays = try c.decodeIfPresent([OverlayClipDoc].self, forKey: .overlays) ?? []
         callouts = try c.decodeIfPresent([CalloutClip].self, forKey: .callouts) ?? []
         paddedBackground = try c.decodeIfPresent(PaddedBackgroundPreset.self, forKey: .paddedBackground)
+        screencastEventLogs = try c.decodeIfPresent([ScreencastEventLog].self, forKey: .screencastEventLogs) ?? []
         // Lenient: an unknown future aspect raw value falls back to render-size
         // inference rather than failing the whole document open.
         if let rawAspect = try c.decodeIfPresent(String.self, forKey: .aspect) {

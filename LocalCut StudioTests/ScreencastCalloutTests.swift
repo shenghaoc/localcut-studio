@@ -200,6 +200,7 @@ struct ScreencastCalloutTransformKeyframeTests {
 
         model.importScreencastEventLog(url: eventLogURL)
         let proposal = try #require(model.autoZoomProposals.first)
+        #expect(model.project.screencastEventLogs == [eventLog])
         model.applyAutoZoomProposal(proposal)
 
         let appliedClip = try #require(model.project.videoTracks.first?.clips.first)

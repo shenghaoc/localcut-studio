@@ -37,6 +37,7 @@ extension ProjectDocument {
             overlays: project.overlayDocs,
             callouts: project.callouts,
             paddedBackground: project.paddedBackground,
+            screencastEventLogs: project.screencastEventLogs,
             aspect: project.aspect,
             coverFrame: project.coverFrame)
     }

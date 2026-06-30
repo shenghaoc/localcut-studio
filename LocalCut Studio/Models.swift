@@ -90,6 +90,8 @@ final class Project {
     /// Phase 43 padded background preset. When non-nil, renders a background
     /// behind the clip with rounded corners, drop shadow, and inset margin.
     var paddedBackground: PaddedBackgroundPreset?
+    /// Phase 43 screencast event logs that generated auto-zoom proposals.
+    var screencastEventLogs: [ScreencastEventLog] = []
     /// Bookmark data for overlay source files, keyed by overlay ID.
     var overlayBookmarks: [UUID: Data] = [:]
     /// Bundle-relative paths for overlay source files, keyed by overlay ID.

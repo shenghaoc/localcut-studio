@@ -22,6 +22,7 @@ final class DocumentController {
         model.project.overlayBundlePaths = [:]
         model.project.callouts = []
         model.project.paddedBackground = nil
+        model.project.screencastEventLogs = []
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -60,6 +61,7 @@ final class DocumentController {
         model.project.overlayBundlePaths.removeAll()
         model.project.callouts.removeAll()
         model.project.paddedBackground = nil
+        model.project.screencastEventLogs.removeAll()
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -212,6 +214,14 @@ final class DocumentController {
         model.project.paddedBackground = PaddedBackgroundBundleResolver.resolve(
             document.paddedBackground,
             bundleURL: bundleURL)
+        model.project.screencastEventLogs = document.screencastEventLogs.filter(\.isSupportedSchema)
+        if let log = model.project.screencastEventLogs.last {
+            model.autoZoomProposals = AutoZoomProposalGenerator.generateProposals(
+                from: log,
+                canvasSize: model.project.renderSize)
+        } else {
+            model.autoZoomProposals.removeAll()
+        }
 
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         model.documentURL = isNewerSchema ? nil : url

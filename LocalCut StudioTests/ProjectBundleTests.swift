@@ -103,6 +103,39 @@ struct ProjectBundleTests {
         #expect(again.document.captionTracks[0].id == captionTrackID)
     }
 
+    @Test("Bundle round-trip preserves screencast event logs")
+    func bundleRoundTripPreservesScreencastEventLogs() throws {
+        let tmp = try makeTempDirectory("eventlog")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Sample.lcbundle")
+        let sessionID = UUID()
+        var document = sampleDocument(
+            mediaID: UUID(),
+            bundleRelativePath: nil,
+            captionTrackID: UUID())
+        document.screencastEventLogs = [
+            ScreencastEventLog(
+                sessionID: sessionID,
+                events: [
+                    ScreencastEvent(
+                        time: time(0.2),
+                        kind: .mouseDown,
+                        position: CGPoint(x: 0.35, y: 0.44)),
+                ]),
+        ]
+
+        _ = try ProjectBundle.write(
+            projectJSON: document.encoded(),
+            to: bundleURL,
+            bundledMedia: [],
+            previousFingerprints: FingerprintIndex())
+
+        let contents = try ProjectBundle.read(url: bundleURL)
+        #expect(contents.document.screencastEventLogs.count == 1)
+        #expect(contents.document.screencastEventLogs.first?.sessionID == sessionID)
+        #expect(contents.document.screencastEventLogs.first?.events.first?.position == CGPoint(x: 0.35, y: 0.44))
+    }
+
     @Test("ProjectBundle.write stages metadata and leaves no staged files behind")
     func bundleMetadataStagingCleansUp() throws {
         let tmp = try makeTempDirectory("staged-metadata")
