@@ -6,10 +6,10 @@ import CoreGraphics
 /// Codable snapshot of a `Project`, split from the runtime model. Holds plain
 /// values plus security-scoped bookmarks instead of live `AVURLAsset`s.
 public struct ProjectDocument: Codable, Equatable, Sendable {
-    // Bumped to 7 (single-file 6) in Phase 38b: `OverlayClip` persistence
-    // added to `ProjectDocument.overlays`. Prior bump (6/5) was for look
-    // effects in Phase 38a.
-    public static let currentSchemaVersion = 7
+    // Bumped to 8 in Phase 43: `callouts` and `paddedBackground` added.
+    // Prior bump to 7 (single-file 6) was in Phase 38b for `OverlayClip`
+    // persistence. Prior bump (6/5) was for look effects in Phase 38a.
+    public static let currentSchemaVersion = 8
     public static let singleFileSchemaVersion = 6
     public static let currentBundleFormat = "1"
     public static let fileExtension = "lcstudio"
@@ -440,6 +440,8 @@ public struct ClipDoc: Codable, Equatable, Sendable {
     public var speedCurve: Keyframed<Float>?
     public var preservePitch: Bool?
     public var pitchAlgorithm: TimePitchAlgorithm?
+    /// Phase 43: keyframed transform for zoom-n-pan animation.
+    public var transformKeyframes: Keyframed<Transform2D>?
 
     public init(mediaID: UUID,
                 sourceStart: CMTimeCode,
@@ -452,7 +454,8 @@ public struct ClipDoc: Codable, Equatable, Sendable {
                 volumeEnvelope: VolumeEnvelope = VolumeEnvelope(),
                 speedCurve: Keyframed<Float>? = nil,
                 preservePitch: Bool? = nil,
-                pitchAlgorithm: TimePitchAlgorithm? = nil) {
+                pitchAlgorithm: TimePitchAlgorithm? = nil,
+                transformKeyframes: Keyframed<Transform2D>? = nil) {
         self.mediaID = mediaID
         self.sourceStart = sourceStart
         self.duration = duration
@@ -465,11 +468,13 @@ public struct ClipDoc: Codable, Equatable, Sendable {
         self.speedCurve = speedCurve
         self.preservePitch = preservePitch
         self.pitchAlgorithm = pitchAlgorithm
+        self.transformKeyframes = transformKeyframes
     }
 
     private enum CodingKeys: String, CodingKey {
         case mediaID, sourceStart, duration, timelineStart, opacity, effects,
-             geometry, transition, volumeEnvelope, speedCurve, preservePitch, pitchAlgorithm
+             geometry, transition, volumeEnvelope, speedCurve, preservePitch,
+             pitchAlgorithm, transformKeyframes
     }
 
     public init(from decoder: any Decoder) throws {
@@ -486,6 +491,7 @@ public struct ClipDoc: Codable, Equatable, Sendable {
         speedCurve = try c.decodeIfPresent(Keyframed<Float>.self, forKey: .speedCurve)
         preservePitch = try c.decodeIfPresent(Bool.self, forKey: .preservePitch)
         pitchAlgorithm = try c.decodeIfPresent(TimePitchAlgorithm.self, forKey: .pitchAlgorithm)
+        transformKeyframes = try c.decodeIfPresent(Keyframed<Transform2D>.self, forKey: .transformKeyframes)
     }
 
     public func makeClip() -> Clip {
@@ -498,6 +504,7 @@ public struct ClipDoc: Codable, Equatable, Sendable {
              effects: effects,
              transition: transition?.makeTransition(),
              volumeEnvelope: volumeEnvelope,
+             transformKeyframes: transformKeyframes ?? Keyframed(defaultValue: .identity),
              speedCurve: speedCurve ?? TimeRemapping.identitySpeedCurve,
              preservePitch: preservePitch ?? true,
              pitchAlgorithm: pitchAlgorithm ?? .timeDomain)
@@ -571,7 +578,8 @@ extension ClipDoc {
             volumeEnvelope: clip.volumeEnvelope,
             speedCurve: clip.speedCurve,
             preservePitch: clip.preservePitch,
-            pitchAlgorithm: clip.pitchAlgorithm)
+            pitchAlgorithm: clip.pitchAlgorithm,
+            transformKeyframes: clip.transformKeyframes)
     }
 }
 
