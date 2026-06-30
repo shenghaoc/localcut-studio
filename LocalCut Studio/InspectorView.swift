@@ -1329,7 +1329,7 @@ private struct CoverInspectorSection: View {
     private var coverPreviewKey: String {
         let cover = model.project.coverFrame
         let title = cover?.title?.text ?? ""
-        let time = cover?.time.cmTime.sanitized.seconds ?? model.currentTime
+        let time = cover?.time.cmTime.sanitized.seconds ?? (model.isPlaying ? -1 : model.currentTime)
         return [
             "\(CoverPreviewInvalidationKey.make(for: model.project))",
             "\(time)",
@@ -1341,10 +1341,12 @@ private struct CoverInspectorSection: View {
     }
 
     private func refreshCoverPreview() async {
-        guard model.totalDuration > 0 else {
-            coverPreviewImage = nil
-            coverPreviewError = nil
-            coverPreviewIsLoading = false
+        guard model.totalDuration > 0, !model.isPlaying else {
+            if model.totalDuration <= 0 {
+                coverPreviewImage = nil
+                coverPreviewError = nil
+                coverPreviewIsLoading = false
+            }
             return
         }
         coverPreviewIsLoading = true
