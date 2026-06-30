@@ -1328,9 +1328,11 @@ private struct CoverInspectorView: View {
     private var coverPreviewKey: String {
         let cover = model.project.coverFrame
         let title = cover?.title?.text ?? ""
-        let time = cover?.time.cmTime.sanitized.seconds ?? (model.isPlaying ? -1 : model.currentTime)
+        let isPlaying = model.isPlaying
+        let time = cover?.time.cmTime.sanitized.seconds ?? (isPlaying ? -1 : model.currentTime)
         return [
             "\(CoverPreviewInvalidationKey.make(for: model.project))",
+            "\(isPlaying)",
             "\(time)",
             cover?.format.rawValue ?? CoverFormat.png.rawValue,
             title,
