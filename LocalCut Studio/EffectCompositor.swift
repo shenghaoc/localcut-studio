@@ -273,10 +273,12 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         var result: CIImage?
 
         // Padded background renders behind everything.
+        var paddedBackgroundImage: CIImage?
         if let bg = instruction.paddedBackground {
             if let bgImage = PaddedBackgroundRenderer.render(
                 preset: bg, renderSize: renderSize) {
                 result = bgImage
+                paddedBackgroundImage = bgImage
             }
         }
 
@@ -292,8 +294,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
 
         // Phase 43: when a padded background is active, inset the foreground
-        // layers with rounded corners so the background is visible around them.
-        if instruction.paddedBackground != nil, instruction.paddedInsetMargin > 0 {
+        // layers with rounded corners so the background remains visible.
+        if let bgImage = paddedBackgroundImage, instruction.paddedInsetMargin > 0 {
             let margin = CGFloat(instruction.paddedInsetMargin)
             let insetRect = CGRect(x: margin, y: margin,
                                    width: renderSize.width - margin * 2,
@@ -301,14 +303,16 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             let cornerRadius = CGFloat(instruction.paddedBackground?.cornerRadius ?? 16)
             let mask = Self.createRoundedRectMask(
                 rect: insetRect, cornerRadius: cornerRadius, renderSize: renderSize)
-            if let foreground = result {
+            // Isolate the foreground (everything over the background).
+            if let composite = result {
                 let clear = CIImage(color: .clear).cropped(to: CGRect(origin: .zero, size: renderSize))
-                if let blend = CIFilter(name: "CIBlendWithMask", parameters: [
-                    kCIInputImageKey: foreground,
+                if let maskedFg = CIFilter(name: "CIBlendWithMask", parameters: [
+                    kCIInputImageKey: composite,
                     kCIInputBackgroundImageKey: clear,
                     kCIInputMaskImageKey: mask,
                 ])?.outputImage {
-                    result = blend
+                    // Composite the masked foreground over the full background.
+                    result = maskedFg.composited(over: bgImage)
                 }
             }
         }
