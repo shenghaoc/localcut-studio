@@ -15,7 +15,14 @@ extension EditorModel {
     var chapterValidationIssues: [ChapterExportIssue] {
         let chapters = YouTubeChapterValidator.chapters(
             from: project.markers, projectDuration: project.duration)
-        return YouTubeChapterValidator.validate(chapters)
+        return YouTubeChapterValidator.validate(chapters, projectDuration: project.duration)
+    }
+
+    var hasRepairableChapterShortSpans: Bool {
+        chapterValidationIssues.contains { issue in
+            if case .spanTooShort = issue { return true }
+            return false
+        }
     }
 
     /// Exports a YouTube chapter sidecar `.txt` file.
@@ -34,9 +41,33 @@ extension EditorModel {
             statusMessage = "Chapter sidecar written to \(outputURL.deletingPathExtension().lastPathComponent).chapters.txt"
         } else {
             let issueCount = result.issues.count
-            statusMessage = "Chapter sidecar written with \(issueCount) validation issue(s)."
+            statusMessage = "Chapter sidecar export blocked by \(issueCount) validation issue(s)."
         }
         return result
+    }
+
+    @MainActor
+    func repairChapterShortSpans(strategy: ChapterShortSpanRepairStrategy) {
+        let repaired = YouTubeChapterValidator.repairedMarkers(
+            from: project.markers,
+            projectDuration: project.duration,
+            strategy: strategy)
+        guard repaired != project.markers else {
+            statusMessage = "No repairable chapter spans found."
+            return
+        }
+
+        let beforeCount = project.markers.filter { $0.kind == .chapter }.count
+        let afterCount = repaired.filter { $0.kind == .chapter }.count
+        performUndoable(strategy.displayName) {
+            project.markers = repaired
+            if let selectedMarkerID,
+               !project.markers.contains(where: { $0.id == selectedMarkerID }) {
+                self.selectedMarkerID = nil
+            }
+            let removedCount = beforeCount - afterCount
+            statusMessage = "\(strategy.displayName) removed \(removedCount) chapter marker(s)."
+        }
     }
 
     /// Sets a marker's kind to `.chapter`.

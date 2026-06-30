@@ -17,7 +17,7 @@
 
 - [ ] **T3.1** YouTube chapter text writer + format linter (in CI).
 - [ ] **T3.2** `AVAssetWriter` chapter-track integration for `.mov` / `.mp4` containers; fallback to sidecar otherwise.
-- [ ] **T3.3** Manual verification checklist (VLC, QuickTime, YouTube).
+- [x] **T3.3** Manual verification checklist (VLC, QuickTime, YouTube) documented in `docs/chapter-export-verification.md`; player playback remains a manual environment check.
 
 ## Caption preset
 

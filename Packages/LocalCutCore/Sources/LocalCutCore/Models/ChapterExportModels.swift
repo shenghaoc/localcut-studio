@@ -85,6 +85,26 @@ public enum ChapterExportIssue: Hashable, Sendable {
     }
 }
 
+// MARK: - Chapter Short-Span Repair
+
+/// Automatic repair strategy for chapter spans that fail YouTube's 10-second
+/// minimum duration rule.
+public enum ChapterShortSpanRepairStrategy: String, Hashable, Codable, Sendable, CaseIterable {
+    /// Remove the following chapter boundary where possible so the short span
+    /// extends into the next chapter.
+    case merge
+    /// Remove the chapter that owns the short span where possible. The first
+    /// chapter is preserved so the 00:00 rule remains intact.
+    case drop
+
+    public var displayName: String {
+        switch self {
+        case .merge: "Merge Short Spans"
+        case .drop: "Drop Short Chapters"
+        }
+    }
+}
+
 // MARK: - Chapter Export Result
 
 /// The result of exporting chapter metadata.
@@ -126,7 +146,8 @@ public enum YouTubeChapterValidator: Sendable {
     ///
     /// - Parameter chapters: The chapter lines to validate, sorted by time.
     /// - Returns: An array of validation issues (empty if valid).
-    public static func validate(_ chapters: [YouTubeChapterLine]) -> [ChapterExportIssue] {
+    public static func validate(_ chapters: [YouTubeChapterLine],
+                                projectDuration: CMTime? = nil) -> [ChapterExportIssue] {
         var issues: [ChapterExportIssue] = []
 
         guard !chapters.isEmpty else {
@@ -159,14 +180,18 @@ public enum YouTubeChapterValidator: Sendable {
                 }
             }
 
-            // Span ≥ 10s (check gap to next chapter, or to end if last).
-            let spanEnd: Double
+            // Span ≥ 10s. For the final chapter this requires a known project
+            // duration; older callers without that context keep the previous
+            // next-chapter-only behavior.
+            let spanEnd: Double?
             if index + 1 < chapters.count {
                 spanEnd = chapters[index + 1].time.seconds
+            } else if let projectDuration, projectDuration.seconds.isFinite {
+                spanEnd = projectDuration.seconds
             } else {
-                // Last chapter — no upper bound to check against.
-                continue
+                spanEnd = nil
             }
+            guard let spanEnd else { continue }
             let span = spanEnd - chapter.time.seconds
             if span < 10 {
                 issues.append(.spanTooShort(index: index, duration: span))
@@ -198,5 +223,58 @@ public enum YouTubeChapterValidator: Sendable {
         return chapterMarkers.map { marker in
             YouTubeChapterLine(time: marker.time, title: marker.name)
         }
+    }
+
+    /// Returns a marker list with short chapter spans resolved according to the
+    /// chosen strategy. Non-chapter markers are preserved unchanged.
+    public static func repairedMarkers(from markers: [TimelineMarker],
+                                       projectDuration: CMTime,
+                                       strategy: ChapterShortSpanRepairStrategy) -> [TimelineMarker] {
+        var repaired = markers
+        var attempts = 0
+
+        while attempts < markers.count {
+            let chapterMarkers = repaired
+                .filter { $0.kind == .chapter }
+                .sorted { $0.time.seconds < $1.time.seconds }
+            let chapters = chapterMarkers.map { YouTubeChapterLine(time: $0.time, title: $0.name) }
+            let issues = validate(chapters, projectDuration: projectDuration)
+            guard let shortSpan = issues.compactMap({ issue -> (index: Int, duration: Double)? in
+                if case .spanTooShort(let index, let duration) = issue {
+                    return (index, duration)
+                }
+                return nil
+            }).first else {
+                break
+            }
+
+            let removeIndex: Int?
+            switch strategy {
+            case .merge:
+                if shortSpan.index + 1 < chapterMarkers.count {
+                    removeIndex = shortSpan.index + 1
+                } else if shortSpan.index > 0 {
+                    removeIndex = shortSpan.index
+                } else {
+                    removeIndex = nil
+                }
+            case .drop:
+                if shortSpan.index > 0 {
+                    removeIndex = shortSpan.index
+                } else if shortSpan.index + 1 < chapterMarkers.count {
+                    removeIndex = shortSpan.index + 1
+                } else {
+                    removeIndex = shortSpan.index
+                }
+            }
+
+            guard let removeIndex,
+                  chapterMarkers.indices.contains(removeIndex) else { break }
+            let removedID = chapterMarkers[removeIndex].id
+            repaired.removeAll { $0.id == removedID }
+            attempts += 1
+        }
+
+        return repaired
     }
 }

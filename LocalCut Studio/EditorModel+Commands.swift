@@ -76,6 +76,7 @@ extension EditorModel {
     /// output action has a menu home and a ⇧⌘E shortcut.
     func requestExport() {
         guard totalDuration > 0 else { return }
+        guard resolveChapterMarkersBeforeExport() else { return }
         let preset = BuiltInExportPresets.defaultPreset
         let panel = NSSavePanel()
         if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
@@ -87,6 +88,66 @@ extension EditorModel {
             guard response == .OK, let url = panel.url, let self else { return }
             Task { await self.export(to: url) }
         }
+    }
+
+    private func resolveChapterMarkersBeforeExport() -> Bool {
+        guard hasChapterMarkers else { return true }
+        let issues = chapterValidationIssues
+        guard !issues.isEmpty else { return true }
+
+        let hasShortSpanIssue = issues.contains { issue in
+            if case .spanTooShort = issue { return true }
+            return false
+        }
+        guard hasShortSpanIssue else {
+            presentChapterExportBlockedAlert(issues: issues)
+            return false
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Resolve chapter markers before export"
+        alert.informativeText = chapterIssueSummary(issues)
+        alert.addButton(withTitle: ChapterShortSpanRepairStrategy.merge.displayName)
+        alert.addButton(withTitle: ChapterShortSpanRepairStrategy.drop.displayName)
+        alert.addButton(withTitle: "Cancel")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            repairChapterShortSpans(strategy: .merge)
+        case .alertSecondButtonReturn:
+            repairChapterShortSpans(strategy: .drop)
+        default:
+            statusMessage = "Export cancelled until chapter markers are fixed."
+            return false
+        }
+
+        let remainingIssues = chapterValidationIssues
+        guard remainingIssues.isEmpty else {
+            presentChapterExportBlockedAlert(issues: remainingIssues)
+            return false
+        }
+        return true
+    }
+
+    private func presentChapterExportBlockedAlert(issues: [ChapterExportIssue]) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Fix chapter markers before export"
+        alert.informativeText = chapterIssueSummary(issues)
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+        statusMessage = "Export blocked by \(issues.count) chapter validation issue(s)."
+    }
+
+    private func chapterIssueSummary(_ issues: [ChapterExportIssue]) -> String {
+        let visibleIssues = issues.prefix(6).map(\.localizedDescription)
+        var summary = visibleIssues.joined(separator: "\n")
+        let remainingCount = issues.count - visibleIssues.count
+        if remainingCount > 0 {
+            summary += "\n\(remainingCount) more issue(s)."
+        }
+        return summary
     }
 
     /// File ▸ Save — writes to the current URL, or prompts for one if unsaved.

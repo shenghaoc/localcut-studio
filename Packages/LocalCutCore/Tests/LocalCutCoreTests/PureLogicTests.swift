@@ -373,6 +373,72 @@ func projectDocumentPureRoundTrip() throws {
     #expect(decoded.audioBus.trackInputs[0].trackInput.gain == 1.2)
 }
 
+// MARK: - Chapter export tests (Phase 44)
+
+@Test("YouTube chapter validator checks final span against project duration")
+func youTubeChapterValidatorChecksFinalSpan() {
+    let chapters = [
+        YouTubeChapterLine(time: time(0), title: "Intro"),
+        YouTubeChapterLine(time: time(12), title: "Demo"),
+        YouTubeChapterLine(time: time(25), title: "Wrap"),
+    ]
+
+    let issues = YouTubeChapterValidator.validate(chapters, projectDuration: time(30))
+
+    #expect(issues.contains(.spanTooShort(index: 2, duration: 5)))
+}
+
+@Test("Chapter merge repair removes the following boundary for a short span")
+func chapterMergeRepairRemovesFollowingBoundary() {
+    let shortBoundaryID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000002")!
+    let markers = [
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000001")!,
+                       time: time(0), name: "Intro", kind: .chapter),
+        TimelineMarker(id: shortBoundaryID,
+                       time: time(5), name: "Setup", kind: .chapter),
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000003")!,
+                       time: time(16), name: "Demo", kind: .chapter),
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000004")!,
+                       time: time(32), name: "Wrap", kind: .chapter),
+    ]
+
+    let repaired = YouTubeChapterValidator.repairedMarkers(
+        from: markers,
+        projectDuration: time(45),
+        strategy: .merge)
+    let chapters = YouTubeChapterValidator.chapters(from: repaired, projectDuration: time(45))
+
+    #expect(!repaired.contains { $0.id == shortBoundaryID })
+    #expect(chapters.map(\.title) == ["Intro", "Demo", "Wrap"])
+    #expect(YouTubeChapterValidator.validate(chapters, projectDuration: time(45)).isEmpty)
+}
+
+@Test("Chapter drop repair removes the short chapter while preserving the zero marker")
+func chapterDropRepairRemovesShortChapter() {
+    let shortChapterID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000012")!
+    let markers = [
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000011")!,
+                       time: time(0), name: "Intro", kind: .chapter),
+        TimelineMarker(id: shortChapterID,
+                       time: time(12), name: "Aside", kind: .chapter),
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000013")!,
+                       time: time(18), name: "Demo", kind: .chapter),
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000014")!,
+                       time: time(32), name: "Wrap", kind: .chapter),
+    ]
+
+    let repaired = YouTubeChapterValidator.repairedMarkers(
+        from: markers,
+        projectDuration: time(50),
+        strategy: .drop)
+    let chapters = YouTubeChapterValidator.chapters(from: repaired, projectDuration: time(50))
+
+    #expect(!repaired.contains { $0.id == shortChapterID })
+    #expect(chapters.map(\.title) == ["Intro", "Demo", "Wrap"])
+    #expect(chapters.first?.time == time(0))
+    #expect(YouTubeChapterValidator.validate(chapters, projectDuration: time(50)).isEmpty)
+}
+
 // MARK: - Overlay model tests (Phase 38b)
 
 @Test("OverlayClip model round-trips through OverlayClipDoc")

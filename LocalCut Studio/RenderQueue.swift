@@ -125,6 +125,7 @@ nonisolated enum RenderQueueError: Error, LocalizedError {
     case hostNotCapable(String)
     case outputDestinationUnavailable
     case compositionEmpty
+    case chapterValidationFailed(String)
     case exportSessionCreationFailed
     case writerInitializationFailed(String)
 
@@ -138,6 +139,8 @@ nonisolated enum RenderQueueError: Error, LocalizedError {
             "Output destination unavailable."
         case .compositionEmpty:
             "Nothing to export — the project's timeline is empty."
+        case .chapterValidationFailed(let detail):
+            "Fix chapter markers before export: \(detail)"
         case .exportSessionCreationFailed:
             "Could not create an export session for this preset."
         case .writerInitializationFailed(let detail):
@@ -570,6 +573,23 @@ final class RenderQueue {
                 return
             }
 
+            let chapterMarkers = snapshot.markers.filter { $0.kind == .chapter }
+            let projectDuration = CMTime(seconds: built.duration, preferredTimescale: 600)
+            if !chapterMarkers.isEmpty {
+                let chapters = YouTubeChapterValidator.chapters(
+                    from: chapterMarkers,
+                    projectDuration: projectDuration)
+                let chapterIssues = YouTubeChapterValidator.validate(
+                    chapters,
+                    projectDuration: projectDuration)
+                if !chapterIssues.isEmpty {
+                    let detail = chapterIssues
+                        .map(\.localizedDescription)
+                        .joined(separator: " ")
+                    throw RenderQueueError.chapterValidationFailed(detail)
+                }
+            }
+
             // Replace any existing file so the writer/session doesn't trip
             // over a stale artefact from a previous run. Past this point the
             // user's pre-existing file is gone, so a cancel may safely delete
@@ -590,14 +610,12 @@ final class RenderQueue {
                 }
             }
 
-            // Extract chapter markers from the snapshot for metadata embedding.
-            let chapterMarkers = snapshot.markers.filter { $0.kind == .chapter }
-
             if !shouldUseWriter,
                let presetName = preset.assetExportSessionPresetName {
                 try await exportWithSession(
                     presetName: presetName, preset: preset,
-                    built: built, outputURL: outputURL, jobID: id)
+                    built: built, outputURL: outputURL, jobID: id,
+                    chapterMarkers: chapterMarkers)
             } else {
                 try await exportWithWriter(
                     preset: preset, built: built, outputURL: outputURL, jobID: id,
@@ -606,7 +624,6 @@ final class RenderQueue {
 
             // Write YouTube chapter sidecar when chapter markers exist.
             if !chapterMarkers.isEmpty {
-                let projectDuration = CMTime(seconds: built.duration, preferredTimescale: 600)
                 _ = ChapterExporter.writeYouTubeSidecar(
                     markers: chapterMarkers,
                     projectDuration: projectDuration,
@@ -677,13 +694,23 @@ final class RenderQueue {
 
     private func exportWithSession(presetName: String, preset: ExportPreset,
                                    built: BuiltComposition, outputURL: URL,
-                                   jobID: UUID) async throws {
+                                   jobID: UUID,
+                                   chapterMarkers: [TimelineMarker] = []) async throws {
         guard let session = AVAssetExportSession(asset: built.composition,
                                                  presetName: presetName) else {
             throw RenderQueueError.exportSessionCreationFailed
         }
         session.videoComposition = built.videoComposition
         session.audioMix = built.audioMix
+        if !chapterMarkers.isEmpty {
+            let projectDuration = CMTime(seconds: built.duration, preferredTimescale: 600)
+            let chapterItems = ChapterExporter.chapterMetadataItems(
+                from: chapterMarkers,
+                projectDuration: projectDuration)
+            if !chapterItems.isEmpty {
+                session.metadata = chapterItems
+            }
+        }
         activeExportSession = session
 
         let progressTask = Task { [weak self] in

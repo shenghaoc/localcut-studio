@@ -12,7 +12,6 @@ struct TutorialFinishingInspectorView: View {
     @State private var showSilenceReview = false
     @State private var showChapterExport = false
     @State private var silenceParams = SilenceDetectionParameters()
-    @State private var chapterExportResult: ChapterExportResult?
 
     var body: some View {
         Section("Tutorial Finishing") {
@@ -169,10 +168,21 @@ struct TutorialFinishingInspectorView: View {
                         }
                     }
 
+                    if model.hasRepairableChapterShortSpans {
+                        HStack {
+                            Button(ChapterShortSpanRepairStrategy.merge.displayName) {
+                                model.repairChapterShortSpans(strategy: .merge)
+                            }
+                            Button(ChapterShortSpanRepairStrategy.drop.displayName) {
+                                model.repairChapterShortSpans(strategy: .drop)
+                            }
+                        }
+                    }
+
                     Button("Export Chapter Sidecar") {
                         showChapterExport = true
                     }
-                    .disabled(!model.hasChapterMarkers)
+                    .disabled(!model.hasChapterMarkers || !issues.isEmpty)
                 }
             }
         }
@@ -185,6 +195,8 @@ struct TutorialFinishingInspectorView: View {
         ) { result in
             if case .success(let url) = result {
                 model.statusMessage = "Chapter sidecar exported to \(url.lastPathComponent)"
+            } else if case .failure(let error) = result {
+                model.statusMessage = "Chapter sidecar export failed: \(error.localizedDescription)"
             }
         }
     }
@@ -237,8 +249,23 @@ struct ChapterSidecarDocument: FileDocument {
 
     func fileWrapper(configuration: FileDocumentWriteConfiguration) throws -> FileWrapper {
         let chapters = YouTubeChapterValidator.chapters(from: markers, projectDuration: projectDuration)
+        let issues = YouTubeChapterValidator.validate(chapters, projectDuration: projectDuration)
+        guard issues.isEmpty else {
+            throw ChapterSidecarDocumentError.validationFailed(issues)
+        }
         let content = YouTubeChapterValidator.format(chapters)
         let data = Data(content.utf8)
         return FileWrapper(regularFileWithContents: data)
+    }
+}
+
+private enum ChapterSidecarDocumentError: LocalizedError {
+    case validationFailed([ChapterExportIssue])
+
+    var errorDescription: String? {
+        switch self {
+        case .validationFailed(let issues):
+            "Fix chapter markers before export: \(issues.map(\.localizedDescription).joined(separator: " "))"
+        }
     }
 }

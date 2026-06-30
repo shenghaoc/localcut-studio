@@ -1,5 +1,6 @@
 import Foundation
 import CoreMedia
+import AVFoundation
 import LocalCutCore
 
 // MARK: - Chapter Exporter
@@ -22,9 +23,11 @@ nonisolated enum ChapterExporter {
         outputURL: URL
     ) -> ChapterExportResult {
         let chapters = YouTubeChapterValidator.chapters(from: markers, projectDuration: projectDuration)
-        let issues = YouTubeChapterValidator.validate(chapters)
+        let issues = YouTubeChapterValidator.validate(chapters, projectDuration: projectDuration)
+        guard issues.isEmpty else {
+            return ChapterExportResult(issues: issues)
+        }
 
-        // Write sidecar even if there are issues — the user may want to review.
         let sidecarURL = outputURL.deletingPathExtension()
             .appendingPathExtension("chapters.txt")
         let content = YouTubeChapterValidator.format(chapters)
@@ -55,7 +58,10 @@ nonisolated enum ChapterExporter {
         projectDuration: CMTime
     ) -> [AVMutableMetadataItem] {
         let chapters = YouTubeChapterValidator.chapters(from: markers, projectDuration: projectDuration)
-        guard !chapters.isEmpty else { return [] }
+        guard !chapters.isEmpty,
+              YouTubeChapterValidator.validate(chapters, projectDuration: projectDuration).isEmpty else {
+            return []
+        }
 
         var items: [AVMutableMetadataItem] = []
         for (index, chapter) in chapters.enumerated() {
@@ -74,5 +80,3 @@ nonisolated enum ChapterExporter {
         return items
     }
 }
-
-import AVFoundation
