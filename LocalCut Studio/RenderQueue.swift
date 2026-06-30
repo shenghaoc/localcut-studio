@@ -590,6 +590,9 @@ final class RenderQueue {
                 }
             }
 
+            // Extract chapter markers from the snapshot for metadata embedding.
+            let chapterMarkers = snapshot.markers.filter { $0.kind == .chapter }
+
             if !shouldUseWriter,
                let presetName = preset.assetExportSessionPresetName {
                 try await exportWithSession(
@@ -597,7 +600,17 @@ final class RenderQueue {
                     built: built, outputURL: outputURL, jobID: id)
             } else {
                 try await exportWithWriter(
-                    preset: preset, built: built, outputURL: outputURL, jobID: id)
+                    preset: preset, built: built, outputURL: outputURL, jobID: id,
+                    chapterMarkers: chapterMarkers)
+            }
+
+            // Write YouTube chapter sidecar when chapter markers exist.
+            if !chapterMarkers.isEmpty {
+                let projectDuration = CMTime(seconds: built.duration, preferredTimescale: 600)
+                _ = ChapterExporter.writeYouTubeSidecar(
+                    markers: chapterMarkers,
+                    projectDuration: projectDuration,
+                    outputURL: outputURL)
             }
 
             if cancelInFlightID == id {
@@ -695,12 +708,23 @@ final class RenderQueue {
     /// settings dicts are populated — colour management + advanced codec
     /// parameters land here in a future spec.
     private func exportWithWriter(preset: ExportPreset, built: BuiltComposition,
-                                  outputURL: URL, jobID: UUID) async throws {
+                                  outputURL: URL, jobID: UUID,
+                                  chapterMarkers: [TimelineMarker] = []) async throws {
         let writer: AVAssetWriter
         do {
             writer = try AVAssetWriter(outputURL: outputURL, fileType: preset.containerType)
         } catch {
             throw RenderQueueError.writerInitializationFailed(error.localizedDescription)
+        }
+
+        // Add chapter metadata items if available.
+        if !chapterMarkers.isEmpty {
+            let projectDuration = CMTime(seconds: built.duration, preferredTimescale: 600)
+            let chapterItems = ChapterExporter.chapterMetadataItems(
+                from: chapterMarkers, projectDuration: projectDuration)
+            if !chapterItems.isEmpty {
+                writer.metadata.append(contentsOf: chapterItems)
+            }
         }
         activeWriter = writer
 
