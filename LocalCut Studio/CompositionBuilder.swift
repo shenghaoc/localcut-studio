@@ -376,6 +376,7 @@ enum CompositionBuilder {
             projectTrackSegments: projectTrackSegments,
             captionTracks: captionTracks,
             overlays: project.overlays,
+            callouts: project.callouts,
             totalDuration: totalDuration,
             renderSize: renderSize,
             frameRate: project.frameRate,
@@ -637,6 +638,7 @@ enum CompositionBuilder {
         projectTrackSegments: [[VideoSegment]],
         captionTracks: [CaptionTrack],
         overlays: [OverlayClip],
+        callouts: [CalloutClip] = [],
         totalDuration: CMTime,
         renderSize: CGSize,
         frameRate: Double,
@@ -654,6 +656,7 @@ enum CompositionBuilder {
         let hasAnySegment = projectTrackSegments.contains { !$0.isEmpty }
             || fillerTrackID != kCMPersistentTrackID_Invalid
             || !overlays.isEmpty
+            || !callouts.isEmpty
         guard hasAnySegment else { return nil }
 
         // Collect and sort every distinct boundary time, including overlap edges
@@ -740,10 +743,16 @@ enum CompositionBuilder {
                 in: captionTracks, midpoint: midpoint)
             let overlaysForInterval = activeOverlayItems(
                 in: overlays, midpoint: midpoint)
+            let calloutsForInterval = callouts.filter { callout in
+                let start = callout.timeRange.start.seconds
+                let end = start + callout.timeRange.duration.seconds
+                return start <= midpoint && midpoint < end
+            }
             instructions.append(EffectCompositionInstruction(
                 timeRange: range, units: units, captions: captionsForInterval,
                 overlays: overlaysForInterval,
                 overlaySourceRegistryID: overlaySourceRegistryID,
+                callouts: calloutsForInterval,
                 frameRate: frameRate,
                 workingColourSpace: workingColourSpace))
         }

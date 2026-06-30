@@ -90,6 +90,8 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let captions: [CaptionRenderItem]
     let overlays: [OverlayRenderItem]
     let overlaySourceRegistryID: UUID?
+    /// Phase 43 callout clips to render.
+    let callouts: [CalloutClip]
     /// Project frame rate — used by grain to advance the noise pattern each
     /// real frame instead of hardcoding a 24 fps cadence.
     let frameRate: Double
@@ -99,18 +101,20 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
     init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = [],
          overlays: [OverlayRenderItem] = [], overlaySourceRegistryID: UUID? = nil,
+         callouts: [CalloutClip] = [],
          frameRate: Double = 24, workingColourSpace: WorkingColourSpace = .sRGB) {
         self.timeRange = timeRange
         self.units = units
         self.captions = captions
         self.overlays = overlays
         self.overlaySourceRegistryID = overlaySourceRegistryID
+        self.callouts = callouts
         self.frameRate = frameRate
         self.workingColourSpace = workingColourSpace
         // A transition tweens its layers across the interval. Captions also tween
         // (per-frame animation transform), so any caption forces tweening too.
-        // Overlays also tween (per-frame position/scale/opacity).
-        containsTweening = !captions.isEmpty || !overlays.isEmpty || units.contains {
+        // Overlays also tween (per-frame position/scale/opacity). Callouts too.
+        containsTweening = !captions.isEmpty || !overlays.isEmpty || !callouts.isEmpty || units.contains {
             if case .transition = $0 { return true }; return false
         }
         let trackIDs = units.flatMap(\.trackIDs)
@@ -286,6 +290,14 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 return
             }
             if !isPending(requestID) { return }
+            result = layer.composited(over: result ?? CIImage(color: .clear)
+                .cropped(to: CGRect(origin: .zero, size: renderSize)))
+        }
+
+        // Callouts sit between overlays and captions.
+        for callout in instruction.callouts {
+            guard let layer = calloutLayer(for: callout, time: request.compositionTime,
+                                           sourceImage: result, renderSize: renderSize) else { continue }
             result = layer.composited(over: result ?? CIImage(color: .clear)
                 .cropped(to: CGRect(origin: .zero, size: renderSize)))
         }
@@ -594,6 +606,92 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         transform = transform.translatedBy(x: -naturalSize.width / 2,
                                            y: -naturalSize.height / 2)
         return transform
+    }
+
+    // MARK: - Callouts (Phase 43)
+
+    /// Renders a callout clip for the current frame.
+    nonisolated private func calloutLayer(
+        for callout: CalloutClip,
+        time: CMTime,
+        sourceImage: CIImage?,
+        renderSize: CGSize
+    ) -> CIImage? {
+        // Check if the callout is visible at this time.
+        let calloutEnd = callout.timeRange.start + callout.timeRange.duration
+        guard time >= callout.timeRange.start, time < calloutEnd else { return nil }
+
+        // Evaluate keyframed transform if animated.
+        let localTime = CMTimeMaximum(time - callout.timeRange.start, .zero)
+        let transform = callout.transformKeyframes.isAnimated
+            ? callout.transformKeyframes.value(at: localTime)
+            : .identity
+
+        let image: CIImage?
+        switch callout.kind {
+        case .arrow:
+            image = CalloutRenderer.renderArrow(
+                style: callout.arrowStyle,
+                startPoint: callout.startPoint,
+                endPoint: callout.endPoint,
+                renderSize: renderSize)
+        case .box:
+            image = CalloutRenderer.renderBox(
+                style: callout.boxStyle,
+                rect: callout.rect,
+                renderSize: renderSize)
+        case .stepNumber:
+            image = CalloutRenderer.renderStepNumber(
+                style: callout.stepNumberStyle,
+                number: callout.stepNumber,
+                position: CGPoint(x: callout.rect.midX, y: callout.rect.midY),
+                renderSize: renderSize)
+        case .spotlight:
+            guard let source = sourceImage else { return nil }
+            image = CalloutRenderer.renderSpotlight(
+                style: callout.spotlightStyle,
+                centre: CGPoint(x: callout.rect.midX, y: callout.rect.midY),
+                sourceImage: source,
+                renderSize: renderSize)
+        case .blurRegion:
+            guard let source = sourceImage else { return nil }
+            image = CalloutRenderer.renderBlurRegion(
+                style: callout.blurRegionStyle,
+                rect: callout.rect,
+                sourceImage: source,
+                renderSize: renderSize)
+        }
+
+        guard var result = image else { return nil }
+
+        // Apply keyframed transform.
+        if transform != .identity {
+            result = result.transformed(by: transform.cgTransform)
+        }
+
+        // Apply static position offset and scale.
+        if callout.scale != 1 || callout.positionOffset != .zero || callout.rotation != 0 {
+            var t = CGAffineTransform.identity
+            t = t.translatedBy(x: callout.positionOffset.width, y: callout.positionOffset.height)
+            if callout.rotation != 0 {
+                let cx = renderSize.width / 2
+                let cy = renderSize.height / 2
+                t = t.translatedBy(x: cx, y: cy)
+                t = t.rotated(by: CGFloat(callout.rotation))
+                t = t.translatedBy(x: -cx, y: -cy)
+            }
+            if callout.scale != 1 {
+                let cx = renderSize.width / 2
+                let cy = renderSize.height / 2
+                t = t.translatedBy(x: cx, y: cy)
+                t = t.scaledBy(x: CGFloat(callout.scale), y: CGFloat(callout.scale))
+                t = t.translatedBy(x: -cx, y: -cy)
+            }
+            result = result.transformed(by: t)
+        }
+
+        let renderRect = CGRect(origin: .zero, size: renderSize)
+        return result.cropped(to: renderRect)
     }
 
     // MARK: - Captions
