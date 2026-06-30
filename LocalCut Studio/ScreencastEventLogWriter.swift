@@ -137,6 +137,22 @@ final class ScreencastEventLogWriter {
     /// Flush the accumulated events to `events.json`. The caller must pass
     /// the event snapshot so this method can run on any thread.
     nonisolated func flush(events: [ScreencastEvent]) throws {
+        try Self.writeLog(sessionID: sessionID, events: events, outputURL: outputURL)
+    }
+
+    nonisolated func flushDetached(events: [ScreencastEvent]) async throws {
+        let sessionID = sessionID
+        let outputURL = outputURL
+        try await Task.detached(priority: .utility) {
+            try Self.writeLog(sessionID: sessionID, events: events, outputURL: outputURL)
+        }.value
+    }
+
+    private nonisolated static func writeLog(
+        sessionID: UUID,
+        events: [ScreencastEvent],
+        outputURL: URL
+    ) throws {
         let log = ScreencastEventLog(
             schemaVersion: ScreencastEventLog.currentSchemaVersion,
             sessionID: sessionID,

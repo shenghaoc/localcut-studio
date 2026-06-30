@@ -277,6 +277,18 @@ struct ZoomPanPresetGeneratorTests {
         #expect(keyframes[2].value.decomposedScale > 1)
     }
 
+    @Test("Snap zoom preserves terminal identity on short clips")
+    func shortSnapZoomEndsAtIdentity() {
+        let shortDuration = CMTime(seconds: 0.2, preferredTimescale: 600)
+        let preset = ZoomPanPreset(
+            kind: .snapZoomOnClick,
+            targetPoint: CGPoint(x: 0.25, y: 0.25),
+            endScale: 4,
+            duration: shortDuration)
+        let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: shortDuration)
+        #expect(keyframes.last?.value == .identity)
+    }
+
     @Test("Keyframe times are sorted")
     func keyframesSorted() {
         let preset = ZoomPanPreset(kind: .snapZoomOnClick, endScale: 2, duration: clipDuration)

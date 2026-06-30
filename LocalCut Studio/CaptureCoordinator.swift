@@ -351,7 +351,7 @@ actor CaptureCoordinator {
         do {
             if let writer = active.eventLogWriter {
                 let snapshot = await writer.snapshotEvents()
-                try writer.flush(events: snapshot)
+                try await writer.flushDetached(events: snapshot)
             }
         } catch {
             eventLogFlushError = "Event log: \(error.localizedDescription)"

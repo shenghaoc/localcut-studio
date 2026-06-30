@@ -15,6 +15,7 @@ struct ScreencastCalloutTransformKeyframeTests {
         let model = EditorModel()
         let calloutID = UUID()
         let start = CMTime(seconds: 2, preferredTimescale: 600)
+        model.project.renderSize = CGSize(width: 210, height: 90)
         model.project.callouts = [
             CalloutClip(
                 id: calloutID,
@@ -40,8 +41,8 @@ struct ScreencastCalloutTransformKeyframeTests {
 
         let keyframe = try #require(callout.transformKeyframes.keyframes.first)
         #expect(abs(keyframe.time.seconds - 1) < 0.001)
-        #expect(abs(keyframe.value.tx - 42) < 0.001)
-        #expect(abs(keyframe.value.ty - -18) < 0.001)
+        #expect(abs(keyframe.value.tx - 0.2) < 0.001)
+        #expect(abs(keyframe.value.ty - -0.2) < 0.001)
         #expect(abs(keyframe.value.decomposedScale - 1.75) < 0.001)
         #expect(abs(keyframe.value.decomposedRotation - Float.pi / 6) < 0.001)
     }

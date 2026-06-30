@@ -209,6 +209,15 @@ public enum ZoomPanPresetGenerator {
             }
         }
 
+        if keyframes.last?.value == .identity, let last = result.last {
+            result[result.count - 1] = Keyframe<Transform2D>(
+                id: last.id,
+                time: last.time,
+                value: .identity,
+                incomingHandle: last.incomingHandle,
+                outgoingHandle: last.outgoingHandle)
+        }
+
         return result
     }
 

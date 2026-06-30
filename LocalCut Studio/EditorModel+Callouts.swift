@@ -196,9 +196,12 @@ extension EditorModel {
     }
 
     private func staticTransform(for callout: CalloutClip) -> Transform2D {
-        Transform2D(
-            translateX: Float(callout.positionOffset.width),
-            translateY: Float(callout.positionOffset.height),
+        let renderSize = project.renderSize
+        let width = max(1, Float(renderSize.width))
+        let height = max(1, Float(renderSize.height))
+        return Transform2D(
+            translateX: Float(callout.positionOffset.width) / width,
+            translateY: Float(callout.positionOffset.height) / height,
             scale: callout.scale,
             rotation: callout.rotation)
     }
