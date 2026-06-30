@@ -1284,9 +1284,23 @@ struct InspectorView: View {
     private var overlayListSection: some View {
         Section("Overlays") {
             if model.project.overlays.isEmpty {
-                Text("No overlays added.")
-                    .foregroundStyle(.secondary)
+                ContentUnavailableView {
+                    Label("No Overlays", systemImage: "square.3.layers.3d")
+                } description: {
+                    Text("Add an animated image, alpha video, or Lottie overlay to the project.")
+                } actions: {
+                    addOverlayMenu
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                }
             } else {
+                HStack {
+                    addOverlayMenu
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Spacer()
+                }
+
                 ForEach(model.project.overlays) { overlay in
                     HStack {
                         Circle()
@@ -1313,23 +1327,6 @@ struct InspectorView: View {
                     }
                 }
             }
-
-            Menu {
-                Button("Animated Image (GIF/WebP/APNG)") {
-                    pendingOverlayType = .animatedImage
-                    showOverlayImporter = true
-                }
-                Button("Alpha Video") {
-                    pendingOverlayType = .alphaVideo
-                    showOverlayImporter = true
-                }
-                Button("Lottie") {
-                    pendingOverlayType = .lottie
-                    showOverlayImporter = true
-                }
-            } label: {
-                Label("Add Overlay", systemImage: "plus")
-            }
         }
         .fileImporter(
             isPresented: $showOverlayImporter,
@@ -1341,6 +1338,25 @@ struct InspectorView: View {
                     await model.importOverlay(from: url, sourceType: pendingOverlayType)
                 }
             }
+        }
+    }
+
+    private var addOverlayMenu: some View {
+        Menu {
+            Button("Animated Image (GIF/WebP/APNG)") {
+                pendingOverlayType = .animatedImage
+                showOverlayImporter = true
+            }
+            Button("Alpha Video") {
+                pendingOverlayType = .alphaVideo
+                showOverlayImporter = true
+            }
+            Button("Lottie") {
+                pendingOverlayType = .lottie
+                showOverlayImporter = true
+            }
+        } label: {
+            Label("Add Overlay", systemImage: "plus")
         }
     }
 }
