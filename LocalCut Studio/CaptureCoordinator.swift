@@ -40,6 +40,9 @@ actor CaptureCoordinator {
         /// Once a critical manifest append fails, the session must remain
         /// unfinalized so recovery can inspect the fragmented files on next launch.
         var manifestWriteFailed = false
+        /// Own-app event log writer. Non-nil only when recording LocalCut Studio
+        /// itself (`.application` target matching our bundle ID).
+        var eventLogWriter: ScreencastEventLogWriter?
     }
 
     private var state: State = .idle
@@ -276,6 +279,15 @@ actor CaptureCoordinator {
         for descriptor in descriptors {
             sourceIDs[descriptor.kind] = descriptor.id
         }
+        // Create event log writer for own-app recordings only.
+        var eventLogWriter: ScreencastEventLogWriter?
+        if let target = request.target, target.isOwnApp {
+            eventLogWriter = await ScreencastEventLogWriter(
+                sessionID: id,
+                startHostTimeUs: startHostTimeUs,
+                directoryURL: directoryURL)
+        }
+
         let active = ActiveSession(
             id: id,
             directoryURL: directoryURL,
@@ -289,7 +301,8 @@ actor CaptureCoordinator {
             onBackpressure: onBackpressure,
             onMicrophoneLevel: onMicrophoneLevel,
             currentTarget: request.target,
-            sourceIDs: sourceIDs)
+            sourceIDs: sourceIDs,
+            eventLogWriter: eventLogWriter)
         activeSession = active
 
         do {
@@ -315,6 +328,8 @@ actor CaptureCoordinator {
             }
             throw error
         }
+        // Start event monitoring for own-app recordings (after sessions are running).
+        await activeSession?.eventLogWriter?.startMonitoring()
         state = .recording
         didStartRecording = true
     }
@@ -325,6 +340,10 @@ actor CaptureCoordinator {
         }
         state = .stopping
         activeSession = nil
+
+        // Stop event monitoring and flush the event log sidecar.
+        await active.eventLogWriter?.stopMonitoring()
+        try? await active.eventLogWriter?.flush()
 
         // Stop all running sessions (no-op if already paused).
         for session in active.sessions {
