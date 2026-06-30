@@ -115,8 +115,10 @@ struct PreviewView: View {
             } else {
                 ContentUnavailableView {
                     Label("No Preview", systemImage: "film.stack")
+                        .foregroundStyle(.secondary)
                 } description: {
                     Text("Import media, then drag a clip to the timeline.")
+                        .foregroundStyle(.secondary)
                 } actions: {
                     Button("Import Media…") {
                         model.requestImport()
@@ -130,7 +132,6 @@ struct PreviewView: View {
                     // a keyboard-accessible import path.
                     .accessibilityHidden(true)
                 }
-                .foregroundStyle(.secondary)
             }
             if model.showSafeZones,
                let profile = SafeZoneLibrary.validProfile(
