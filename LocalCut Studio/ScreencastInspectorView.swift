@@ -223,8 +223,8 @@ struct ScreencastInspectorView: View {
             HStack {
                 Text("Scale")
                 Slider(value: Binding(
-                    get: { CGFloat(binding.wrappedValue.scale) },
-                    set: { var c = binding.wrappedValue; c.scale = Float($0); binding.wrappedValue = c }),
+                    get: { binding.wrappedValue.scale },
+                    set: { binding.wrappedValue.scale = $0 }),
                        in: 0.1...4, step: 0.05)
                 Text(String(format: "%.2fx", binding.wrappedValue.scale))
                     .monospacedDigit()
@@ -233,12 +233,8 @@ struct ScreencastInspectorView: View {
             HStack {
                 Text("Rotation")
                 Slider(value: Binding(
-                    get: { CGFloat(Double(binding.wrappedValue.rotation) * 180 / Double.pi) },
-                    set: {
-                        var c = binding.wrappedValue
-                        c.rotation = Float(Double($0) * Double.pi / 180)
-                        binding.wrappedValue = c
-                    }),
+                    get: { binding.wrappedValue.rotation * 180 / .pi },
+                    set: { binding.wrappedValue.rotation = $0 * .pi / 180 }),
                        in: -180...180, step: 1)
                 Text("\(Int(Double(binding.wrappedValue.rotation) * 180 / Double.pi)) deg")
                     .monospacedDigit()

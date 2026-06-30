@@ -91,7 +91,7 @@ nonisolated enum PaddedBackgroundRenderer {
         guard let gradient = CGGradient(
             colorsSpace: CGColorSpaceCreateDeviceRGB(),
             colors: [startColor, endColor] as CFArray,
-            locations: [0, 1]
+            locations: [0.0, 1.0]
         ) else {
             context.setFillColor(startColor)
             context.fill(CGRect(origin: .zero, size: renderSize))
