@@ -40,7 +40,7 @@ struct InspectorView: View {
                 }
             }
 
-            CoverInspectorSection(model: model)
+            CoverInspectorView(model: model)
             projectSection
             overlayListSection
         }
@@ -1219,8 +1219,7 @@ private struct InspectorPosterView: View {
 
 /// Extracted view to isolate `@Observable` high-frequency updates (like `model.currentTime`)
 /// from the main `InspectorView.body`, preventing unnecessary re-renders of the entire form during playback.
-@MainActor
-private struct CoverInspectorSection: View {
+private struct CoverInspectorView: View {
     @Bindable var model: EditorModel
     @State private var coverPreviewImage: NSImage?
     @State private var coverPreviewIsLoading = false
@@ -1345,8 +1344,8 @@ private struct CoverInspectorSection: View {
             if model.totalDuration <= 0 {
                 coverPreviewImage = nil
                 coverPreviewError = nil
-                coverPreviewIsLoading = false
             }
+            coverPreviewIsLoading = false
             return
         }
         coverPreviewIsLoading = true
@@ -1354,11 +1353,17 @@ private struct CoverInspectorSection: View {
         coverPreviewImage = nil
         do {
             let data = try await model.makeCoverImageData()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                coverPreviewIsLoading = false
+                return
+            }
             coverPreviewImage = NSImage(data: data)
             coverPreviewError = coverPreviewImage == nil ? "Cover preview unavailable." : nil
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                coverPreviewIsLoading = false
+                return
+            }
             coverPreviewImage = nil
             coverPreviewError = "Cover preview unavailable."
         }
