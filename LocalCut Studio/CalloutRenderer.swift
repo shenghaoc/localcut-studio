@@ -215,6 +215,8 @@ nonisolated enum CalloutRenderer {
     // MARK: - Spotlight Callout
 
     /// Render a spotlight callout as a CIImage using radial gradient masking.
+    /// Note: `centre` is in normalised screen-space (0,0 = top-left). Core
+    /// Image uses bottom-left origin, so Y is flipped.
     static func renderSpotlight(
         style: SpotlightCalloutStyle,
         centre: CGPoint,
@@ -222,7 +224,7 @@ nonisolated enum CalloutRenderer {
         renderSize: CGSize
     ) -> CIImage? {
         let cx = CGFloat(centre.x) * renderSize.width
-        let cy = CGFloat(centre.y) * renderSize.height
+        let cy = (1.0 - CGFloat(centre.y)) * renderSize.height
         let radius = CGFloat(style.radius) * max(renderSize.width, renderSize.height)
         let feather = CGFloat(style.feather) * max(renderSize.width, renderSize.height)
 
@@ -247,6 +249,8 @@ nonisolated enum CalloutRenderer {
     // MARK: - Blur Region Callout
 
     /// Render a blur-region callout as a CIImage.
+    /// Note: `rect` is in normalised screen-space (0,0 = top-left). Core
+    /// Image uses bottom-left origin, so Y is flipped.
     static func renderBlurRegion(
         style: BlurRegionCalloutStyle,
         rect: CGRect,
@@ -255,7 +259,7 @@ nonisolated enum CalloutRenderer {
     ) -> CIImage? {
         let blurRect = CGRect(
             x: rect.origin.x * renderSize.width,
-            y: rect.origin.y * renderSize.height,
+            y: (1.0 - rect.origin.y - rect.size.height) * renderSize.height,
             width: rect.size.width * renderSize.width,
             height: rect.size.height * renderSize.height)
 
