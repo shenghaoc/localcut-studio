@@ -278,7 +278,8 @@ struct CoordinatorSourceSwitchRoutingTests {
             title: "Editor",
             owner: "LocalCut Studio",
             width: 1280,
-            height: 720)
+            height: 720,
+            frame: CGRect(x: 100, y: 120, width: 1280, height: 720))
 
         let didUpdate = try await CaptureCoordinator.updateFirstSwitchableSession(
             [passive, switching],
@@ -517,7 +518,8 @@ struct RegionCaptureGeometryTests {
             title: "Window",
             owner: "App",
             width: 1280,
-            height: 720)))
+            height: 720,
+            frame: CGRect(x: 0, y: 0, width: 1280, height: 720))))
         #expect(!region.applies(to: .application(
             processID: 22,
             bundleIdentifier: "com.example.App",

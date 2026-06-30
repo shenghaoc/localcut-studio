@@ -48,9 +48,11 @@ enum CompositionBuilder {
         let clipSourceStart: CMTime
         let sourceRange: CMTimeRange
         let orderingStart: CMTime
+        /// Phase 43: keyframed transform for zoom-n-pan animation.
+        let transformKeyframes: Keyframed<Transform2D>
 
         var layer: CompositorLayer {
-            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, mask: mask, effects: effects, showSkinMask: showSkinMask, clipSourceStart: clipSourceStart, sourceRange: sourceRange, timeRange: timeRange)
+            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, mask: mask, effects: effects, showSkinMask: showSkinMask, clipSourceStart: clipSourceStart, sourceRange: sourceRange, timeRange: timeRange, transformKeyframes: transformKeyframes)
         }
 
         func contains(_ seconds: Double) -> Bool {
@@ -173,7 +175,8 @@ enum CompositionBuilder {
                             showSkinMask: showSkinMask,
                             clipSourceStart: clip.sourceStart,
                             sourceRange: remapSegment.sourceRange,
-                            orderingStart: piece.effectiveStart))
+                            orderingStart: piece.effectiveStart,
+                            transformKeyframes: clip.transformKeyframes))
                     }
                 }
             }
@@ -311,7 +314,7 @@ enum CompositionBuilder {
         // loop-insert it into the composition track so a 30-minute tail does
         // not make the editor block on writing tens of thousands of frames.
         // Codex P2 (cap filler generation).
-        let visualRanges = visualActivityRanges(captionTracks: captionTracks, overlays: project.overlays)
+        let visualRanges = visualActivityRanges(captionTracks: captionTracks, overlays: project.overlays, callouts: project.callouts)
         let videoRanges = projectTrackSegments.flatMap { segments in
             segments.map(\.timeRange)
         }
@@ -376,6 +379,8 @@ enum CompositionBuilder {
             projectTrackSegments: projectTrackSegments,
             captionTracks: captionTracks,
             overlays: project.overlays,
+            callouts: project.callouts,
+            paddedBackground: project.paddedBackground,
             totalDuration: totalDuration,
             renderSize: renderSize,
             frameRate: project.frameRate,
@@ -435,7 +440,8 @@ enum CompositionBuilder {
     }
 
     private static func visualActivityRanges(captionTracks: [CaptionTrack],
-                                             overlays: [OverlayClip]) -> [CMTimeRange] {
+                                             overlays: [OverlayClip],
+                                             callouts: [CalloutClip] = []) -> [CMTimeRange] {
         let captionRanges = captionTracks.flatMap { track in
             track.lines.map(\.range)
         }
@@ -445,7 +451,12 @@ enum CompositionBuilder {
                   overlay.timelineEnd > overlay.timelineStart else { return nil }
             return CMTimeRange(start: overlay.timelineStart, end: overlay.timelineEnd)
         }
-        return captionRanges + overlayRanges
+        let calloutRanges = callouts.compactMap { callout -> CMTimeRange? in
+            let end = callout.timeRange.start + callout.timeRange.duration
+            guard callout.timeRange.start.isNumeric, end.isNumeric, end > callout.timeRange.start else { return nil }
+            return CMTimeRange(start: callout.timeRange.start, end: end)
+        }
+        return captionRanges + overlayRanges + calloutRanges
     }
 
     private static func visualFillerRanges(visualRanges: [CMTimeRange],
@@ -637,6 +648,8 @@ enum CompositionBuilder {
         projectTrackSegments: [[VideoSegment]],
         captionTracks: [CaptionTrack],
         overlays: [OverlayClip],
+        callouts: [CalloutClip] = [],
+        paddedBackground: PaddedBackgroundPreset? = nil,
         totalDuration: CMTime,
         renderSize: CGSize,
         frameRate: Double,
@@ -654,6 +667,7 @@ enum CompositionBuilder {
         let hasAnySegment = projectTrackSegments.contains { !$0.isEmpty }
             || fillerTrackID != kCMPersistentTrackID_Invalid
             || !overlays.isEmpty
+            || !callouts.isEmpty
         guard hasAnySegment else { return nil }
 
         // Collect and sort every distinct boundary time, including overlap edges
@@ -680,6 +694,11 @@ enum CompositionBuilder {
         for overlay in overlays {
             boundarySet.insert(overlay.timelineStart.seconds)
             boundarySet.insert(overlay.timelineEnd.seconds)
+        }
+        for callout in callouts {
+            boundarySet.insert(callout.timeRange.start.seconds)
+            let calloutEnd = callout.timeRange.start.seconds + callout.timeRange.duration.seconds
+            boundarySet.insert(calloutEnd)
         }
         let boundaries = boundarySet.sorted()
 
@@ -733,17 +752,26 @@ enum CompositionBuilder {
                     showSkinMask: false,
                     clipSourceStart: fillerRange.start,
                     sourceRange: fillerRange,
-                    timeRange: fillerRange)))
+                    timeRange: fillerRange,
+                    transformKeyframes: Keyframed(defaultValue: .identity))))
             }
 
             let captionsForInterval = activeCaptionItems(
                 in: captionTracks, midpoint: midpoint)
             let overlaysForInterval = activeOverlayItems(
                 in: overlays, midpoint: midpoint)
+            let calloutsForInterval = callouts.filter { callout in
+                let start = callout.timeRange.start.seconds
+                let end = start + callout.timeRange.duration.seconds
+                return start <= midpoint && midpoint < end
+            }
             instructions.append(EffectCompositionInstruction(
                 timeRange: range, units: units, captions: captionsForInterval,
                 overlays: overlaysForInterval,
                 overlaySourceRegistryID: overlaySourceRegistryID,
+                callouts: calloutsForInterval,
+                paddedBackground: paddedBackground,
+                paddedInsetMargin: paddedBackground?.insetMargin ?? 0,
                 frameRate: frameRate,
                 workingColourSpace: workingColourSpace))
         }

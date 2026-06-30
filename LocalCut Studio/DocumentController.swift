@@ -20,6 +20,9 @@ final class DocumentController {
         model.project.overlays = []
         model.project.overlayBookmarks = [:]
         model.project.overlayBundlePaths = [:]
+        model.project.callouts = []
+        model.project.paddedBackground = nil
+        model.project.screencastEventLogs = []
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -29,6 +32,8 @@ final class DocumentController {
         model.snapToBeats = false
         model.beatOffsetSeconds = 0
         model.project.coverFrame = nil
+        model.selectedCalloutID = nil
+        model.autoZoomProposals.removeAll()
         model.documentURL = nil
         model.isDirty = false
         model.unresolvedMedia = []
@@ -47,12 +52,16 @@ final class DocumentController {
         for url in model.accessedURLs { url.stopAccessingSecurityScopedResource() }
         model.accessedURLs.removeAll()
         RenderCache.shared.purge()
+        PaddedBackgroundRenderer.purgeCache()
         model.project.mediaItems.removeAll()
         model.project.captionTracks.removeAll()
         model.project.markers.removeAll()
         model.project.overlays.removeAll()
         model.project.overlayBookmarks.removeAll()
         model.project.overlayBundlePaths.removeAll()
+        model.project.callouts.removeAll()
+        model.project.paddedBackground = nil
+        model.project.screencastEventLogs.removeAll()
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -62,6 +71,8 @@ final class DocumentController {
         model.selectedTransitionClipID = nil
         model.selectedMarkerID = nil
         model.selectedOverlayID = nil
+        model.selectedCalloutID = nil
+        model.autoZoomProposals.removeAll()
         model.unresolvedMedia = []
         model.undoManager.removeAllActions()
         model.coalescedCommitTask?.cancel()
@@ -198,6 +209,20 @@ final class DocumentController {
             }
         }
 
+        // Load callouts and padded background (Phase 43).
+        model.project.callouts = document.callouts
+        model.project.paddedBackground = PaddedBackgroundBundleResolver.resolve(
+            document.paddedBackground,
+            bundleURL: bundleURL)
+        model.project.screencastEventLogs = document.screencastEventLogs.filter(\.isSupportedSchema)
+        if let log = model.project.screencastEventLogs.last {
+            model.autoZoomProposals = AutoZoomProposalGenerator.generateProposals(
+                from: log,
+                canvasSize: model.project.renderSize)
+        } else {
+            model.autoZoomProposals.removeAll()
+        }
+
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         model.documentURL = isNewerSchema ? nil : url
         model.unresolvedMedia = unresolved
@@ -241,6 +266,7 @@ final class DocumentController {
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
         let originalOverlayPaths = model.project.overlayBundlePaths
+        let originalPaddedBackground = model.project.paddedBackground
         var overlayAccesses: [URL] = []
         defer { stopOverlayAccesses(overlayAccesses) }
         do {
@@ -259,10 +285,12 @@ final class DocumentController {
                 }
                 let overlayPlan = bundledOverlays(model: model)
                 overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
+                let backgroundPlan = PaddedBackgroundBundleResolver.bundledAssetPlan(model: model)
+                overlayAccesses.append(contentsOf: backgroundPlan.accessedURLs)
                 let projectJSON = try encodedDocument(forBundle: true, model: model)
                 let index = try ProjectBundle.write(projectJSON: projectJSON,
                                                      to: url,
-                                                     bundledMedia: bundledMedia + overlayPlan.assets,
+                                                     bundledMedia: bundledMedia + overlayPlan.assets + backgroundPlan.assets,
                                                      previousFingerprints: model.lastBundleFingerprints)
                 model.lastBundleFingerprints = index
                 model.persistBeatCachesSynchronously(to: url)
@@ -271,6 +299,7 @@ final class DocumentController {
                 let data = try document.encoded()
                 try data.write(to: url, options: .atomic)
                 adoptSingleFileOverlayBookmarks(from: document.overlays, model: model)
+                PaddedBackgroundBundleResolver.adoptSingleFileBookmark(from: document.paddedBackground, model: model)
             }
             adoptSaved(url: url, model: model)
             model.statusMessage = "Saved \(url.lastPathComponent)."
@@ -280,6 +309,7 @@ final class DocumentController {
                 item.bundleRelativePath = path
             }
             model.project.overlayBundlePaths = originalOverlayPaths
+            model.project.paddedBackground = originalPaddedBackground
             model.statusMessage = "Save failed: \(error.localizedDescription)"
             return false
         }
@@ -308,6 +338,14 @@ final class DocumentController {
                 copy.bundleRelativePath = nil
                 return copy
             }
+            if var background = document.paddedBackground {
+                if background.imageBookmark == nil,
+                   let bookmark = PaddedBackgroundBundleResolver.singleFileBookmark(for: background, model: model) {
+                    background.imageBookmark = bookmark
+                }
+                background.imageBundleRelativePath = nil
+                document.paddedBackground = background
+            }
         } else {
             document.overlays = document.overlays.map { overlay in
                 var copy = overlay
@@ -315,6 +353,15 @@ final class DocumentController {
                     copy.bookmark = Data()
                 }
                 return copy
+            }
+            if var background = document.paddedBackground {
+                if let path = background.imageBundleRelativePath,
+                   ProjectBundleLayout.isSafeAssetRelativePath(path) {
+                    background.imageBookmark = nil
+                } else if background.imageBundleRelativePath != nil {
+                    background.imageBundleRelativePath = nil
+                }
+                document.paddedBackground = background
             }
             if let path = document.coverFrame?.bundleRelativePath,
                !ProjectBundleLayout.isSafeCoversPath(path) {
@@ -410,6 +457,7 @@ final class DocumentController {
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
         let originalOverlayPaths = model.project.overlayBundlePaths
         let originalCoverPath = model.project.coverFrame?.bundleRelativePath
+        let originalPaddedBackground = model.project.paddedBackground
         var overlayAccesses: [URL] = []
         defer { stopOverlayAccesses(overlayAccesses) }
         do {
@@ -428,6 +476,8 @@ final class DocumentController {
             }
             let overlayPlan = bundledOverlays(model: model)
             overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
+            let backgroundPlan = PaddedBackgroundBundleResolver.bundledAssetPlan(model: model)
+            overlayAccesses.append(contentsOf: backgroundPlan.accessedURLs)
             let coverPreparation = await model.makeCoverBundleData()
             if let coverData = coverPreparation.data {
                 model.project.coverFrame?.bundleRelativePath =
@@ -440,7 +490,7 @@ final class DocumentController {
             let previous = model.lastBundleFingerprints
             let index = try await Task.detached {
                 try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
-                                        bundledMedia: bundledMedia + overlayPlan.assets,
+                                        bundledMedia: bundledMedia + overlayPlan.assets + backgroundPlan.assets,
                                         previousFingerprints: previous,
                                         coverData: coverPreparation.data)
             }.value
@@ -462,6 +512,7 @@ final class DocumentController {
             }
             model.project.overlayBundlePaths = originalOverlayPaths
             model.project.coverFrame?.bundleRelativePath = originalCoverPath
+            model.project.paddedBackground = originalPaddedBackground
             model.statusMessage = "Convert failed: \(error.localizedDescription)"
         }
     }
@@ -539,6 +590,7 @@ final class DocumentController {
             let data = try document.encoded()
             try await Task.detached { try data.write(to: url, options: .atomic) }.value
             adoptSingleFileOverlayBookmarks(from: document.overlays, model: model)
+            PaddedBackgroundBundleResolver.adoptSingleFileBookmark(from: document.paddedBackground, model: model)
             adoptSaved(url: url, cleanIfRevision: savedRevision, model: model)
             model.statusMessage = "Saved \(url.lastPathComponent)."
         } catch {
@@ -557,6 +609,7 @@ final class DocumentController {
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
         let originalOverlayPaths = model.project.overlayBundlePaths
         let originalCoverPath = model.project.coverFrame?.bundleRelativePath
+        let originalPaddedBackground = model.project.paddedBackground
         var overlayAccesses: [URL] = []
         defer { stopOverlayAccesses(overlayAccesses) }
         do {
@@ -572,6 +625,8 @@ final class DocumentController {
             }
             let overlayPlan = bundledOverlays(model: model)
             overlayAccesses.append(contentsOf: overlayPlan.accessedURLs)
+            let backgroundPlan = PaddedBackgroundBundleResolver.bundledAssetPlan(model: model)
+            overlayAccesses.append(contentsOf: backgroundPlan.accessedURLs)
             let coverPreparation = await model.makeCoverBundleData()
             if let coverData = coverPreparation.data {
                 model.project.coverFrame?.bundleRelativePath =
@@ -584,7 +639,7 @@ final class DocumentController {
             let bundleURLCopy = bundleURL
             let index = try await Task.detached {
                 try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
-                                        bundledMedia: bundledMedia + overlayPlan.assets,
+                                        bundledMedia: bundledMedia + overlayPlan.assets + backgroundPlan.assets,
                                         previousFingerprints: previous,
                                         coverData: coverPreparation.data)
             }.value
@@ -605,6 +660,7 @@ final class DocumentController {
             }
             model.project.overlayBundlePaths = originalOverlayPaths
             model.project.coverFrame?.bundleRelativePath = originalCoverPath
+            model.project.paddedBackground = originalPaddedBackground
             model.statusMessage = "Save failed: \(error.localizedDescription)"
         }
     }

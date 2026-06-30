@@ -40,6 +40,9 @@ actor CaptureCoordinator {
         /// Once a critical manifest append fails, the session must remain
         /// unfinalized so recovery can inspect the fragmented files on next launch.
         var manifestWriteFailed = false
+        /// Event log writer for screen/application/window targets. Own-app
+        /// targets include key codes; non-own targets record mouse/scroll only.
+        var eventLogWriter: ScreencastEventLogWriter?
     }
 
     private var state: State = .idle
@@ -276,6 +279,18 @@ actor CaptureCoordinator {
         for descriptor in descriptors {
             sourceIDs[descriptor.kind] = descriptor.id
         }
+        // Create an event log writer for screen targets. Webcam/mic-only
+        // recordings have no screen coordinate space for proposals.
+        var eventLogWriter: ScreencastEventLogWriter?
+        if let target = request.target {
+            eventLogWriter = ScreencastEventLogWriter(
+                sessionID: id,
+                startHostTimeUs: startHostTimeUs,
+                directoryURL: directoryURL,
+                target: target,
+                captureRegion: request.captureRegion)
+        }
+
         let active = ActiveSession(
             id: id,
             directoryURL: directoryURL,
@@ -289,7 +304,8 @@ actor CaptureCoordinator {
             onBackpressure: onBackpressure,
             onMicrophoneLevel: onMicrophoneLevel,
             currentTarget: request.target,
-            sourceIDs: sourceIDs)
+            sourceIDs: sourceIDs,
+            eventLogWriter: eventLogWriter)
         activeSession = active
 
         do {
@@ -315,6 +331,9 @@ actor CaptureCoordinator {
             }
             throw error
         }
+        // Start event monitoring after screen sessions are running so event
+        // timestamps align with the capture clock.
+        await activeSession?.eventLogWriter?.startMonitoring()
         state = .recording
         didStartRecording = true
     }
@@ -325,6 +344,18 @@ actor CaptureCoordinator {
         }
         state = .stopping
         activeSession = nil
+
+        // Stop event monitoring and flush the event log sidecar.
+        await active.eventLogWriter?.stopMonitoring()
+        var eventLogFlushError: String?
+        do {
+            if let writer = active.eventLogWriter {
+                let snapshot = await writer.snapshotEvents()
+                try await writer.flushDetached(events: snapshot)
+            }
+        } catch {
+            eventLogFlushError = "Event log: \(error.localizedDescription)"
+        }
 
         // Stop all running sessions (no-op if already paused).
         for session in active.sessions {
@@ -401,6 +432,14 @@ actor CaptureCoordinator {
                 .map(\.localizedDescription)
                 .joined(separator: "; ")
         }
+        // Append event-log flush error (non-fatal, but user-visible).
+        if let eventLogFlushError {
+            if let existing = manifestFinalizationError {
+                manifestFinalizationError = existing + "; " + eventLogFlushError
+            } else {
+                manifestFinalizationError = eventLogFlushError
+            }
+        }
         active.manifest.close()
         state = .idle
 
@@ -428,6 +467,8 @@ actor CaptureCoordinator {
             throw CaptureEngineError.notRecording
         }
         state = .pausing
+
+        await active.eventLogWriter?.stopMonitoring()
 
         // Stop all capture streams.
         for session in active.sessions {
@@ -691,6 +732,7 @@ actor CaptureCoordinator {
             throw error
         }
         state = .recording
+        await activeSession?.eventLogWriter?.startMonitoring()
         didStartRecording = true
     }
 
@@ -707,6 +749,7 @@ actor CaptureCoordinator {
         // Persist the switched target so resume() uses it.
         active.currentTarget = newTarget
         active.startRequest?.captureRegion = nil
+        await active.eventLogWriter?.updateTarget(newTarget)
         activeSession = active
     }
 

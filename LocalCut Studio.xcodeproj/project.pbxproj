@@ -164,8 +164,6 @@
 				000000000000000000000040 /* LocalCut StudioUITests */,
 			);
 			name = "LocalCut StudioUITests";
-			packageProductDependencies = (
-			);
 			productName = "LocalCut StudioUITests";
 			productReference = 000000000000000000000320 /* LocalCut StudioUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";

@@ -186,7 +186,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
             }
             return SCContentFilter(display: display, excludingWindows: excludedWindows)
 
-        case .window(let windowID, _, _, _, _):
+        case .window(let windowID, _, _, _, _, _):
             guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
                 throw CaptureEngineError.targetUnavailable
             }

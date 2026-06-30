@@ -10,7 +10,7 @@ private enum RecorderHarnessPhase: String {
     case stopped = "Stopped"
 }
 
-private let recorderHarnessShortcutModifiers: EventModifiers = [.command, .option, .control]
+private let recorderHarnessShortcutModifiers: EventModifiers = []
 
 struct RecorderUITestHarnessView: View {
     @State private var model = EditorModel()

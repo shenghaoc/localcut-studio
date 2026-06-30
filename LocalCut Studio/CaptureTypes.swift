@@ -64,7 +64,7 @@ nonisolated struct CaptureSourceOption: Identifiable, Hashable {
 
 nonisolated enum CaptureTarget: Hashable, Sendable {
     case display(displayID: UInt32, width: Int, height: Int)
-    case window(windowID: UInt32, title: String, owner: String, width: Int, height: Int)
+    case window(windowID: UInt32, title: String, owner: String, width: Int, height: Int, frame: CGRect)
     case application(processID: Int32, bundleIdentifier: String, name: String, displayID: UInt32, width: Int, height: Int)
 
     var sourceKind: CaptureSourceKind {
@@ -79,7 +79,7 @@ nonisolated enum CaptureTarget: Hashable, Sendable {
         switch self {
         case .display(let displayID, _, _):
             "Display \(displayID)"
-        case .window(_, let title, let owner, _, _):
+        case .window(_, let title, let owner, _, _, _):
             title.isEmpty ? owner : "\(owner) — \(title)"
         case .application(_, _, let name, _, _, _):
             name
@@ -89,7 +89,7 @@ nonisolated enum CaptureTarget: Hashable, Sendable {
     var outputSize: (width: Int, height: Int) {
         switch self {
         case .display(_, let width, let height),
-             .window(_, _, _, let width, let height),
+             .window(_, _, _, let width, let height, _),
              .application(_, _, _, _, let width, let height):
             // VideoToolbox H.264/HEVC hardware encoders require even dimensions;
             // round down to the nearest even number to avoid AVAssetWriter failures.

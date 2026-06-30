@@ -6,15 +6,17 @@
 - **R1.2** Pan velocity and acceleration are bounded; documented thresholds prevent whip-motion.
 - **R1.3** After applying a preset, the user can edit, add, or delete the resulting keyframes like any hand-authored set.
 
-## R2 — Own-app event log
+## R2 — Capture event log
 
-- **R2.1** When recording LocalCut Studio itself, the session writes a sidecar `events.json` with timestamped mouse / scroll / key events.
-- **R2.2** Event capture is own-process only; no cross-application tracking; no Accessibility permission prompt.
-- **R2.3** The event log persists with the session and survives bundle round-trip.
+- **R2.1** When recording LocalCut Studio itself, the session writes a sidecar `events.json` with timestamped mouse / scroll / key-code events.
+- **R2.2** Display, window, and non-own app recordings write mouse / scroll events when the event can be mapped into the capture target; non-own app targets use display coordinate space and do not capture cross-app keys or text.
+- **R2.3** Event capture uses `NSEvent` local/global monitors only; no Accessibility permission prompt.
+- **R2.4** The event log persists with the session and survives bundle round-trip.
+- **R2.5** Pause/resume and source-switch lifecycles stop, restart, or retarget event monitoring so events do not double-log across session state changes.
 
 ## R3 — Auto-zoom proposals
 
-- **R3.1** A panel reads the event log, clusters click bursts, and proposes zoom-n-pan keyframes.
+- **R3.1** A panel reads a landed capture sidecar or imported standalone event log, clusters click bursts, and proposes zoom-n-pan keyframes.
 - **R3.2** Each proposal is review-before-apply (apply / skip); nothing auto-applies.
 - **R3.3** Proposals are deterministic given the same event log and clustering parameters.
 
@@ -28,11 +30,12 @@
 
 - **R5.1** Preset offers gradient or image background, rounded-corner clip frame, drop shadow, inset margin.
 - **R5.2** Background images downsample to the project canvas at apply time.
-- **R5.3** Realtime at 1080p on the accelerated tier with the preset on.
+- **R5.3** Background images persist as security-scoped bookmarks for single-file projects and bundle-relative assets for `.lcbundle` projects and render-queue snapshots.
+- **R5.4** Realtime at 1080p on the accelerated tier with the preset on.
 
 ## R6 — Verification
 
 - **R6.1** Snapshot tests for each callout kind on a fixture clip.
 - **R6.2** Determinism test on the auto-zoom proposal output for a fixture event log.
-- **R6.3** Smoke: own-app session → events captured → auto-zoom proposed → apply → keyframes editable → export.
+- **R6.3** Smoke: capture session → events captured or imported → auto-zoom proposed → apply → keyframes editable → export.
 - **R6.4** `xcodebuild` (Debug, macOS) green; no test count regression.

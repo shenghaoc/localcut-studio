@@ -561,6 +561,11 @@ public struct Clip: Identifiable, Hashable, Sendable {
     public var transition: Transition?
     public var volumeEnvelope: VolumeEnvelope = VolumeEnvelope()
 
+    /// Keyframed transform animation for zoom-n-pan effects. Keyframes are in
+    /// clip-source-local time and represent the clip's transform relative to its
+    /// natural fit in the render canvas. Default is identity (no animation).
+    public var transformKeyframes: Keyframed<Transform2D> = Keyframed(defaultValue: .identity)
+
     /// Per-clip speed curve for source-to-output retiming. The curve is authored
     /// in clip-source-local time: a source timestamp maps onto the timeline by
     /// integrating `1 / speed` from the clip in-point to that timestamp.
@@ -612,6 +617,7 @@ public struct Clip: Identifiable, Hashable, Sendable {
                 effects: [Effect] = [],
                 transition: Transition? = nil,
                 volumeEnvelope: VolumeEnvelope = VolumeEnvelope(),
+                transformKeyframes: Keyframed<Transform2D> = Keyframed(defaultValue: .identity),
                 speedCurve: Keyframed<Float> = TimeRemapping.identitySpeedCurve,
                 preservePitch: Bool = true,
                 pitchAlgorithm: TimePitchAlgorithm = .timeDomain) {
@@ -624,6 +630,7 @@ public struct Clip: Identifiable, Hashable, Sendable {
         self.effects = effects
         self.transition = transition
         self.volumeEnvelope = volumeEnvelope
+        self.transformKeyframes = transformKeyframes
         self.speedCurve = speedCurve
         self.preservePitch = preservePitch
         self.pitchAlgorithm = pitchAlgorithm

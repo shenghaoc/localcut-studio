@@ -54,6 +54,12 @@ struct ProjectState: Equatable {
     var overlayBookmarks: [UUID: Data]
     /// Overlay bundle-relative paths keyed by overlay ID.
     var overlayBundlePaths: [UUID: String]
+    /// Phase 43 callout clips.
+    var callouts: [CalloutClip]
+    /// Phase 43 padded background preset.
+    var paddedBackground: PaddedBackgroundPreset?
+    /// Phase 43 screencast event logs persisted with the project.
+    var screencastEventLogs: [ScreencastEventLog]
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
@@ -79,6 +85,9 @@ struct ProjectState: Equatable {
             && lhs.overlays == rhs.overlays
             && lhs.overlayBookmarks == rhs.overlayBookmarks
             && lhs.overlayBundlePaths == rhs.overlayBundlePaths
+            && lhs.callouts == rhs.callouts
+            && lhs.paddedBackground == rhs.paddedBackground
+            && lhs.screencastEventLogs == rhs.screencastEventLogs
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
@@ -131,6 +140,9 @@ extension EditorModel {
             overlays: project.overlays,
             overlayBookmarks: project.overlayBookmarks,
             overlayBundlePaths: project.overlayBundlePaths,
+            callouts: project.callouts,
+            paddedBackground: project.paddedBackground,
+            screencastEventLogs: project.screencastEventLogs,
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID,
             selectedMarkerID: selectedMarkerID,
@@ -201,6 +213,9 @@ extension EditorModel {
         project.overlays = state.overlays
         project.overlayBookmarks = state.overlayBookmarks
         project.overlayBundlePaths = state.overlayBundlePaths
+        project.callouts = state.callouts
+        project.paddedBackground = state.paddedBackground
+        project.screencastEventLogs = state.screencastEventLogs
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID

@@ -46,6 +46,7 @@ struct InspectorView: View {
             coverSection
             projectSection
             overlayListSection
+            ScreencastInspectorView(model: model)
         }
         .formStyle(.grouped)
         .fileImporter(

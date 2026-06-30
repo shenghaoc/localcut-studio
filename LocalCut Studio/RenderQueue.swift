@@ -1402,6 +1402,8 @@ final class RenderQueue {
 
         project.captionTracks = doc.captionTracks.map { $0.makeTrack() }
         project.overlays = doc.overlays.map { $0.makeOverlayClip() }
+        project.callouts = doc.callouts
+        project.paddedBackground = doc.paddedBackground
         for overlay in doc.overlays {
             if let path = overlay.bundleRelativePath,
                ProjectBundleLayout.isSafeAssetRelativePath(path) {

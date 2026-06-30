@@ -28,6 +28,9 @@ final class EditorModel {
     /// clip / transition delete shortcut keeps working unchanged.
     var selectedMarkerID: TimelineMarker.ID?
     var selectedOverlayID: OverlayClip.ID?
+    var selectedCalloutID: CalloutClip.ID?
+    /// Phase 43 auto-zoom proposals from the event log.
+    var autoZoomProposals: [ZoomPanProposal] = []
 
     // Playback
     let player = AVPlayer()

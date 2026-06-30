@@ -103,6 +103,39 @@ struct ProjectBundleTests {
         #expect(again.document.captionTracks[0].id == captionTrackID)
     }
 
+    @Test("Bundle round-trip preserves screencast event logs")
+    func bundleRoundTripPreservesScreencastEventLogs() throws {
+        let tmp = try makeTempDirectory("eventlog")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Sample.lcbundle")
+        let sessionID = UUID()
+        var document = sampleDocument(
+            mediaID: UUID(),
+            bundleRelativePath: nil,
+            captionTrackID: UUID())
+        document.screencastEventLogs = [
+            ScreencastEventLog(
+                sessionID: sessionID,
+                events: [
+                    ScreencastEvent(
+                        time: time(0.2),
+                        kind: .mouseDown,
+                        position: CGPoint(x: 0.35, y: 0.44)),
+                ]),
+        ]
+
+        _ = try ProjectBundle.write(
+            projectJSON: document.encoded(),
+            to: bundleURL,
+            bundledMedia: [],
+            previousFingerprints: FingerprintIndex())
+
+        let contents = try ProjectBundle.read(url: bundleURL)
+        #expect(contents.document.screencastEventLogs.count == 1)
+        #expect(contents.document.screencastEventLogs.first?.sessionID == sessionID)
+        #expect(contents.document.screencastEventLogs.first?.events.first?.position == CGPoint(x: 0.35, y: 0.44))
+    }
+
     @Test("ProjectBundle.write stages metadata and leaves no staged files behind")
     func bundleMetadataStagingCleansUp() throws {
         let tmp = try makeTempDirectory("staged-metadata")
@@ -350,6 +383,87 @@ struct ProjectBundleTests {
 
         #expect(queuedOverlay.bundleRelativePath == savedOverlay.bundleRelativePath)
         #expect(!queuedOverlay.bookmark.isEmpty)
+    }
+
+    @Test("Bundle save copies padded background image and strips bookmark")
+    func bundleSaveCopiesPaddedBackgroundImage() throws {
+        let tmp = try makeTempDirectory("padded-background")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let source = try writeAsset([0x89, 0x50, 0x4E, 0x47],
+                                    name: "wallpaper.png",
+                                    in: tmp)
+        let bundleURL = tmp.appendingPathComponent("BackgroundProject.lcbundle")
+
+        let model = EditorModel()
+        model.project.paddedBackground = PaddedBackgroundPreset(
+            source: .image,
+            imageBookmark: try source.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil))
+
+        #expect(model.writeSynchronously(to: bundleURL))
+
+        let contents = try ProjectBundle.read(url: bundleURL)
+        let background = try #require(contents.document.paddedBackground)
+        let relativePath = try #require(background.imageBundleRelativePath)
+        let copiedURL = bundleURL.appendingPathComponent(relativePath)
+
+        #expect(relativePath.hasPrefix("assets/"))
+        #expect(relativePath.hasSuffix(".png"))
+        #expect(FileManager.default.fileExists(atPath: copiedURL.path))
+        #expect(try Data(contentsOf: copiedURL) == Data(contentsOf: source))
+        #expect(background.imageBookmark == nil)
+        #expect(contents.fingerprints.entries[relativePath] != nil)
+    }
+
+    @Test("Single-file save converts bundled padded background path into bookmark")
+    func singleFileSavePreservesBundledPaddedBackgroundImage() throws {
+        let tmp = try makeTempDirectory("padded-background-single-file")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("BackgroundProject.lcbundle")
+        let relativePath = "assets/66666666-6666-6666-6666-666666666666.png"
+        let sourceURL = bundleURL.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: sourceURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: sourceURL, options: .atomic)
+
+        let model = EditorModel()
+        model.documentURL = bundleURL
+        model.project.paddedBackground = PaddedBackgroundPreset(
+            source: .image,
+            imageBundleRelativePath: relativePath)
+
+        let document = model.makeDocumentForSave(forBundle: false)
+        let background = try #require(document.paddedBackground)
+
+        #expect(background.imageBundleRelativePath == nil)
+        #expect(background.imageBookmark != nil)
+    }
+
+    @Test("Queue snapshot adds bookmark for bundled padded background image")
+    func queueSnapshotAddsBundledPaddedBackgroundBookmark() throws {
+        let tmp = try makeTempDirectory("padded-background-queue")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("BackgroundQueue.lcbundle")
+        let relativePath = "assets/77777777-7777-7777-7777-777777777777.png"
+        let sourceURL = bundleURL.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: sourceURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: sourceURL, options: .atomic)
+
+        let project = Project()
+        project.paddedBackground = PaddedBackgroundPreset(
+            source: .image,
+            imageBundleRelativePath: relativePath)
+
+        let snapshot = ProjectDocument(project: project, queueBundleURL: bundleURL)
+        let background = try #require(snapshot.paddedBackground)
+
+        #expect(background.imageBundleRelativePath == relativePath)
+        #expect(background.imageBookmark != nil)
     }
 
     // MARK: - T6.2 — fingerprint detects an external edit

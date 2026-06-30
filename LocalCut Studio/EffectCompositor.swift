@@ -27,6 +27,8 @@ struct CompositorLayer {
     /// The piece's range on the composition timeline, paired with `sourceRange`
     /// to map composition time → source time.
     let timeRange: CMTimeRange
+    /// Phase 43: keyframed transform for zoom-n-pan animation.
+    let transformKeyframes: Keyframed<Transform2D>
 
     nonisolated func sourceTime(at compositionTime: CMTime) -> CMTime {
         let rel = CMTimeMaximum(.zero, compositionTime - timeRange.start)
@@ -90,6 +92,12 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let captions: [CaptionRenderItem]
     let overlays: [OverlayRenderItem]
     let overlaySourceRegistryID: UUID?
+    /// Phase 43 callout clips to render.
+    let callouts: [CalloutClip]
+    /// Phase 43 padded background preset. When non-nil, renders behind everything.
+    let paddedBackground: PaddedBackgroundPreset?
+    /// Phase 43: inset margin in points for padded-background clips.
+    let paddedInsetMargin: Float
     /// Project frame rate — used by grain to advance the noise pattern each
     /// real frame instead of hardcoding a 24 fps cadence.
     let frameRate: Double
@@ -99,18 +107,23 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
     init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = [],
          overlays: [OverlayRenderItem] = [], overlaySourceRegistryID: UUID? = nil,
+         callouts: [CalloutClip] = [], paddedBackground: PaddedBackgroundPreset? = nil,
+         paddedInsetMargin: Float = 0,
          frameRate: Double = 24, workingColourSpace: WorkingColourSpace = .sRGB) {
         self.timeRange = timeRange
         self.units = units
         self.captions = captions
         self.overlays = overlays
         self.overlaySourceRegistryID = overlaySourceRegistryID
+        self.callouts = callouts
+        self.paddedBackground = paddedBackground
+        self.paddedInsetMargin = paddedInsetMargin
         self.frameRate = frameRate
         self.workingColourSpace = workingColourSpace
         // A transition tweens its layers across the interval. Captions also tween
         // (per-frame animation transform), so any caption forces tweening too.
-        // Overlays also tween (per-frame position/scale/opacity).
-        containsTweening = !captions.isEmpty || !overlays.isEmpty || units.contains {
+        // Overlays also tween (per-frame position/scale/opacity). Callouts too.
+        containsTweening = !captions.isEmpty || !overlays.isEmpty || !callouts.isEmpty || units.contains {
             if case .transition = $0 { return true }; return false
         }
         let trackIDs = units.flatMap(\.trackIDs)
@@ -259,15 +272,44 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let ciContext = Self.context(for: space)
         var result: CIImage?
 
+        // Padded background renders behind everything.
+        var paddedBackgroundImage: CIImage?
+        if let bg = instruction.paddedBackground {
+            if let bgImage = PaddedBackgroundRenderer.render(
+                preset: bg, renderSize: renderSize) {
+                result = bgImage
+                paddedBackgroundImage = bgImage
+            }
+        }
+
+        var foregroundResult: CIImage?
         for unit in instruction.units {
             guard let image = renderedImage(for: unit, request: request,
                                             frameRate: instruction.frameRate,
                                             workingColourSpace: space) else { continue }
+            if paddedBackgroundImage != nil {
+                let foregroundCanvas = foregroundResult ?? CIImage(color: .clear)
+                    .cropped(to: CGRect(origin: .zero, size: renderSize))
+                foregroundResult = image.composited(over: foregroundCanvas)
+            }
             if let existing = result {
                 result = image.composited(over: existing)
             } else {
                 result = image
             }
+        }
+
+        // Phase 43: when a padded background is active, inset the foreground
+        // layers with rounded corners and drop shadow so the background remains
+        // visible around them.
+        if let bgImage = paddedBackgroundImage, instruction.paddedInsetMargin > 0,
+           let preset = instruction.paddedBackground {
+            result = Self.paddedBackgroundComposite(
+                foreground: foregroundResult,
+                background: bgImage,
+                preset: preset,
+                insetMargin: CGFloat(instruction.paddedInsetMargin),
+                renderSize: renderSize)
         }
 
         // Overlays sit between video layers and captions. Earlier entries draw
@@ -286,6 +328,14 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 return
             }
             if !isPending(requestID) { return }
+            result = layer.composited(over: result ?? CIImage(color: .clear)
+                .cropped(to: CGRect(origin: .zero, size: renderSize)))
+        }
+
+        // Callouts sit between overlays and captions.
+        for callout in instruction.callouts {
+            guard let layer = calloutLayer(for: callout, time: request.compositionTime,
+                                           sourceImage: result, renderSize: renderSize) else { continue }
             result = layer.composited(over: result ?? CIImage(color: .clear)
                 .cropped(to: CGRect(origin: .zero, size: renderSize)))
         }
@@ -327,6 +377,70 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         finishPendingRequest(requestID) {
             request.finish(withComposedVideoFrame: destination)
         }
+    }
+
+    nonisolated static func paddedBackgroundComposite(
+        foreground: CIImage?,
+        background: CIImage,
+        preset: PaddedBackgroundPreset,
+        insetMargin: CGFloat,
+        renderSize: CGSize
+    ) -> CIImage {
+        let renderRect = CGRect(origin: .zero, size: renderSize)
+        let background = background.cropped(to: renderRect)
+        guard let foreground, renderSize.width > 0, renderSize.height > 0 else {
+            return background
+        }
+
+        let maxMargin = max(0, min(renderSize.width, renderSize.height) / 2 - 1)
+        let margin = min(max(0, insetMargin), maxMargin)
+        let insetRect = renderRect.insetBy(dx: margin, dy: margin)
+        guard insetRect.width > 0, insetRect.height > 0 else { return background }
+
+        let scale = min(insetRect.width / renderSize.width, insetRect.height / renderSize.height)
+        let fittedSize = CGSize(width: renderSize.width * scale, height: renderSize.height * scale)
+        let fittedRect = CGRect(
+            x: insetRect.midX - fittedSize.width / 2,
+            y: insetRect.midY - fittedSize.height / 2,
+            width: fittedSize.width,
+            height: fittedSize.height)
+        let transform = CGAffineTransform(
+            a: scale, b: 0,
+            c: 0, d: scale,
+            tx: fittedRect.minX,
+            ty: fittedRect.minY)
+        let fittedForeground = foreground
+            .cropped(to: renderRect)
+            .transformed(by: transform)
+            .cropped(to: renderRect)
+        let mask = CalloutRenderer.createRoundedRectMask(
+            rect: fittedRect,
+            cornerRadius: CGFloat(preset.cornerRadius),
+            renderSize: renderSize)
+        let clear = CIImage(color: .clear).cropped(to: renderRect)
+        guard let masked = CIFilter(name: "CIBlendWithMask", parameters: [
+            kCIInputImageKey: fittedForeground,
+            kCIInputBackgroundImageKey: clear,
+            kCIInputMaskImageKey: mask,
+        ])?.outputImage else {
+            return fittedForeground.composited(over: background).cropped(to: renderRect)
+        }
+
+        var foregroundLayer = masked
+        if preset.shadowOpacity > 0, preset.shadowRadius > 0,
+           let shadow = CIFilter(name: "CIDropShadow", parameters: [
+               kCIInputImageKey: foregroundLayer,
+               "inputOffset": CIVector(
+                   x: CGFloat(preset.shadowOffset.width),
+                   y: CGFloat(preset.shadowOffset.height)),
+               "inputRadius": CGFloat(preset.shadowRadius),
+               "inputColor": CIColor(
+                   red: 0, green: 0, blue: 0,
+                   alpha: CGFloat(preset.shadowOpacity)),
+           ])?.outputImage {
+            foregroundLayer = shadow.cropped(to: renderRect)
+        }
+        return foregroundLayer.composited(over: background).cropped(to: renderRect)
     }
 
     nonisolated private func isPending(_ requestID: UUID) -> Bool {
@@ -442,6 +556,32 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
 
         image = image.transformed(by: layer.transform)
+
+        // Phase 43: apply keyframed transform (zoom-n-pan) relative to the
+        // clip's static geometry transform. Keyframes are authored in
+        // clip-source-local time (0 = clip start), but sourceTime includes the
+        // media in-point. Subtract it. Reuse the outer `sourceTime` (line 475).
+        if layer.transformKeyframes.isAnimated {
+            let kfLocalTime = max(.zero, sourceTime - layer.clipSourceStart)
+            let kfValue = layer.transformKeyframes.value(at: kfLocalTime)
+            if kfValue != .identity {
+                let renderSize = request.renderContext.size
+                let cx = renderSize.width / 2
+                let cy = renderSize.height / 2
+                // The keyframed transform is in normalised coordinates; scale
+                // translation to render-space pixels and compose with the
+                // centre-relative transform.
+                let tx = CGFloat(kfValue.tx) * renderSize.width
+                let ty = CGFloat(kfValue.ty) * renderSize.height
+                var t = CGAffineTransform(translationX: cx, y: cy)
+                t = t.concatenating(CGAffineTransform(
+                    a: CGFloat(kfValue.a), b: CGFloat(kfValue.b),
+                    c: CGFloat(kfValue.c), d: CGFloat(kfValue.d),
+                    tx: tx, ty: ty))
+                t = t.concatenating(CGAffineTransform(translationX: -cx, y: -cy))
+                image = image.transformed(by: t)
+            }
+        }
 
         if layer.mask != .none {
             image = masked(image, shape: layer.mask)
@@ -594,6 +734,177 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         transform = transform.translatedBy(x: -naturalSize.width / 2,
                                            y: -naturalSize.height / 2)
         return transform
+    }
+
+    // MARK: - Callouts (Phase 43)
+
+    /// Renders a callout clip for the current frame.
+    nonisolated private func calloutLayer(
+        for callout: CalloutClip,
+        time: CMTime,
+        sourceImage: CIImage?,
+        renderSize: CGSize
+    ) -> CIImage? {
+        // Check if the callout is visible at this time.
+        let calloutEnd = callout.timeRange.start + callout.timeRange.duration
+        guard time >= callout.timeRange.start, time < calloutEnd else { return nil }
+
+        // Evaluate keyframed transform if animated.
+        let localTime = CMTimeMaximum(time - callout.timeRange.start, .zero)
+        let kfTransform = callout.transformKeyframes.isAnimated
+            ? callout.transformKeyframes.value(at: localTime)
+            : .identity
+
+        // For spotlight and blur-region, the image is a full-canvas composite,
+        // so ALL transforms (keyframed + static) must be applied to the geometry
+        // before rendering. For overlays (arrow, box, step-number), only the
+        // keyframed transform is applied to geometry; the static transform is
+        // applied to the rendered image afterwards.
+        let isFullFrame = callout.kind == .spotlight || callout.kind == .blurRegion
+        let geometryTransform = isFullFrame
+            ? Self.composeStaticTransform(callout: callout, keyframed: kfTransform, renderSize: renderSize)
+            : kfTransform
+
+        let transformedRect = Self.applyTransformToRect(callout.rect, transform: geometryTransform,
+                                                         renderSize: renderSize)
+        let transformedStart = Self.applyTransformToPoint(callout.startPoint, transform: geometryTransform,
+                                                           renderSize: renderSize)
+        let transformedEnd = Self.applyTransformToPoint(callout.endPoint, transform: geometryTransform,
+                                                         renderSize: renderSize)
+
+        let image: CIImage?
+        switch callout.kind {
+        case .arrow:
+            image = CalloutRenderer.renderArrow(
+                style: callout.arrowStyle,
+                startPoint: transformedStart,
+                endPoint: transformedEnd,
+                renderSize: renderSize)
+        case .box:
+            image = CalloutRenderer.renderBox(
+                style: callout.boxStyle,
+                rect: transformedRect,
+                renderSize: renderSize)
+        case .stepNumber:
+            image = CalloutRenderer.renderStepNumber(
+                style: callout.stepNumberStyle,
+                number: callout.stepNumber,
+                position: CGPoint(x: transformedRect.midX, y: transformedRect.midY),
+                renderSize: renderSize)
+        case .spotlight:
+            guard let source = sourceImage else { return nil }
+            image = CalloutRenderer.renderSpotlight(
+                style: callout.spotlightStyle,
+                centre: CGPoint(x: transformedRect.midX, y: transformedRect.midY),
+                sourceImage: source,
+                renderSize: renderSize)
+        case .blurRegion:
+            guard let source = sourceImage else { return nil }
+            image = CalloutRenderer.renderBlurRegion(
+                style: callout.blurRegionStyle,
+                rect: transformedRect,
+                sourceImage: source,
+                renderSize: renderSize)
+        }
+
+        guard var result = image else { return nil }
+
+        // For non-full-frame effects, apply static transform to the rendered image.
+        if !isFullFrame && (callout.scale != 1 || callout.rotation != 0 || callout.positionOffset != .zero) {
+            let cx = renderSize.width / 2
+            let cy = renderSize.height / 2
+            var t = CGAffineTransform.identity
+            if callout.scale != 1 || callout.rotation != 0 {
+                t = t.translatedBy(x: cx, y: cy)
+                if callout.rotation != 0 {
+                    t = t.rotated(by: CGFloat(callout.rotation))
+                }
+                if callout.scale != 1 {
+                    t = t.scaledBy(x: CGFloat(callout.scale), y: CGFloat(callout.scale))
+                }
+                t = t.translatedBy(x: -cx, y: -cy)
+            }
+            if callout.positionOffset != .zero {
+                t = t.translatedBy(x: callout.positionOffset.width,
+                                   y: callout.positionOffset.height)
+            }
+            result = result.transformed(by: t)
+        }
+
+        let renderRect = CGRect(origin: .zero, size: renderSize)
+        return result.cropped(to: renderRect)
+    }
+
+    /// Apply a normalised-space Transform2D to a normalised rect, returning the
+    /// transformed rect in normalised coordinates.
+    private nonisolated static func applyTransformToRect(
+        _ rect: CGRect, transform: Transform2D, renderSize: CGSize
+    ) -> CGRect {
+        guard transform != .identity else { return rect }
+        let centre = CGPoint(x: rect.midX, y: rect.midY)
+        let newCentre = applyTransformToPoint(centre, transform: transform, renderSize: renderSize)
+        let scale = CGFloat(transform.decomposedScale)
+        return CGRect(
+            x: newCentre.x - rect.width * scale / 2,
+            y: newCentre.y - rect.height * scale / 2,
+            width: rect.width * scale,
+            height: rect.height * scale)
+    }
+
+    /// Apply a normalised-space Transform2D to a normalised point, returning
+    /// the transformed point in normalised coordinates. The transform is
+    /// centre-relative (applied around 0.5, 0.5).
+    private nonisolated static func applyTransformToPoint(
+        _ point: CGPoint, transform: Transform2D, renderSize: CGSize
+    ) -> CGPoint {
+        guard transform != .identity else { return point }
+        let tx = CGFloat(transform.tx)
+        let ty = CGFloat(transform.ty)
+        let scale = CGFloat(transform.decomposedScale)
+        let rotation = CGFloat(transform.decomposedRotation)
+        // Transform is centre-relative: offset from 0.5, rotate, scale, then add back.
+        let dx = point.x - 0.5
+        let dy = point.y - 0.5
+        let cosR = cos(rotation)
+        let sinR = sin(rotation)
+        let rx = dx * cosR - dy * sinR
+        let ry = dx * sinR + dy * cosR
+        return CGPoint(x: 0.5 + rx * scale + tx, y: 0.5 + ry * scale + ty)
+    }
+
+    /// Compose the static callout transform (scale, rotation, position offset)
+    /// with the keyframed transform into a single Transform2D for geometry-based
+    /// application on full-frame effects (spotlight, blur-region).
+    private nonisolated static func composeStaticTransform(
+        callout: CalloutClip, keyframed: Transform2D, renderSize: CGSize
+    ) -> Transform2D {
+        guard callout.scale != 1 || callout.rotation != 0 || callout.positionOffset != .zero else {
+            return keyframed
+        }
+        // Static transform: scale around centre, then translate.
+        // positionOffset is in canvas points; normalise to 0…1 for use in
+        // the normalised-space applyTransformToPoint.
+        let s = callout.scale
+        let r = callout.rotation
+        let cosR = cos(r)
+        let sinR = sin(r)
+        let a = s * cosR
+        let b = s * sinR
+        let c = -s * sinR
+        let d = s * cosR
+        let w = max(1, Float(renderSize.width))
+        let h = max(1, Float(renderSize.height))
+        let tx = Float(callout.positionOffset.width) / w
+        let ty = Float(callout.positionOffset.height) / h
+        let staticT = Transform2D(a: a, b: b, c: c, d: d, tx: tx, ty: ty)
+        // Compose: apply keyframed first, then static.
+        return Transform2D(
+            a: staticT.a * keyframed.a + staticT.b * keyframed.c,
+            b: staticT.a * keyframed.b + staticT.b * keyframed.d,
+            c: staticT.c * keyframed.a + staticT.d * keyframed.c,
+            d: staticT.c * keyframed.b + staticT.d * keyframed.d,
+            tx: staticT.a * keyframed.tx + staticT.b * keyframed.ty + staticT.tx,
+            ty: staticT.c * keyframed.tx + staticT.d * keyframed.ty + staticT.ty)
     }
 
     // MARK: - Captions

@@ -17,22 +17,25 @@ final class RecorderFlowUITests: XCTestCase {
         XCTAssertTrue(element(in: app, identifiedBy: "uitest-recorder-harness").waitForExistence(timeout: 5))
         XCTAssertTrue(element(in: app, identifiedBy: "uitest-recorder-state-idle").exists)
 
-        let recorderShortcutModifiers: XCUIElement.KeyModifierFlags = [.command, .option, .control]
-
-        app.typeKey("1", modifierFlags: recorderShortcutModifiers)
+        app.activate()
+        app.typeKey("1", modifierFlags: [])
         XCTAssertTrue(element(in: app, identifiedBy: "uitest-recorder-state-recording").waitForExistence(timeout: 2))
 
-        app.typeKey("2", modifierFlags: recorderShortcutModifiers)
+        app.activate()
+        app.typeKey("2", modifierFlags: [])
         XCTAssertTrue(element(in: app, identifiedBy: "uitest-recorder-state-paused").waitForExistence(timeout: 2))
 
-        app.typeKey("3", modifierFlags: recorderShortcutModifiers)
+        app.activate()
+        app.typeKey("3", modifierFlags: [])
         XCTAssertTrue(element(in: app, identifiedBy: "uitest-recorder-state-recording").waitForExistence(timeout: 2))
 
-        app.typeKey("4", modifierFlags: recorderShortcutModifiers)
+        app.activate()
+        app.typeKey("4", modifierFlags: [])
         XCTAssertTrue(element(in: app, identifiedBy: "uitest-recorder-state-stopped").waitForExistence(timeout: 2))
         XCTAssertTrue(element(in: app, identifiedBy: "uitest-timeline-gap-3-0").waitForExistence(timeout: 2))
 
-        app.typeKey("5", modifierFlags: recorderShortcutModifiers)
+        app.activate()
+        app.typeKey("5", modifierFlags: [])
         XCTAssertTrue(element(in: app, identifiedBy: "uitest-timeline-gap-0-0").waitForExistence(timeout: 2))
         XCTAssertTrue(element(in: app, identifiedBy: "uitest-status-gaps-collapsed").waitForExistence(timeout: 2))
     }
