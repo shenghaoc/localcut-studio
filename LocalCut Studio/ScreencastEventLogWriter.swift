@@ -124,8 +124,15 @@ final class ScreencastEventLogWriter {
         events
     }
 
-    /// Flush the accumulated events to `events.json`.
-    func flush() throws {
+    /// Capture a snapshot of the accumulated events. Must be called on the
+    /// main actor since `events` is actor-isolated.
+    func snapshotEvents() -> [ScreencastEvent] {
+        events
+    }
+
+    /// Flush the accumulated events to `events.json`. The caller must pass
+    /// the event snapshot so this method can run on any thread.
+    nonisolated func flush(events: [ScreencastEvent]) throws {
         let log = ScreencastEventLog(
             schemaVersion: ScreencastEventLog.currentSchemaVersion,
             sessionID: sessionID,
@@ -267,7 +274,9 @@ final class ScreencastEventLogWriter {
             guard let size = windowSize, size.width > 0, size.height > 0 else { return nil }
             let clampedX = max(0, min(locationInWindow.x, size.width))
             let clampedY = max(0, min(locationInWindow.y, size.height))
-            return CGPoint(x: clampedX / size.width, y: clampedY / size.height)
+            // AppKit window coordinates have Y=0 at bottom; flip to top-left
+            // to match the rendering pipeline convention.
+            return CGPoint(x: clampedX / size.width, y: 1.0 - clampedY / size.height)
         }
 
         switch target {

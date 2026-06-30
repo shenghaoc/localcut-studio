@@ -121,7 +121,8 @@ public enum ZoomPanPresetGenerator {
     ///
     /// If any segment violates bounds, the keyframes are adjusted to cap the
     /// velocity/acceleration while preserving the overall shape as much as possible.
-    private static func enforceBounds(
+    /// Public so `AutoZoomProposalGenerator` can also enforce bounds on its output.
+    static func enforceBounds(
         keyframes: [Keyframe<Transform2D>],
         duration: Double
     ) -> [Keyframe<Transform2D>] {

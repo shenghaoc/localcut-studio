@@ -179,14 +179,23 @@ public enum AutoZoomProposalGenerator {
         let ty = Float(0.5 - burst.centreY) * (endScale - 1)
         let zoomed = Transform2D(translateX: tx, translateY: ty, scale: endScale, rotation: 0)
 
-        let keyframes: [Keyframe<Transform2D>] = [
+        let rawKeyframes: [Keyframe<Transform2D>] = [
             Keyframe(time: CMTime(seconds: 0, preferredTimescale: 600), value: .identity),
             Keyframe(time: CMTime(seconds: zoomInTime, preferredTimescale: 600), value: zoomed),
             Keyframe(time: CMTime(seconds: zoomInTime + holdTime, preferredTimescale: 600), value: zoomed),
             Keyframe(time: CMTime(seconds: totalDuration, preferredTimescale: 600), value: .identity),
         ]
+        // Enforce velocity/acceleration bounds to prevent jarring motion.
+        let keyframes = ZoomPanPresetGenerator.enforceBounds(
+            keyframes: rawKeyframes, duration: totalDuration)
+
+        // Generate a deterministic ID from the proposal content so repeated
+        // generation from the same event log produces identical proposals (R3.3).
+        let deterministicID = ZoomPanProposal.deterministicID(
+            timeRange: timeRange, targetPoint: targetPoint, clickCount: burst.events.count)
 
         return ZoomPanProposal(
+            id: deterministicID,
             timeRange: timeRange,
             targetPoint: targetPoint,
             endScale: endScale,

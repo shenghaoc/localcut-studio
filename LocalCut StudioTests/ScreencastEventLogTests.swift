@@ -66,7 +66,7 @@ struct ScreencastEventLogWriterTests {
             startHostTimeUs: 0,
             directoryURL: dir,
             target: .display(displayID: 1, width: 1920, height: 1080))
-        try writer.flush()
+        try writer.flush(events: [])
 
         let eventsURL = dir.appendingPathComponent("events.json")
         #expect(FileManager.default.fileExists(atPath: eventsURL.path))

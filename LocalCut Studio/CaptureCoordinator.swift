@@ -349,7 +349,10 @@ actor CaptureCoordinator {
         await active.eventLogWriter?.stopMonitoring()
         var eventLogFlushError: String?
         do {
-            try await active.eventLogWriter?.flush()
+            if let writer = active.eventLogWriter {
+                let snapshot = await writer.snapshotEvents()
+                try writer.flush(events: snapshot)
+            }
         } catch {
             eventLogFlushError = "Event log: \(error.localizedDescription)"
         }

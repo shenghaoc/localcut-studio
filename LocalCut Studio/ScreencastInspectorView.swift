@@ -53,6 +53,28 @@ struct ScreencastInspectorView: View {
                     }
                 }
             }
+            clipTransformKeyframeSection
+        }
+    }
+
+    @ViewBuilder
+    private var clipTransformKeyframeSection: some View {
+        let clip = model.selectedClip
+        let count = clip?.transformKeyframes.keyframes.count ?? 0
+        DisclosureGroup("Clip Transform Keyframes") {
+            LabeledContent("Count") {
+                Text("\(count)")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            if count > 0 {
+                Button("Clear All Keyframes") {
+                    if let clipID = clip?.id {
+                        model.clearClipTransformKeyframes(clipID: clipID)
+                    }
+                }
+                .font(.caption)
+            }
         }
     }
 

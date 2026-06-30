@@ -721,7 +721,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // applied to the rendered image afterwards.
         let isFullFrame = callout.kind == .spotlight || callout.kind == .blurRegion
         let geometryTransform = isFullFrame
-            ? Self.composeStaticTransform(callout: callout, keyframed: kfTransform)
+            ? Self.composeStaticTransform(callout: callout, keyframed: kfTransform, renderSize: renderSize)
             : kfTransform
 
         let transformedRect = Self.applyTransformToRect(callout.rect, transform: geometryTransform,
@@ -835,24 +835,26 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// with the keyframed transform into a single Transform2D for geometry-based
     /// application on full-frame effects (spotlight, blur-region).
     private nonisolated static func composeStaticTransform(
-        callout: CalloutClip, keyframed: Transform2D
+        callout: CalloutClip, keyframed: Transform2D, renderSize: CGSize
     ) -> Transform2D {
         guard callout.scale != 1 || callout.rotation != 0 || callout.positionOffset != .zero else {
             return keyframed
         }
         // Static transform: scale around centre, then translate.
-        // Convert to Transform2D components.
+        // positionOffset is in canvas points; normalise to 0…1 for use in
+        // the normalised-space applyTransformToPoint.
         let s = callout.scale
         let r = callout.rotation
         let cosR = cos(r)
         let sinR = sin(r)
-        // Scale-then-rotate matrix (centre-relative).
         let a = s * cosR
         let b = s * sinR
         let c = -s * sinR
         let d = s * cosR
-        let tx = Float(callout.positionOffset.width)
-        let ty = Float(callout.positionOffset.height)
+        let w = max(1, Float(renderSize.width))
+        let h = max(1, Float(renderSize.height))
+        let tx = Float(callout.positionOffset.width) / w
+        let ty = Float(callout.positionOffset.height) / h
         let staticT = Transform2D(a: a, b: b, c: c, d: d, tx: tx, ty: ty)
         // Compose: apply keyframed first, then static.
         return Transform2D(

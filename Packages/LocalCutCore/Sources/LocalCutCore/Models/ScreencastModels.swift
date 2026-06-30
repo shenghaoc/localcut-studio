@@ -227,6 +227,35 @@ public struct ZoomPanProposal: Hashable, Codable, Identifiable, Sendable {
         try c.encode(keyframes, forKey: .keyframes)
         try c.encode(clickCount, forKey: .clickCount)
     }
+
+    /// Generate a deterministic UUID from proposal content so repeated
+    /// generation from the same event log always produces the same ID.
+    static func deterministicID(
+        timeRange: CMTimeRange,
+        targetPoint: CGPoint,
+        clickCount: Int
+    ) -> UUID {
+        var hasher = Hasher()
+        hasher.combine(timeRange.start.seconds)
+        hasher.combine(timeRange.duration.seconds)
+        hasher.combine(targetPoint.x)
+        hasher.combine(targetPoint.y)
+        hasher.combine(clickCount)
+        let hash = hasher.finalize()
+        // Construct a UUIDv5-like deterministic UUID from the hash.
+        let bytes = withUnsafeBytes(of: hash.bigEndian) { Array($0) }
+        // Pad to 16 bytes.
+        var uuidBytes = [UInt8](repeating: 0, count: 16)
+        for i in 0..<min(bytes.count, 16) { uuidBytes[i] = bytes[i] }
+        // Set version 4 bits and variant bits for valid UUID format.
+        uuidBytes[6] = (uuidBytes[6] & 0x0F) | 0x40
+        uuidBytes[8] = (uuidBytes[8] & 0x3F) | 0x80
+        return UUID(uuid: (
+            uuidBytes[0], uuidBytes[1], uuidBytes[2], uuidBytes[3],
+            uuidBytes[4], uuidBytes[5], uuidBytes[6], uuidBytes[7],
+            uuidBytes[8], uuidBytes[9], uuidBytes[10], uuidBytes[11],
+            uuidBytes[12], uuidBytes[13], uuidBytes[14], uuidBytes[15]))
+    }
 }
 
 // MARK: - Callout Kinds

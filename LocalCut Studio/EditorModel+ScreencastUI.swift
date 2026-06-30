@@ -101,15 +101,15 @@ extension EditorModel {
         let proposals = autoZoomProposals
         guard !proposals.isEmpty else { return }
 
-        // Merge all proposal keyframes into one set, offsetting each by its
-        // proposal start time minus the clip's sourceStart so they align with
-        // clip-source-local time.
+        // Merge all proposal keyframes with existing keyframes, offsetting
+        // each by its proposal start time minus the clip's sourceStart so
+        // they align with clip-source-local time.
         let clip = project.videoTracks[trackIndex].clips[clipIndex]
-        var allKeyframes: [Keyframe<Transform2D>] = []
+        var newKeyframes: [Keyframe<Transform2D>] = []
         for proposal in proposals {
             let recordingOffset = proposal.timeRange.start - clip.sourceStart
             for kf in proposal.keyframes {
-                allKeyframes.append(Keyframe<Transform2D>(
+                newKeyframes.append(Keyframe<Transform2D>(
                     id: kf.id,
                     time: kf.time + recordingOffset,
                     value: kf.value,
@@ -117,10 +117,12 @@ extension EditorModel {
                     outgoingHandle: kf.outgoingHandle))
             }
         }
+        let existing = clip.transformKeyframes
+        let merged = existing.keyframes + newKeyframes
 
         performUndoable("Apply All Auto-Zoom Proposals") {
             project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes =
-                Keyframed(keyframes: allKeyframes, defaultValue: .identity)
+                Keyframed(keyframes: merged, defaultValue: .identity)
         }
         autoZoomProposals.removeAll()
         statusMessage = "Applied \(proposals.count) auto-zoom proposals."
@@ -195,6 +197,19 @@ extension EditorModel {
             transform(&preset)
             project.paddedBackground = preset
         }
+    }
+
+    /// Clear all transform keyframes from a clip.
+    @MainActor
+    func clearClipTransformKeyframes(clipID: UUID) {
+        guard let trackIndex = project.videoTracks.firstIndex(where: { $0.clips.contains(where: { $0.id == clipID }) }),
+              let clipIndex = project.videoTracks[trackIndex].clips.firstIndex(where: { $0.id == clipID }) else { return }
+        performUndoable("Clear Clip Transform Keyframes") {
+            project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes =
+                Keyframed(defaultValue: .identity)
+        }
+        statusMessage = "Cleared clip transform keyframes."
+        Task { await rebuild() }
     }
 
     /// Remove the padded background preset.
