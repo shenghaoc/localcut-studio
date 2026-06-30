@@ -51,6 +51,7 @@ final class DocumentController {
         for url in model.accessedURLs { url.stopAccessingSecurityScopedResource() }
         model.accessedURLs.removeAll()
         RenderCache.shared.purge()
+        PaddedBackgroundRenderer.purgeCache()
         model.project.mediaItems.removeAll()
         model.project.captionTracks.removeAll()
         model.project.markers.removeAll()

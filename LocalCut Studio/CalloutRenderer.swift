@@ -290,7 +290,9 @@ nonisolated enum CalloutRenderer {
     // MARK: - Helpers
 
     /// Create a rounded-rect mask image (white inside, black outside).
-    private static func createRoundedRectMask(
+    /// Shared by callout blur-region rendering and the compositor's padded-
+    /// background inset masking.
+    static func createRoundedRectMask(
         rect: CGRect,
         cornerRadius: CGFloat,
         renderSize: CGSize

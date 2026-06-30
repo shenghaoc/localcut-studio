@@ -303,7 +303,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                                    width: renderSize.width - margin * 2,
                                    height: renderSize.height - margin * 2)
             let cornerRadius = CGFloat(preset.cornerRadius)
-            let mask = Self.createRoundedRectMask(
+            let mask = CalloutRenderer.createRoundedRectMask(
                 rect: insetRect, cornerRadius: cornerRadius, renderSize: renderSize)
             // Isolate the foreground (everything over the background).
             if let composite = result {
@@ -517,13 +517,12 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         image = image.transformed(by: layer.transform)
 
         // Phase 43: apply keyframed transform (zoom-n-pan) relative to the
-        // clip's static geometry transform.
+        // clip's static geometry transform. Keyframes are authored in
+        // clip-source-local time (0 = clip start), but sourceTime includes the
+        // media in-point. Subtract it. Reuse the outer `sourceTime` (line 475).
         if layer.transformKeyframes.isAnimated {
-            let sourceTime = layer.sourceTime(at: request.compositionTime)
-            // Keyframes are authored in clip-source-local time (0 = clip start),
-            // but sourceTime includes the media in-point. Subtract it.
-            let clipLocalTime = max(.zero, sourceTime - layer.clipSourceStart)
-            let kfValue = layer.transformKeyframes.value(at: clipLocalTime)
+            let kfLocalTime = max(.zero, sourceTime - layer.clipSourceStart)
+            let kfValue = layer.transformKeyframes.value(at: kfLocalTime)
             if kfValue != .identity {
                 let renderSize = request.renderContext.size
                 let cx = renderSize.width / 2
@@ -1486,44 +1485,6 @@ private final class LUTCache: Sendable {
 
     nonisolated func setEntry(_ entry: LUTEntry, forBookmark bookmark: Data) {
         lock.withLock { $0[bookmark] = entry }
-    }
-}
-
-// MARK: - Padded background mask helper
-
-extension EffectCompositor {
-    /// Create a rounded-rect mask image (white inside, black outside) for
-    /// insetting the foreground layers when a padded background is active.
-    nonisolated static func createRoundedRectMask(
-        rect: CGRect,
-        cornerRadius: CGFloat,
-        renderSize: CGSize
-    ) -> CIImage {
-        let width = Int(renderSize.width)
-        let height = Int(renderSize.height)
-        let colorSpace = CGColorSpaceCreateDeviceGray()
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.none.rawValue
-        ) else {
-            return CIImage(color: CIColor.white).cropped(to: CGRect(origin: .zero, size: renderSize))
-        }
-        context.setFillColor(CGColor.black)
-        context.fill(CGRect(origin: .zero, size: renderSize))
-        context.setFillColor(CGColor.white)
-        let path = CGPath(roundedRect: rect, cornerWidth: cornerRadius,
-                          cornerHeight: cornerRadius, transform: nil)
-        context.addPath(path)
-        context.fillPath()
-        guard let cgImage = context.makeImage() else {
-            return CIImage(color: CIColor.white).cropped(to: CGRect(origin: .zero, size: renderSize))
-        }
-        return CIImage(cgImage: cgImage)
     }
 }
 
