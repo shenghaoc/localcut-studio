@@ -225,3 +225,83 @@ struct ZoomPanBoundsTests {
         #expect(ZoomPanBounds.maxScaleAcceleration > 0)
     }
 }
+
+// MARK: - ZoomPanPresetGenerator
+
+@Suite("ZoomPanPresetGenerator")
+struct ZoomPanPresetGeneratorTests {
+    let clipDuration = CMTime(seconds: 10, preferredTimescale: 600)
+
+    @Test("Slow zoom-in produces two keyframes")
+    func slowZoomInKeyframes() {
+        let preset = ZoomPanPreset(kind: .slowZoomIn, endScale: 2, duration: clipDuration)
+        let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clipDuration)
+        #expect(keyframes.count == 2)
+        #expect(keyframes[0].value == .identity)
+        #expect(keyframes[1].value.decomposedScale > 1)
+    }
+
+    @Test("Pan produces two keyframes with different translations")
+    func panKeyframes() {
+        let preset = ZoomPanPreset(kind: .pan, endScale: 1.5, duration: clipDuration)
+        let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clipDuration)
+        #expect(keyframes.count == 2)
+        #expect(keyframes[0].value.tx != keyframes[1].value.tx)
+    }
+
+    @Test("Snap zoom produces four keyframes")
+    func snapZoomKeyframes() {
+        let preset = ZoomPanPreset(kind: .snapZoomOnClick, endScale: 2.5, duration: clipDuration)
+        let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clipDuration)
+        #expect(keyframes.count == 4)
+        // Start and end at identity
+        #expect(keyframes[0].value == .identity)
+        #expect(keyframes[3].value == .identity)
+        // Middle two at zoomed scale
+        #expect(keyframes[1].value.decomposedScale > 1)
+        #expect(keyframes[2].value.decomposedScale > 1)
+    }
+
+    @Test("Keyframe times are sorted")
+    func keyframesSorted() {
+        let preset = ZoomPanPreset(kind: .snapZoomOnClick, endScale: 2, duration: clipDuration)
+        let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clipDuration)
+        for i in 1..<keyframes.count {
+            #expect(keyframes[i].time >= keyframes[i - 1].time)
+        }
+    }
+
+    @Test("Velocity bounds are enforced")
+    func velocityBoundsEnforced() {
+        // Create a preset that would exceed velocity bounds
+        let shortDuration = CMTime(seconds: 0.1, preferredTimescale: 600)
+        let preset = ZoomPanPreset(kind: .slowZoomIn, endScale: 5, duration: shortDuration)
+        let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clipDuration)
+        // Should still produce valid keyframes (bounds enforcement adjusts values)
+        #expect(keyframes.count == 2)
+        let dt = keyframes[1].time.seconds - keyframes[0].time.seconds
+        guard dt > 0 else { return }
+        let dx = keyframes[1].value.tx - keyframes[0].value.tx
+        let dy = keyframes[1].value.ty - keyframes[0].value.ty
+        let velocity = sqrt(dx * dx + dy * dy) / Float(dt)
+        #expect(velocity <= ZoomPanBounds.maxVelocity + 0.01)
+    }
+
+    @Test("Empty result for zero duration")
+    func zeroDuration() {
+        let preset = ZoomPanPreset(kind: .slowZoomIn, duration: .zero)
+        let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clipDuration)
+        #expect(keyframes.isEmpty)
+    }
+
+    @Test("Duration is clamped to clip duration")
+    func durationClamped() {
+        let longDuration = CMTime(seconds: 100, preferredTimescale: 600)
+        let preset = ZoomPanPreset(kind: .slowZoomIn, duration: longDuration)
+        let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clipDuration)
+        // Last keyframe should be at clip duration, not 100s
+        if let last = keyframes.last {
+            #expect(last.time.seconds <= clipDuration.seconds + 0.01)
+        }
+    }
+}
