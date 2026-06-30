@@ -53,6 +53,15 @@ struct ScreencastInspectorView: View {
         }
     }
 
+    /// Creates a binding that dynamically fetches the latest callout from the
+    /// model by ID, avoiding stale captures during rapid slider updates.
+    private func calloutBinding(for callout: CalloutClip) -> Binding<CalloutClip> {
+        Binding(
+            get: { model.callout(for: callout.id) ?? callout },
+            set: { model.updateCallout($0) }
+        )
+    }
+
     @ViewBuilder
     private func calloutParameterEditor(_ callout: CalloutClip) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -81,9 +90,7 @@ struct ScreencastInspectorView: View {
 
     @ViewBuilder
     private func arrowEditor(_ callout: CalloutClip) -> some View {
-        let binding = Binding(
-            get: { callout },
-            set: { model.updateCallout($0) })
+        let binding = calloutBinding(for: callout)
         HStack {
             Text("Stroke")
             Slider(value: Binding(
@@ -95,9 +102,7 @@ struct ScreencastInspectorView: View {
 
     @ViewBuilder
     private func boxEditor(_ callout: CalloutClip) -> some View {
-        let binding = Binding(
-            get: { callout },
-            set: { model.updateCallout($0) })
+        let binding = calloutBinding(for: callout)
         HStack {
             Text("Corner Radius")
             Slider(value: Binding(
@@ -109,9 +114,7 @@ struct ScreencastInspectorView: View {
 
     @ViewBuilder
     private func stepNumberEditor(_ callout: CalloutClip) -> some View {
-        let binding = Binding(
-            get: { callout },
-            set: { model.updateCallout($0) })
+        let binding = calloutBinding(for: callout)
         HStack {
             Text("Number")
             TextField("Step", value: Binding(
@@ -124,9 +127,7 @@ struct ScreencastInspectorView: View {
 
     @ViewBuilder
     private func spotlightEditor(_ callout: CalloutClip) -> some View {
-        let binding = Binding(
-            get: { callout },
-            set: { model.updateCallout($0) })
+        let binding = calloutBinding(for: callout)
         HStack {
             Text("Radius")
             Slider(value: Binding(
@@ -145,9 +146,7 @@ struct ScreencastInspectorView: View {
 
     @ViewBuilder
     private func blurRegionEditor(_ callout: CalloutClip) -> some View {
-        let binding = Binding(
-            get: { callout },
-            set: { model.updateCallout($0) })
+        let binding = calloutBinding(for: callout)
         HStack {
             Text("Blur")
             Slider(value: Binding(

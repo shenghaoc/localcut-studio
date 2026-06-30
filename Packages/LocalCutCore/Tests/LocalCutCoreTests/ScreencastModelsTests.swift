@@ -324,7 +324,7 @@ struct AutoZoomProposalGeneratorTests {
         let log = ScreencastEventLog(schemaVersion: 99, sessionID: UUID(), events: [
             ScreencastEvent(time: CMTime(seconds: 1, preferredTimescale: 600),
                             kind: .mouseDown,
-                            position: CGPoint(x: 500, y: 300))
+                            position: CGPoint(x: 0.5, y: 0.5))
         ])
         let proposals = AutoZoomProposalGenerator.generateProposals(from: log, canvasSize: canvasSize)
         #expect(proposals.isEmpty)
@@ -332,23 +332,23 @@ struct AutoZoomProposalGeneratorTests {
 
     @Test("Click bursts cluster consistently")
     func clickBurstClustering() {
+        // Positions are normalised 0...1 (as stored by ScreencastEventLogWriter).
         let events = [
             ScreencastEvent(time: CMTime(seconds: 1, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 500, y: 300)),
+                            kind: .mouseDown, position: CGPoint(x: 0.26, y: 0.28)),
             ScreencastEvent(time: CMTime(seconds: 1.3, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 510, y: 310)),
+                            kind: .mouseDown, position: CGPoint(x: 0.27, y: 0.29)),
             ScreencastEvent(time: CMTime(seconds: 1.6, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 505, y: 305)),
-            // Long gap — new burst
+                            kind: .mouseDown, position: CGPoint(x: 0.26, y: 0.28)),
+            // Long gap — new burst at a distant point
             ScreencastEvent(time: CMTime(seconds: 5, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 1000, y: 600)),
+                            kind: .mouseDown, position: CGPoint(x: 0.7, y: 0.6)),
             ScreencastEvent(time: CMTime(seconds: 5.2, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 1010, y: 610)),
+                            kind: .mouseDown, position: CGPoint(x: 0.71, y: 0.61)),
         ]
         let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
         let proposals = AutoZoomProposalGenerator.generateProposals(from: log, canvasSize: canvasSize)
         #expect(proposals.count == 2)
-        // First burst around (500, 300), second around (1000, 600)
         #expect(proposals[0].clickCount == 3)
         #expect(proposals[1].clickCount == 2)
     }
@@ -357,11 +357,11 @@ struct AutoZoomProposalGeneratorTests {
     func determinism() {
         let events = [
             ScreencastEvent(time: CMTime(seconds: 1, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 500, y: 300)),
+                            kind: .mouseDown, position: CGPoint(x: 0.5, y: 0.5)),
             ScreencastEvent(time: CMTime(seconds: 1.2, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 510, y: 310)),
+                            kind: .mouseDown, position: CGPoint(x: 0.51, y: 0.51)),
             ScreencastEvent(time: CMTime(seconds: 1.4, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 505, y: 305)),
+                            kind: .mouseDown, position: CGPoint(x: 0.505, y: 0.505)),
         ]
         let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
         let proposals1 = AutoZoomProposalGenerator.generateProposals(from: log, canvasSize: canvasSize)
@@ -377,7 +377,7 @@ struct AutoZoomProposalGeneratorTests {
     func nonClickEventsIgnored() {
         let events = [
             ScreencastEvent(time: CMTime(seconds: 1, preferredTimescale: 600),
-                            kind: .scroll, position: CGPoint(x: 500, y: 300)),
+                            kind: .scroll, position: CGPoint(x: 0.5, y: 0.5)),
             ScreencastEvent(time: CMTime(seconds: 1.2, preferredTimescale: 600),
                             kind: .key, keyCode: 36, modifierFlagsRaw: 0x100000),
         ]
@@ -390,7 +390,7 @@ struct AutoZoomProposalGeneratorTests {
     func singleClickIgnored() {
         let events = [
             ScreencastEvent(time: CMTime(seconds: 1, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 500, y: 300)),
+                            kind: .mouseDown, position: CGPoint(x: 0.5, y: 0.5)),
         ]
         let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
         let proposals = AutoZoomProposalGenerator.generateProposals(from: log, canvasSize: canvasSize)
@@ -401,9 +401,9 @@ struct AutoZoomProposalGeneratorTests {
     func proposalKeyframes() {
         let events = [
             ScreencastEvent(time: CMTime(seconds: 1, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 500, y: 300)),
+                            kind: .mouseDown, position: CGPoint(x: 0.5, y: 0.5)),
             ScreencastEvent(time: CMTime(seconds: 1.2, preferredTimescale: 600),
-                            kind: .mouseDown, position: CGPoint(x: 510, y: 310)),
+                            kind: .mouseDown, position: CGPoint(x: 0.51, y: 0.51)),
         ]
         let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
         let proposals = AutoZoomProposalGenerator.generateProposals(from: log, canvasSize: canvasSize)

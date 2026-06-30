@@ -1,7 +1,7 @@
 import Foundation
-import AppKit
 import CoreImage
 import CoreGraphics
+import ImageIO
 import LocalCutCore
 
 /// Renders the padded-background preset as a CIImage for compositing behind

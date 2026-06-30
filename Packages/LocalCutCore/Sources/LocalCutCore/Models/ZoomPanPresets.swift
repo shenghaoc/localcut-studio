@@ -130,6 +130,9 @@ public enum ZoomPanPresetGenerator {
 
             let prev = result[i - 1].value
             let curr = result[i].value
+            // Use a mutable copy so translation and scale clamping compose
+            // correctly when both exceed bounds in the same segment.
+            var updatedValue = curr
 
             // Check translation velocity
             let dx = curr.tx - prev.tx
@@ -138,31 +141,28 @@ public enum ZoomPanPresetGenerator {
             let velocity = dist / Float(dt)
 
             if velocity > ZoomPanBounds.maxVelocity {
-                let scale = ZoomPanBounds.maxVelocity / velocity
-                let newTx = prev.tx + dx * scale
-                let newTy = prev.ty + dy * scale
-                result[i] = Keyframe<Transform2D>(
-                    id: result[i].id,
-                    time: result[i].time,
-                    value: Transform2D(a: curr.a, b: curr.b, c: curr.c,
-                                       d: curr.d, tx: newTx, ty: newTy),
-                    incomingHandle: result[i].incomingHandle,
-                    outgoingHandle: result[i].outgoingHandle)
+                let velocityScale = ZoomPanBounds.maxVelocity / velocity
+                updatedValue.tx = prev.tx + dx * velocityScale
+                updatedValue.ty = prev.ty + dy * velocityScale
             }
 
-            // Check scale velocity
-            let scaleDelta = abs(curr.decomposedScale - prev.decomposedScale)
+            // Check scale velocity (operates on the already-clamped value)
+            let scaleDelta = abs(updatedValue.decomposedScale - prev.decomposedScale)
             let scaleVelocity = scaleDelta / Float(dt)
             if scaleVelocity > ZoomPanBounds.maxScaleVelocity {
                 let scaleFactor = ZoomPanBounds.maxScaleVelocity / scaleVelocity
-                let targetScale = prev.decomposedScale + (curr.decomposedScale - prev.decomposedScale) * scaleFactor
-                let ratio = targetScale / curr.decomposedScale
+                let targetScale = prev.decomposedScale + (updatedValue.decomposedScale - prev.decomposedScale) * scaleFactor
+                let ratio = targetScale / updatedValue.decomposedScale
+                updatedValue = Transform2D(a: updatedValue.a * ratio, b: updatedValue.b * ratio,
+                                           c: updatedValue.c * ratio, d: updatedValue.d * ratio,
+                                           tx: updatedValue.tx, ty: updatedValue.ty)
+            }
+
+            if updatedValue != curr {
                 result[i] = Keyframe<Transform2D>(
                     id: result[i].id,
                     time: result[i].time,
-                    value: Transform2D(a: curr.a * ratio, b: curr.b * ratio,
-                                       c: curr.c * ratio, d: curr.d * ratio,
-                                       tx: curr.tx, ty: curr.ty),
+                    value: updatedValue,
                     incomingHandle: result[i].incomingHandle,
                     outgoingHandle: result[i].outgoingHandle)
             }

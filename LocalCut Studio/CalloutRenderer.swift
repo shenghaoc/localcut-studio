@@ -1,11 +1,23 @@
 import Foundation
-import AppKit
 import CoreImage
 import CoreGraphics
+import CoreText
 import LocalCutCore
+
+// NOTE: No AppKit import — all drawing uses CoreGraphics and CoreText so
+// the compositor can call these methods safely from background threads.
 
 /// Renders callout overlays as CIImages for compositing in the effect pipeline.
 nonisolated enum CalloutRenderer {
+
+    // MARK: - Constants
+
+    /// System-yellow equivalent in sRGB (no AppKit dependency).
+    private static let calloutYellow = CGColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)
+    /// System-red equivalent in sRGB.
+    private static let calloutRed = CGColor(red: 1.0, green: 0.23, blue: 0.18, alpha: 1.0)
+    /// White.
+    private static let calloutWhite = CGColor(gray: 1.0, alpha: 1.0)
 
     // MARK: - Arrow Callout
 
@@ -43,7 +55,7 @@ nonisolated enum CalloutRenderer {
         let end = CGPoint(x: ex, y: ey)
 
         // Draw arrow shaft.
-        context.setStrokeColor(NSColor.systemYellow.cgColor)
+        context.setStrokeColor(calloutYellow)
         context.setLineWidth(CGFloat(style.strokeWidth))
         context.setLineCap(.round)
         context.move(to: start)
@@ -62,7 +74,7 @@ nonisolated enum CalloutRenderer {
             x: ex - headLength * cos(angle + headAngle),
             y: ey - headLength * sin(angle + headAngle))
 
-        context.setFillColor(NSColor.systemYellow.cgColor)
+        context.setFillColor(calloutYellow)
         context.move(to: end)
         context.addLine(to: head1)
         context.addLine(to: head2)
@@ -116,13 +128,14 @@ nonisolated enum CalloutRenderer {
 
         // Fill (if opacity > 0).
         if style.fillOpacity > 0 {
-            context.setFillColor(NSColor.systemYellow.withAlphaComponent(CGFloat(style.fillOpacity)).cgColor)
+            let fillColor = calloutYellow.copy(alpha: CGFloat(style.fillOpacity)) ?? calloutYellow
+            context.setFillColor(fillColor)
             context.addPath(path)
             context.fillPath()
         }
 
         // Stroke.
-        context.setStrokeColor(NSColor.systemYellow.cgColor)
+        context.setStrokeColor(calloutYellow)
         context.setLineWidth(CGFloat(style.strokeWidth))
         context.addPath(path)
         context.strokePath()
@@ -169,28 +182,29 @@ nonisolated enum CalloutRenderer {
             y: cy - radius,
             width: diameter,
             height: diameter)
-        context.setFillColor(NSColor.systemRed.cgColor)
+        context.setFillColor(calloutRed)
         context.fillEllipse(in: circleRect)
 
-        // Draw number text.
-        let text = "\(number)" as NSString
+        // Draw number text using Core Text (thread-safe, no AppKit).
+        let textString = "\(number)"
         let fontSize = CGFloat(style.fontSize)
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: fontSize, weight: .bold),
-            .foregroundColor: NSColor.white,
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): calloutWhite,
         ]
-        let textSize = text.size(withAttributes: attributes)
-        let textPoint = CGPoint(
-            x: cx - textSize.width / 2,
-            y: cy - textSize.height / 2)
+        let attrString = NSAttributedString(string: textString, attributes: attributes)
+        let line = CTLineCreateWithAttributedString(attrString)
+        let bounds = CTLineGetBoundsWithOptions(line, [])
 
-        // Core Graphics Y is flipped, so we need to draw text in the flipped context.
-        // Use NSString.draw which handles the flipped context correctly.
+        // Position text centred in the circle. The CGContext has been flipped
+        // (translate + scale), so we draw in the flipped coordinate space.
         context.saveGState()
-        context.translateBy(x: 0, y: CGFloat(height))
         context.scaleBy(x: 1, y: -1)
-        text.draw(at: CGPoint(x: textPoint.x, y: CGFloat(height) - textPoint.y - textSize.height),
-                  withAttributes: attributes)
+        context.textPosition = CGPoint(
+            x: cx - bounds.width / 2,
+            y: -cy - bounds.height / 2 - bounds.minY)
+        CTLineDraw(line, context)
         context.restoreGState()
 
         guard let cgImage = context.makeImage() else { return nil }
@@ -226,19 +240,12 @@ nonisolated enum CalloutRenderer {
         guard let gradientImage = gradientFilter.outputImage else { return nil }
         let croppedGradient = gradientImage.cropped(to: CGRect(origin: .zero, size: renderSize))
 
-        // Darken the source image outside the spotlight.
-        guard let blendFilter = CIFilter(name: "CIMultiplyBlendMode") else { return nil }
-        blendFilter.setValue(sourceImage, forKey: kCIInputImageKey)
-        blendFilter.setValue(croppedGradient, forKey: kCIInputBackgroundImageKey)
-
-        // Actually, we want to darken OUTSIDE, so we need a different approach.
-        // Create a dark overlay and mask it with the inverse gradient.
+        // Dark overlay masked by the gradient: inside the spotlight the gradient
+        // is transparent (shows source), outside it is opaque (shows dark overlay).
         let darkOverlay = CIImage(color: CIColor(red: 0, green: 0, blue: 0,
                                                   alpha: CGFloat(style.dimOpacity)))
             .cropped(to: CGRect(origin: .zero, size: renderSize))
 
-        // The gradient goes from transparent (inside) to dark (outside).
-        // Use the gradient as a mask for the dark overlay.
         guard let maskFilter = CIFilter(name: "CIBlendWithMask") else { return nil }
         maskFilter.setValue(darkOverlay, forKey: kCIInputImageKey)
         maskFilter.setValue(sourceImage, forKey: kCIInputBackgroundImageKey)

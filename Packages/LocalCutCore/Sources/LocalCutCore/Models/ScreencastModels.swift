@@ -18,7 +18,7 @@ public struct ScreencastEvent: Hashable, Codable, Sendable {
     public var time: CMTime
     /// The kind of interaction.
     public var kind: ScreencastEventKind
-    /// Cursor position in the captured coordinate space, where applicable.
+    /// Cursor position normalised to 0…1 relative to the captured window/screen bounds, where applicable.
     public var position: CGPoint?
     /// Key code for `.key` events (e.g. virtual key code).
     public var keyCode: UInt16?

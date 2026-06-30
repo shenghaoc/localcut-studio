@@ -99,9 +99,9 @@ public enum AutoZoomProposalGenerator {
 
         for event in sorted {
             guard let pos = event.position else { continue }
-            // Normalise position to 0…1.
-            let nx = Double(pos.x) / max(1, Double(canvasSize.width))
-            let ny = Double(pos.y) / max(1, Double(canvasSize.height))
+            // Positions are already normalised to 0…1 by the event log writer.
+            let nx = Double(pos.x)
+            let ny = Double(pos.y)
 
             if let cur = current {
                 let gap = (event.time - cur.endTime).seconds

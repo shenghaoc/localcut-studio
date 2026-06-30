@@ -94,13 +94,13 @@ final class ScreencastEventLogWriter {
         switch event.type {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
             kind = .mouseDown
-            position = event.locationInWindow
+            position = Self.normalizedPosition(from: event)
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             kind = .mouseUp
-            position = event.locationInWindow
+            position = Self.normalizedPosition(from: event)
         case .scrollWheel:
             kind = .scroll
-            position = event.locationInWindow
+            position = Self.normalizedPosition(from: event)
         case .keyDown:
             kind = .key
             keyCode = event.keyCode
@@ -119,6 +119,22 @@ final class ScreencastEventLogWriter {
             position: position,
             keyCode: keyCode,
             modifierFlagsRaw: modifierFlagsRaw))
+    }
+
+    /// Convert window-local coordinates to normalised 0...1 relative to the
+    /// window bounds. Returns nil if the window size is unavailable.
+    private static func normalizedPosition(from event: NSEvent) -> CGPoint? {
+        guard let window = event.window,
+              window.frame.width > 0, window.frame.height > 0 else {
+            return nil
+        }
+        let loc = event.locationInWindow
+        // Clamp to window bounds to avoid out-of-range values.
+        let clampedX = max(0, min(loc.x, window.frame.width))
+        let clampedY = max(0, min(loc.y, window.frame.height))
+        return CGPoint(
+            x: clampedX / window.frame.width,
+            y: clampedY / window.frame.height)
     }
 }
 
