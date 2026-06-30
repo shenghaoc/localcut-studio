@@ -63,8 +63,13 @@ public enum BeatDetectionCore {
 
             // Pack windowed samples into split complex (interleaved → split).
             windowed.withUnsafeBufferPointer { buf in
-                buf.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: halfN) { complexP in
-                    vDSP_ctoz(complexP, 2, &split, 1, vDSP_Length(halfN))
+                if let baseAddress = buf.baseAddress {
+                    // withMemoryRebound formally rebinds Float memory to
+                    // DSPComplex, satisfying Swift's memory model.  The byte
+                    // count is halfN × 8 = frameSize × 4, matching the buffer.
+                    baseAddress.withMemoryRebound(to: DSPComplex.self, capacity: halfN) { complexP in
+                        vDSP_ctoz(complexP, 2, &split, 1, vDSP_Length(halfN))
+                    }
                 }
             }
 
@@ -179,7 +184,7 @@ public enum BeatDetectionCore {
                 var pick: (lag: Int, energy: Float)?
                 for candidate in candidates where candidate >= minLag && candidate <= maxLag {
                     let energy = cachedAutocorrelation(at: candidate)
-                    if pick == nil || energy > pick!.energy {
+                    if energy > (pick?.energy ?? -.infinity) {
                         pick = (candidate, energy)
                     }
                 }
@@ -207,7 +212,7 @@ public enum BeatDetectionCore {
         guard tempoBPM > 0, durationSeconds > 0 else {
             return peaks.map { quantizedTime(seconds: Double($0) * hopDuration) }
         }
-        guard !peaks.isEmpty else { return [] }
+        guard let firstPeak = peaks.first else { return [] }
 
         let interval = 60 / tempoBPM
         let halfBeat = interval * 0.4
@@ -215,7 +220,7 @@ public enum BeatDetectionCore {
         // bare phase offset: starting at `firstPeakTime.truncatingRemainder`
         // would emit spurious leading beats (e.g. at t=0) before any onset
         // exists. The first peak is itself a valid grid position.
-        let firstPeakTime = Double(peaks.first!) * hopDuration
+        let firstPeakTime = Double(firstPeak) * hopDuration
         let searchRadius = Int(ceil(halfBeat / hopDuration))
 
         var beats: [CMTime] = []

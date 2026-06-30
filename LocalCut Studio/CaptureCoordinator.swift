@@ -87,8 +87,8 @@ actor CaptureCoordinator {
             let size = target.outputSize
             totalPixelRate += Double(size.width * size.height) * request.frameRate
         }
-        if request.webcamDeviceID != nil {
-            let camSize = Self.webcamDimensions(deviceID: request.webcamDeviceID!)
+        if let webcamDeviceID = request.webcamDeviceID {
+            let camSize = Self.webcamDimensions(deviceID: webcamDeviceID)
             totalPixelRate += Double(camSize.width * camSize.height) * request.frameRate
         }
         let budget = Self.maxPixelRate(for: capability.tier)
