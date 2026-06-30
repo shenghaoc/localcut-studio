@@ -30,3 +30,7 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 ## 2026-06-26 — Prevent Duplicate VoiceOver Reads on Sliders
 **Learning:** Visual text labels (e.g. `HStack` with text and value) paired with `Slider`s in SwiftUI can cause VoiceOver to announce the label and value twice if the slider itself already sets `.accessibilityLabel` and `.accessibilityValue`.
 **Action:** Always add `.accessibilityHidden(true)` to the visible text views when a neighboring accessible control already carries the full context.
+
+## 2026-06-30 — Add Call to Action to Empty State in PreviewView
+**Learning:** The 'No Preview' empty state in PreviewView only instructed users what to do but lacked a direct button to accomplish it. However, the CTA lives inside `videoCanvas` which uses `.accessibilityElement(children: .ignore)`, so VoiceOver cannot discover the button.
+**Action:** Keep `videoCanvas` as the ignored, non-interactive preview surface and add the empty-state `ContentUnavailableView` as an overlay after that accessibility boundary. The 'Import Media…' CTA remains discoverable to VoiceOver while the parent "Preview" element still conveys the empty preview state. Scope `.foregroundStyle(.secondary)` to the title and description only — not the actions container — so the `.borderedProminent` button retains its default high-contrast label.
