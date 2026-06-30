@@ -198,6 +198,10 @@ final class DocumentController {
             }
         }
 
+        // Load callouts and padded background (Phase 43).
+        model.project.callouts = document.callouts
+        model.project.paddedBackground = document.paddedBackground
+
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         model.documentURL = isNewerSchema ? nil : url
         model.unresolvedMedia = unresolved

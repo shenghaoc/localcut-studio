@@ -35,6 +35,8 @@ extension ProjectDocument {
             markers: project.markers,
             audioBus: AudioBusDoc(project: project),
             overlays: project.overlayDocs,
+            callouts: project.callouts,
+            paddedBackground: project.paddedBackground,
             aspect: project.aspect,
             coverFrame: project.coverFrame)
     }

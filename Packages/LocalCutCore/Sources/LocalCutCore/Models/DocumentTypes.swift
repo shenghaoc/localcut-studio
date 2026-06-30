@@ -28,6 +28,10 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     public var markers: [TimelineMarker]
     public var audioBus: AudioBusDoc
     public var overlays: [OverlayClipDoc]
+    /// Phase 43 callout clips.
+    public var callouts: [CalloutClip]
+    /// Phase 43 padded background preset.
+    public var paddedBackground: PaddedBackgroundPreset?
     public var aspect: ProjectAspect
     public var coverFrame: CoverFrameDoc?
 
@@ -45,6 +49,8 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
                 markers: [TimelineMarker] = [],
                 audioBus: AudioBusDoc = AudioBusDoc(),
                 overlays: [OverlayClipDoc] = [],
+                callouts: [CalloutClip] = [],
+                paddedBackground: PaddedBackgroundPreset? = nil,
                 aspect: ProjectAspect? = nil,
                 coverFrame: CoverFrameDoc? = nil) {
         self.schemaVersion = schemaVersion
@@ -61,6 +67,8 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         self.markers = markers
         self.audioBus = audioBus
         self.overlays = overlays
+        self.callouts = callouts
+        self.paddedBackground = paddedBackground
         self.aspect = aspect ?? ProjectAspect.infer(width: renderWidth, height: renderHeight)
         self.coverFrame = coverFrame
     }
@@ -68,7 +76,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, bundleFormat, name, renderWidth, renderHeight, frameRate,
              workingColourSpace, media, videoTracks, audioTracks, captionTracks,
-             markers, audioBus, overlays, aspect, coverFrame
+             markers, audioBus, overlays, callouts, paddedBackground, aspect, coverFrame
     }
 
     public init(from decoder: any Decoder) throws {
@@ -91,6 +99,8 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         markers = try c.decodeIfPresent([TimelineMarker].self, forKey: .markers) ?? []
         audioBus = try c.decodeIfPresent(AudioBusDoc.self, forKey: .audioBus) ?? AudioBusDoc()
         overlays = try c.decodeIfPresent([OverlayClipDoc].self, forKey: .overlays) ?? []
+        callouts = try c.decodeIfPresent([CalloutClip].self, forKey: .callouts) ?? []
+        paddedBackground = try c.decodeIfPresent(PaddedBackgroundPreset.self, forKey: .paddedBackground)
         // Lenient: an unknown future aspect raw value falls back to render-size
         // inference rather than failing the whole document open.
         if let rawAspect = try c.decodeIfPresent(String.self, forKey: .aspect) {
