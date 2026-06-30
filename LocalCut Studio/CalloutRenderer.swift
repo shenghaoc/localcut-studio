@@ -43,7 +43,8 @@ nonisolated enum CalloutRenderer {
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 
-        // Flip Y for Core Image coordinate system (origin at bottom-left).
+        // Flip Y so screen-space normalised coordinates (0,0 = top-left) map
+        // to CIImage/CGContext pixel space (0,0 = bottom-left).
         context.translateBy(x: 0, y: CGFloat(height))
         context.scaleBy(x: 1, y: -1)
 

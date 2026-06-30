@@ -68,6 +68,27 @@ struct ScreencastInspectorView: View {
             }
         }
 
+        // List existing callouts so users can reselect them for editing.
+        if !model.project.callouts.isEmpty {
+            DisclosureGroup("Callouts (\(model.project.callouts.count))") {
+                ForEach(model.project.callouts) { callout in
+                    Button {
+                        model.selectedCalloutID = callout.id
+                    } label: {
+                        HStack {
+                            Text(callout.kind.displayName)
+                            Spacer()
+                            Text(String(format: "%.1fs", callout.timeRange.start.seconds))
+                                .foregroundStyle(.secondary)
+                            if callout.id == model.selectedCalloutID {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if let calloutID = model.selectedCalloutID,
            let callout = model.callout(for: calloutID) {
             calloutParameterEditor(callout)

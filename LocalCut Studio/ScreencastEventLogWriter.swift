@@ -13,6 +13,7 @@ final class ScreencastEventLogWriter {
     private let startHostTimeUs: Int64
     private let outputURL: URL
     private var target: CaptureTarget
+    private var captureRegion: CaptureRegion?
     private var events: [ScreencastEvent] = []
     nonisolated(unsafe) private var localMonitor: Any?
     nonisolated(unsafe) private var globalMonitor: Any?
@@ -24,14 +25,18 @@ final class ScreencastEventLogWriter {
     ///   - startHostTimeUs: The capture start time in host-time microseconds.
     ///   - directoryURL: The capture session directory where `events.json` will
     ///     be written.
+    ///   - target: The capture target.
+    ///   - captureRegion: Optional region within the display being captured.
     nonisolated init(sessionID: UUID,
                      startHostTimeUs: Int64,
                      directoryURL: URL,
-                     target: CaptureTarget) {
+                     target: CaptureTarget,
+                     captureRegion: CaptureRegion? = nil) {
         self.sessionID = sessionID
         self.startHostTimeUs = startHostTimeUs
         self.outputURL = directoryURL.appendingPathComponent("events.json")
         self.target = target
+        self.captureRegion = captureRegion
     }
 
     /// Begin monitoring events for the current target.
@@ -74,13 +79,16 @@ final class ScreencastEventLogWriter {
         }
     }
 
-    /// Remove the monitor as a safety net.
+    /// Remove the monitor as a safety net. `NSEvent.removeMonitor` must run on
+    /// the main thread but `deinit` can be called from any executor, so dispatch
+    /// the removal. The monitor handler captures `self` weakly, so any events
+    /// arriving between deallocation and the async removal are harmless.
     deinit {
-        if let localMonitor {
-            NSEvent.removeMonitor(localMonitor)
-        }
-        if let globalMonitor {
-            NSEvent.removeMonitor(globalMonitor)
+        let local = localMonitor
+        let global = globalMonitor
+        DispatchQueue.main.async {
+            if let local { NSEvent.removeMonitor(local) }
+            if let global { NSEvent.removeMonitor(global) }
         }
     }
 
@@ -171,14 +179,23 @@ final class ScreencastEventLogWriter {
 
         switch target {
         case .display(let displayID, _, _):
+            if let region = captureRegion, region.displayID == displayID {
+                return Self.normalizedRegionPosition(region: region, point: NSEvent.mouseLocation)
+            }
             return Self.normalizedScreenPosition(displayID: displayID, point: NSEvent.mouseLocation)
-        case .window(let windowID, _, _, let width, let height):
-            guard event.windowNumber == Int(windowID) else { return nil }
+        case .window(_, _, _, let width, let height):
+            // Note: event.windowNumber (AppKit) and CGWindowID use different
+            // numbering schemes, so we cannot filter by window ID here. The
+            // global monitor receives system-wide events; we normalise to the
+            // target window's dimensions.
             return Self.normalizedWindowPosition(
                 location: event.locationInWindow,
                 width: CGFloat(width),
                 height: CGFloat(height))
         case .application(_, _, _, let displayID, _, _):
+            if let region = captureRegion, region.displayID == displayID {
+                return Self.normalizedRegionPosition(region: region, point: NSEvent.mouseLocation)
+            }
             return Self.normalizedScreenPosition(displayID: displayID, point: NSEvent.mouseLocation)
         }
     }
@@ -212,6 +229,29 @@ final class ScreencastEventLogWriter {
         return CGPoint(
             x: (point.x - frame.minX) / frame.width,
             y: (point.y - frame.minY) / frame.height)
+    }
+
+    /// Normalise a screen-space point to 0...1 relative to the captured region
+    /// within the display. Points outside the region return nil.
+    private static func normalizedRegionPosition(region: CaptureRegion, point: CGPoint) -> CGPoint? {
+        guard let screen = NSScreen.screens.first(where: { screen in
+            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+                return false
+            }
+            return number.uint32Value == region.displayID
+        }) else { return nil }
+        let screenFrame = screen.frame
+        // Convert sourceRect (origin bottom-left) to screen coordinates.
+        let regionRect = CGRect(
+            x: screenFrame.minX + region.sourceRect.minX,
+            y: screenFrame.maxY - region.sourceRect.maxY,
+            width: region.sourceRect.width,
+            height: region.sourceRect.height)
+        guard regionRect.width > 0, regionRect.height > 0 else { return nil }
+        let nx = (point.x - regionRect.minX) / regionRect.width
+        let ny = (point.y - regionRect.minY) / regionRect.height
+        guard nx >= 0, nx <= 1, ny >= 0, ny <= 1 else { return nil }
+        return CGPoint(x: nx, y: ny)
     }
 }
 

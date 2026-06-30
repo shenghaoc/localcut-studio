@@ -52,7 +52,7 @@ extension EditorModel {
     @MainActor
     func updateCallout(_ updated: CalloutClip) {
         guard let index = project.callouts.firstIndex(where: { $0.id == updated.id }) else { return }
-        performCoalescedUndoable("Edit Callout", target: updated.id, rebuild: .immediate) {
+        performCoalescedUndoable("Edit Callout", target: updated.id, rebuild: .debounced) {
             project.callouts[index] = updated
         }
     }

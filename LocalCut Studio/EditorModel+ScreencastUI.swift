@@ -54,9 +54,21 @@ extension EditorModel {
             return
         }
 
+        // Offset proposal keyframes to clip-source-local time. The proposal
+        // keyframes are authored from 0...duration; shift them by the proposal's
+        // start time so they align with the correct position in the clip.
+        let offset = proposal.timeRange.start
+        let offsetKeyframes = proposal.keyframes.map { kf in
+            Keyframe<Transform2D>(
+                id: kf.id,
+                time: kf.time + offset,
+                value: kf.value,
+                incomingHandle: kf.incomingHandle,
+                outgoingHandle: kf.outgoingHandle)
+        }
         performUndoable("Apply Auto-Zoom Proposal") {
             project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes =
-                Keyframed(keyframes: proposal.keyframes, defaultValue: .identity)
+                Keyframed(keyframes: offsetKeyframes, defaultValue: .identity)
         }
         statusMessage = "Applied auto-zoom proposal."
         Task { await rebuild() }
@@ -83,10 +95,19 @@ extension EditorModel {
         let proposals = autoZoomProposals
         guard !proposals.isEmpty else { return }
 
-        // Merge all proposal keyframes into one set.
+        // Merge all proposal keyframes into one set, offsetting each by its
+        // proposal start time so they align with clip-source-local time.
         var allKeyframes: [Keyframe<Transform2D>] = []
         for proposal in proposals {
-            allKeyframes.append(contentsOf: proposal.keyframes)
+            let offset = proposal.timeRange.start
+            for kf in proposal.keyframes {
+                allKeyframes.append(Keyframe<Transform2D>(
+                    id: kf.id,
+                    time: kf.time + offset,
+                    value: kf.value,
+                    incomingHandle: kf.incomingHandle,
+                    outgoingHandle: kf.outgoingHandle))
+            }
         }
 
         performUndoable("Apply All Auto-Zoom Proposals") {

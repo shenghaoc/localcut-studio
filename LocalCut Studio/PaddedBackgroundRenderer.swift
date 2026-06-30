@@ -2,11 +2,24 @@ import Foundation
 import CoreImage
 import CoreGraphics
 import ImageIO
+import os
 import LocalCutCore
 
 /// Renders the padded-background preset as a CIImage for compositing behind
 /// the clip in the effect pipeline.
 nonisolated enum PaddedBackgroundRenderer {
+
+    /// Cache for resolved background images, keyed by bookmark data hash.
+    /// Avoids re-resolving security-scoped bookmarks and re-downsampling on
+    /// every video-composition request.
+    private static let imageCache = OSAllocatedUnfairLock<
+        [Int: (image: CGImage, width: Int, height: Int)]
+    >(uncheckedState: [:])
+
+    /// Clear the cache (e.g. when the project is closed or the preset changes).
+    static func purgeCache() {
+        imageCache.withLock { $0.removeAll() }
+    }
 
     /// Render the padded background at the given canvas size.
     ///
@@ -106,34 +119,29 @@ nonisolated enum PaddedBackgroundRenderer {
 
     /// Draw a background image, downsampled to fit the render size.
     /// Returns true if successful, false if the image couldn't be loaded.
+    /// Uses a cache keyed by bookmark data hash to avoid repeated disk I/O.
     private static func drawImage(
         context: CGContext,
         bookmark: Data,
         renderSize: CGSize
     ) -> Bool {
-        var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: bookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return false }
+        let cacheKey = bookmark.hashValue
+        let maxDimension = Int(max(renderSize.width, renderSize.height))
 
-        let needsAccess = url.startAccessingSecurityScopedResource()
-        defer { if needsAccess { url.stopAccessingSecurityScopedResource() } }
-
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return false }
-
-        // Downsample to render size to avoid holding giant images in memory.
-        let maxDimension = max(renderSize.width, renderSize.height)
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            return false
+        // Check cache first.
+        let cached = imageCache.withLock { $0[cacheKey] }
+        let cgImage: CGImage?
+        if let cached, cached.width == maxDimension, cached.height == maxDimension {
+            cgImage = cached.image
+        } else {
+            // Resolve and downsample.
+            cgImage = Self.loadAndDownsample(bookmark: bookmark, maxDimension: maxDimension)
+            if let cgImage {
+                imageCache.withLock { $0[cacheKey] = (cgImage, maxDimension, maxDimension) }
+            }
         }
+
+        guard let image = cgImage else { return false }
 
         // Draw the image to fill the canvas (aspect fill).
         let imageWidth = CGFloat(image.width)
@@ -148,5 +156,28 @@ nonisolated enum PaddedBackgroundRenderer {
 
         context.draw(image, in: CGRect(x: x, y: y, width: scaledWidth, height: scaledHeight))
         return true
+    }
+
+    /// Load and downsample a background image from a security-scoped bookmark.
+    private static func loadAndDownsample(bookmark: Data, maxDimension: Int) -> CGImage? {
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: bookmark,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+
+        let needsAccess = url.startAccessingSecurityScopedResource()
+        defer { if needsAccess { url.stopAccessingSecurityScopedResource() } }
+
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }

@@ -919,7 +919,8 @@ extension EditorModel {
             statusMessage += " Some sources failed: \(loadErrors.joined(separator: "; "))"
         }
 
-        // Load event log sidecar if present (Phase 43).
+        // Load event log sidecar if present (Phase 43). Clear stale proposals
+        // from a previous capture when no valid log is available.
         let eventsURL = result.directoryURL.appendingPathComponent("events.json")
         if let data = try? Data(contentsOf: eventsURL),
            let log = try? JSONDecoder().decode(ScreencastEventLog.self, from: data),
@@ -930,6 +931,8 @@ extension EditorModel {
             if !autoZoomProposals.isEmpty {
                 statusMessage += " \(autoZoomProposals.count) auto-zoom proposals available."
             }
+        } else {
+            autoZoomProposals = []
         }
 
         for entry in loaded where entry.item.hasVideo {

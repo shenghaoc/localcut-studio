@@ -287,7 +287,8 @@ actor CaptureCoordinator {
                 sessionID: id,
                 startHostTimeUs: startHostTimeUs,
                 directoryURL: directoryURL,
-                target: target)
+                target: target,
+                captureRegion: request.captureRegion)
         }
 
         let active = ActiveSession(
@@ -346,7 +347,12 @@ actor CaptureCoordinator {
 
         // Stop event monitoring and flush the event log sidecar.
         await active.eventLogWriter?.stopMonitoring()
-        try? await active.eventLogWriter?.flush()
+        var eventLogFlushError: String?
+        do {
+            try await active.eventLogWriter?.flush()
+        } catch {
+            eventLogFlushError = "Event log: \(error.localizedDescription)"
+        }
 
         // Stop all running sessions (no-op if already paused).
         for session in active.sessions {
@@ -422,6 +428,14 @@ actor CaptureCoordinator {
             manifestFinalizationError = finishErrors
                 .map(\.localizedDescription)
                 .joined(separator: "; ")
+        }
+        // Append event-log flush error (non-fatal, but user-visible).
+        if let eventLogFlushError {
+            if let existing = manifestFinalizationError {
+                manifestFinalizationError = existing + "; " + eventLogFlushError
+            } else {
+                manifestFinalizationError = eventLogFlushError
+            }
         }
         active.manifest.close()
         state = .idle

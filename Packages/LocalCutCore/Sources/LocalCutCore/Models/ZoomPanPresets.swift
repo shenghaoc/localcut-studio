@@ -147,12 +147,13 @@ public enum ZoomPanPresetGenerator {
             }
 
             // Check scale velocity (operates on the already-clamped value)
-            let scaleDelta = abs(updatedValue.decomposedScale - prev.decomposedScale)
+            let currentScale = updatedValue.decomposedScale
+            let scaleDelta = abs(currentScale - prev.decomposedScale)
             let scaleVelocity = scaleDelta / Float(dt)
-            if scaleVelocity > ZoomPanBounds.maxScaleVelocity {
+            if scaleVelocity > ZoomPanBounds.maxScaleVelocity, currentScale > 0 {
                 let scaleFactor = ZoomPanBounds.maxScaleVelocity / scaleVelocity
-                let targetScale = prev.decomposedScale + (updatedValue.decomposedScale - prev.decomposedScale) * scaleFactor
-                let ratio = targetScale / updatedValue.decomposedScale
+                let targetScale = prev.decomposedScale + (currentScale - prev.decomposedScale) * scaleFactor
+                let ratio = targetScale / currentScale
                 updatedValue = Transform2D(a: updatedValue.a * ratio, b: updatedValue.b * ratio,
                                            c: updatedValue.c * ratio, d: updatedValue.d * ratio,
                                            tx: updatedValue.tx, ty: updatedValue.ty)

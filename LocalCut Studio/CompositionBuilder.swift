@@ -48,9 +48,11 @@ enum CompositionBuilder {
         let clipSourceStart: CMTime
         let sourceRange: CMTimeRange
         let orderingStart: CMTime
+        /// Phase 43: keyframed transform for zoom-n-pan animation.
+        let transformKeyframes: Keyframed<Transform2D>
 
         var layer: CompositorLayer {
-            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, mask: mask, effects: effects, showSkinMask: showSkinMask, clipSourceStart: clipSourceStart, sourceRange: sourceRange, timeRange: timeRange)
+            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, mask: mask, effects: effects, showSkinMask: showSkinMask, clipSourceStart: clipSourceStart, sourceRange: sourceRange, timeRange: timeRange, transformKeyframes: transformKeyframes)
         }
 
         func contains(_ seconds: Double) -> Bool {
@@ -173,7 +175,8 @@ enum CompositionBuilder {
                             showSkinMask: showSkinMask,
                             clipSourceStart: clip.sourceStart,
                             sourceRange: remapSegment.sourceRange,
-                            orderingStart: piece.effectiveStart))
+                            orderingStart: piece.effectiveStart,
+                            transformKeyframes: clip.transformKeyframes))
                     }
                 }
             }
@@ -686,6 +689,11 @@ enum CompositionBuilder {
             boundarySet.insert(overlay.timelineStart.seconds)
             boundarySet.insert(overlay.timelineEnd.seconds)
         }
+        for callout in callouts {
+            boundarySet.insert(callout.timeRange.start.seconds)
+            let calloutEnd = callout.timeRange.start.seconds + callout.timeRange.duration.seconds
+            boundarySet.insert(calloutEnd)
+        }
         let boundaries = boundarySet.sorted()
 
         var instructions: [AVVideoCompositionInstructionProtocol] = []
@@ -738,7 +746,8 @@ enum CompositionBuilder {
                     showSkinMask: false,
                     clipSourceStart: fillerRange.start,
                     sourceRange: fillerRange,
-                    timeRange: fillerRange)))
+                    timeRange: fillerRange,
+                    transformKeyframes: Keyframed(defaultValue: .identity))))
             }
 
             let captionsForInterval = activeCaptionItems(
@@ -756,6 +765,7 @@ enum CompositionBuilder {
                 overlaySourceRegistryID: overlaySourceRegistryID,
                 callouts: calloutsForInterval,
                 paddedBackground: paddedBackground,
+                paddedInsetMargin: paddedBackground?.insetMargin ?? 0,
                 frameRate: frameRate,
                 workingColourSpace: workingColourSpace))
         }
