@@ -9,11 +9,11 @@ import LocalCutCore
 /// the clip in the effect pipeline.
 nonisolated enum PaddedBackgroundRenderer {
 
-    /// Cache for resolved background images, keyed by bookmark data hash.
+    /// Cache for resolved background images, keyed by bookmark data.
     /// Avoids re-resolving security-scoped bookmarks and re-downsampling on
     /// every video-composition request.
     private static let imageCache = OSAllocatedUnfairLock<
-        [Int: (image: CGImage, width: Int, height: Int)]
+        [Data: (image: CGImage, width: Int, height: Int)]
     >(uncheckedState: [:])
 
     /// Clear the cache (e.g. when the project is closed or the preset changes).
@@ -125,11 +125,10 @@ nonisolated enum PaddedBackgroundRenderer {
         bookmark: Data,
         renderSize: CGSize
     ) -> Bool {
-        let cacheKey = bookmark.hashValue
         let maxDimension = Int(max(renderSize.width, renderSize.height))
 
         // Check cache first.
-        let cached = imageCache.withLock { $0[cacheKey] }
+        let cached = imageCache.withLock { $0[bookmark] }
         let cgImage: CGImage?
         if let cached, cached.width == maxDimension, cached.height == maxDimension {
             cgImage = cached.image
@@ -137,7 +136,7 @@ nonisolated enum PaddedBackgroundRenderer {
             // Resolve and downsample.
             cgImage = Self.loadAndDownsample(bookmark: bookmark, maxDimension: maxDimension)
             if let cgImage {
-                imageCache.withLock { $0[cacheKey] = (cgImage, maxDimension, maxDimension) }
+                imageCache.withLock { $0[bookmark] = (cgImage, maxDimension, maxDimension) }
             }
         }
 

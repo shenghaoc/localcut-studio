@@ -179,7 +179,8 @@ final class ScreencastEventLogWriter {
         case .scrollWheel:
             kind = .scroll
             position = normalizedPosition(from: event, source: source)
-        case .keyDown, .keyUp where source == .ownAppLocal:
+        case .keyDown where source == .ownAppLocal,
+             .keyUp where source == .ownAppLocal:
             kind = .key
             keyCode = event.keyCode
             modifierFlagsRaw = event.modifierFlags.rawValue
@@ -237,7 +238,8 @@ final class ScreencastEventLogWriter {
                 locationInWindow: locationInWindow,
                 windowSize: windowSize,
                 source: source)
-        case .keyDown, .keyUp where source == .ownAppLocal:
+        case .keyDown where source == .ownAppLocal,
+             .keyUp where source == .ownAppLocal:
             kind = .key
         default:
             return
@@ -328,15 +330,22 @@ final class ScreencastEventLogWriter {
             height: window.frame.height)
     }
 
+    /// Normalise window-local coordinates to 0…1 with top-left origin.
+    /// AppKit window coordinates have Y=0 at the bottom, so we flip Y
+    /// to match screen-space convention (Y=0 at top) used by the rendering
+    /// pipeline and callout coordinate system.
     private static func normalizedWindowPosition(location: CGPoint,
                                                  width: CGFloat,
                                                  height: CGFloat) -> CGPoint? {
         guard width > 0, height > 0 else { return nil }
         let clampedX = max(0, min(location.x, width))
         let clampedY = max(0, min(location.y, height))
-        return CGPoint(x: clampedX / width, y: clampedY / height)
+        return CGPoint(x: clampedX / width, y: 1.0 - clampedY / height)
     }
 
+    /// Normalise screen-space coordinates to 0…1 with top-left origin.
+    /// `NSScreen.frame` has Y=0 at the bottom of the primary display, so we
+    /// flip Y to match the top-left convention used by the rendering pipeline.
     private static func normalizedScreenPosition(displayID: UInt32, point: CGPoint) -> CGPoint? {
         guard let screen = NSScreen.screens.first(where: { screen in
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
@@ -348,11 +357,13 @@ final class ScreencastEventLogWriter {
         guard frame.width > 0, frame.height > 0, frame.contains(point) else { return nil }
         return CGPoint(
             x: (point.x - frame.minX) / frame.width,
-            y: (point.y - frame.minY) / frame.height)
+            y: 1.0 - (point.y - frame.minY) / frame.height)
     }
 
-    /// Normalise a screen-space point to 0...1 relative to the captured region
-    /// within the display. Points outside the region return nil.
+    /// Normalise a screen-space point to 0…1 with top-left origin relative to
+    /// the captured region within the display. Points outside the region return
+    /// nil. `sourceRect` uses bottom-left origin (CoreGraphics convention), so
+    /// we convert to screen coordinates then flip Y.
     private static func normalizedRegionPosition(region: CaptureRegion, point: CGPoint) -> CGPoint? {
         guard let screen = NSScreen.screens.first(where: { screen in
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
@@ -369,7 +380,7 @@ final class ScreencastEventLogWriter {
             height: region.sourceRect.height)
         guard regionRect.width > 0, regionRect.height > 0 else { return nil }
         let nx = (point.x - regionRect.minX) / regionRect.width
-        let ny = (point.y - regionRect.minY) / regionRect.height
+        let ny = 1.0 - (point.y - regionRect.minY) / regionRect.height
         guard nx >= 0, nx <= 1, ny >= 0, ny <= 1 else { return nil }
         return CGPoint(x: nx, y: ny)
     }

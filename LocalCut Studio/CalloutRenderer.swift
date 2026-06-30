@@ -263,8 +263,11 @@ nonisolated enum CalloutRenderer {
             width: rect.size.width * renderSize.width,
             height: rect.size.height * renderSize.height)
 
-        // Crop the source to the blur region, blur it, then composite back.
+        // Crop the source to the blur region, clamp edges to prevent
+        // transparent fade, then blur. Without clamping, GaussianBlur
+        // extends beyond the crop boundary and fades to transparent black.
         let cropped = sourceImage.cropped(to: blurRect)
+            .clampedToExtent()
 
         guard let blurFilter = CIFilter(name: "CIGaussianBlur") else { return nil }
         blurFilter.setValue(cropped, forKey: kCIInputImageKey)
