@@ -29,3 +29,7 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Vulnerability:** Untrusted user input via media metadata was not fully validated upon project reconstruction from document or queues, creating potential vector for crash via negative/infinite durations or huge canvas sizes.
 **Learning:** App Sandbox security extends beyond file access—it means treating media parameters as adversarial input that must be bounded to avoid crashing rendering pipeline/timecode string conversion.
 **Prevention:** Always use `.sanitized` property defined in `LocalCutCore` on `CMTime`, `CGSize`, and `CGAffineTransform` before ingesting media values into model domain.
+## 2026-06-28 — Avoid Force Unwraps in Media processing
+**Vulnerability:** Found force unwraps (`!`) in `BeatDetectionCore.swift` and `CaptureCoordinator.swift`.
+**Learning:** Force-unwrapping poses a Denial of Service (crash) risk if the application receives unexpected inputs or if the assumption about the data structure's content fails.
+**Prevention:** Always use safe optional binding (`if let`, `guard let`) when dealing with optional variables, especially when those variables depend on complex parsing logic, hardware configuration, or external media processing.
