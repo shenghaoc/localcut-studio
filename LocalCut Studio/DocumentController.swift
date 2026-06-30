@@ -23,6 +23,7 @@ final class DocumentController {
         model.project.callouts = []
         model.project.paddedBackground = nil
         model.project.screencastEventLogs = []
+        model.project.keystrokeOverlayClips = []
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -62,6 +63,7 @@ final class DocumentController {
         model.project.callouts.removeAll()
         model.project.paddedBackground = nil
         model.project.screencastEventLogs.removeAll()
+        model.project.keystrokeOverlayClips.removeAll()
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -222,6 +224,7 @@ final class DocumentController {
         } else {
             model.autoZoomProposals.removeAll()
         }
+        model.project.keystrokeOverlayClips = document.keystrokeOverlayClips
 
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         model.documentURL = isNewerSchema ? nil : url

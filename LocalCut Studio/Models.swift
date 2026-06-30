@@ -92,6 +92,8 @@ final class Project {
     var paddedBackground: PaddedBackgroundPreset?
     /// Phase 43 screencast event logs that generated auto-zoom proposals.
     var screencastEventLogs: [ScreencastEventLog] = []
+    /// Phase 44 keystroke overlay clips derived from event logs.
+    var keystrokeOverlayClips: [KeystrokeOverlayClip] = []
     /// Bookmark data for overlay source files, keyed by overlay ID.
     var overlayBookmarks: [UUID: Data] = [:]
     /// Bundle-relative paths for overlay source files, keyed by overlay ID.

@@ -20,7 +20,7 @@ extension EditorModel {
         }
 
         performUndoable("Add Keystroke Overlay") {
-            keystrokeOverlayClips.append(clip)
+            project.keystrokeOverlayClips.append(clip)
             statusMessage = "Added keystroke overlay with \(clip.events.count) event(s)."
         }
     }
@@ -29,7 +29,7 @@ extension EditorModel {
     @MainActor
     func removeKeystrokeOverlay(id: KeystrokeOverlayClip.ID) {
         performUndoable("Remove Keystroke Overlay") {
-            keystrokeOverlayClips.removeAll { $0.id == id }
+            project.keystrokeOverlayClips.removeAll { $0.id == id }
             statusMessage = "Removed keystroke overlay."
         }
     }
@@ -37,9 +37,9 @@ extension EditorModel {
     /// Updates the style of a keystroke overlay clip.
     @MainActor
     func updateKeystrokeOverlayStyle(id: KeystrokeOverlayClip.ID, style: KeystrokeOverlayStyle) {
-        guard let index = keystrokeOverlayClips.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = project.keystrokeOverlayClips.firstIndex(where: { $0.id == id }) else { return }
         performUndoable("Update Keystroke Overlay Style") {
-            keystrokeOverlayClips[index].style = style
+            project.keystrokeOverlayClips[index].style = style
         }
     }
 }

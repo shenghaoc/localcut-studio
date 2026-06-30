@@ -113,7 +113,7 @@ struct TutorialFinishingInspectorView: View {
                         model.addKeystrokeOverlayFromEventLog()
                     }
 
-                    ForEach(model.keystrokeOverlayClips) { clip in
+                    ForEach(model.project.keystrokeOverlayClips) { clip in
                         HStack {
                             VStack(alignment: .leading) {
                                 Text("\(clip.events.count) keystroke(s)")

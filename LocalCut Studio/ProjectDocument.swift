@@ -38,6 +38,7 @@ extension ProjectDocument {
             callouts: project.callouts,
             paddedBackground: project.paddedBackground,
             screencastEventLogs: project.screencastEventLogs,
+            keystrokeOverlayClips: project.keystrokeOverlayClips,
             aspect: project.aspect,
             coverFrame: project.coverFrame)
     }

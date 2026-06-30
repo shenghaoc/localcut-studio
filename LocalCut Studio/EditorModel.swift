@@ -33,8 +33,6 @@ final class EditorModel {
     var autoZoomProposals: [ZoomPanProposal] = []
     /// Phase 44 silence detection proposals for review-before-apply.
     var silenceProposals: [ProposedCut] = []
-    /// Phase 44 keystroke overlay clips derived from event logs.
-    var keystrokeOverlayClips: [KeystrokeOverlayClip] = []
 
     // Playback
     let player = AVPlayer()
