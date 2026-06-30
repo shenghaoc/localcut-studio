@@ -113,10 +113,16 @@ struct PreviewView: View {
             if model.hasPreviewItem {
                 PreviewPlayerView(player: model.player)
             } else {
-                ContentUnavailableView(
-                    "No Preview",
-                    systemImage: "film.stack",
-                    description: Text("Import media, then drag a clip to the timeline."))
+                ContentUnavailableView {
+                    Label("No Preview", systemImage: "film.stack")
+                } description: {
+                    Text("Import media, then drag a clip to the timeline.")
+                } actions: {
+                    Button("Import Media…") {
+                        model.requestImport()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
                 .foregroundStyle(.secondary)
             }
             if model.showSafeZones,
