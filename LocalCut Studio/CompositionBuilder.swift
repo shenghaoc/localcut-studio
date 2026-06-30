@@ -314,7 +314,7 @@ enum CompositionBuilder {
         // loop-insert it into the composition track so a 30-minute tail does
         // not make the editor block on writing tens of thousands of frames.
         // Codex P2 (cap filler generation).
-        let visualRanges = visualActivityRanges(captionTracks: captionTracks, overlays: project.overlays)
+        let visualRanges = visualActivityRanges(captionTracks: captionTracks, overlays: project.overlays, callouts: project.callouts)
         let videoRanges = projectTrackSegments.flatMap { segments in
             segments.map(\.timeRange)
         }
@@ -440,7 +440,8 @@ enum CompositionBuilder {
     }
 
     private static func visualActivityRanges(captionTracks: [CaptionTrack],
-                                             overlays: [OverlayClip]) -> [CMTimeRange] {
+                                             overlays: [OverlayClip],
+                                             callouts: [CalloutClip] = []) -> [CMTimeRange] {
         let captionRanges = captionTracks.flatMap { track in
             track.lines.map(\.range)
         }
@@ -450,7 +451,12 @@ enum CompositionBuilder {
                   overlay.timelineEnd > overlay.timelineStart else { return nil }
             return CMTimeRange(start: overlay.timelineStart, end: overlay.timelineEnd)
         }
-        return captionRanges + overlayRanges
+        let calloutRanges = callouts.compactMap { callout -> CMTimeRange? in
+            let end = callout.timeRange.start + callout.timeRange.duration
+            guard callout.timeRange.start.isNumeric, end.isNumeric, end > callout.timeRange.start else { return nil }
+            return CMTimeRange(start: callout.timeRange.start, end: end)
+        }
+        return captionRanges + overlayRanges + calloutRanges
     }
 
     private static func visualFillerRanges(visualRanges: [CMTimeRange],
