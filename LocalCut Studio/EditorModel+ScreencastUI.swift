@@ -55,20 +55,26 @@ extension EditorModel {
         }
 
         // Offset proposal keyframes to clip-source-local time. The proposal
-        // keyframes are authored from 0...duration; shift them by the proposal's
-        // start time so they align with the correct position in the clip.
-        let offset = proposal.timeRange.start
+        // keyframes are authored from 0...duration relative to the proposal
+        // start. Convert to clip-source-local by subtracting the clip's
+        // sourceStart (the in-point within the recording).
+        let clip = project.videoTracks[trackIndex].clips[clipIndex]
+        let recordingOffset = proposal.timeRange.start - clip.sourceStart
         let offsetKeyframes = proposal.keyframes.map { kf in
             Keyframe<Transform2D>(
                 id: kf.id,
-                time: kf.time + offset,
+                time: kf.time + recordingOffset,
                 value: kf.value,
                 incomingHandle: kf.incomingHandle,
                 outgoingHandle: kf.outgoingHandle)
         }
+        // Merge with existing keyframes rather than replacing, so previously
+        // applied proposals are preserved.
+        let existing = project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes
+        let merged = existing.keyframes + offsetKeyframes
         performUndoable("Apply Auto-Zoom Proposal") {
             project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes =
-                Keyframed(keyframes: offsetKeyframes, defaultValue: .identity)
+                Keyframed(keyframes: merged, defaultValue: .identity)
         }
         statusMessage = "Applied auto-zoom proposal."
         Task { await rebuild() }
@@ -96,14 +102,16 @@ extension EditorModel {
         guard !proposals.isEmpty else { return }
 
         // Merge all proposal keyframes into one set, offsetting each by its
-        // proposal start time so they align with clip-source-local time.
+        // proposal start time minus the clip's sourceStart so they align with
+        // clip-source-local time.
+        let clip = project.videoTracks[trackIndex].clips[clipIndex]
         var allKeyframes: [Keyframe<Transform2D>] = []
         for proposal in proposals {
-            let offset = proposal.timeRange.start
+            let recordingOffset = proposal.timeRange.start - clip.sourceStart
             for kf in proposal.keyframes {
                 allKeyframes.append(Keyframe<Transform2D>(
                     id: kf.id,
-                    time: kf.time + offset,
+                    time: kf.time + recordingOffset,
                     value: kf.value,
                     incomingHandle: kf.incomingHandle,
                     outgoingHandle: kf.outgoingHandle))
