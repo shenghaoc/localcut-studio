@@ -32,9 +32,5 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 **Action:** Always add `.accessibilityHidden(true)` to the visible text views when a neighboring accessible control already carries the full context.
 
 ## 2026-06-30 — Add Call to Action to Empty State in PreviewView
-**Learning:** The 'No Preview' empty state in PreviewView only instructed users what to do but lacked a direct button to accomplish it.
-**Action:** Replaced the plain  initialization with the trailing closure syntax to provide an  block containing an 'Import Media…' CTA button.
-
-## 2026-06-30 — Add Call to Action to Empty State in PreviewView
-**Learning:** The 'No Preview' empty state in PreviewView only instructed users what to do but lacked a direct button to accomplish it.
-**Action:** Replaced the plain ContentUnavailableView initialization with the trailing closure syntax to provide an actions block containing an 'Import Media…' CTA button.
+**Learning:** The 'No Preview' empty state in PreviewView only instructed users what to do but lacked a direct button to accomplish it. However, the CTA lives inside `videoCanvas` which uses `.accessibilityElement(children: .ignore)`, so VoiceOver cannot discover the button.
+**Action:** Replaced the plain `ContentUnavailableView` initialization with the trailing closure syntax to provide an `actions` block containing an 'Import Media…' CTA button. Added `.accessibilityHidden(true)` to the button because the parent "Preview" element already conveys the empty state through its `accessibilityValue`, and the import action remains available via File ▸ Import… (⌘I).

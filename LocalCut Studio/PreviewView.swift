@@ -122,6 +122,13 @@ struct PreviewView: View {
                         model.requestImport()
                     }
                     .buttonStyle(.borderedProminent)
+                    // This button is inside `videoCanvas` which uses
+                    // `.accessibilityElement(children: .ignore)`, so VoiceOver
+                    // cannot discover it.  Hide it: the parent "Preview"
+                    // element already conveys the empty state in its
+                    // accessibilityValue, and File ▸ Import… (⌘I) provides
+                    // a keyboard-accessible import path.
+                    .accessibilityHidden(true)
                 }
                 .foregroundStyle(.secondary)
             }
