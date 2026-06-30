@@ -10,9 +10,6 @@ struct InspectorView: View {
     @Bindable var model: EditorModel
     @State private var showLUTImporter = false
     @State private var showLookImporter = false
-    @State private var coverPreviewImage: NSImage?
-    @State private var coverPreviewIsLoading = false
-    @State private var coverPreviewError: String?
 
     var body: some View {
         // The side rail's segmented switcher (EditorSideRailView) is the sole
@@ -43,7 +40,7 @@ struct InspectorView: View {
                 }
             }
 
-            coverSection
+            CoverInspectorView(model: model)
             projectSection
             overlayListSection
             ScreencastInspectorView(model: model)
@@ -942,172 +939,6 @@ struct InspectorView: View {
         }
     }
 
-    @ViewBuilder
-    private var coverSection: some View {
-        Section("Cover") {
-            coverPreview
-            LabeledContent("Time") {
-                Text(coverTimeLabel)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            HStack {
-                Button {
-                    model.nudgeCoverFrame(byFrames: -1)
-                } label: {
-                    Label("Previous Frame", systemImage: "backward.frame")
-                }
-                .labelStyle(.iconOnly)
-                .disabled(model.totalDuration <= 0)
-                .controlSize(.small)
-                .help("Move cover frame back one frame")
-                .accessibilityLabel("Move cover frame back one frame")
-
-                Button("Set to Playhead") {
-                    model.setCoverTimeToPlayhead()
-                }
-                .controlSize(.small)
-                .help("Use the current playhead position as the cover frame time")
-                .accessibilityLabel("Set cover frame to current playhead position")
-
-                Button {
-                    model.nudgeCoverFrame(byFrames: 1)
-                } label: {
-                    Label("Next Frame", systemImage: "forward.frame")
-                }
-                .labelStyle(.iconOnly)
-                .disabled(model.totalDuration <= 0)
-                .controlSize(.small)
-                .help("Move cover frame forward one frame")
-                .accessibilityLabel("Move cover frame forward one frame")
-                Spacer()
-            }
-            Picker("Format", selection: coverFormatBinding) {
-                ForEach(CoverFormat.allCases) { format in
-                    Text(format.displayName).tag(format)
-                }
-            }
-            .help("Choose the cover image output format (PNG, JPEG, or HEIC)")
-            .accessibilityLabel("Cover image output format")
-            TextField("Title", text: coverTitleBinding)
-                .help("Optional title text drawn onto the cover image")
-                .accessibilityLabel("Cover title text")
-                .onSubmit { model.commitCoalescedUndo() }
-            HStack {
-                Button {
-                    exportCoverTapped()
-                } label: {
-                    Label("Export Cover…", systemImage: "photo")
-                }
-                .help("Save the cover image to a file")
-                .disabled(model.totalDuration <= 0)
-                .controlSize(.small)
-                Spacer()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var coverPreview: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.secondary.opacity(0.12))
-                .frame(maxWidth: .infinity)
-                .aspectRatio(coverPreviewAspectRatio, contentMode: .fit)
-            if let coverPreviewImage {
-                Image(nsImage: coverPreviewImage)
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-            } else if coverPreviewIsLoading {
-                ProgressView()
-            } else if let coverPreviewError {
-                Text(coverPreviewError)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(8)
-            }
-        }
-        .frame(maxHeight: 180)
-        .task(id: coverPreviewKey) {
-            await refreshCoverPreview()
-        }
-    }
-
-    private var coverPreviewAspectRatio: CGFloat {
-        let size = model.project.renderSize
-        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else {
-            return 16.0 / 9.0
-        }
-        return size.width / size.height
-    }
-
-    private var coverPreviewKey: String {
-        let cover = model.project.coverFrame
-        let title = cover?.title?.text ?? ""
-        let time = cover?.time.cmTime.sanitized.seconds ?? model.currentTime
-        return [
-            "\(CoverPreviewInvalidationKey.make(for: model.project))",
-            "\(time)",
-            cover?.format.rawValue ?? CoverFormat.png.rawValue,
-            title,
-            "\(model.project.renderSize.width)x\(model.project.renderSize.height)",
-            model.project.workingColourSpace.rawValue,
-        ].joined(separator: "|")
-    }
-
-    private func refreshCoverPreview() async {
-        guard model.totalDuration > 0 else {
-            coverPreviewImage = nil
-            coverPreviewError = nil
-            coverPreviewIsLoading = false
-            return
-        }
-        coverPreviewIsLoading = true
-        coverPreviewError = nil
-        coverPreviewImage = nil
-        do {
-            let data = try await model.makeCoverImageData()
-            guard !Task.isCancelled else { return }
-            coverPreviewImage = NSImage(data: data)
-            coverPreviewError = coverPreviewImage == nil ? "Cover preview unavailable." : nil
-        } catch {
-            guard !Task.isCancelled else { return }
-            coverPreviewImage = nil
-            coverPreviewError = "Cover preview unavailable."
-        }
-        coverPreviewIsLoading = false
-    }
-
-    private var coverTimeLabel: String {
-        let time = model.project.coverFrame?.time.cmTime.sanitized.seconds ?? model.currentTime
-        return TimeFormatting.timecode(time)
-    }
-
-    private var coverFormatBinding: Binding<CoverFormat> {
-        Binding(
-            get: { model.project.coverFrame?.format ?? .png },
-            set: { model.setCoverFormat($0) })
-    }
-
-    private var coverTitleBinding: Binding<String> {
-        Binding(
-            get: { model.project.coverFrame?.title?.text ?? "" },
-            set: { model.setCoverTitle($0) })
-    }
-
-    private func exportCoverTapped() {
-        let format = model.project.coverFrame?.format ?? .png
-        let panel = NSSavePanel()
-        if let type = UTType(filenameExtension: format.fileExtension) {
-            panel.allowedContentTypes = [type]
-        }
-        panel.nameFieldStringValue = "\(model.project.name)-cover.\(format.fileExtension)"
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await model.exportCover(to: url) }
-    }
 
     private var aspectBinding: Binding<ProjectAspect> {
         Binding(
@@ -1383,5 +1214,191 @@ private struct InspectorPosterView: View {
         .frame(maxWidth: .infinity, minHeight: 92, idealHeight: 110, maxHeight: 120)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .accessibilityHidden(true)
+    }
+}
+
+
+/// Extracted view to isolate `@Observable` high-frequency updates (like `model.currentTime`)
+/// from the main `InspectorView.body`, preventing unnecessary re-renders of the entire form during playback.
+private struct CoverInspectorView: View {
+    @Bindable var model: EditorModel
+    @State private var coverPreviewImage: NSImage?
+    @State private var coverPreviewIsLoading = false
+    @State private var coverPreviewError: String?
+
+    var body: some View {
+        Section("Cover") {
+            coverPreview
+            LabeledContent("Time") {
+                Text(coverTimeLabel)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            HStack {
+                Button {
+                    model.nudgeCoverFrame(byFrames: -1)
+                } label: {
+                    Label("Previous Frame", systemImage: "backward.frame")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(model.totalDuration <= 0)
+                .controlSize(.small)
+                .help("Move cover frame back one frame")
+                .accessibilityLabel("Move cover frame back one frame")
+
+                Button("Set to Playhead") {
+                    model.setCoverTimeToPlayhead()
+                }
+                .controlSize(.small)
+                .help("Use the current playhead position as the cover frame time")
+                .accessibilityLabel("Set cover frame to current playhead position")
+
+                Button {
+                    model.nudgeCoverFrame(byFrames: 1)
+                } label: {
+                    Label("Next Frame", systemImage: "forward.frame")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(model.totalDuration <= 0)
+                .controlSize(.small)
+                .help("Move cover frame forward one frame")
+                .accessibilityLabel("Move cover frame forward one frame")
+                Spacer()
+            }
+            Picker("Format", selection: coverFormatBinding) {
+                ForEach(CoverFormat.allCases) { format in
+                    Text(format.displayName).tag(format)
+                }
+            }
+            .help("Choose the cover image output format (PNG, JPEG, or HEIC)")
+            .accessibilityLabel("Cover image output format")
+            TextField("Title", text: coverTitleBinding)
+                .help("Optional title text drawn onto the cover image")
+                .accessibilityLabel("Cover title text")
+                .onSubmit { model.commitCoalescedUndo() }
+            HStack {
+                Button {
+                    exportCoverTapped()
+                } label: {
+                    Label("Export Cover…", systemImage: "photo")
+                }
+                .help("Save the cover image to a file")
+                .disabled(model.totalDuration <= 0)
+                .controlSize(.small)
+                Spacer()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var coverPreview: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.12))
+                .frame(maxWidth: .infinity)
+                .aspectRatio(coverPreviewAspectRatio, contentMode: .fit)
+            if let coverPreviewImage {
+                Image(nsImage: coverPreviewImage)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else if coverPreviewIsLoading {
+                ProgressView()
+            } else if let coverPreviewError {
+                Text(coverPreviewError)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(8)
+            }
+        }
+        .frame(maxHeight: 180)
+        .task(id: coverPreviewKey) {
+            await refreshCoverPreview()
+        }
+    }
+
+    private var coverPreviewAspectRatio: CGFloat {
+        let size = model.project.renderSize
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else {
+            return 16.0 / 9.0
+        }
+        return size.width / size.height
+    }
+
+    private var coverPreviewKey: String {
+        let cover = model.project.coverFrame
+        let title = cover?.title?.text ?? ""
+        let isPlaying = model.isPlaying
+        let time = cover?.time.cmTime.sanitized.seconds ?? (isPlaying ? -1 : model.currentTime)
+        return [
+            "\(CoverPreviewInvalidationKey.make(for: model.project))",
+            "\(isPlaying)",
+            "\(time)",
+            cover?.format.rawValue ?? CoverFormat.png.rawValue,
+            title,
+            "\(model.project.renderSize.width)x\(model.project.renderSize.height)",
+            model.project.workingColourSpace.rawValue,
+        ].joined(separator: "|")
+    }
+
+    private func refreshCoverPreview() async {
+        guard model.totalDuration > 0, !model.isPlaying else {
+            if model.totalDuration <= 0 {
+                coverPreviewImage = nil
+                coverPreviewError = nil
+            }
+            coverPreviewIsLoading = false
+            return
+        }
+        coverPreviewIsLoading = true
+        coverPreviewError = nil
+        coverPreviewImage = nil
+        do {
+            let data = try await model.makeCoverImageData()
+            guard !Task.isCancelled else {
+                coverPreviewIsLoading = false
+                return
+            }
+            coverPreviewImage = NSImage(data: data)
+            coverPreviewError = coverPreviewImage == nil ? "Cover preview unavailable." : nil
+        } catch {
+            guard !Task.isCancelled else {
+                coverPreviewIsLoading = false
+                return
+            }
+            coverPreviewImage = nil
+            coverPreviewError = "Cover preview unavailable."
+        }
+        coverPreviewIsLoading = false
+    }
+
+    private var coverTimeLabel: String {
+        let time = model.project.coverFrame?.time.cmTime.sanitized.seconds ?? model.currentTime
+        return TimeFormatting.timecode(time)
+    }
+
+    private var coverFormatBinding: Binding<CoverFormat> {
+        Binding(
+            get: { model.project.coverFrame?.format ?? .png },
+            set: { model.setCoverFormat($0) })
+    }
+
+    private var coverTitleBinding: Binding<String> {
+        Binding(
+            get: { model.project.coverFrame?.title?.text ?? "" },
+            set: { model.setCoverTitle($0) })
+    }
+
+    private func exportCoverTapped() {
+        let format = model.project.coverFrame?.format ?? .png
+        let panel = NSSavePanel()
+        if let type = UTType(filenameExtension: format.fileExtension) {
+            panel.allowedContentTypes = [type]
+        }
+        panel.nameFieldStringValue = "\(model.project.name)-cover.\(format.fileExtension)"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await model.exportCover(to: url) }
     }
 }
