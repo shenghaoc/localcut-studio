@@ -690,18 +690,25 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         // Evaluate keyframed transform if animated.
         let localTime = CMTimeMaximum(time - callout.timeRange.start, .zero)
-        let transform = callout.transformKeyframes.isAnimated
+        let kfTransform = callout.transformKeyframes.isAnimated
             ? callout.transformKeyframes.value(at: localTime)
             : .identity
 
-        // For spotlight and blur-region, apply the keyframed transform to the
-        // rect/centre *before* rendering so only the mask moves, not the whole
-        // video frame. For overlays (arrow, box, step-number), apply it after.
-        let transformedRect = Self.applyTransformToRect(callout.rect, transform: transform,
+        // For spotlight and blur-region, the image is a full-canvas composite,
+        // so ALL transforms (keyframed + static) must be applied to the geometry
+        // before rendering. For overlays (arrow, box, step-number), only the
+        // keyframed transform is applied to geometry; the static transform is
+        // applied to the rendered image afterwards.
+        let isFullFrame = callout.kind == .spotlight || callout.kind == .blurRegion
+        let geometryTransform = isFullFrame
+            ? Self.composeStaticTransform(callout: callout, keyframed: kfTransform)
+            : kfTransform
+
+        let transformedRect = Self.applyTransformToRect(callout.rect, transform: geometryTransform,
                                                          renderSize: renderSize)
-        let transformedStart = Self.applyTransformToPoint(callout.startPoint, transform: transform,
+        let transformedStart = Self.applyTransformToPoint(callout.startPoint, transform: geometryTransform,
                                                            renderSize: renderSize)
-        let transformedEnd = Self.applyTransformToPoint(callout.endPoint, transform: transform,
+        let transformedEnd = Self.applyTransformToPoint(callout.endPoint, transform: geometryTransform,
                                                          renderSize: renderSize)
 
         let image: CIImage?
@@ -741,14 +748,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
         guard var result = image else { return nil }
 
-        // Apply static scale, rotation (centre-relative), then position offset.
-        // Order matters: scale/rotate first, then translate, so the offset is
-        // not itself rotated or scaled.
-        if callout.scale != 1 || callout.rotation != 0 || callout.positionOffset != .zero {
+        // For non-full-frame effects, apply static transform to the rendered image.
+        if !isFullFrame && (callout.scale != 1 || callout.rotation != 0 || callout.positionOffset != .zero) {
             let cx = renderSize.width / 2
             let cy = renderSize.height / 2
             var t = CGAffineTransform.identity
-            // Scale and rotation are applied around the render centre.
             if callout.scale != 1 || callout.rotation != 0 {
                 t = t.translatedBy(x: cx, y: cy)
                 if callout.rotation != 0 {
@@ -759,7 +763,6 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 }
                 t = t.translatedBy(x: -cx, y: -cy)
             }
-            // Position offset is applied last so it is not affected by rotation/scale.
             if callout.positionOffset != .zero {
                 t = t.translatedBy(x: callout.positionOffset.width,
                                    y: callout.positionOffset.height)
@@ -788,7 +791,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     }
 
     /// Apply a normalised-space Transform2D to a normalised point, returning
-    /// the transformed point in normalised coordinates.
+    /// the transformed point in normalised coordinates. The transform is
+    /// centre-relative (applied around 0.5, 0.5).
     private nonisolated static func applyTransformToPoint(
         _ point: CGPoint, transform: Transform2D, renderSize: CGSize
     ) -> CGPoint {
@@ -796,10 +800,48 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let tx = CGFloat(transform.tx)
         let ty = CGFloat(transform.ty)
         let scale = CGFloat(transform.decomposedScale)
-        // Transform is centre-relative: offset from 0.5, scale, then add back.
+        let rotation = CGFloat(transform.decomposedRotation)
+        // Transform is centre-relative: offset from 0.5, rotate, scale, then add back.
         let dx = point.x - 0.5
         let dy = point.y - 0.5
-        return CGPoint(x: 0.5 + dx * scale + tx, y: 0.5 + dy * scale + ty)
+        let cosR = cos(rotation)
+        let sinR = sin(rotation)
+        let rx = dx * cosR - dy * sinR
+        let ry = dx * sinR + dy * cosR
+        return CGPoint(x: 0.5 + rx * scale + tx, y: 0.5 + ry * scale + ty)
+    }
+
+    /// Compose the static callout transform (scale, rotation, position offset)
+    /// with the keyframed transform into a single Transform2D for geometry-based
+    /// application on full-frame effects (spotlight, blur-region).
+    private nonisolated static func composeStaticTransform(
+        callout: CalloutClip, keyframed: Transform2D
+    ) -> Transform2D {
+        guard callout.scale != 1 || callout.rotation != 0 || callout.positionOffset != .zero else {
+            return keyframed
+        }
+        // Static transform: scale around centre, then translate.
+        // Convert to Transform2D components.
+        let s = callout.scale
+        let r = callout.rotation
+        let cosR = cos(r)
+        let sinR = sin(r)
+        // Scale-then-rotate matrix (centre-relative).
+        let a = s * cosR
+        let b = s * sinR
+        let c = -s * sinR
+        let d = s * cosR
+        let tx = Float(callout.positionOffset.width)
+        let ty = Float(callout.positionOffset.height)
+        let staticT = Transform2D(a: a, b: b, c: c, d: d, tx: tx, ty: ty)
+        // Compose: apply keyframed first, then static.
+        return Transform2D(
+            a: staticT.a * keyframed.a + staticT.b * keyframed.c,
+            b: staticT.a * keyframed.b + staticT.b * keyframed.d,
+            c: staticT.c * keyframed.a + staticT.d * keyframed.c,
+            d: staticT.c * keyframed.b + staticT.d * keyframed.d,
+            tx: staticT.a * keyframed.tx + staticT.b * keyframed.ty + staticT.tx,
+            ty: staticT.c * keyframed.tx + staticT.d * keyframed.ty + staticT.ty)
     }
 
     // MARK: - Captions
