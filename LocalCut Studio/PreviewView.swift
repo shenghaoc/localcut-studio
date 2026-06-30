@@ -80,12 +80,16 @@ struct PreviewView: View {
         HStack(spacing: 0) {
             videoCanvas
                 // Collapse the non-interactive canvas to a single labelled element
-                // *before* the overlays are added, so the transport controls and
-                // format badge stay separate accessible siblings rather than being
-                // swallowed (or read twice) inside the preview container.
+                // *before* the overlays are added, so the empty-state action,
+                // transport controls, and badges stay separate accessible siblings
+                // rather than being swallowed (or read twice) inside the preview
+                // container.
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Preview")
                 .accessibilityValue(previewAccessibilityValue)
+                .overlay {
+                    emptyPreviewState
+                }
                 .overlay(alignment: .bottom) {
                     TransportOverlay(model: model)
                         .padding(.bottom, 16)
@@ -112,26 +116,6 @@ struct PreviewView: View {
             Color.black
             if model.hasPreviewItem {
                 PreviewPlayerView(player: model.player)
-            } else {
-                ContentUnavailableView {
-                    Label("No Preview", systemImage: "film.stack")
-                        .foregroundStyle(.secondary)
-                } description: {
-                    Text("Import media, then drag a clip to the timeline.")
-                        .foregroundStyle(.secondary)
-                } actions: {
-                    Button("Import Media…") {
-                        model.requestImport()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    // This button is inside `videoCanvas` which uses
-                    // `.accessibilityElement(children: .ignore)`, so VoiceOver
-                    // cannot discover it.  Hide it: the parent "Preview"
-                    // element already conveys the empty state in its
-                    // accessibilityValue, and File ▸ Import… (⌘I) provides
-                    // a keyboard-accessible import path.
-                    .accessibilityHidden(true)
-                }
             }
             if model.showSafeZones,
                let profile = SafeZoneLibrary.validProfile(
@@ -142,6 +126,26 @@ struct PreviewView: View {
                     profile: profile,
                     renderSize: model.project.renderSize)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyPreviewState: some View {
+        if !model.hasPreviewItem {
+            ContentUnavailableView {
+                Label("No Preview", systemImage: "film.stack")
+                    .foregroundStyle(.secondary)
+            } description: {
+                Text("Import media, then drag a clip to the timeline.")
+                    .foregroundStyle(.secondary)
+            } actions: {
+                Button("Import Media…") {
+                    model.requestImport()
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Import media")
+            }
+            .padding(24)
         }
     }
 
