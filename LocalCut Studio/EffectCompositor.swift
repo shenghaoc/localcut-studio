@@ -294,13 +294,15 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
 
         // Phase 43: when a padded background is active, inset the foreground
-        // layers with rounded corners so the background remains visible.
-        if let bgImage = paddedBackgroundImage, instruction.paddedInsetMargin > 0 {
+        // layers with rounded corners and drop shadow so the background remains
+        // visible around them.
+        if let bgImage = paddedBackgroundImage, instruction.paddedInsetMargin > 0,
+           let preset = instruction.paddedBackground {
             let margin = CGFloat(instruction.paddedInsetMargin)
             let insetRect = CGRect(x: margin, y: margin,
                                    width: renderSize.width - margin * 2,
                                    height: renderSize.height - margin * 2)
-            let cornerRadius = CGFloat(instruction.paddedBackground?.cornerRadius ?? 16)
+            let cornerRadius = CGFloat(preset.cornerRadius)
             let mask = Self.createRoundedRectMask(
                 rect: insetRect, cornerRadius: cornerRadius, renderSize: renderSize)
             // Isolate the foreground (everything over the background).
@@ -311,8 +313,24 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                     kCIInputBackgroundImageKey: clear,
                     kCIInputMaskImageKey: mask,
                 ])?.outputImage {
-                    // Composite the masked foreground over the full background.
-                    result = maskedFg.composited(over: bgImage)
+                    var foreground = maskedFg
+                    // Apply drop shadow if configured.
+                    if preset.shadowOpacity > 0, preset.shadowRadius > 0 {
+                        if let shadow = CIFilter(name: "CIDropShadow", parameters: [
+                            kCIInputImageKey: foreground,
+                            "inputOffset": CIVector(
+                                x: CGFloat(preset.shadowOffset.width),
+                                y: CGFloat(preset.shadowOffset.height)),
+                            "inputRadius": CGFloat(preset.shadowRadius),
+                            "inputColor": CIColor(
+                                red: 0, green: 0, blue: 0,
+                                alpha: CGFloat(preset.shadowOpacity)),
+                        ])?.outputImage {
+                            foreground = shadow.cropped(to: CGRect(origin: .zero, size: renderSize))
+                        }
+                    }
+                    // Composite the (optionally shadowed) foreground over the background.
+                    result = foreground.composited(over: bgImage)
                 }
             }
         }

@@ -82,12 +82,13 @@ final class ScreencastEventLogWriter {
     }
 
     /// Switch event-coordinate mapping when the live recorder switches source.
-    func updateTarget(_ newTarget: CaptureTarget) {
+    func updateTarget(_ newTarget: CaptureTarget, captureRegion: CaptureRegion? = nil) {
         let wasMonitoring = localMonitor != nil || globalMonitor != nil
         if wasMonitoring {
             stopMonitoring()
         }
         target = newTarget
+        self.captureRegion = captureRegion
         if wasMonitoring {
             startMonitoring()
         }
