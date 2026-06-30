@@ -92,6 +92,8 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let overlaySourceRegistryID: UUID?
     /// Phase 43 callout clips to render.
     let callouts: [CalloutClip]
+    /// Phase 43 padded background preset. When non-nil, renders behind everything.
+    let paddedBackground: PaddedBackgroundPreset?
     /// Project frame rate — used by grain to advance the noise pattern each
     /// real frame instead of hardcoding a 24 fps cadence.
     let frameRate: Double
@@ -101,7 +103,7 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
     init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = [],
          overlays: [OverlayRenderItem] = [], overlaySourceRegistryID: UUID? = nil,
-         callouts: [CalloutClip] = [],
+         callouts: [CalloutClip] = [], paddedBackground: PaddedBackgroundPreset? = nil,
          frameRate: Double = 24, workingColourSpace: WorkingColourSpace = .sRGB) {
         self.timeRange = timeRange
         self.units = units
@@ -109,6 +111,7 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
         self.overlays = overlays
         self.overlaySourceRegistryID = overlaySourceRegistryID
         self.callouts = callouts
+        self.paddedBackground = paddedBackground
         self.frameRate = frameRate
         self.workingColourSpace = workingColourSpace
         // A transition tweens its layers across the interval. Captions also tween
@@ -262,6 +265,14 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let space = instruction.workingColourSpace
         let ciContext = Self.context(for: space)
         var result: CIImage?
+
+        // Padded background renders behind everything.
+        if let bg = instruction.paddedBackground {
+            if let bgImage = PaddedBackgroundRenderer.render(
+                preset: bg, renderSize: renderSize) {
+                result = bgImage
+            }
+        }
 
         for unit in instruction.units {
             guard let image = renderedImage(for: unit, request: request,

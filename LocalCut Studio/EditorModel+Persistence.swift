@@ -56,6 +56,8 @@ struct ProjectState: Equatable {
     var overlayBundlePaths: [UUID: String]
     /// Phase 43 callout clips.
     var callouts: [CalloutClip]
+    /// Phase 43 padded background preset.
+    var paddedBackground: PaddedBackgroundPreset?
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
@@ -82,6 +84,7 @@ struct ProjectState: Equatable {
             && lhs.overlayBookmarks == rhs.overlayBookmarks
             && lhs.overlayBundlePaths == rhs.overlayBundlePaths
             && lhs.callouts == rhs.callouts
+            && lhs.paddedBackground == rhs.paddedBackground
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
@@ -135,6 +138,7 @@ extension EditorModel {
             overlayBookmarks: project.overlayBookmarks,
             overlayBundlePaths: project.overlayBundlePaths,
             callouts: project.callouts,
+            paddedBackground: project.paddedBackground,
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID,
             selectedMarkerID: selectedMarkerID,
@@ -206,6 +210,7 @@ extension EditorModel {
         project.overlayBookmarks = state.overlayBookmarks
         project.overlayBundlePaths = state.overlayBundlePaths
         project.callouts = state.callouts
+        project.paddedBackground = state.paddedBackground
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID

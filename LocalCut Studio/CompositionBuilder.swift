@@ -377,6 +377,7 @@ enum CompositionBuilder {
             captionTracks: captionTracks,
             overlays: project.overlays,
             callouts: project.callouts,
+            paddedBackground: project.paddedBackground,
             totalDuration: totalDuration,
             renderSize: renderSize,
             frameRate: project.frameRate,
@@ -639,6 +640,7 @@ enum CompositionBuilder {
         captionTracks: [CaptionTrack],
         overlays: [OverlayClip],
         callouts: [CalloutClip] = [],
+        paddedBackground: PaddedBackgroundPreset? = nil,
         totalDuration: CMTime,
         renderSize: CGSize,
         frameRate: Double,
@@ -753,6 +755,7 @@ enum CompositionBuilder {
                 overlays: overlaysForInterval,
                 overlaySourceRegistryID: overlaySourceRegistryID,
                 callouts: calloutsForInterval,
+                paddedBackground: paddedBackground,
                 frameRate: frameRate,
                 workingColourSpace: workingColourSpace))
         }
