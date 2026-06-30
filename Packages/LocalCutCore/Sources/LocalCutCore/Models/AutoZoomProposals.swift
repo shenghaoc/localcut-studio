@@ -172,8 +172,11 @@ public enum AutoZoomProposalGenerator {
         let zoomOutTime = parameters.zoomOutDuration
 
         let endScale = parameters.defaultEndScale
-        let tx = Float(burst.centreX - 0.5) * (endScale - 1)
-        let ty = Float(burst.centreY - 0.5) * (endScale - 1)
+        // Translation must point toward the centre (opposite sign of the target
+        // offset) because the compositor applies the translation *before* the
+        // centre-relative scale-around-centre transform.
+        let tx = Float(0.5 - burst.centreX) * (endScale - 1)
+        let ty = Float(0.5 - burst.centreY) * (endScale - 1)
         let zoomed = Transform2D(translateX: tx, translateY: ty, scale: endScale, rotation: 0)
 
         let keyframes: [Keyframe<Transform2D>] = [

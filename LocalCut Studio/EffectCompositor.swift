@@ -520,7 +520,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // clip's static geometry transform.
         if layer.transformKeyframes.isAnimated {
             let sourceTime = layer.sourceTime(at: request.compositionTime)
-            let kfValue = layer.transformKeyframes.value(at: sourceTime)
+            // Keyframes are authored in clip-source-local time (0 = clip start),
+            // but sourceTime includes the media in-point. Subtract it.
+            let clipLocalTime = max(.zero, sourceTime - layer.clipSourceStart)
+            let kfValue = layer.transformKeyframes.value(at: clipLocalTime)
             if kfValue != .identity {
                 let renderSize = request.renderContext.size
                 let cx = renderSize.width / 2

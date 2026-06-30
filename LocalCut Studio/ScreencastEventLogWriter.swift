@@ -283,7 +283,10 @@ final class ScreencastEventLogWriter {
             if let region = captureRegion, region.displayID == displayID {
                 return Self.normalizedRegionPosition(region: region, point: NSEvent.mouseLocation)
             }
-            return Self.normalizedScreenPosition(displayID: displayID, point: NSEvent.mouseLocation)
+            // Without a cropped region we cannot determine which display
+            // events belong to the captured application (Accessibility is
+            // not requested). Drop the event to respect the privacy boundary.
+            return nil
         }
     }
 
@@ -311,7 +314,9 @@ final class ScreencastEventLogWriter {
             if let region = captureRegion, region.displayID == displayID {
                 return Self.normalizedRegionPosition(region: region, point: NSEvent.mouseLocation)
             }
-            return Self.normalizedScreenPosition(displayID: displayID, point: NSEvent.mouseLocation)
+            // Without a cropped region we cannot determine which display
+            // events belong to the captured application. Drop the event.
+            return nil
         }
     }
 

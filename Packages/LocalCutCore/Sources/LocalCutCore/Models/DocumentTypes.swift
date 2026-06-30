@@ -9,8 +9,10 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     // Bumped to 8 in Phase 43: `callouts` and `paddedBackground` added.
     // Prior bump to 7 (single-file 6) was in Phase 38b for `OverlayClip`
     // persistence. Prior bump (6/5) was for look effects in Phase 38a.
+    // Single-file bumped to 7 in Phase 43: `callouts`, `paddedBackground`,
+    // and per-clip `transformKeyframes` added.
     public static let currentSchemaVersion = 8
-    public static let singleFileSchemaVersion = 6
+    public static let singleFileSchemaVersion = 7
     public static let currentBundleFormat = "1"
     public static let fileExtension = "lcstudio"
 

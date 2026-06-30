@@ -51,8 +51,11 @@ public enum ZoomPanPresetGenerator {
         endScale: Float,
         duration: Double
     ) -> [Keyframe<Transform2D>] {
-        let tx = Float(targetPoint.x - 0.5) * (endScale - 1)
-        let ty = Float(targetPoint.y - 0.5) * (endScale - 1)
+        // Translation points toward the centre (opposite sign of the target
+        // offset) because the compositor applies translation before the
+        // centre-relative scale-around-centre transform.
+        let tx = Float(0.5 - targetPoint.x) * (endScale - 1)
+        let ty = Float(0.5 - targetPoint.y) * (endScale - 1)
 
         let start = Keyframe<Transform2D>(
             time: CMTime(seconds: 0, preferredTimescale: 600),
@@ -70,9 +73,10 @@ public enum ZoomPanPresetGenerator {
         endScale: Float,
         duration: Double
     ) -> [Keyframe<Transform2D>] {
-        let startTx = Float(targetPoint.x - 0.5) * (endScale - 1) - 0.3
-        let endTx = Float(targetPoint.x - 0.5) * (endScale - 1) + 0.3
-        let ty = Float(targetPoint.y - 0.5) * (endScale - 1)
+        let baseTx = Float(0.5 - targetPoint.x) * (endScale - 1)
+        let startTx = baseTx - 0.3
+        let endTx = baseTx + 0.3
+        let ty = Float(0.5 - targetPoint.y) * (endScale - 1)
 
         let start = Keyframe<Transform2D>(
             time: CMTime(seconds: 0, preferredTimescale: 600),
@@ -94,8 +98,8 @@ public enum ZoomPanPresetGenerator {
         let zoomInTime = min(0.3, duration * 0.15)
         let holdTime = duration * 0.7
 
-        let tx = Float(targetPoint.x - 0.5) * (endScale - 1)
-        let ty = Float(targetPoint.y - 0.5) * (endScale - 1)
+        let tx = Float(0.5 - targetPoint.x) * (endScale - 1)
+        let ty = Float(0.5 - targetPoint.y) * (endScale - 1)
         let zoomed = Transform2D(translateX: tx, translateY: ty,
                                  scale: endScale, rotation: 0)
 
