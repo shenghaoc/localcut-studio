@@ -64,12 +64,15 @@ final class ScreencastEventLogWriter {
             }
         } else {
             globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: Self.globalEventMask) { [weak self] event in
+                // Extract Sendable values before entering assumeIsolated.
                 let eventType = event.type
+                let locationInWindow = event.locationInWindow
+                let windowSize = event.window?.frame.size
                 MainActor.assumeIsolated {
                     self?.recordFromMonitor(
                         eventType: eventType,
-                        locationInWindow: .zero,
-                        windowSize: nil,
+                        locationInWindow: locationInWindow,
+                        windowSize: windowSize,
                         keyCode: 0,
                         modifierFlags: [],
                         source: .globalTarget)
