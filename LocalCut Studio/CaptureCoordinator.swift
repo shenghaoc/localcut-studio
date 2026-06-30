@@ -40,8 +40,8 @@ actor CaptureCoordinator {
         /// Once a critical manifest append fails, the session must remain
         /// unfinalized so recovery can inspect the fragmented files on next launch.
         var manifestWriteFailed = false
-        /// Own-app event log writer. Non-nil only when recording LocalCut Studio
-        /// itself (`.application` target matching our bundle ID).
+        /// Event log writer for screen/application/window targets. Own-app
+        /// targets include key codes; non-own targets record mouse/scroll only.
         var eventLogWriter: ScreencastEventLogWriter?
     }
 
@@ -279,13 +279,15 @@ actor CaptureCoordinator {
         for descriptor in descriptors {
             sourceIDs[descriptor.kind] = descriptor.id
         }
-        // Create event log writer for own-app recordings only.
+        // Create an event log writer for screen targets. Webcam/mic-only
+        // recordings have no screen coordinate space for proposals.
         var eventLogWriter: ScreencastEventLogWriter?
-        if let target = request.target, target.isOwnApp {
-            eventLogWriter = await ScreencastEventLogWriter(
+        if let target = request.target {
+            eventLogWriter = ScreencastEventLogWriter(
                 sessionID: id,
                 startHostTimeUs: startHostTimeUs,
-                directoryURL: directoryURL)
+                directoryURL: directoryURL,
+                target: target)
         }
 
         let active = ActiveSession(
@@ -328,7 +330,8 @@ actor CaptureCoordinator {
             }
             throw error
         }
-        // Start event monitoring for own-app recordings (after sessions are running).
+        // Start event monitoring after screen sessions are running so event
+        // timestamps align with the capture clock.
         await activeSession?.eventLogWriter?.startMonitoring()
         state = .recording
         didStartRecording = true
@@ -447,6 +450,8 @@ actor CaptureCoordinator {
             throw CaptureEngineError.notRecording
         }
         state = .pausing
+
+        await active.eventLogWriter?.stopMonitoring()
 
         // Stop all capture streams.
         for session in active.sessions {
@@ -710,6 +715,7 @@ actor CaptureCoordinator {
             throw error
         }
         state = .recording
+        await activeSession?.eventLogWriter?.startMonitoring()
         didStartRecording = true
     }
 
@@ -726,6 +732,7 @@ actor CaptureCoordinator {
         // Persist the switched target so resume() uses it.
         active.currentTarget = newTarget
         active.startRequest?.captureRegion = nil
+        await active.eventLogWriter?.updateTarget(newTarget)
         activeSession = active
     }
 

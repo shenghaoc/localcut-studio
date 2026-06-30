@@ -98,6 +98,29 @@ extension EditorModel {
         Task { await rebuild() }
     }
 
+    /// Import a standalone Phase 43 `events.json` file and generate proposals.
+    @MainActor
+    func importScreencastEventLog(url: URL) {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: url)
+            let log = try JSONDecoder().decode(ScreencastEventLog.self, from: data)
+            guard log.isSupportedSchema else {
+                statusMessage = "Event log uses an unsupported schema."
+                return
+            }
+            autoZoomProposals = AutoZoomProposalGenerator.generateProposals(
+                from: log,
+                canvasSize: project.renderSize)
+            statusMessage = autoZoomProposals.isEmpty
+                ? "Imported event log; no auto-zoom proposals found."
+                : "Imported event log; \(autoZoomProposals.count) auto-zoom proposals available."
+        } catch {
+            statusMessage = "Could not import event log: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Padded Background
 
     /// Apply a default padded background preset.
@@ -108,6 +131,41 @@ extension EditorModel {
         }
         statusMessage = "Applied padded background."
         Task { await rebuild() }
+    }
+
+    /// Apply an image-backed padded background. The bookmark is persisted for
+    /// single-file documents and copied into `.lcbundle` saves.
+    @MainActor
+    func applyPaddedBackgroundImage(url: URL) {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+        guard let bookmark = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil) else {
+            statusMessage = "Could not access background image."
+            return
+        }
+
+        performUndoable("Apply Background Image") {
+            var preset = project.paddedBackground ?? PaddedBackgroundPreset()
+            preset.source = .image
+            preset.imageBookmark = bookmark
+            preset.imageBundleRelativePath = nil
+            project.paddedBackground = preset
+        }
+        statusMessage = "Applied \(url.lastPathComponent) as padded background."
+        Task { await rebuild() }
+    }
+
+    /// Mutate the padded background preset with one undo coalescing target.
+    @MainActor
+    func updatePaddedBackground(_ transform: @escaping (inout PaddedBackgroundPreset) -> Void) {
+        performCoalescedUndoable("Edit Padded Background", target: "padded-background", rebuild: .immediate) {
+            var preset = project.paddedBackground ?? PaddedBackgroundPreset()
+            transform(&preset)
+            project.paddedBackground = preset
+        }
     }
 
     /// Remove the padded background preset.

@@ -240,18 +240,7 @@ nonisolated enum CalloutRenderer {
         guard let gradientImage = gradientFilter.outputImage else { return nil }
         let croppedGradient = gradientImage.cropped(to: CGRect(origin: .zero, size: renderSize))
 
-        // Dark overlay masked by the gradient: inside the spotlight the gradient
-        // is transparent (shows source), outside it is opaque (shows dark overlay).
-        let darkOverlay = CIImage(color: CIColor(red: 0, green: 0, blue: 0,
-                                                  alpha: CGFloat(style.dimOpacity)))
-            .cropped(to: CGRect(origin: .zero, size: renderSize))
-
-        guard let maskFilter = CIFilter(name: "CIBlendWithMask") else { return nil }
-        maskFilter.setValue(darkOverlay, forKey: kCIInputImageKey)
-        maskFilter.setValue(sourceImage, forKey: kCIInputBackgroundImageKey)
-        maskFilter.setValue(croppedGradient, forKey: kCIInputMaskImageKey)
-
-        return maskFilter.outputImage
+        return croppedGradient.composited(over: sourceImage)
     }
 
     // MARK: - Blur Region Callout

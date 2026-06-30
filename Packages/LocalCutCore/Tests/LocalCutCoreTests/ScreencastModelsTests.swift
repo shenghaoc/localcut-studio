@@ -211,6 +211,20 @@ struct PaddedBackgroundPresetTests {
         #expect(abs(decoded.cornerRadius - 20) < 0.001)
         #expect(abs(decoded.shadowOpacity - 0.6) < 0.001)
     }
+
+    @Test("Image bundle path round-trips")
+    func imageBundlePathRoundTrip() throws {
+        let preset = PaddedBackgroundPreset(
+            source: .image,
+            imageBookmark: Data([0x01, 0x02]),
+            imageBundleRelativePath: "assets/background.png")
+        let data = try JSONEncoder().encode(preset)
+        let decoded = try JSONDecoder().decode(PaddedBackgroundPreset.self, from: data)
+
+        #expect(decoded.source == .image)
+        #expect(decoded.imageBookmark == Data([0x01, 0x02]))
+        #expect(decoded.imageBundleRelativePath == "assets/background.png")
+    }
 }
 
 // MARK: - Velocity / Acceleration Bounds

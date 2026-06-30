@@ -467,6 +467,9 @@ public struct PaddedBackgroundPreset: Hashable, Codable, Sendable {
     public var gradientAngle: Float
     /// Bookmark data for the background image. Used when source is `.image`.
     public var imageBookmark: Data?
+    /// Bundle-relative image path (`assets/<uuid>.<ext>`) for portable
+    /// `.lcbundle` saves. Runtime paths still resolve through `imageBookmark`.
+    public var imageBundleRelativePath: String?
     /// Corner radius of the inset clip frame in points.
     public var cornerRadius: Float
     /// Drop shadow opacity (0…1).
@@ -483,6 +486,7 @@ public struct PaddedBackgroundPreset: Hashable, Codable, Sendable {
                 gradientEnd: SIMD4<Float> = SIMD4(0.08, 0.08, 0.12, 1),
                 gradientAngle: Float = .pi / 2,
                 imageBookmark: Data? = nil,
+                imageBundleRelativePath: String? = nil,
                 cornerRadius: Float = 16,
                 shadowOpacity: Float = 0.5,
                 shadowRadius: Float = 20,
@@ -493,6 +497,7 @@ public struct PaddedBackgroundPreset: Hashable, Codable, Sendable {
         self.gradientEnd = gradientEnd
         self.gradientAngle = gradientAngle
         self.imageBookmark = imageBookmark
+        self.imageBundleRelativePath = imageBundleRelativePath
         self.cornerRadius = max(0, cornerRadius)
         self.shadowOpacity = max(0, min(1, shadowOpacity))
         self.shadowRadius = max(0, shadowRadius)

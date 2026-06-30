@@ -64,7 +64,8 @@ struct ScreencastEventLogWriterTests {
         let writer = ScreencastEventLogWriter(
             sessionID: UUID(),
             startHostTimeUs: 0,
-            directoryURL: dir)
+            directoryURL: dir,
+            target: .display(displayID: 1, width: 1920, height: 1080))
         try writer.flush()
 
         let eventsURL = dir.appendingPathComponent("events.json")
@@ -86,7 +87,8 @@ struct ScreencastEventLogWriterTests {
         let writer = ScreencastEventLogWriter(
             sessionID: UUID(),
             startHostTimeUs: 0,
-            directoryURL: dir)
+            directoryURL: dir,
+            target: .display(displayID: 1, width: 1920, height: 1080))
         #expect(writer.currentEvents().isEmpty)
     }
 }

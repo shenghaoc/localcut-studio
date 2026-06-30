@@ -42,16 +42,16 @@ extension ProjectDocument {
     }
 
     /// Captures a queue snapshot. Saved bundle documents intentionally strip
-    /// bookmarks for bundled overlay assets, but the render queue persists only
-    /// the snapshot and not the enclosing bundle URL. When a live bundle project
-    /// is queued, add temporary bookmarks for those bundled overlay assets so the
-    /// background runner can resolve and render them later.
+    /// bookmarks for bundled overlay/background assets, but the render queue
+    /// persists only the snapshot and not the enclosing bundle URL. When a live
+    /// bundle project is queued, add temporary bookmarks for those bundled
+    /// assets so the background runner can resolve and render them later.
     init(project: Project, queueBundleURL: URL?) {
         self.init(project: project)
-        addQueueOverlayBookmarks(from: queueBundleURL)
+        addQueueBundleAssetBookmarks(from: queueBundleURL)
     }
 
-    private mutating func addQueueOverlayBookmarks(from bundleURL: URL?) {
+    private mutating func addQueueBundleAssetBookmarks(from bundleURL: URL?) {
         guard let bundleURL,
               ProjectBundle.isBundle(url: bundleURL) else { return }
 
@@ -70,6 +70,19 @@ extension ProjectDocument {
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil)) ?? Data()
         }
+
+        guard var background = paddedBackground,
+              background.source == .image,
+              background.imageBookmark == nil,
+              let relative = background.imageBundleRelativePath,
+              ProjectBundleLayout.isSafeAssetRelativePath(relative) else { return }
+        let sourceURL = bundleURL.appendingPathComponent(relative)
+        guard FileManager.default.isReadableFile(atPath: sourceURL.path) else { return }
+        background.imageBookmark = try? sourceURL.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil)
+        paddedBackground = background
     }
 }
 
