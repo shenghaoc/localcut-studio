@@ -64,11 +64,12 @@ public enum BeatDetectionCore {
             // Pack windowed samples into split complex (interleaved → split).
             windowed.withUnsafeBufferPointer { buf in
                 if let baseAddress = buf.baseAddress {
-                    // Use raw-pointer cast rather than withMemoryRebound
-                    // because Float (4 B) and DSPComplex (8 B) differ in stride.
-                    let complexP = UnsafeRawPointer(baseAddress)
-                        .assumingMemoryBound(to: DSPComplex.self)
-                    vDSP_ctoz(complexP, 2, &split, 1, vDSP_Length(halfN))
+                    // withMemoryRebound formally rebinds Float memory to
+                    // DSPComplex, satisfying Swift's memory model.  The byte
+                    // count is halfN × 8 = frameSize × 4, matching the buffer.
+                    baseAddress.withMemoryRebound(to: DSPComplex.self, capacity: halfN) { complexP in
+                        vDSP_ctoz(complexP, 2, &split, 1, vDSP_Length(halfN))
+                    }
                 }
             }
 
