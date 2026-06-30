@@ -54,6 +54,8 @@ struct ProjectState: Equatable {
     var overlayBookmarks: [UUID: Data]
     /// Overlay bundle-relative paths keyed by overlay ID.
     var overlayBundlePaths: [UUID: String]
+    /// Phase 43 callout clips.
+    var callouts: [CalloutClip]
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
@@ -79,6 +81,7 @@ struct ProjectState: Equatable {
             && lhs.overlays == rhs.overlays
             && lhs.overlayBookmarks == rhs.overlayBookmarks
             && lhs.overlayBundlePaths == rhs.overlayBundlePaths
+            && lhs.callouts == rhs.callouts
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
@@ -131,6 +134,7 @@ extension EditorModel {
             overlays: project.overlays,
             overlayBookmarks: project.overlayBookmarks,
             overlayBundlePaths: project.overlayBundlePaths,
+            callouts: project.callouts,
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID,
             selectedMarkerID: selectedMarkerID,
@@ -201,6 +205,7 @@ extension EditorModel {
         project.overlays = state.overlays
         project.overlayBookmarks = state.overlayBookmarks
         project.overlayBundlePaths = state.overlayBundlePaths
+        project.callouts = state.callouts
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID

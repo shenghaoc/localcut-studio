@@ -28,6 +28,7 @@ final class EditorModel {
     /// clip / transition delete shortcut keeps working unchanged.
     var selectedMarkerID: TimelineMarker.ID?
     var selectedOverlayID: OverlayClip.ID?
+    var selectedCalloutID: CalloutClip.ID?
 
     // Playback
     let player = AVPlayer()

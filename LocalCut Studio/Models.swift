@@ -85,6 +85,8 @@ final class Project {
     /// Animated overlay clips. Ordered bottom-to-top; later entries render above
     /// earlier ones, matching the video-track stacking convention.
     var overlays: [OverlayClip] = []
+    /// Phase 43 callout clips (arrow, box, step number, spotlight, blur region).
+    var callouts: [CalloutClip] = []
     /// Bookmark data for overlay source files, keyed by overlay ID.
     var overlayBookmarks: [UUID: Data] = [:]
     /// Bundle-relative paths for overlay source files, keyed by overlay ID.
