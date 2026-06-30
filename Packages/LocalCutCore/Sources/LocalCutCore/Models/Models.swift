@@ -1098,20 +1098,33 @@ public struct CaptionLine: Identifiable, Hashable, Codable, Sendable {
 
 // MARK: - Timeline Markers
 
+/// The semantic role of a timeline marker.
+public enum MarkerKind: String, Hashable, Codable, Sendable {
+    /// A generic annotation marker (the default for legacy documents).
+    case note
+    /// A chapter marker used for YouTube sidecar and embedded chapter metadata.
+    case chapter
+}
+
 public struct TimelineMarker: Identifiable, Hashable, Codable, Sendable {
     public let id: UUID
     public var time: CMTime
     public var name: String
     public var colour: RGBAColour?
+    /// The semantic kind of this marker. Defaults to `.note` for legacy
+    /// documents that lack the field.
+    public var kind: MarkerKind
 
-    public init(id: UUID = UUID(), time: CMTime, name: String = "Marker", colour: RGBAColour? = nil) {
+    public init(id: UUID = UUID(), time: CMTime, name: String = "Marker",
+                colour: RGBAColour? = nil, kind: MarkerKind = .note) {
         self.id = id
         self.time = time
         self.name = name
         self.colour = colour
+        self.kind = kind
     }
 
-    private enum CodingKeys: String, CodingKey { case id, time, name, colour }
+    private enum CodingKeys: String, CodingKey { case id, time, name, colour, kind }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -1120,6 +1133,7 @@ public struct TimelineMarker: Identifiable, Hashable, Codable, Sendable {
         time = timeCode.cmTime
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Marker"
         colour = try c.decodeIfPresent(RGBAColour.self, forKey: .colour)
+        kind = try c.decodeIfPresent(MarkerKind.self, forKey: .kind) ?? .note
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -1128,6 +1142,7 @@ public struct TimelineMarker: Identifiable, Hashable, Codable, Sendable {
         try c.encode(CMTimeCode(time), forKey: .time)
         try c.encode(name, forKey: .name)
         try c.encodeIfPresent(colour, forKey: .colour)
+        try c.encode(kind, forKey: .kind)
     }
 }
 

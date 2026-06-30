@@ -31,6 +31,7 @@ public enum BuiltInCaptionPresets: Sendable {
         karaokeBounce,
         karaokeTypewriter,
         retroOutline,
+        tutorialScreencast,
     ]
 
     public static let socialBoldYellow = CaptionPresetV1(
@@ -210,6 +211,31 @@ public enum BuiltInCaptionPresets: Sendable {
             s.enterAnimation = .slide
             s.slideDirection = .fromBottom
             s.enterDuration = 0.3
+            return s
+        }())
+
+    // MARK: - Tutorial / Screencast
+
+    /// A caption preset tuned for tutorials and screencasts: sans-serif,
+    /// high-contrast white on a dark pill background, larger readable font,
+    /// no animation.
+    public static let tutorialScreencast = CaptionPresetV1(
+        name: "Tutorial",
+        family: "tutorial",
+        style: {
+            var s = CaptionStyle()
+            s.fontName = "Helvetica"
+            s.fontSize = 52
+            s.fill = .white
+            s.pill = PillStyle(
+                colour: RGBAColour(red: 0.1, green: 0.1, blue: 0.12, alpha: 0.92),
+                cornerRadius: 10,
+                paddingX: 20,
+                paddingY: 10)
+            s.anchor = .bottom
+            s.verticalInset = 80
+            s.enterAnimation = .none
+            s.exitAnimation = .none
             return s
         }())
 }
