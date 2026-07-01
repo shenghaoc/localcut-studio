@@ -231,6 +231,8 @@ final class DocumentController {
             model.autoZoomProposals.removeAll()
         }
         model.project.keystrokeOverlayClips = document.keystrokeOverlayClips
+        // Phase 45: scene doc is migrated on decode (in ProjectDocument.init(from:)).
+        model.project.sceneDoc = document.sceneDoc
 
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         model.documentURL = isNewerSchema ? nil : url

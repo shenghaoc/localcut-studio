@@ -40,7 +40,8 @@ extension ProjectDocument {
             screencastEventLogs: project.screencastEventLogs,
             keystrokeOverlayClips: project.keystrokeOverlayClips,
             aspect: project.aspect,
-            coverFrame: project.coverFrame)
+            coverFrame: project.coverFrame,
+            sceneDoc: project.sceneDoc)
     }
 
     /// Captures a queue snapshot. Saved bundle documents intentionally strip

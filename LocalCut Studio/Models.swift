@@ -94,6 +94,8 @@ final class Project {
     var screencastEventLogs: [ScreencastEventLog] = []
     /// Phase 44 keystroke overlay clips derived from event logs.
     var keystrokeOverlayClips: [KeystrokeOverlayClip] = []
+    /// Phase 45 scene definitions for Program Mode.
+    var sceneDoc: SceneDoc = SceneDoc()
     /// Bookmark data for overlay source files, keyed by overlay ID.
     var overlayBookmarks: [UUID: Data] = [:]
     /// Bundle-relative paths for overlay source files, keyed by overlay ID.
