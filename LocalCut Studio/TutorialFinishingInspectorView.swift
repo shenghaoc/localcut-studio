@@ -162,8 +162,8 @@ struct TutorialFinishingInspectorView: View {
                     }
 
                     if !issues.isEmpty {
-                        ForEach(issues.indices, id: \.self) { i in
-                            Label(issues[i].localizedDescription, systemImage: "exclamationmark.triangle")
+                        ForEach(issues, id: \.self) { issue in
+                            Label(issue.localizedDescription, systemImage: "exclamationmark.triangle")
                                 .font(.caption)
                                 .foregroundStyle(.orange)
                         }

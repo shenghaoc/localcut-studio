@@ -16,6 +16,9 @@ extension EditorModel {
     /// Runs silence detection on the first selected audio track's media.
     @MainActor
     func runSilenceDetection(parameters: SilenceDetectionParameters = SilenceDetectionParameters()) {
+        // Cancel any in-flight detection from a previous invocation.
+        silenceDetectionTask?.cancel()
+
         guard let track = project.audioTracks.first(where: { !$0.clips.isEmpty }),
               let clip = track.clips.first,
               let media = project.media(for: clip.mediaID)
@@ -26,14 +29,31 @@ extension EditorModel {
 
         let url = media.url
         let params = parameters
+        let generation = sessionGeneration
+        // Capture the source→timeline offset so we can translate detected
+        // source-time ranges into timeline positions after the async decode.
+        let sourceToTimeline = clip.timelineStart - clip.sourceStart
 
-        Task {
+        silenceDetectionTask = Task {
             do {
                 let detector = SilenceDetector()
                 let (silences, proposals) = try await detector.detect(url: url, parameters: params)
 
+                // Convert from source time to timeline time.
+                let timelineProposals = proposals.map { proposal -> ProposedCut in
+                    var p = proposal
+                    p.silenceRange = CMTimeRange(
+                        start: proposal.silenceRange.start + sourceToTimeline,
+                        duration: proposal.silenceRange.duration)
+                    p.unpaddedSilenceRange = CMTimeRange(
+                        start: proposal.unpaddedSilenceRange.start + sourceToTimeline,
+                        duration: proposal.unpaddedSilenceRange.duration)
+                    return p
+                }
+
                 await MainActor.run {
-                    self.silenceProposals = proposals
+                    guard self.sessionGeneration == generation else { return }
+                    self.silenceProposals = timelineProposals
                     if silences.isEmpty {
                         self.statusMessage = "No silences detected."
                     } else {
@@ -42,6 +62,7 @@ extension EditorModel {
                 }
             } catch {
                 await MainActor.run {
+                    guard self.sessionGeneration == generation else { return }
                     self.statusMessage = "Silence detection failed: \(error.localizedDescription)"
                 }
             }
@@ -134,6 +155,9 @@ extension EditorModel {
 
                 // Right portion (after silence) — shifted left.
                 // Use Clip init to get a fresh UUID, avoiding duplicate IDs.
+                // Shift source-local keyframes (speedCurve, transformKeyframes)
+                // backward by rightSourceOffset so they stay aligned with the
+                // right portion's new sourceStart.
                 if overlapEnd < clipEnd {
                     let rightOutputOffset = overlapEnd - clipStart
                     let rightSourceOffset = clip.sourceOffset(forOutputOffset: rightOutputOffset)
@@ -147,8 +171,8 @@ extension EditorModel {
                         effects: clip.effects,
                         transition: clip.transition,
                         volumeEnvelope: clip.volumeEnvelope,
-                        transformKeyframes: clip.transformKeyframes,
-                        speedCurve: clip.speedCurve,
+                        transformKeyframes: clip.transformKeyframes.shifted(by: rightSourceOffset),
+                        speedCurve: clip.speedCurve.shifted(by: rightSourceOffset),
                         preservePitch: clip.preservePitch,
                         pitchAlgorithm: clip.pitchAlgorithm)
                     newClips.append(right)
@@ -161,15 +185,19 @@ extension EditorModel {
         for captionTrack in project.captionTracks {
             for line in captionTrack.lines {
                 if line.range.start >= silenceEnd {
-                    // Caption lines are value types; we need to update in place.
-                    // Since CaptionLine.range is a CMTimeRange, shift the line.
                     let shiftedStart = line.range.start - silenceDuration
                     let shiftedRange = CMTimeRange(start: shiftedStart, duration: line.range.duration)
+                    // WordTiming ranges are in absolute timeline time — shift them too.
+                    let shiftedWords = line.words?.map { wt -> WordTiming in
+                        WordTiming(range: CMTimeRange(
+                            start: wt.range.start - silenceDuration,
+                            duration: wt.range.duration), word: wt.word)
+                    }
                     captionTrack.updateLine(CaptionLine(
                         id: line.id,
                         range: shiftedRange,
                         text: line.text,
-                        words: line.words,
+                        words: shiftedWords,
                         style: line.style,
                         styleKeyframes: line.styleKeyframes))
                 }

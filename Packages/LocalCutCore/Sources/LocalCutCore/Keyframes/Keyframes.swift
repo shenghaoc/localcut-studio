@@ -86,6 +86,18 @@ public struct Keyframed<T: Interpolatable>: Hashable, Codable, Sendable {
 
     public var isAnimated: Bool { !keyframes.isEmpty }
 
+    /// Returns a copy with all keyframe times shifted by the given offset.
+    /// Used when splitting a clip to re-anchor source-local keyframes to
+    /// the right portion's new sourceStart.
+    public func shifted(by offset: CMTime) -> Keyframed<T> {
+        guard offset != .zero else { return self }
+        let shifted = keyframes.map { kf in
+            Keyframe(id: kf.id, time: kf.time - offset, value: kf.value,
+                     incomingHandle: kf.incomingHandle, outgoingHandle: kf.outgoingHandle)
+        }
+        return Keyframed(keyframes: shifted, defaultValue: defaultValue)
+    }
+
     /// Linearly interpolates between the two surrounding keyframes.
     /// O(log n) via binary search for the lower bound.
     public func value(at time: CMTime) -> T {

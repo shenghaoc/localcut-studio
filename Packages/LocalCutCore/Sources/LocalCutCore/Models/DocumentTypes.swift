@@ -13,7 +13,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     // Single-file bumped to 7 in Phase 43: `callouts`, `paddedBackground`,
     // and per-clip `transformKeyframes` added.
     public static let currentSchemaVersion = 9
-    public static let singleFileSchemaVersion = 8
+    public static let singleFileSchemaVersion = 9
     public static let currentBundleFormat = "1"
     public static let fileExtension = "lcstudio"
 

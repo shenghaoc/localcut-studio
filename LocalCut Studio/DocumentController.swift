@@ -35,6 +35,9 @@ final class DocumentController {
         model.project.coverFrame = nil
         model.selectedCalloutID = nil
         model.autoZoomProposals.removeAll()
+        model.silenceDetectionTask?.cancel()
+        model.silenceDetectionTask = nil
+        model.silenceProposals = []
         model.documentURL = nil
         model.isDirty = false
         model.unresolvedMedia = []
@@ -75,6 +78,9 @@ final class DocumentController {
         model.selectedOverlayID = nil
         model.selectedCalloutID = nil
         model.autoZoomProposals.removeAll()
+        model.silenceDetectionTask?.cancel()
+        model.silenceDetectionTask = nil
+        model.silenceProposals = []
         model.unresolvedMedia = []
         model.undoManager.removeAllActions()
         model.coalescedCommitTask?.cancel()

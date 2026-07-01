@@ -33,6 +33,8 @@ final class EditorModel {
     var autoZoomProposals: [ZoomPanProposal] = []
     /// Phase 44 silence detection proposals for review-before-apply.
     var silenceProposals: [ProposedCut] = []
+    /// Tracks the in-flight silence detection task for cancellation.
+    var silenceDetectionTask: Task<Void, Never>?
 
     // Playback
     let player = AVPlayer()

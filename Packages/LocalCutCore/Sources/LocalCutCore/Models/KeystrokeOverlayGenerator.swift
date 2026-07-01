@@ -26,10 +26,25 @@ public enum KeystrokeOverlayGenerator: Sendable {
     ) -> KeystrokeOverlayClip? {
         guard log.isSupportedSchema else { return nil }
 
+        // Filter to .key events and deduplicate key-down/key-up pairs.
+        // The event log records both NSEvent.keyDown and .keyUp as .key;
+        // they share the same keyCode and timestamp, so keeping only the
+        // first event per (keyCode, time) pair drops the key-up duplicate.
         let keyEvents = log.events.filter { $0.kind == .key }
         guard !keyEvents.isEmpty else { return nil }
+        var seenKeys = Set<UInt16>()
+        let deduplicated = keyEvents.filter { event in
+            guard let keyCode = event.keyCode else { return false }
+            // For character keys, only keep the first event per keyCode.
+            // Modifier keys may legitimately repeat, so allow them through.
+            let isModifier = (event.modifierFlagsRaw ?? 0) & 0x1E0000 != 0
+            if isModifier { return true }
+            if seenKeys.contains(keyCode) { return false }
+            seenKeys.insert(keyCode)
+            return true
+        }
 
-        let events = keyEvents.compactMap { event -> KeystrokeOverlayEvent? in
+        let events = deduplicated.compactMap { event -> KeystrokeOverlayEvent? in
             guard let keyCode = event.keyCode else { return nil }
             let modifiers = event.modifierFlagsRaw ?? 0
             let (text, mode) = displayTextAndMode(keyCode: keyCode, modifierFlags: modifiers)

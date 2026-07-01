@@ -68,7 +68,7 @@ nonisolated enum KeystrokeOverlayRenderer {
                 opacity: opacity,
                 position: position))
 
-            yOffset -= CGFloat(style.fontSize) + CGFloat(style.pillPaddingY) * 2 + 8
+            yOffset += CGFloat(style.fontSize) + CGFloat(style.pillPaddingY) * 2 + 8
         }
 
         return frames
