@@ -127,13 +127,13 @@ nonisolated enum KeystrokeOverlayRenderer {
         let fontName = style.fontName as CFString
         let ctFont = CTFontCreateWithName(fontName, fontSize, nil)
 
-        let attributes: [CFString: Any] = [
-            kCTFontAttributeName: ctFont,
-            kCTForegroundColorAttributeName: CGColor(gray: 1, alpha: CGFloat(frame.opacity))
+        let attributes: [NSAttributedString.Key: Any] = [
+            NSAttributedString.Key(kCTFontAttributeName as String): ctFont,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 1, alpha: CGFloat(frame.opacity))
         ]
         let attributedString = NSAttributedString(
             string: frame.displayText,
-            attributes: attributes as [NSAttributedString.Key: Any])
+            attributes: attributes)
         let line = CTLineCreateWithAttributedString(attributedString)
         let bounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
         let textWidth = bounds.width
