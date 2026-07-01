@@ -91,7 +91,9 @@ struct SilenceReviewSheet: View {
 
     private func timecodeString(_ time: CMTime) -> String {
         guard time.isNumeric else { return "0:00.0" }
-        let total = max(0, time.seconds)
+        let seconds = time.seconds
+        guard seconds.isFinite else { return "0:00.0" }
+        let total = max(0, seconds)
         let mins = Int(total) / 60
         let secs = Int(total) % 60
         let frac = Int((total - Double(Int(total))) * 10)

@@ -13,51 +13,43 @@ extension EditorModel {
         !silenceProposals.isEmpty
     }
 
-    /// Runs silence detection on the first selected audio track's media.
+    /// Runs silence detection on the selected audio clip's media, falling back
+    /// to the first available audio clip when no audio clip is selected.
     @MainActor
     func runSilenceDetection(parameters: SilenceDetectionParameters = SilenceDetectionParameters()) {
         // Cancel any in-flight detection from a previous invocation.
         silenceDetectionTask?.cancel()
 
-        guard let track = project.audioTracks.first(where: { !$0.clips.isEmpty }),
-              let clip = track.clips.first,
-              let media = project.media(for: clip.mediaID)
-        else {
+        guard let target = silenceDetectionTarget() else {
             statusMessage = "No audio track with media for silence detection."
             return
         }
 
+        let clip = target.clip
+        let media = target.media
         let url = media.url
         let params = parameters
         let generation = sessionGeneration
-        // Capture the source→timeline offset so we can translate detected
-        // source-time ranges into timeline positions after the async decode.
-        let sourceToTimeline = clip.timelineStart - clip.sourceStart
+        let sourceRange = clip.timeRangeInSource
 
         silenceDetectionTask = Task {
             do {
                 let detector = SilenceDetector()
-                let (silences, proposals) = try await detector.detect(url: url, parameters: params)
-
-                // Convert from source time to timeline time.
-                let timelineProposals = proposals.map { proposal -> ProposedCut in
-                    var p = proposal
-                    p.silenceRange = CMTimeRange(
-                        start: proposal.silenceRange.start + sourceToTimeline,
-                        duration: proposal.silenceRange.duration)
-                    p.unpaddedSilenceRange = CMTimeRange(
-                        start: proposal.unpaddedSilenceRange.start + sourceToTimeline,
-                        duration: proposal.unpaddedSilenceRange.duration)
-                    return p
+                let (_, proposals) = try await detector.detect(
+                    url: url,
+                    parameters: params,
+                    timeRange: sourceRange)
+                let timelineProposals = proposals.compactMap {
+                    Self.timelineProposal($0, for: clip)
                 }
 
                 await MainActor.run {
                     guard self.sessionGeneration == generation else { return }
                     self.silenceProposals = timelineProposals
-                    if silences.isEmpty {
+                    if timelineProposals.isEmpty {
                         self.statusMessage = "No silences detected."
                     } else {
-                        self.statusMessage = "Found \(silences.count) silence(s). Review to apply."
+                        self.statusMessage = "Found \(timelineProposals.count) silence(s). Review to apply."
                     }
                 }
             } catch {
@@ -110,14 +102,28 @@ extension EditorModel {
 
     // MARK: - Private
 
+    nonisolated static func timelineProposal(_ proposal: ProposedCut, for clip: Clip) -> ProposedCut? {
+        guard let silenceRange = timelineRange(forSourceRelativeRange: proposal.silenceRange, in: clip) else {
+            return nil
+        }
+
+        var mapped = proposal
+        mapped.silenceRange = silenceRange
+        mapped.unpaddedSilenceRange = timelineRange(
+            forSourceRelativeRange: proposal.unpaddedSilenceRange,
+            in: clip) ?? silenceRange
+        return mapped
+    }
+
     /// Applies a single proposal by ripple-deleting the silence range.
     ///
     /// Clips overlapping the silence are split; clips entirely after it are
     /// shifted left so no gap remains. Also ripples caption tracks.
     private func applySingleProposal(_ proposal: ProposedCut) {
-        let silenceStart = proposal.silenceRange.start
-        let silenceEnd = proposal.silenceRange.end
-        let silenceDuration = silenceEnd - silenceStart
+        let cutRange = proposal.silenceRange
+        let silenceStart = cutRange.start
+        let silenceEnd = cutRange.end
+        let silenceDuration = cutRange.duration
 
         let allTracks: [Track] = project.audioTracks + project.videoTracks
         for track in allTracks {
@@ -181,27 +187,171 @@ extension EditorModel {
             track.clips = newClips
         }
 
-        // Ripple caption tracks: shift caption lines that start after the silence.
-        for captionTrack in project.captionTracks {
-            for line in captionTrack.lines {
-                if line.range.start >= silenceEnd {
-                    let shiftedStart = line.range.start - silenceDuration
-                    let shiftedRange = CMTimeRange(start: shiftedStart, duration: line.range.duration)
-                    // WordTiming ranges are in absolute timeline time — shift them too.
-                    let shiftedWords = line.words?.map { wt -> WordTiming in
-                        WordTiming(range: CMTimeRange(
-                            start: wt.range.start - silenceDuration,
-                            duration: wt.range.duration), word: wt.word)
-                    }
-                    captionTrack.updateLine(CaptionLine(
-                        id: line.id,
-                        range: shiftedRange,
-                        text: line.text,
-                        words: shiftedWords,
-                        style: line.style,
-                        styleKeyframes: line.styleKeyframes))
-                }
+        rippleCaptionTracks(removing: cutRange)
+        rippleMarkers(removing: cutRange)
+        rippleOverlays(removing: cutRange)
+        rippleCallouts(removing: cutRange)
+        rippleKeystrokeOverlays(removing: cutRange)
+    }
+
+    private func silenceDetectionTarget() -> (clip: Clip, media: MediaItem)? {
+        if let selectedClipID,
+           let track = track(for: selectedClipID),
+           track.kind == .audio,
+           let clip = track.clips.first(where: { $0.id == selectedClipID }),
+           let media = project.media(for: clip.mediaID),
+           media.hasAudio {
+            return (clip, media)
+        }
+
+        for track in project.audioTracks {
+            for clip in track.clips {
+                guard let media = project.media(for: clip.mediaID),
+                      media.hasAudio else { continue }
+                return (clip, media)
             }
         }
+        return nil
+    }
+
+    private func rippleCaptionTracks(removing cutRange: CMTimeRange) {
+        for captionTrack in project.captionTracks {
+            let rippled = captionTrack.lines.compactMap { line -> CaptionLine? in
+                guard let range = Self.rippleTimeRange(line.range, removing: cutRange) else {
+                    return nil
+                }
+                let words = line.words?.compactMap { word -> WordTiming? in
+                    guard let wordRange = Self.rippleTimeRange(word.range, removing: cutRange) else {
+                        return nil
+                    }
+                    return WordTiming(range: wordRange, word: word.word)
+                }
+                return CaptionLine(
+                    id: line.id,
+                    range: range,
+                    text: line.text,
+                    words: words,
+                    style: line.style,
+                    styleKeyframes: line.styleKeyframes)
+            }
+            captionTrack.replaceLines(rippled)
+        }
+    }
+
+    private func rippleMarkers(removing cutRange: CMTimeRange) {
+        for index in project.markers.indices {
+            guard let shifted = Self.rippleTime(project.markers[index].time, removing: cutRange, clampInside: true) else {
+                continue
+            }
+            project.markers[index].time = shifted
+        }
+        project.markers.sort { $0.time < $1.time }
+    }
+
+    private func rippleOverlays(removing cutRange: CMTimeRange) {
+        project.overlays = project.overlays.compactMap { overlay in
+            guard let range = Self.rippleTimeRange(
+                CMTimeRange(start: overlay.timelineStart, duration: overlay.duration),
+                removing: cutRange) else { return nil }
+            var rippled = overlay
+            rippled.timelineStart = range.start
+            rippled.duration = range.duration
+            return rippled
+        }
+    }
+
+    private func rippleCallouts(removing cutRange: CMTimeRange) {
+        project.callouts = project.callouts.compactMap { callout in
+            guard let range = Self.rippleTimeRange(callout.timeRange, removing: cutRange) else {
+                return nil
+            }
+            var rippled = callout
+            rippled.timeRange = range
+            return rippled
+        }
+    }
+
+    private func rippleKeystrokeOverlays(removing cutRange: CMTimeRange) {
+        project.keystrokeOverlayClips = project.keystrokeOverlayClips.compactMap { clip in
+            guard let range = Self.rippleTimeRange(clip.timeRange, removing: cutRange) else {
+                return nil
+            }
+            let events = clip.events.compactMap { event -> KeystrokeOverlayEvent? in
+                guard let time = Self.rippleTime(event.time, removing: cutRange) else { return nil }
+                var rippled = event
+                rippled.time = time
+                return rippled
+            }
+            guard !events.isEmpty else { return nil }
+            var rippled = clip
+            rippled.timeRange = range
+            rippled.events = events
+            return rippled
+        }
+    }
+
+    nonisolated static func rippleTimeRange(_ range: CMTimeRange,
+                                            removing cutRange: CMTimeRange) -> CMTimeRange? {
+        guard range.start.isNumeric,
+              range.duration.isNumeric,
+              range.duration > .zero,
+              cutRange.start.isNumeric,
+              cutRange.duration.isNumeric,
+              cutRange.duration > .zero else { return range.duration > .zero ? range : nil }
+
+        let rangeEnd = range.end
+        let cutStart = cutRange.start
+        let cutEnd = cutRange.end
+        let cutDuration = cutRange.duration
+
+        if rangeEnd <= cutStart {
+            return range
+        }
+        if range.start >= cutEnd {
+            return CMTimeRange(start: range.start - cutDuration, duration: range.duration)
+        }
+
+        let overlapStart = CMTimeMaximum(range.start, cutStart)
+        let overlapEnd = CMTimeMinimum(rangeEnd, cutEnd)
+        let removedDuration = overlapEnd - overlapStart
+        let newDuration = range.duration - removedDuration
+        guard newDuration > .zero else { return nil }
+
+        let newStart = range.start < cutStart ? range.start : cutStart
+        return CMTimeRange(start: newStart, duration: newDuration)
+    }
+
+    private nonisolated static func rippleTime(_ time: CMTime,
+                                               removing cutRange: CMTimeRange,
+                                               clampInside: Bool = false) -> CMTime? {
+        guard time.isNumeric,
+              cutRange.start.isNumeric,
+              cutRange.duration.isNumeric,
+              cutRange.duration > .zero else { return time }
+
+        if time < cutRange.start {
+            return time
+        }
+        if time >= cutRange.end {
+            return time - cutRange.duration
+        }
+        return clampInside ? cutRange.start : nil
+    }
+
+    private nonisolated static func timelineRange(forSourceRelativeRange range: CMTimeRange,
+                                                  in clip: Clip) -> CMTimeRange? {
+        guard range.start.isNumeric,
+              range.duration.isNumeric,
+              range.duration > .zero else { return nil }
+
+        let clipSourceRange = CMTimeRange(start: .zero, duration: clip.duration)
+        let clamped = range.intersection(clipSourceRange)
+        guard clamped.duration > .zero else { return nil }
+
+        let outputStart = clip.outputOffset(forSourceOffset: clamped.start)
+        let outputEnd = clip.outputOffset(forSourceOffset: clamped.end)
+        guard outputEnd > outputStart else { return nil }
+        return CMTimeRange(start: clip.timelineStart + outputStart,
+                           duration: outputEnd - outputStart)
     }
 }

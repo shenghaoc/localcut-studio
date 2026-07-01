@@ -314,7 +314,11 @@ enum CompositionBuilder {
         // loop-insert it into the composition track so a 30-minute tail does
         // not make the editor block on writing tens of thousands of frames.
         // Codex P2 (cap filler generation).
-        let visualRanges = visualActivityRanges(captionTracks: captionTracks, overlays: project.overlays, callouts: project.callouts)
+        let visualRanges = visualActivityRanges(
+            captionTracks: captionTracks,
+            overlays: project.overlays,
+            callouts: project.callouts,
+            keystrokeOverlays: project.keystrokeOverlayClips)
         let videoRanges = projectTrackSegments.flatMap { segments in
             segments.map(\.timeRange)
         }
@@ -380,6 +384,7 @@ enum CompositionBuilder {
             captionTracks: captionTracks,
             overlays: project.overlays,
             callouts: project.callouts,
+            keystrokeOverlays: project.keystrokeOverlayClips,
             paddedBackground: project.paddedBackground,
             totalDuration: totalDuration,
             renderSize: renderSize,
@@ -441,7 +446,8 @@ enum CompositionBuilder {
 
     private static func visualActivityRanges(captionTracks: [CaptionTrack],
                                              overlays: [OverlayClip],
-                                             callouts: [CalloutClip] = []) -> [CMTimeRange] {
+                                             callouts: [CalloutClip] = [],
+                                             keystrokeOverlays: [KeystrokeOverlayClip] = []) -> [CMTimeRange] {
         let captionRanges = captionTracks.flatMap { track in
             track.lines.map(\.range)
         }
@@ -456,7 +462,13 @@ enum CompositionBuilder {
             guard callout.timeRange.start.isNumeric, end.isNumeric, end > callout.timeRange.start else { return nil }
             return CMTimeRange(start: callout.timeRange.start, end: end)
         }
-        return captionRanges + overlayRanges + calloutRanges
+        let keystrokeRanges = keystrokeOverlays.compactMap { overlay -> CMTimeRange? in
+            guard overlay.timeRange.start.isNumeric,
+                  overlay.timeRange.end.isNumeric,
+                  overlay.timeRange.end > overlay.timeRange.start else { return nil }
+            return overlay.timeRange
+        }
+        return captionRanges + overlayRanges + calloutRanges + keystrokeRanges
     }
 
     private static func visualFillerRanges(visualRanges: [CMTimeRange],
@@ -649,6 +661,7 @@ enum CompositionBuilder {
         captionTracks: [CaptionTrack],
         overlays: [OverlayClip],
         callouts: [CalloutClip] = [],
+        keystrokeOverlays: [KeystrokeOverlayClip] = [],
         paddedBackground: PaddedBackgroundPreset? = nil,
         totalDuration: CMTime,
         renderSize: CGSize,
@@ -667,6 +680,7 @@ enum CompositionBuilder {
         let hasAnySegment = projectTrackSegments.contains { !$0.isEmpty }
             || fillerTrackID != kCMPersistentTrackID_Invalid
             || !overlays.isEmpty
+            || !keystrokeOverlays.isEmpty
             || !callouts.isEmpty
         guard hasAnySegment else { return nil }
 
@@ -699,6 +713,10 @@ enum CompositionBuilder {
             boundarySet.insert(callout.timeRange.start.seconds)
             let calloutEnd = callout.timeRange.start.seconds + callout.timeRange.duration.seconds
             boundarySet.insert(calloutEnd)
+        }
+        for overlay in keystrokeOverlays {
+            boundarySet.insert(overlay.timeRange.start.seconds)
+            boundarySet.insert(overlay.timeRange.end.seconds)
         }
         let boundaries = boundarySet.sorted()
 
@@ -760,6 +778,8 @@ enum CompositionBuilder {
                 in: captionTracks, midpoint: midpoint)
             let overlaysForInterval = activeOverlayItems(
                 in: overlays, midpoint: midpoint)
+            let keystrokeOverlaysForInterval = activeKeystrokeOverlayItems(
+                in: keystrokeOverlays, midpoint: midpoint)
             let calloutsForInterval = callouts.filter { callout in
                 let start = callout.timeRange.start.seconds
                 let end = start + callout.timeRange.duration.seconds
@@ -769,6 +789,7 @@ enum CompositionBuilder {
                 timeRange: range, units: units, captions: captionsForInterval,
                 overlays: overlaysForInterval,
                 overlaySourceRegistryID: overlaySourceRegistryID,
+                keystrokeOverlays: keystrokeOverlaysForInterval,
                 callouts: calloutsForInterval,
                 paddedBackground: paddedBackground,
                 paddedInsetMargin: paddedBackground?.insetMargin ?? 0,
@@ -834,6 +855,25 @@ enum CompositionBuilder {
                 rotation: overlay.rotation,
                 opacity: overlay.opacity,
                 endAction: overlay.endAction))
+        }
+        return items
+    }
+
+    /// Keystroke overlay clips active at `midpoint`, ordered bottom-to-top
+    /// matching the project's keystroke overlay array order.
+    private static func activeKeystrokeOverlayItems(in overlays: [KeystrokeOverlayClip],
+                                                    midpoint: Double) -> [KeystrokeOverlayRenderItem] {
+        var items: [KeystrokeOverlayRenderItem] = []
+        for overlay in overlays {
+            let start = overlay.timeRange.start.seconds
+            let end = overlay.timeRange.end.seconds
+            guard start <= midpoint, midpoint < end else { continue }
+            items.append(KeystrokeOverlayRenderItem(
+                overlayID: overlay.id,
+                range: overlay.timeRange,
+                events: overlay.events,
+                style: overlay.style,
+                opacity: overlay.opacity))
         }
         return items
     }

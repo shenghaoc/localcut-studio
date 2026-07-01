@@ -67,9 +67,9 @@ nonisolated enum ChapterExporter {
         for (index, chapter) in chapters.enumerated() {
             // Chapter title item.
             let titleItem = AVMutableMetadataItem()
-            titleItem.key = AVMetadataKey.commonKeyTitle.rawValue as NSString
-            titleItem.keySpace = .common
+            titleItem.identifier = .commonIdentifierTitle
             titleItem.value = chapter.title as NSString
+            titleItem.dataType = kCMMetadataBaseDataType_UTF8 as String
             titleItem.locale = Locale.current
             titleItem.time = chapter.time
             let rawDuration = index + 1 < chapters.count
@@ -82,5 +82,33 @@ nonisolated enum ChapterExporter {
             items.append(titleItem)
         }
         return items
+    }
+
+    public static func chapterTimedMetadataGroups(
+        from markers: [TimelineMarker],
+        projectDuration: CMTime
+    ) -> [AVTimedMetadataGroup] {
+        chapterMetadataItems(from: markers, projectDuration: projectDuration).compactMap { item in
+            let range = CMTimeRange(start: item.time, duration: item.duration)
+            guard range.duration > .zero else { return nil }
+            return AVTimedMetadataGroup(items: [item], timeRange: range)
+        }
+    }
+
+    public static func chapterMetadataFormatDescription() -> CMFormatDescription? {
+        let specification: [String: Any] = [
+            kCMMetadataFormatDescriptionMetadataSpecificationKey_Identifier as String:
+                AVMetadataIdentifier.commonIdentifierTitle.rawValue,
+            kCMMetadataFormatDescriptionMetadataSpecificationKey_DataType as String:
+                kCMMetadataBaseDataType_UTF8 as String,
+        ]
+        var formatDescription: CMMetadataFormatDescription?
+        let status = CMMetadataFormatDescriptionCreateWithMetadataSpecifications(
+            allocator: kCFAllocatorDefault,
+            metadataType: kCMMetadataFormatType_Boxed,
+            metadataSpecifications: [specification] as CFArray,
+            formatDescriptionOut: &formatDescription)
+        guard status == noErr else { return nil }
+        return formatDescription
     }
 }

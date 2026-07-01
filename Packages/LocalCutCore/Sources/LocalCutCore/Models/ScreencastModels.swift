@@ -12,6 +12,12 @@ public enum ScreencastEventKind: String, Hashable, Codable, Sendable {
     case key
 }
 
+/// Key-event phase captured for local keyboard events.
+public enum ScreencastKeyPhase: String, Hashable, Codable, Sendable {
+    case down
+    case up
+}
+
 /// A single timestamped user interaction captured during recording.
 public struct ScreencastEvent: Hashable, Codable, Sendable {
     /// Time relative to the recording start.
@@ -25,20 +31,25 @@ public struct ScreencastEvent: Hashable, Codable, Sendable {
     /// Raw modifier flag bits for `.key` events. Stored as `UInt` because
     /// `NSEvent.ModifierFlags` lives in AppKit, which LocalCutCore avoids.
     public var modifierFlagsRaw: UInt?
+    /// Whether a key event came from key-down or key-up. Optional so older
+    /// event logs decode and fall back to legacy de-duplication.
+    public var keyPhase: ScreencastKeyPhase?
 
     public init(time: CMTime, kind: ScreencastEventKind,
                 position: CGPoint? = nil,
                 keyCode: UInt16? = nil,
-                modifierFlagsRaw: UInt? = nil) {
+                modifierFlagsRaw: UInt? = nil,
+                keyPhase: ScreencastKeyPhase? = nil) {
         self.time = time
         self.kind = kind
         self.position = position
         self.keyCode = keyCode
         self.modifierFlagsRaw = modifierFlagsRaw
+        self.keyPhase = keyPhase
     }
 
     private enum CodingKeys: String, CodingKey {
-        case time, kind, position, keyCode, modifierFlagsRaw
+        case time, kind, position, keyCode, modifierFlagsRaw, keyPhase
     }
 
     public init(from decoder: Decoder) throws {
@@ -49,6 +60,7 @@ public struct ScreencastEvent: Hashable, Codable, Sendable {
         position = try c.decodeIfPresent(CGPoint.self, forKey: .position)
         keyCode = try c.decodeIfPresent(UInt16.self, forKey: .keyCode)
         modifierFlagsRaw = try c.decodeIfPresent(UInt.self, forKey: .modifierFlagsRaw)
+        keyPhase = try c.decodeIfPresent(ScreencastKeyPhase.self, forKey: .keyPhase)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -58,6 +70,7 @@ public struct ScreencastEvent: Hashable, Codable, Sendable {
         try c.encodeIfPresent(position, forKey: .position)
         try c.encodeIfPresent(keyCode, forKey: .keyCode)
         try c.encodeIfPresent(modifierFlagsRaw, forKey: .modifierFlagsRaw)
+        try c.encodeIfPresent(keyPhase, forKey: .keyPhase)
     }
 }
 

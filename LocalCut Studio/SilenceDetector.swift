@@ -19,9 +19,10 @@ actor SilenceDetector {
     ///   - parameters: Detection tuning parameters.
     /// - Returns: Detected silences and proposed cuts.
     func detect(url: URL,
-                parameters: SilenceDetectionParameters = SilenceDetectionParameters()
+                parameters: SilenceDetectionParameters = SilenceDetectionParameters(),
+                timeRange: CMTimeRange? = nil
     ) async throws -> ([DetectedSilence], [ProposedCut]) {
-        let samples = try await decodeMonoSamples(from: url)
+        let samples = try await decodeMonoSamples(from: url, timeRange: timeRange)
         guard !samples.isEmpty else {
             throw SilenceDetectionError.emptyAudio
         }
@@ -48,13 +49,22 @@ actor SilenceDetector {
             parameters: parameters)
     }
 
-    private func decodeMonoSamples(from url: URL) async throws -> [Float] {
+    private func decodeMonoSamples(from url: URL, timeRange: CMTimeRange? = nil) async throws -> [Float] {
         let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         guard let audioTrack = try await asset.loadTracks(withMediaType: .audio).first else {
             throw SilenceDetectionError.noAudioTrack
         }
 
         let reader = try AVAssetReader(asset: asset)
+        let requestedTimeRange = timeRange.flatMap { range -> CMTimeRange? in
+            guard range.start.isNumeric,
+                  range.duration.isNumeric,
+                  range.duration > .zero else { return nil }
+            return range
+        }
+        if let requestedTimeRange {
+            reader.timeRange = requestedTimeRange
+        }
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: targetSampleRate,
@@ -76,7 +86,12 @@ actor SilenceDetector {
         }
 
         var samples: [Float] = []
-        let duration = try? await asset.load(.duration)
+        let duration: CMTime?
+        if let requestedTimeRange {
+            duration = requestedTimeRange.duration
+        } else {
+            duration = try? await asset.load(.duration)
+        }
         if let duration, duration.seconds.isFinite, duration.seconds > 0 {
             let cappedSeconds = min(duration.seconds, 7200) // 2 hours cap
             let estimatedSamples = Int(cappedSeconds * targetSampleRate)

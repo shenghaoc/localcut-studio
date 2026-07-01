@@ -63,6 +63,15 @@ struct OverlayRenderItem: Sendable {
     let endAction: OverlayEndAction
 }
 
+/// One keystroke overlay scheduled inside a composition instruction.
+struct KeystrokeOverlayRenderItem: Sendable {
+    let overlayID: UUID
+    let range: CMTimeRange
+    let events: [KeystrokeOverlayEvent]
+    let style: KeystrokeOverlayStyle
+    let opacity: Float
+}
+
 /// One bottom-to-top render step within an instruction interval: either a single
 /// layer, or a transition that blends an outgoing and incoming layer over a
 /// derived progress through the overlap interval.
@@ -91,6 +100,7 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let units: [RenderUnit]
     let captions: [CaptionRenderItem]
     let overlays: [OverlayRenderItem]
+    let keystrokeOverlays: [KeystrokeOverlayRenderItem]
     let overlaySourceRegistryID: UUID?
     /// Phase 43 callout clips to render.
     let callouts: [CalloutClip]
@@ -107,6 +117,7 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
     init(timeRange: CMTimeRange, units: [RenderUnit], captions: [CaptionRenderItem] = [],
          overlays: [OverlayRenderItem] = [], overlaySourceRegistryID: UUID? = nil,
+         keystrokeOverlays: [KeystrokeOverlayRenderItem] = [],
          callouts: [CalloutClip] = [], paddedBackground: PaddedBackgroundPreset? = nil,
          paddedInsetMargin: Float = 0,
          frameRate: Double = 24, workingColourSpace: WorkingColourSpace = .sRGB) {
@@ -114,6 +125,7 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
         self.units = units
         self.captions = captions
         self.overlays = overlays
+        self.keystrokeOverlays = keystrokeOverlays
         self.overlaySourceRegistryID = overlaySourceRegistryID
         self.callouts = callouts
         self.paddedBackground = paddedBackground
@@ -123,7 +135,11 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
         // A transition tweens its layers across the interval. Captions also tween
         // (per-frame animation transform), so any caption forces tweening too.
         // Overlays also tween (per-frame position/scale/opacity). Callouts too.
-        containsTweening = !captions.isEmpty || !overlays.isEmpty || !callouts.isEmpty || units.contains {
+        containsTweening = !captions.isEmpty
+            || !overlays.isEmpty
+            || !keystrokeOverlays.isEmpty
+            || !callouts.isEmpty
+            || units.contains {
             if case .transition = $0 { return true }; return false
         }
         let trackIDs = units.flatMap(\.trackIDs)
@@ -336,6 +352,18 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         for callout in instruction.callouts {
             guard let layer = calloutLayer(for: callout, time: request.compositionTime,
                                            sourceImage: result, renderSize: renderSize) else { continue }
+            result = layer.composited(over: result ?? CIImage(color: .clear)
+                .cropped(to: CGRect(origin: .zero, size: renderSize)))
+        }
+
+        // Keystroke overlays sit above callouts and below captions.
+        for item in instruction.keystrokeOverlays {
+            guard let layer = KeystrokeOverlayRenderer.render(
+                events: item.events,
+                style: item.style,
+                currentTime: request.compositionTime,
+                renderSize: renderSize,
+                overlayOpacity: item.opacity) else { continue }
             result = layer.composited(over: result ?? CIImage(color: .clear)
                 .cropped(to: CGRect(origin: .zero, size: renderSize)))
         }

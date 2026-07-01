@@ -64,6 +64,10 @@ struct Phase44TutorialFinishingTests {
             from: model.project.markers,
             projectDuration: model.project.duration)
         #expect(YouTubeChapterValidator.validate(chapters, projectDuration: model.project.duration).isEmpty)
+        #expect(ChapterExporter.chapterTimedMetadataGroups(
+            from: model.project.markers,
+            projectDuration: model.project.duration).count == 3)
+        #expect(ChapterExporter.chapterMetadataFormatDescription() != nil)
 
         let built = try #require(try await CompositionBuilder.build(project: model.project))
         let outputURL = tmp.appendingPathComponent("phase44-smoke.mov")
@@ -95,6 +99,120 @@ struct Phase44TutorialFinishingTests {
         00:10 Demo
         00:20 Wrap
         """)
+    }
+
+    @Test("Silence proposals from trimmed retimed clips map into timeline time")
+    func silenceProposalsMapTrimmedRetimedClipsToTimeline() throws {
+        let clip = Clip(
+            mediaID: UUID(),
+            sourceStart: time(10),
+            duration: time(4),
+            timelineStart: time(30),
+            speedCurve: Keyframed(defaultValue: Float(2)))
+        let proposal = ProposedCut(
+            silenceRange: CMTimeRange(start: time(1), duration: time(1)),
+            unpaddedSilenceRange: CMTimeRange(start: time(1.25), duration: time(0.5)))
+
+        let mapped = try #require(EditorModel.timelineProposal(proposal, for: clip))
+
+        #expect(approximatelyEqual(mapped.silenceRange.start.seconds, 30.5))
+        #expect(approximatelyEqual(mapped.silenceRange.duration.seconds, 0.5))
+        #expect(approximatelyEqual(mapped.unpaddedSilenceRange.start.seconds, 30.625))
+        #expect(approximatelyEqual(mapped.unpaddedSilenceRange.duration.seconds, 0.25))
+    }
+
+    @Test("Silence cuts ripple timeline annotations and virtual clips")
+    func silenceCutsRippleTimelineAnnotationsAndVirtualClips() {
+        let model = EditorModel()
+        let mediaID = UUID()
+        model.project.videoTracks[0].clips = [
+            Clip(mediaID: mediaID, sourceStart: .zero, duration: time(10), timelineStart: .zero),
+        ]
+        model.project.markers = [
+            TimelineMarker(time: time(7), name: "After", kind: .chapter),
+        ]
+        model.project.overlays = [
+            OverlayClip(sourceType: .animatedImage, timelineStart: time(7), duration: time(2)),
+        ]
+        model.project.callouts = [
+            CalloutClip(kind: .box, timeRange: CMTimeRange(start: time(7), duration: time(2))),
+        ]
+        model.project.keystrokeOverlayClips = [
+            KeystrokeOverlayClip(
+                sourceSessionID: UUID(),
+                timeRange: CMTimeRange(start: .zero, duration: time(10)),
+                events: [
+                    KeystrokeOverlayEvent(time: time(3), displayText: "A", displayMode: .character),
+                    KeystrokeOverlayEvent(time: time(5), displayText: "B", displayMode: .character),
+                    KeystrokeOverlayEvent(time: time(8), displayText: "C", displayMode: .character),
+                ]),
+        ]
+        let captionTrack = CaptionTrack(name: "Captions", lines: [
+            CaptionLine(
+                range: CMTimeRange(start: time(3), duration: time(4)),
+                text: "Before after",
+                words: [
+                    WordTiming(range: CMTimeRange(start: time(5), duration: time(0.5)), word: "cut"),
+                    WordTiming(range: CMTimeRange(start: time(6.5), duration: time(0.5)), word: "after"),
+                ]),
+        ])
+        model.project.captionTracks = [captionTrack]
+
+        model.silenceProposals = [
+            ProposedCut(
+                silenceRange: CMTimeRange(start: time(4), duration: time(2)),
+                unpaddedSilenceRange: CMTimeRange(start: time(4), duration: time(2))),
+        ]
+        model.applySelectedSilenceProposals()
+
+        #expect(approximatelyEqual(model.project.duration.seconds, 8))
+        #expect(approximatelyEqual(model.project.markers[0].time.seconds, 5))
+        #expect(approximatelyEqual(model.project.overlays[0].timelineStart.seconds, 5))
+        #expect(approximatelyEqual(model.project.callouts[0].timeRange.start.seconds, 5))
+        #expect(approximatelyEqual(model.project.captionTracks[0].lines[0].range.start.seconds, 3))
+        #expect(approximatelyEqual(model.project.captionTracks[0].lines[0].range.duration.seconds, 2))
+        #expect(model.project.captionTracks[0].lines[0].words?.map(\.word) == ["after"])
+        #expect(model.project.keystrokeOverlayClips[0].events.map(\.displayText) == ["A", "C"])
+        #expect(model.project.keystrokeOverlayClips[0].events.map { $0.time.seconds } == [3, 6])
+    }
+
+    @Test("Keystroke overlays participate in the shared video composition")
+    func keystrokeOverlaysParticipateInVideoComposition() async throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("phase44-keystrokes-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let videoURL = try await makeVideoFixture(seconds: 2, fps: 2, in: tmp)
+        let media = try await loadedMedia(from: videoURL)
+        let model = EditorModel()
+        model.project.renderSize = CGSize(width: 64, height: 36)
+        model.project.frameRate = 2
+        model.project.mediaItems = [media]
+        model.project.videoTracks[0].clips = [
+            Clip(mediaID: media.id, sourceStart: .zero, duration: time(2), timelineStart: .zero),
+        ]
+        model.project.keystrokeOverlayClips = [
+            KeystrokeOverlayClip(
+                sourceSessionID: UUID(),
+                timeRange: CMTimeRange(start: .zero, duration: time(2)),
+                events: [
+                    KeystrokeOverlayEvent(time: time(0.5), displayText: "A", displayMode: .character),
+                ]),
+        ]
+
+        let built = try #require(try await CompositionBuilder.build(project: model.project))
+        let instruction = try #require(built.videoComposition?.instructions
+            .compactMap { $0 as? EffectCompositionInstruction }
+            .first { $0.timeRange.containsTime(time(0.5)) })
+
+        #expect(instruction.keystrokeOverlays.count == 1)
+        #expect(KeystrokeOverlayRenderer.render(
+            events: instruction.keystrokeOverlays[0].events,
+            style: instruction.keystrokeOverlays[0].style,
+            currentTime: time(0.6),
+            renderSize: model.project.renderSize,
+            overlayOpacity: instruction.keystrokeOverlays[0].opacity) != nil)
     }
 
     private func time(_ seconds: Double) -> CMTime {

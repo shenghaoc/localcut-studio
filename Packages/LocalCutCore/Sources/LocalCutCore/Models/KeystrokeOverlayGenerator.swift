@@ -26,21 +26,16 @@ public enum KeystrokeOverlayGenerator: Sendable {
     ) -> KeystrokeOverlayClip? {
         guard log.isSupportedSchema else { return nil }
 
-        // Filter to .key events and deduplicate key-down/key-up pairs.
-        // The event log records both NSEvent.keyDown and .keyUp as .key;
-        // they share the same keyCode and timestamp, so keeping only the
-        // first event per (keyCode, time) pair drops the key-up duplicate.
-        let keyEvents = log.events.filter { $0.kind == .key }
+        let keyEvents = log.events.filter { event in
+            event.kind == .key && event.keyPhase != .up
+        }
         guard !keyEvents.isEmpty else { return nil }
-        var seenKeys = Set<UInt16>()
+        var seenKeys = Set<KeyEventIdentity>()
         let deduplicated = keyEvents.filter { event in
             guard let keyCode = event.keyCode else { return false }
-            // For character keys, only keep the first event per keyCode.
-            // Modifier keys may legitimately repeat, so allow them through.
-            let isModifier = (event.modifierFlagsRaw ?? 0) & 0x1E0000 != 0
-            if isModifier { return true }
-            if seenKeys.contains(keyCode) { return false }
-            seenKeys.insert(keyCode)
+            let identity = KeyEventIdentity(keyCode: keyCode, time: event.time)
+            if seenKeys.contains(identity) { return false }
+            seenKeys.insert(identity)
             return true
         }
 
@@ -69,6 +64,20 @@ public enum KeystrokeOverlayGenerator: Sendable {
             timeRange: timeRange,
             events: events,
             style: style)
+    }
+
+    private struct KeyEventIdentity: Hashable {
+        let keyCode: UInt16
+        let timeValue: CMTimeValue
+        let timeScale: CMTimeScale
+        let timeEpoch: CMTimeEpoch
+
+        init(keyCode: UInt16, time: CMTime) {
+            self.keyCode = keyCode
+            timeValue = time.value
+            timeScale = time.timescale
+            timeEpoch = time.epoch
+        }
     }
 
     // MARK: - Key Code Mapping
