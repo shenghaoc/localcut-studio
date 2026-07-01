@@ -53,6 +53,22 @@ func keyframedFloatSortedInterpolationAndReplacement() {
     #expect(approximatelyEqual(Double(value.value(at: time(3))), 0.25))
 }
 
+@Test("Keyframed<Float>: shifting rebases at the split and drops negative keys")
+func keyframedFloatShiftRebasesAtSplit() {
+    let value = Keyframed<Float>(
+        keyframes: [
+            Keyframe(time: time(0), value: 0),
+            Keyframe(time: time(10), value: 10),
+        ],
+        defaultValue: 0)
+
+    let shifted = value.shifted(by: time(5))
+
+    #expect(shifted.defaultValue == 5)
+    #expect(shifted.keyframes.map { $0.time } == [time(0), time(5)])
+    #expect(shifted.keyframes.map { $0.value } == [5, 10])
+}
+
 @Test("Look effects clamp authored and keyframed values")
 func lookEffectsClampValues() {
     let incoming = KeyframeHandle(x: 0.2, y: 0.3)

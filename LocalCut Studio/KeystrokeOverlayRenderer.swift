@@ -84,6 +84,9 @@ nonisolated enum KeystrokeOverlayRenderer {
         renderSize: CGSize,
         overlayOpacity: Float
     ) -> CIImage? {
+        let effectiveOverlayOpacity = max(0, min(1, overlayOpacity))
+        guard effectiveOverlayOpacity > 0 else { return nil }
+
         let frames = evaluate(
             events: events, style: style,
             currentTime: currentTime, renderSize: renderSize)
@@ -104,17 +107,16 @@ nonisolated enum KeystrokeOverlayRenderer {
         context.clear(CGRect(origin: .zero, size: renderSize))
 
         for frame in frames {
-            drawKeystroke(frame: frame, style: style, context: context, renderSize: renderSize)
+            let adjustedFrame = KeystrokeFrame(
+                displayText: frame.displayText,
+                displayMode: frame.displayMode,
+                opacity: frame.opacity * effectiveOverlayOpacity,
+                position: frame.position)
+            drawKeystroke(frame: adjustedFrame, style: style, context: context, renderSize: renderSize)
         }
 
         guard let cgImage = context.makeImage() else { return nil }
-        var image = CIImage(cgImage: cgImage)
-        if overlayOpacity < 1 {
-            image = image.applyingFilter("CIColorMatrix", parameters: [
-                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(overlayOpacity))
-            ])
-        }
-        return image
+        return CIImage(cgImage: cgImage)
     }
 
     // MARK: - Drawing

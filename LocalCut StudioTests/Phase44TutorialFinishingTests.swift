@@ -176,6 +176,51 @@ struct Phase44TutorialFinishingTests {
         #expect(model.project.keystrokeOverlayClips[0].events.map { $0.time.seconds } == [3, 6])
     }
 
+    @Test("Silence splits rebase clip volume automation")
+    func silenceSplitRebasesClipVolumeAutomation() throws {
+        let model = EditorModel()
+        let mediaID = UUID()
+        var clip = Clip(mediaID: mediaID, sourceStart: .zero, duration: time(10), timelineStart: .zero)
+        clip.volumeEnvelope = VolumeEnvelope(
+            fadeIn: time(1),
+            fadeOut: time(1),
+            ramps: [
+                VolumeEnvelope.Ramp(
+                    range: CMTimeRange(start: time(6), duration: time(2)),
+                    fromVolume: 0.2,
+                    toVolume: 0.8),
+            ])
+        model.project.videoTracks[0].clips = [clip]
+        model.silenceProposals = [
+            ProposedCut(
+                silenceRange: CMTimeRange(start: time(4), duration: time(2)),
+                unpaddedSilenceRange: CMTimeRange(start: time(4), duration: time(2))),
+        ]
+
+        model.applySelectedSilenceProposals()
+
+        let clips = model.project.videoTracks[0].clips.sorted { $0.timelineStart < $1.timelineStart }
+        #expect(clips.count == 2)
+        let left = try #require(clips.first)
+        let right = try #require(clips.last)
+
+        #expect(left.duration == time(4))
+        #expect(left.volumeEnvelope.fadeIn == time(1))
+        #expect(left.volumeEnvelope.fadeOut == .zero)
+        #expect(left.volumeEnvelope.ramps.isEmpty)
+
+        #expect(right.sourceStart == time(6))
+        #expect(right.timelineStart == time(4))
+        #expect(right.duration == time(4))
+        #expect(right.volumeEnvelope.fadeIn == .zero)
+        #expect(right.volumeEnvelope.fadeOut == time(1))
+        let ramp = try #require(right.volumeEnvelope.ramps.first)
+        #expect(ramp.range.start == .zero)
+        #expect(ramp.range.duration == time(2))
+        #expect(abs(ramp.fromVolume - 0.2) < 0.0001)
+        #expect(abs(ramp.toVolume - 0.8) < 0.0001)
+    }
+
     @Test("Keystroke overlays participate in the shared video composition")
     func keystrokeOverlaysParticipateInVideoComposition() async throws {
         let tmp = FileManager.default.temporaryDirectory

@@ -44,20 +44,16 @@ extension EditorModel {
                     Self.timelineProposal($0, for: clip)
                 }
 
-                await MainActor.run {
-                    guard let self, self.silenceDetectionGeneration == detectionGen else { return }
-                    self.silenceProposals = timelineProposals
-                    if timelineProposals.isEmpty {
-                        self.statusMessage = "No silences detected."
-                    } else {
-                        self.statusMessage = "Found \(timelineProposals.count) silence(s). Review to apply."
-                    }
+                guard let self, self.silenceDetectionGeneration == detectionGen else { return }
+                self.silenceProposals = timelineProposals
+                if timelineProposals.isEmpty {
+                    self.statusMessage = "No silences detected."
+                } else {
+                    self.statusMessage = "Found \(timelineProposals.count) silence(s). Review to apply."
                 }
             } catch {
-                await MainActor.run {
-                    guard let self, self.silenceDetectionGeneration == detectionGen else { return }
-                    self.statusMessage = "Silence detection failed: \(error.localizedDescription)"
-                }
+                guard let self, self.silenceDetectionGeneration == detectionGen else { return }
+                self.statusMessage = "Silence detection failed: \(error.localizedDescription)"
             }
         }
     }
@@ -174,6 +170,10 @@ extension EditorModel {
                     let leftSourceOffset = clip.sourceOffset(forOutputOffset: leftOutputOffset)
                     var left = clip
                     left.duration = leftSourceOffset
+                    left.volumeEnvelope = Self.volumeEnvelope(
+                        clip.volumeEnvelope,
+                        slicedTo: CMTimeRange(start: .zero, duration: leftOutputOffset),
+                        originalOutputDuration: clip.outputDuration)
                     newClips.append(left)
                 }
 
@@ -197,7 +197,12 @@ extension EditorModel {
                         geometry: clip.geometry,
                         effects: clip.effects,
                         transition: nil,
-                        volumeEnvelope: clip.volumeEnvelope,
+                        volumeEnvelope: Self.volumeEnvelope(
+                            clip.volumeEnvelope,
+                            slicedTo: CMTimeRange(
+                                start: rightOutputOffset,
+                                duration: clip.outputDuration - rightOutputOffset),
+                            originalOutputDuration: clip.outputDuration),
                         transformKeyframes: clip.transformKeyframes.shifted(by: rightSourceOffset),
                         speedCurve: clip.speedCurve.shifted(by: rightSourceOffset),
                         preservePitch: clip.preservePitch,
@@ -357,6 +362,42 @@ extension EditorModel {
             return time - cutRange.duration
         }
         return clampInside ? cutRange.start : nil
+    }
+
+    private nonisolated static func volumeEnvelope(_ envelope: VolumeEnvelope,
+                                                   slicedTo outputRange: CMTimeRange,
+                                                   originalOutputDuration: CMTime) -> VolumeEnvelope {
+        guard !envelope.isEmpty,
+              outputRange.start.isNumeric,
+              outputRange.duration.isNumeric,
+              outputRange.duration > .zero else { return VolumeEnvelope() }
+
+        let keepsOriginalHead = outputRange.start <= .zero
+        let keepsOriginalTail = originalOutputDuration.isNumeric
+            && outputRange.end >= originalOutputDuration
+        let ramps = envelope.ramps.compactMap { ramp -> VolumeEnvelope.Ramp? in
+            guard ramp.range.start.isNumeric,
+                  ramp.range.duration.isNumeric,
+                  ramp.range.duration > .zero else { return nil }
+            let overlap = ramp.range.intersection(outputRange)
+            guard overlap.duration > .zero else { return nil }
+
+            let fullDuration = ramp.range.duration.seconds
+            guard fullDuration > 0, fullDuration.isFinite else { return nil }
+            let startFraction = Float(max(0, min(1, (overlap.start - ramp.range.start).seconds / fullDuration)))
+            let endFraction = Float(max(0, min(1, (overlap.end - ramp.range.start).seconds / fullDuration)))
+            let from = ramp.fromVolume + (ramp.toVolume - ramp.fromVolume) * startFraction
+            let to = ramp.fromVolume + (ramp.toVolume - ramp.fromVolume) * endFraction
+            return VolumeEnvelope.Ramp(
+                range: CMTimeRange(start: overlap.start - outputRange.start, duration: overlap.duration),
+                fromVolume: from,
+                toVolume: to)
+        }
+
+        return VolumeEnvelope(
+            fadeIn: keepsOriginalHead ? envelope.fadeIn : .zero,
+            fadeOut: keepsOriginalTail ? envelope.fadeOut : .zero,
+            ramps: ramps)
     }
 
     private nonisolated static func timelineRange(forSourceRelativeRange range: CMTimeRange,

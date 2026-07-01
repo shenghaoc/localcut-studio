@@ -630,14 +630,24 @@ final class RenderQueue {
                     chapterDuration: chapterDuration)
             }
 
-            // Write YouTube chapter sidecar when chapter markers exist.
-            // Sidecar write failure is logged as a warning but does not fail
-            // the job — the movie export itself succeeded.
+            // Write YouTube chapter sidecar when chapter markers exist. The
+            // sidecar is part of the promised output, so a write failure must be
+            // visible in the queue instead of completing silently.
             if !chapterMarkers.isEmpty {
                 let sidecarResult = ChapterExporter.writeYouTubeSidecar(
                     markers: chapterMarkers,
                     projectDuration: chapterDuration,
                     outputURL: outputURL)
+                if !sidecarResult.issues.isEmpty {
+                    let detail = sidecarResult.issues
+                        .map(\.localizedDescription)
+                        .joined(separator: " ")
+                    throw RenderQueueError.chapterValidationFailed(detail)
+                }
+                guard sidecarResult.sidecarPath != nil else {
+                    throw RenderQueueError.chapterSidecarWriteFailed(
+                        sidecarResult.embeddedChapterNote ?? "unknown write error")
+                }
                 if let note = sidecarResult.embeddedChapterNote {
                     logger.warning("Chapter sidecar write issue: \(note)")
                 }
@@ -892,7 +902,12 @@ final class RenderQueue {
         writer.startSession(atSourceTime: .zero)
 
         if let timedChapterMetadata {
-            try appendTimedChapterMetadata(timedChapterMetadata, writer: writer)
+            do {
+                try appendTimedChapterMetadata(timedChapterMetadata, writer: writer)
+            } catch {
+                logger.warning("Failed to append timed chapter metadata: \(error.localizedDescription). Falling back to sidecar-only.")
+                timedChapterMetadata.input.markAsFinished()
+            }
         }
 
         let totalDuration = built.duration
