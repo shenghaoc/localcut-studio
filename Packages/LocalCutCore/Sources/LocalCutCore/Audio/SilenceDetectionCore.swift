@@ -162,6 +162,7 @@ public enum SilenceDetectionCore: Sendable {
         mix(UInt64(UInt32(bitPattern: silence.unpaddedRange.duration.timescale)))
 
         let tail = fingerprint & 0x0000_ffff_ffff_ffff
-        return UUID(uuidString: String(format: "00000000-0000-4000-8000-%012llx", tail))!
+        let uuidString = String(format: "00000000-0000-4000-8000-%012llx", tail)
+        return UUID(uuidString: uuidString) ?? UUID()
     }
 }

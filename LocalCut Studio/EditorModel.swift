@@ -35,6 +35,8 @@ final class EditorModel {
     var silenceProposals: [ProposedCut] = []
     /// Tracks the in-flight silence detection task for cancellation.
     var silenceDetectionTask: Task<Void, Never>?
+    /// Incremented on each detection invocation to prevent stale results.
+    var silenceDetectionGeneration: Int = 0
 
     // Playback
     let player = AVPlayer()

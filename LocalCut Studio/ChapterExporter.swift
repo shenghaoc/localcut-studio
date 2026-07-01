@@ -76,9 +76,10 @@ nonisolated enum ChapterExporter {
                 ? chapters[index + 1].time - chapter.time
                 : projectDuration - chapter.time
             // Clamp to non-negative to avoid corrupt metadata when a marker
-            // is placed at or past the project end.
-            titleItem.duration = CMTime(seconds: max(0, rawDuration.seconds),
-                                        preferredTimescale: 600)
+            // is placed at or past the project end. Also guard against NaN
+            // from non-numeric CMTime subtraction (max(0, NaN) returns NaN).
+            let clampedSeconds = rawDuration.seconds.isFinite ? max(0, rawDuration.seconds) : 0
+            titleItem.duration = CMTime(seconds: clampedSeconds, preferredTimescale: 600)
             items.append(titleItem)
         }
         return items

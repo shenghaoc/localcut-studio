@@ -37,8 +37,10 @@ extension EditorModel {
             projectDuration: project.duration,
             outputURL: outputURL)
 
-        if result.issues.isEmpty {
+        if result.issues.isEmpty, result.sidecarPath != nil {
             statusMessage = "Chapter sidecar written to \(outputURL.deletingPathExtension().lastPathComponent).chapters.txt"
+        } else if result.issues.isEmpty {
+            statusMessage = result.embeddedChapterNote ?? "Chapter sidecar write failed."
         } else {
             let issueCount = result.issues.count
             statusMessage = "Chapter sidecar export blocked by \(issueCount) validation issue(s)."

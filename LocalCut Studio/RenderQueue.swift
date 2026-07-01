@@ -631,13 +631,15 @@ final class RenderQueue {
             }
 
             // Write YouTube chapter sidecar when chapter markers exist.
+            // Sidecar write failure is logged as a warning but does not fail
+            // the job — the movie export itself succeeded.
             if !chapterMarkers.isEmpty {
                 let sidecarResult = ChapterExporter.writeYouTubeSidecar(
                     markers: chapterMarkers,
                     projectDuration: chapterDuration,
                     outputURL: outputURL)
                 if let note = sidecarResult.embeddedChapterNote {
-                    throw RenderQueueError.chapterSidecarWriteFailed(note)
+                    logger.warning("Chapter sidecar write issue: \(note)")
                 }
             }
 
@@ -718,6 +720,7 @@ final class RenderQueue {
             let chapterItems = ChapterExporter.chapterMetadataItems(
                 from: chapterMarkers,
                 projectDuration: chapterDuration)
+                .filter { $0.duration.isValid && $0.duration > .zero }
             if !chapterItems.isEmpty {
                 session.metadata = (session.metadata ?? []) + chapterItems
             }

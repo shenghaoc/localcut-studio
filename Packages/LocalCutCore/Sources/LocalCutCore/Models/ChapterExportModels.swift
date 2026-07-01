@@ -219,7 +219,7 @@ public enum YouTubeChapterValidator: Sendable {
                                 projectDuration: CMTime) -> [YouTubeChapterLine] {
         let chapterMarkers = markers
             .filter { $0.kind == .chapter }
-            .sorted { $0.time.seconds < $1.time.seconds }
+            .sorted { CMTimeCompare($0.time, $1.time) < 0 }
         return chapterMarkers.map { marker in
             YouTubeChapterLine(time: marker.time, title: marker.name)
         }
@@ -236,7 +236,7 @@ public enum YouTubeChapterValidator: Sendable {
         while attempts < markers.count {
             let chapterMarkers = repaired
                 .filter { $0.kind == .chapter }
-                .sorted { $0.time.seconds < $1.time.seconds }
+                .sorted { CMTimeCompare($0.time, $1.time) < 0 }
             let chapters = chapterMarkers.map { YouTubeChapterLine(time: $0.time, title: $0.name) }
             let issues = validate(chapters, projectDuration: projectDuration)
             guard let shortSpan = issues.compactMap({ issue -> (index: Int, duration: Double)? in

@@ -54,9 +54,11 @@ nonisolated enum KeystrokeOverlayRenderer {
                 opacity = Float(elapsed / fadeIn)
             } else if elapsed < fadeIn + hold {
                 opacity = 1.0
-            } else {
+            } else if fadeOut > 0 {
                 let fadeElapsed = elapsed - fadeIn - hold
                 opacity = Float(max(0, 1 - fadeElapsed / fadeOut))
+            } else {
+                opacity = 0
             }
 
             guard opacity > 0 else { continue }

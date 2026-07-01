@@ -29,10 +29,11 @@ extension EditorModel {
         let media = target.media
         let url = media.url
         let params = parameters
-        let generation = sessionGeneration
+        silenceDetectionGeneration += 1
+        let detectionGen = silenceDetectionGeneration
         let sourceRange = clip.timeRangeInSource
 
-        silenceDetectionTask = Task {
+        silenceDetectionTask = Task { [weak self] in
             do {
                 let detector = SilenceDetector()
                 let (_, proposals) = try await detector.detect(
@@ -44,7 +45,7 @@ extension EditorModel {
                 }
 
                 await MainActor.run {
-                    guard self.sessionGeneration == generation else { return }
+                    guard let self, self.silenceDetectionGeneration == detectionGen else { return }
                     self.silenceProposals = timelineProposals
                     if timelineProposals.isEmpty {
                         self.statusMessage = "No silences detected."
@@ -54,7 +55,7 @@ extension EditorModel {
                 }
             } catch {
                 await MainActor.run {
-                    guard self.sessionGeneration == generation else { return }
+                    guard let self, self.silenceDetectionGeneration == detectionGen else { return }
                     self.statusMessage = "Silence detection failed: \(error.localizedDescription)"
                 }
             }
@@ -86,11 +87,10 @@ extension EditorModel {
             for proposal in selected {
                 applySingleProposal(proposal)
             }
+            silenceProposals = []
             statusMessage = "Applied \(selected.count) silence cut(s)."
             scheduleRebuild()
         }
-
-        silenceProposals = []
     }
 
     /// Cancels the review, discarding all proposals.
