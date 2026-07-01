@@ -89,10 +89,14 @@ extension EditorModel {
 
     // MARK: - Private
 
-    /// Applies a single proposal by trimming or splitting overlapping clips.
+    /// Applies a single proposal by ripple-deleting the silence range.
+    ///
+    /// Clips overlapping the silence are split; clips entirely after it are
+    /// shifted left so no gap remains.
     private func applySingleProposal(_ proposal: ProposedCut) {
         let silenceStart = proposal.silenceRange.start
         let silenceEnd = proposal.silenceRange.end
+        let silenceDuration = silenceEnd - silenceStart
 
         for track in project.audioTracks + project.videoTracks {
             var newClips: [Clip] = []
@@ -100,12 +104,21 @@ extension EditorModel {
                 let clipStart = clip.timelineStart
                 let clipEnd = clip.timelineEnd
 
-                // No overlap — keep as-is.
-                guard silenceStart < clipEnd, silenceEnd > clipStart else {
+                // Clip entirely before silence — keep as-is.
+                if clipEnd <= silenceStart {
                     newClips.append(clip)
                     continue
                 }
 
+                // Clip entirely after silence — shift left.
+                if clipStart >= silenceEnd {
+                    var shifted = clip
+                    shifted.timelineStart = clipStart - silenceDuration
+                    newClips.append(shifted)
+                    continue
+                }
+
+                // Clip overlaps the silence.
                 let overlapStart = max(silenceStart, clipStart)
                 let overlapEnd = min(silenceEnd, clipEnd)
 
@@ -118,14 +131,14 @@ extension EditorModel {
                     newClips.append(left)
                 }
 
-                // Right portion (after silence).
+                // Right portion (after silence) — shifted left.
                 if overlapEnd < clipEnd {
                     let rightOutputOffset = overlapEnd - clipStart
                     let rightSourceOffset = clip.sourceOffset(forOutputOffset: rightOutputOffset)
                     var right = clip
                     right.sourceStart = clip.sourceStart + rightSourceOffset
                     right.duration = clip.duration - rightSourceOffset
-                    right.timelineStart = overlapEnd
+                    right.timelineStart = overlapStart - silenceDuration
                     newClips.append(right)
                 }
             }
