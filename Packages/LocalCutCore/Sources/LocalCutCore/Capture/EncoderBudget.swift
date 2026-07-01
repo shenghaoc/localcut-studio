@@ -108,12 +108,13 @@ public actor EncoderBudget {
         }
         var acquired: [EncoderLease] = []
         for _ in 0..<count {
-            let lease = EncoderLease(consumer: consumer) { [weak self] in
+            let leaseID = UUID()
+            let lease = EncoderLease(id: leaseID, consumer: consumer) { [weak self] in
                 // The release closure captures self weakly; if the budget
                 // actor is deallocated, the release is a no-op.
-                Task { await self?.releaseLease(id: lease.id) }
+                Task { await self?.releaseLease(id: leaseID) }
             }
-            leases[lease.id] = consumer
+            leases[leaseID] = consumer
             acquired.append(lease)
         }
         return acquired

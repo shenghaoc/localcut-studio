@@ -107,7 +107,7 @@ func manifestParsesOldRecords() throws {
 
 @Test("Manifest skips unknown record kinds")
 func manifestSkipsUnknownKinds() throws {
-    var data = CaptureManifest(records: [
+    var data = try CaptureManifest(records: [
         .header(CaptureManifestHeader(
             sessionID: UUID(),
             createdAt: Date(),

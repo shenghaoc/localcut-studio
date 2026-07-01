@@ -31,8 +31,9 @@ struct ProgramCompositorTests {
             SceneLayer(sourceRef: .captureSource(sourceId), zIndex: 0)
         ])
         let sceneB = SceneDefinition(name: "B", layers: [
-            SceneLayer(sourceRef: .captureSource(sourceId), zIndex: 0,
-                      transform: Transform2D(translateX: 0, translateY: 0, scale: 0.5, rotation: 0))
+            SceneLayer(sourceRef: .captureSource(sourceId),
+                      transform: Transform2D(translateX: 0, translateY: 0, scale: 0.5, rotation: 0),
+                      zIndex: 0)
         ])
 
         compositor.updateScenes([sceneA, sceneB])

@@ -87,11 +87,11 @@ enum ProgramLanding {
             }
 
             let duration = CMTimeSubtract(endTime, startTime)
-            guard duration.isValid, !duration.isNegative else { continue }
+            guard duration.isValid, duration.seconds >= 0 else { continue }
 
             let clip = LayoutClip(
-                timelineStart: CMTimeCode(value: startTime.value, timescale: timescale),
-                duration: CMTimeCode(value: duration.value, timescale: timescale),
+                timelineStart: CMTimeCode(CMTime(value: startTime.value, timescale: timescale)),
+                duration: CMTimeCode(CMTime(value: duration.value, timescale: timescale)),
                 sceneSnapshot: sceneDef)
             clips.append(clip)
         }

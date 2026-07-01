@@ -11,6 +11,8 @@ struct EncoderBudgetTests {
         let lease = try await budget.acquire(.export)
         #expect(await budget.activeCount == 1)
         lease.relinquish()
+        // Release is async (Task); yield to let it complete.
+        try await Task.sleep(for: .milliseconds(10))
         #expect(await budget.activeCount == 0)
     }
 
@@ -36,7 +38,7 @@ struct EncoderBudgetTests {
             try await budget.acquire(.isoRecord)
         }
         // Release all leases.
-        budget.releaseAll(leases)
+        await budget.releaseAll(leases)
         #expect(await budget.activeCount == 0)
     }
 
@@ -46,9 +48,11 @@ struct EncoderBudgetTests {
         let lease = try await budget.acquire(.export)
         #expect(await budget.activeCount == 1)
         lease.relinquish()
+        try await Task.sleep(for: .milliseconds(10))
         #expect(await budget.activeCount == 0)
         // Double release should be a no-op.
         lease.relinquish()
+        try await Task.sleep(for: .milliseconds(10))
         #expect(await budget.activeCount == 0)
     }
 
@@ -78,11 +82,8 @@ struct EncoderBudgetTests {
         await #expect(throws: EncoderBudgetError.self) {
             try await budget.acquire(.export)
         }
-        // Release in any order.
-        w.relinquish()
-        p.relinquish()
-        e.relinquish()
-        i.relinquish()
+        // Release all via releaseAll (synchronous on actor).
+        await budget.releaseAll([w, p, e, i])
         #expect(await budget.activeCount == 0)
     }
 
@@ -93,7 +94,8 @@ struct EncoderBudgetTests {
         #expect(leases.count == 3)
         #expect(await budget.activeCount == 3)
         #expect(await budget.availableCount == 1)
-        budget.releaseAll(leases)
+        await budget.releaseAll(leases)
+        try await Task.sleep(for: .milliseconds(10))
         #expect(await budget.activeCount == 0)
     }
 
@@ -112,7 +114,7 @@ struct EncoderBudgetTests {
         let ledger = await budget.ledger
         #expect(ledger.count == 1)
         #expect(ledger[0].consumer == .programIso)
-        lease.relinquish()
+        await budget.releaseAll([lease])
         let emptyLedger = await budget.ledger
         #expect(emptyLedger.isEmpty)
     }

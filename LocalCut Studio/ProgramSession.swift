@@ -1,18 +1,16 @@
 import Foundation
 import AVFoundation
 import CoreMedia
-import CoreVideo
+@preconcurrency import CoreVideo
 import LocalCutCore
 
 // MARK: - Program session error
 
-enum ProgramSessionError: Error, Sendable {
+enum ProgramSessionError: Error, Sendable, Equatable {
     /// Another program session is already running.
     case sessionAlreadyRunning
     /// Encoder budget exhausted before any encoder opens.
     case budgetExhausted(EncoderBudgetError)
-    /// A capture source failed to start.
-    case sourceStartFailed(sourceID: UUID, underlying: Error)
     /// The session was cancelled before completion.
     case cancelled
     /// No sources configured.
@@ -111,7 +109,7 @@ actor ProgramSession {
     func start(sources: [CaptureSourceDescriptor],
                scenes: [SceneDefinition],
                renderSize: CGSize,
-               onFrame: @escaping @Sendable (CVPixelBuffer) -> Void) throws {
+               onFrame: @escaping @Sendable (CVPixelBuffer) -> Void) async throws {
         guard !isRunning else {
             throw ProgramSessionError.sessionAlreadyRunning
         }
@@ -129,7 +127,7 @@ actor ProgramSession {
         // Acquire encoder leases up front. One per video source.
         let videoSources = sources.filter { $0.kind.isVideo }
         do {
-            leases = try budget.acquire(.programIso, count: videoSources.count)
+            leases = try await budget.acquire(.programIso, count: videoSources.count)
         } catch let error as EncoderBudgetError {
             throw ProgramSessionError.budgetExhausted(error)
         }
@@ -143,7 +141,7 @@ actor ProgramSession {
 
         // Open manifest writer.
         let manifestURL = dir.appendingPathComponent("manifest.ndjson")
-        manifestWriter = CaptureManifestFileWriter(url: manifestURL)
+        manifestWriter = try CaptureManifestFileWriter(url: manifestURL)
 
         // Record session start time.
         sessionStartHostTimeUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
@@ -185,7 +183,7 @@ actor ProgramSession {
 
         // Create compositor.
         compositor = ProgramCompositor(renderSize: renderSize)
-        compositor?.updateScenes(scenes)
+        await compositor?.updateScenes(scenes)
 
         // Create taps and writers for each source.
         for source in sources {
@@ -197,12 +195,14 @@ actor ProgramSession {
             if source.kind.isVideo {
                 // Create a writer for this source.
                 let fileURL = dir.appendingPathComponent(source.relativePath)
-                let writer = ContinuousCaptureWriter(
-                    sourceID: source.id,
-                    fileURL: fileURL,
+                let writer = try ContinuousCaptureWriter(
+                    source: source,
+                    outputURL: fileURL,
                     mediaType: .video,
                     outputSettings: videoOutputSettings(for: source),
-                    fragmentInterval: CMTime(value: 2, timescale: 1))
+                    fragmentInterval: CMTime(value: 2, timescale: 1),
+                    sessionStartHostTimeUs: sessionStartHostTimeUs,
+                    manifest: manifestWriter!)
                 writers[source.id] = writer
             }
         }
@@ -213,30 +213,31 @@ actor ProgramSession {
     // MARK: - Scene switch
 
     /// Switches to a new scene. Writes a `scene-switch` manifest record.
-    func switchScene(to sceneId: UUID, enableTransitions: Bool = false) {
+    func switchScene(to sceneId: UUID, enableTransitions: Bool = false) async {
         guard isRunning else { return }
         let atUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
         appendRecord(.sceneSwitch(CaptureSceneSwitchRecord(sceneId: sceneId, atUs: atUs)))
-        compositor?.switchScene(to: sceneId, enableTransitions: enableTransitions)
+        await compositor?.switchScene(to: sceneId, enableTransitions: enableTransitions)
     }
 
     /// Updates scenes mid-session (e.g. user edited a scene). Writes a
     /// new `scene-doc` manifest record so recovery has the exact snapshot.
-    func updateScenes(_ scenes: [SceneDefinition]) {
+    func updateScenes(_ scenes: [SceneDefinition]) async {
         guard isRunning else { return }
         let atUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
         let sceneDoc = SceneDoc(scenes: scenes)
         currentSceneDoc = sceneDoc
         appendRecord(.sceneDoc(CaptureSceneDocRecord(atUs: atUs, scenes: sceneDoc)))
-        compositor?.updateScenes(scenes)
+        await compositor?.updateScenes(scenes)
     }
 
     // MARK: - Feed frames
 
     /// Feeds a captured frame to the compositor via the source's tap.
-    func feedFrame(sourceID: UUID, buffer: CVPixelBuffer) {
-        taps[sourceID]?.feed(buffer)
-        compositor?.updateSource(sourceID, buffer: buffer)
+    func feedFrame(sourceID: UUID, buffer: CVPixelBuffer) async {
+        // CVPixelBuffer is IOSurface-backed and safe to share across actors.
+        await taps[sourceID]?.feed(buffer)
+        await compositor?.updateSource(sourceID, buffer: buffer)
     }
 
     // MARK: - Stop
@@ -257,7 +258,7 @@ actor ProgramSession {
 
         // Dispose all taps (close exactly once).
         for tap in taps.values {
-            tap.dispose()
+            await tap.dispose()
         }
 
         // Finish all writers concurrently.
@@ -265,7 +266,7 @@ actor ProgramSession {
         await withTaskGroup(of: (UUID, CaptureSourceEndedRecord?).self) { group in
             for (sourceID, writer) in writers {
                 group.addTask {
-                    let record = await writer.finish(atUs: stopTimeUs)
+                    let record = try? await writer.finish()
                     return (sourceID, record)
                 }
             }
@@ -289,7 +290,7 @@ actor ProgramSession {
         manifestWriter?.close()
 
         // Release encoder leases.
-        budget.releaseAll(leases)
+        await budget.releaseAll(leases)
 
         // Build result.
         let manifest = CaptureManifest(records: manifestRecords)
@@ -331,7 +332,7 @@ actor ProgramSession {
     /// Appends a record to both the in-memory list and the file writer.
     private func appendRecord(_ record: CaptureManifestRecord) {
         manifestRecords.append(record)
-        manifestWriter?.append(record)
+        try? manifestWriter?.append(record)
     }
 
     /// Called when a tap's deinit fires without an explicit dispose.

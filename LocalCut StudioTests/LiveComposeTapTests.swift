@@ -4,10 +4,10 @@ import CoreVideo
 @testable import LocalCut_Studio
 
 @Suite("LiveComposeTap")
+@MainActor
 struct LiveComposeTapTests {
 
-    /// Creates a minimal CVPixelBuffer for testing. Returns nil if the
-    /// system can't create one (shouldn't happen on macOS).
+    /// Creates a minimal CVPixelBuffer for testing.
     private func makeTestBuffer(width: Int = 64, height: Int = 64) -> CVPixelBuffer? {
         var pixelBuffer: CVPixelBuffer?
         let attrs: [String: Any] = [
@@ -32,15 +32,11 @@ struct LiveComposeTapTests {
         let buf2 = try #require(makeTestBuffer())
         tap.feed(buf2)
         #expect(tap.latestBuffer === buf2)
-        // buf1 is now released (only buf2 is retained).
     }
 
     @Test("Replacing frame releases old wrapper exactly once")
     func replacingReleasesOldOnce() throws {
         let tap = LiveComposeTap(sourceID: UUID())
-        var disposeCount = 0
-        // We can't directly observe CVPixelBuffer release, but we can
-        // verify the tap's state transitions.
         let buf1 = try #require(makeTestBuffer())
         tap.feed(buf1)
         #expect(tap.latestBuffer === buf1)
@@ -48,16 +44,14 @@ struct LiveComposeTapTests {
         let buf2 = try #require(makeTestBuffer())
         tap.feed(buf2)
         #expect(tap.latestBuffer === buf2)
-        // After replacement, only buf2 is held.
-        disposeCount += 1
     }
 
     @Test("Dispose releases held wrapper exactly once")
     func disposeReleasesOnce() throws {
         var disposeCallCount = 0
-        let tap = LiveComposeTap(sourceID: UUID()) {
-            disposeCallCount += 1
-        }
+        let tap = LiveComposeTap(sourceID: UUID(), onDispose: { @Sendable in
+            MainActor.assumeIsolated { disposeCallCount += 1 }
+        })
         let buf = try #require(makeTestBuffer())
         tap.feed(buf)
         #expect(tap.latestBuffer != nil)
@@ -78,9 +72,7 @@ struct LiveComposeTapTests {
         let buf = try #require(makeTestBuffer())
         tap.feed(buf)
 
-        // Simulate the source being invisible — the tap still holds the frame.
-        // (In real usage, the compositor simply doesn't composite invisible
-        // layers, but the tap keeps the buffer warm.)
+        // The tap still holds the frame even when the source is invisible.
         #expect(tap.latestBuffer !== nil)
         #expect(tap.latestBuffer === buf)
     }

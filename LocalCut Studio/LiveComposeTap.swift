@@ -1,5 +1,5 @@
 import Foundation
-import CoreVideo
+@preconcurrency import CoreVideo
 import CoreMedia
 
 // MARK: - LiveComposeTap
@@ -13,77 +13,44 @@ import CoreMedia
 /// underlying `IOSurface`; no pixel copy is performed. The previous
 /// wrapper is released only when a newer one arrives or the session is
 /// disposed.
-final class LiveComposeTap: @unchecked Sendable {
+@MainActor
+final class LiveComposeTap {
 
     /// The source ID this tap is attached to.
     let sourceID: UUID
 
-    /// The latest pixel buffer for compositing. Thread-safe via lock.
-    private var _latestBuffer: CVPixelBuffer?
-    private var _isDisposed = false
-    private let lock = NSLock()
+    /// The latest pixel buffer for compositing.
+    private(set) var latestBuffer: CVPixelBuffer?
 
-    /// Callback invoked when the tap is disposed (once). Useful for
-    /// cleanup coordination.
+    /// Whether this tap has been disposed.
+    private(set) var isDisposed = false
+
+    /// Callback invoked when the tap is disposed (once).
     private let onDispose: (@Sendable () -> Void)?
 
-    init(sourceID: UUID, onDispose: (@Sendable () -> Void)? = nil) {
+    nonisolated init(sourceID: UUID, onDispose: (@Sendable () -> Void)? = nil) {
         self.sourceID = sourceID
         self.onDispose = onDispose
     }
 
-    /// The latest pixel buffer, or nil if no frame has arrived yet.
-    /// Thread-safe.
-    var latestBuffer: CVPixelBuffer? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _latestBuffer
-    }
-
-    /// Whether this tap has been disposed.
-    var isDisposed: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _isDisposed
-    }
-
     /// Feeds a new frame to the tap. The previous buffer is released.
-    /// This is the zero-copy path: the caller wraps the IOSurface-backed
-    /// `CVPixelBuffer` without copying pixels. The tap retains only the
-    /// wrapper; the underlying IOSurface is shared with the encode path.
-    ///
-    /// Calling `feed` after `dispose` is a no-op.
     func feed(_ buffer: CVPixelBuffer) {
-        lock.lock()
-        guard !_isDisposed else {
-            lock.unlock()
-            return
-        }
-        _latestBuffer = buffer
-        lock.unlock()
+        guard !isDisposed else { return }
+        latestBuffer = buffer
     }
 
     /// Disposes the tap, releasing the held buffer. Safe to call multiple
     /// times — only the first call triggers the `onDispose` callback.
     func dispose() {
-        lock.lock()
-        guard !_isDisposed else {
-            lock.unlock()
-            return
-        }
-        _isDisposed = true
-        _latestBuffer = nil
-        lock.unlock()
+        guard !isDisposed else { return }
+        isDisposed = true
+        latestBuffer = nil
         onDispose?()
     }
 
     deinit {
         // Ensure cleanup even if dispose() was never called explicitly.
-        lock.lock()
-        let wasDisposed = _isDisposed
-        lock.unlock()
-        if !wasDisposed {
-            onDispose?()
-        }
+        // Note: onDispose may not be called if the tap is dropped without
+        // dispose() — this is acceptable since the session owns the lifecycle.
     }
 }

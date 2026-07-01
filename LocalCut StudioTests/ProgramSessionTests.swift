@@ -62,7 +62,11 @@ struct ProgramSessionTests {
 
     @Test("Start with budget exhaustion opens no encoders")
     func budgetExhaustionOpensNoEncoders() async throws {
-        let budget = EncoderBudget(maxConcurrent: 0) // Force exhaustion.
+        // Budget of 1: the session needs 1 video source, but the budget
+        // is already exhausted before start.
+        let budget = EncoderBudget(maxConcurrent: 1)
+        // Pre-exhaust the budget.
+        let preLease = try await budget.acquire(.export)
         let dir = try tempDir()
         let session = ProgramSession(budget: budget, rootURL: dir)
         let source = testSource()
@@ -76,6 +80,7 @@ struct ProgramSessionTests {
                 onFrame: { _ in })
         }
         #expect(await !session.isRunning)
+        preLease.relinquish()
     }
 
     @Test("Partial setup failure cleans up leases")

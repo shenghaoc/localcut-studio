@@ -10,7 +10,7 @@ import CoreMedia
 ///
 /// Layout clips are created when a Program Mode session stops and its
 /// scene-switch records are partitioned into segments.
-public struct LayoutClip: Hashable, Codable, Sendable, Identifiable {
+public struct LayoutClip: Equatable, Codable, Sendable, Identifiable {
     public var id: UUID
     /// The time on the timeline where this clip starts.
     public var timelineStart: CMTimeCode
@@ -37,9 +37,9 @@ public struct LayoutClip: Hashable, Codable, Sendable, Identifiable {
 
     /// The end time of this clip on the timeline.
     public var timelineEnd: CMTimeCode {
-        CMTimeCode(
+        CMTimeCode(CMTime(
             value: timelineStart.value + duration.value,
-            timescale: timelineStart.timescale)
+            timescale: timelineStart.timescale))
     }
 }
 
@@ -47,7 +47,7 @@ public struct LayoutClip: Hashable, Codable, Sendable, Identifiable {
 
 /// Persistence snapshot for a layout track. Stored alongside video and
 /// audio tracks in `ProjectDocument`.
-public struct LayoutTrackDoc: Codable, Equatable, Sendable {
+public struct LayoutTrackDoc: Equatable, Codable, Sendable {
     public var id: UUID
     public var name: String
     public var isMuted: Bool
@@ -83,7 +83,7 @@ public final class LayoutTrack: Identifiable {
 
     /// The first free time at the tail of the track.
     public var endTime: CMTimeCode {
-        clips.reduce(CMTimeCode(value: 0, timescale: 600)) { acc, clip in
+        clips.reduce(CMTimeCode(CMTime(value: 0, timescale: 600))) { acc, clip in
             clip.timelineEnd.value > acc.value ? clip.timelineEnd : acc
         }
     }

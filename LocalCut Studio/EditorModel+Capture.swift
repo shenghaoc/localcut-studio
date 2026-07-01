@@ -601,6 +601,8 @@ extension EditorModel {
                 if let index = project.audioTracks.firstIndex(where: { $0.id == slot.trackID }) {
                     trackIndices[slot.key] = index
                 }
+            case .layout:
+                break // Layout tracks are not recording targets.
             }
         }
         return trackIndices
@@ -638,6 +640,8 @@ extension EditorModel {
             case .audio:
                 guard let trackIndex = project.audioTracks.firstIndex(where: { $0.id == slot.trackID }) else { continue }
                 project.audioTracks[trackIndex].clips.removeAll { $0.id == slot.clipID }
+            case .layout:
+                break // Layout tracks are not recording targets.
             }
         }
         project.videoTracks.removeAll { videoTrackIDs.contains($0.id) && $0.clips.isEmpty }
