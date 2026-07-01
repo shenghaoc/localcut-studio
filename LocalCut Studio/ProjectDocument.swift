@@ -41,7 +41,10 @@ extension ProjectDocument {
             keystrokeOverlayClips: project.keystrokeOverlayClips,
             aspect: project.aspect,
             coverFrame: project.coverFrame,
-            sceneDoc: project.sceneDoc)
+            sceneDoc: project.sceneDoc,
+            layoutTracks: project.layoutTracks.map {
+                LayoutTrackDoc(id: $0.id, name: $0.name, isMuted: $0.isMuted, clips: $0.clips)
+            })
     }
 
     /// Captures a queue snapshot. Saved bundle documents intentionally strip

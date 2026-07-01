@@ -233,6 +233,12 @@ final class DocumentController {
         model.project.keystrokeOverlayClips = document.keystrokeOverlayClips
         // Phase 45: scene doc is migrated on decode (in ProjectDocument.init(from:)).
         model.project.sceneDoc = document.sceneDoc
+        model.project.layoutTracks = document.layoutTracks.map {
+            let track = LayoutTrack(id: $0.id, name: $0.name)
+            track.isMuted = $0.isMuted
+            track.clips = $0.clips
+            return track
+        }
 
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         model.documentURL = isNewerSchema ? nil : url

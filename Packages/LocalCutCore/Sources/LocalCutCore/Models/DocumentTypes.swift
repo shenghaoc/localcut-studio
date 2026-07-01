@@ -44,6 +44,8 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     public var coverFrame: CoverFrameDoc?
     /// Phase 45 scene definitions for Program Mode.
     public var sceneDoc: SceneDoc
+    /// Phase 45 layout tracks from Program Mode sessions.
+    public var layoutTracks: [LayoutTrackDoc]
 
     public init(schemaVersion: Int = ProjectDocument.currentSchemaVersion,
                 bundleFormat: String? = nil,
@@ -65,7 +67,8 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
                 keystrokeOverlayClips: [KeystrokeOverlayClip] = [],
                 aspect: ProjectAspect? = nil,
                 coverFrame: CoverFrameDoc? = nil,
-                sceneDoc: SceneDoc = SceneDoc()) {
+                sceneDoc: SceneDoc = SceneDoc(),
+                layoutTracks: [LayoutTrackDoc] = []) {
         self.schemaVersion = schemaVersion
         self.bundleFormat = bundleFormat
         self.name = name
@@ -87,13 +90,14 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         self.aspect = aspect ?? ProjectAspect.infer(width: renderWidth, height: renderHeight)
         self.coverFrame = coverFrame
         self.sceneDoc = sceneDoc
+        self.layoutTracks = layoutTracks
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, bundleFormat, name, renderWidth, renderHeight, frameRate,
              workingColourSpace, media, videoTracks, audioTracks, captionTracks,
              markers, audioBus, overlays, callouts, paddedBackground, screencastEventLogs,
-             keystrokeOverlayClips, aspect, coverFrame, sceneDoc
+             keystrokeOverlayClips, aspect, coverFrame, sceneDoc, layoutTracks
     }
 
     public init(from decoder: any Decoder) throws {
@@ -135,6 +139,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         // future schema upgrades are applied.
         let rawSceneDoc = try c.decodeIfPresent(SceneDoc.self, forKey: .sceneDoc) ?? SceneDoc()
         sceneDoc = migrateSceneDoc(rawSceneDoc)
+        layoutTracks = try c.decodeIfPresent([LayoutTrackDoc].self, forKey: .layoutTracks) ?? []
     }
 
     public func encoded() throws -> Data {
@@ -448,7 +453,13 @@ public struct TrackDoc: Codable, Equatable, Sendable {
         clips = try c.decodeIfPresent([ClipDoc].self, forKey: .clips) ?? []
     }
 
-    public var trackKind: TrackKind { kind == "audio" ? .audio : .video }
+    public var trackKind: TrackKind {
+        switch kind {
+        case "audio": .audio
+        case "layout": .layout
+        default: .video
+        }
+    }
 }
 
 public struct ClipDoc: Codable, Equatable, Sendable {

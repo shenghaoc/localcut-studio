@@ -68,6 +68,8 @@ public enum WorkingColourSpace: String, Codable, Hashable, Sendable, CaseIterabl
 public enum TrackKind: Hashable, Sendable {
     case video
     case audio
+    /// Phase 45: layout track for Program Mode scene-switch replay.
+    case layout
 }
 
 // MARK: - Colour Grading

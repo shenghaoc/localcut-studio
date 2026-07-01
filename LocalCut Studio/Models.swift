@@ -96,6 +96,8 @@ final class Project {
     var keystrokeOverlayClips: [KeystrokeOverlayClip] = []
     /// Phase 45 scene definitions for Program Mode.
     var sceneDoc: SceneDoc = SceneDoc()
+    /// Phase 45 layout tracks from Program Mode sessions.
+    var layoutTracks: [LayoutTrack] = []
     /// Bookmark data for overlay source files, keyed by overlay ID.
     var overlayBookmarks: [UUID: Data] = [:]
     /// Bundle-relative paths for overlay source files, keyed by overlay ID.
