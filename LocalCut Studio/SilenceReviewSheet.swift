@@ -43,7 +43,7 @@ struct SilenceReviewSheet: View {
                     model.applySelectedSilenceProposals()
                     isPresented = false
                 }
-                .disabled(model.silenceProposals.allSatisfy(\.isSelected) == false)
+                .disabled(!model.silenceProposals.contains(where: \.isSelected))
                 .keyboardShortcut(.defaultAction)
             }
         }
