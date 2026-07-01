@@ -72,9 +72,13 @@ nonisolated enum ChapterExporter {
             titleItem.value = chapter.title as NSString
             titleItem.locale = Locale.current
             titleItem.time = chapter.time
-            titleItem.duration = index + 1 < chapters.count
+            let rawDuration = index + 1 < chapters.count
                 ? chapters[index + 1].time - chapter.time
                 : projectDuration - chapter.time
+            // Clamp to non-negative to avoid corrupt metadata when a marker
+            // is placed at or past the project end.
+            titleItem.duration = CMTime(seconds: max(0, rawDuration.seconds),
+                                        preferredTimescale: 600)
             items.append(titleItem)
         }
         return items

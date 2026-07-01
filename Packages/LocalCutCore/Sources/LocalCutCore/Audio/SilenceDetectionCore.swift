@@ -57,7 +57,7 @@ public enum SilenceDetectionCore: Sendable {
                     inSilence = false
                     let silenceEndBlock = i
                     let silenceBlockCount = silenceEndBlock - silenceStartBlock
-                    if silenceBlockCount >= minSilenceSamples / blockSize {
+                    if silenceBlockCount * blockSize >= minSilenceSamples {
                         appendSilence(
                             startBlock: silenceStartBlock, endBlock: silenceEndBlock,
                             blockSize: blockSize, sampleRate: sampleRate,
@@ -72,7 +72,7 @@ public enum SilenceDetectionCore: Sendable {
         if inSilence {
             let silenceEndBlock = blockCount
             let silenceBlockCount = silenceEndBlock - silenceStartBlock
-            if silenceBlockCount >= minSilenceSamples / blockSize {
+            if silenceBlockCount * blockSize >= minSilenceSamples {
                 appendSilence(
                     startBlock: silenceStartBlock, endBlock: silenceEndBlock,
                     blockSize: blockSize, sampleRate: sampleRate,
@@ -100,11 +100,12 @@ public enum SilenceDetectionCore: Sendable {
         guard blockCount > 0 else { return [] }
         var rmsValues = [Float](repeating: 0, count: blockCount)
         samples.withUnsafeBufferPointer { ptr in
+            guard let base = ptr.baseAddress else { return }
             for i in 0..<blockCount {
                 let offset = i * blockSize
                 let count = min(blockSize, ptr.count - offset)
                 var meanSquare: Float = 0
-                vDSP_measqv(ptr.baseAddress! + offset, 1, &meanSquare, vDSP_Length(count))
+                vDSP_measqv(base + offset, 1, &meanSquare, vDSP_Length(count))
                 rmsValues[i] = sqrt(meanSquare)
             }
         }

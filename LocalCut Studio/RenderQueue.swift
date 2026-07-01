@@ -624,10 +624,13 @@ final class RenderQueue {
 
             // Write YouTube chapter sidecar when chapter markers exist.
             if !chapterMarkers.isEmpty {
-                _ = ChapterExporter.writeYouTubeSidecar(
+                let sidecarResult = ChapterExporter.writeYouTubeSidecar(
                     markers: chapterMarkers,
                     projectDuration: projectDuration,
                     outputURL: outputURL)
+                if let note = sidecarResult.embeddedChapterNote {
+                    logger.warning("Chapter sidecar write issue: \(note)")
+                }
             }
 
             if cancelInFlightID == id {
@@ -708,7 +711,7 @@ final class RenderQueue {
                 from: chapterMarkers,
                 projectDuration: projectDuration)
             if !chapterItems.isEmpty {
-                session.metadata = chapterItems
+                session.metadata = (session.metadata ?? []) + chapterItems
             }
         }
         activeExportSession = session

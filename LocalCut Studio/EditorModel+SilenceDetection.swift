@@ -92,13 +92,14 @@ extension EditorModel {
     /// Applies a single proposal by ripple-deleting the silence range.
     ///
     /// Clips overlapping the silence are split; clips entirely after it are
-    /// shifted left so no gap remains.
+    /// shifted left so no gap remains. Also ripples caption tracks.
     private func applySingleProposal(_ proposal: ProposedCut) {
         let silenceStart = proposal.silenceRange.start
         let silenceEnd = proposal.silenceRange.end
         let silenceDuration = silenceEnd - silenceStart
 
-        for track in project.audioTracks + project.videoTracks {
+        let allTracks: [Track] = project.audioTracks + project.videoTracks
+        for track in allTracks {
             var newClips: [Clip] = []
             for clip in track.clips {
                 let clipStart = clip.timelineStart
@@ -132,17 +133,47 @@ extension EditorModel {
                 }
 
                 // Right portion (after silence) — shifted left.
+                // Use Clip init to get a fresh UUID, avoiding duplicate IDs.
                 if overlapEnd < clipEnd {
                     let rightOutputOffset = overlapEnd - clipStart
                     let rightSourceOffset = clip.sourceOffset(forOutputOffset: rightOutputOffset)
-                    var right = clip
-                    right.sourceStart = clip.sourceStart + rightSourceOffset
-                    right.duration = clip.duration - rightSourceOffset
-                    right.timelineStart = overlapStart - silenceDuration
+                    let right = Clip(
+                        mediaID: clip.mediaID,
+                        sourceStart: clip.sourceStart + rightSourceOffset,
+                        duration: clip.duration - rightSourceOffset,
+                        timelineStart: overlapEnd - silenceDuration,
+                        opacity: clip.opacity,
+                        geometry: clip.geometry,
+                        effects: clip.effects,
+                        transition: clip.transition,
+                        volumeEnvelope: clip.volumeEnvelope,
+                        transformKeyframes: clip.transformKeyframes,
+                        speedCurve: clip.speedCurve,
+                        preservePitch: clip.preservePitch,
+                        pitchAlgorithm: clip.pitchAlgorithm)
                     newClips.append(right)
                 }
             }
             track.clips = newClips
+        }
+
+        // Ripple caption tracks: shift caption lines that start after the silence.
+        for captionTrack in project.captionTracks {
+            for line in captionTrack.lines {
+                if line.range.start >= silenceEnd {
+                    // Caption lines are value types; we need to update in place.
+                    // Since CaptionLine.range is a CMTimeRange, shift the line.
+                    let shiftedStart = line.range.start - silenceDuration
+                    let shiftedRange = CMTimeRange(start: shiftedStart, duration: line.range.duration)
+                    captionTrack.updateLine(CaptionLine(
+                        id: line.id,
+                        range: shiftedRange,
+                        text: line.text,
+                        words: line.words,
+                        style: line.style,
+                        styleKeyframes: line.styleKeyframes))
+                }
+            }
         }
     }
 }

@@ -33,8 +33,11 @@ public struct SilenceDetectionParameters: Hashable, Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        openThresholdDB = try c.decodeIfPresent(Float.self, forKey: .openThresholdDB) ?? -40
-        closeThresholdDB = try c.decodeIfPresent(Float.self, forKey: .closeThresholdDB) ?? -35
+        let rawOpen = try c.decodeIfPresent(Float.self, forKey: .openThresholdDB) ?? -40
+        let rawClose = try c.decodeIfPresent(Float.self, forKey: .closeThresholdDB) ?? -35
+        // Enforce hysteresis invariant: open <= close.
+        openThresholdDB = min(rawOpen, rawClose)
+        closeThresholdDB = max(rawOpen, rawClose)
         let minDurCode = try c.decodeIfPresent(CMTimeCode.self, forKey: .minimumSilenceDuration)
         minimumSilenceDuration = minDurCode?.cmTime ?? CMTime(seconds: 0.6, preferredTimescale: 600)
         let paddingCode = try c.decodeIfPresent(CMTimeCode.self, forKey: .padding)
