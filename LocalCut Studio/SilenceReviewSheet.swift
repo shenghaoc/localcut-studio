@@ -78,7 +78,7 @@ struct SilenceReviewSheet: View {
             Spacer()
 
             Button {
-                model.currentTime = proposal.silenceRange.start.seconds
+                model.seek(toSeconds: proposal.silenceRange.start.seconds)
             } label: {
                 Image(systemName: "play.circle")
                     .font(.title3)
