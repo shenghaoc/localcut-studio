@@ -67,7 +67,7 @@ nonisolated enum ChapterExporter {
         for (index, chapter) in chapters.enumerated() {
             // Chapter title item.
             let titleItem = AVMutableMetadataItem()
-            titleItem.key = AVMetadataKey.commonKeyTitle as NSString
+            titleItem.key = AVMetadataKey.commonKeyTitle.rawValue as NSString
             titleItem.keySpace = .common
             titleItem.value = chapter.title as NSString
             titleItem.locale = Locale.current
