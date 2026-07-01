@@ -60,6 +60,7 @@ struct SilenceReviewSheet: View {
             ))
             .toggleStyle(.checkbox)
             .labelsHidden()
+            .accessibilityLabel("Select silence at \(timecodeString(proposal.silenceRange.start))")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(timecodeString(proposal.silenceRange.start) + " – " + timecodeString(proposal.silenceRange.end))
@@ -84,6 +85,7 @@ struct SilenceReviewSheet: View {
             }
             .buttonStyle(.borderless)
             .help("Scrub to this silence")
+            .accessibilityLabel("Preview silence at \(timecodeString(proposal.silenceRange.start))")
         }
     }
 

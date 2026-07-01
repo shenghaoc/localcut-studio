@@ -122,13 +122,14 @@ struct TutorialFinishingInspectorView: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Button {
+                            Button(role: .destructive) {
                                 model.removeKeystrokeOverlay(id: clip.id)
                             } label: {
                                 Image(systemName: "trash")
                                     .foregroundStyle(.secondary)
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel("Remove keystroke overlay")
                         }
                     }
                 }
