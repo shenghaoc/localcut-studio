@@ -505,4 +505,35 @@ struct KeystrokeOverlayGeneratorTests {
 
         #expect(clip.events.map(\.displayText) == ["C"])
     }
+
+    @Test("Legacy v1 events without keyPhase are included")
+    func legacyEventsWithoutKeyPhaseAreIncluded() throws {
+        let events = [
+            ScreencastEvent(
+                time: CMTime(seconds: 5, preferredTimescale: 600),
+                kind: .key,
+                keyCode: 0x00,
+                modifierFlagsRaw: 0),
+        ]
+        let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
+        let clip = try #require(KeystrokeOverlayGenerator.generate(from: log))
+
+        #expect(clip.events.map(\.displayText) == ["A"])
+    }
+
+    @Test("Minus key maps to correct character")
+    func minusKeyMapsCorrectly() throws {
+        let events = [
+            ScreencastEvent(
+                time: CMTime(seconds: 6, preferredTimescale: 600),
+                kind: .key,
+                keyCode: 0x1B,
+                modifierFlagsRaw: 0,
+                keyPhase: .down),
+        ]
+        let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
+        let clip = try #require(KeystrokeOverlayGenerator.generate(from: log))
+
+        #expect(clip.events.map(\.displayText) == ["-"])
+    }
 }

@@ -27,7 +27,12 @@ public enum KeystrokeOverlayGenerator: Sendable {
         guard log.isSupportedSchema else { return nil }
 
         let keyEvents = log.events.filter { event in
-            event.kind == .key && event.keyPhase != .up
+            guard event.kind == .key else { return false }
+            // Modern logs with keyPhase: only include key-down events.
+            // Legacy v1 logs without keyPhase: include all .key events;
+            // deduplication by (keyCode, time) below handles same-timestamp
+            // down/up pairs from the old writer.
+            return event.keyPhase == .down || event.keyPhase == nil
         }
         guard !keyEvents.isEmpty else { return nil }
         var seenKeys = Set<KeyEventIdentity>()
@@ -180,7 +185,7 @@ public enum KeystrokeOverlayGenerator: Sendable {
         case 0x2C: return "/"
         case 0x2F: return "."
         case 0x32: return "`"
-        case 0x38: return "-"
+        case 0x1B: return "-"
         case 0x39: return "\u{21EA}" // Caps Lock
         case 0x41: return "."
         case 0x43: return "*"
