@@ -769,10 +769,18 @@ final class RenderQueue {
         }
         activeWriter = writer
 
-        let timedChapterMetadata = try makeTimedChapterMetadataInput(
-            writer: writer,
-            markers: chapterMarkers,
-            chapterDuration: chapterDuration)
+        let timedChapterMetadata: (input: AVAssetWriterInput, adaptor: AVAssetWriterInputMetadataAdaptor, groups: [AVTimedMetadataGroup])?
+        do {
+            timedChapterMetadata = try makeTimedChapterMetadataInput(
+                writer: writer,
+                markers: chapterMarkers,
+                chapterDuration: chapterDuration)
+        } catch {
+            // Chapter metadata track rejected by the container/codec
+            // combination. Fall back to sidecar-only — the movie export
+            // continues without embedded chapters.
+            timedChapterMetadata = nil
+        }
 
         let renderSize = preset.targetSize.cgSize
         // The bracket bitrate scales with frame rate too — honour the
