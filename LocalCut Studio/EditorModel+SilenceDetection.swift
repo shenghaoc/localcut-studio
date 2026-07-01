@@ -76,19 +76,37 @@ extension EditorModel {
     @MainActor
     func applySelectedSilenceProposals() {
         let selected = silenceProposals.filter(\.isSelected).sorted {
-            $0.silenceRange.start > $1.silenceRange.start
+            $0.silenceRange.start < $1.silenceRange.start
         }
         guard !selected.isEmpty else {
             statusMessage = "No proposals selected."
             return
         }
 
+        // Coalesce overlapping ranges so that padding-expanded silences
+        // that touch or overlap are merged into a single cut, preventing
+        // double-deletion when applied sequentially.
+        var coalesced: [ProposedCut] = []
+        for proposal in selected {
+            if var last = coalesced.last,
+               proposal.silenceRange.start <= last.silenceRange.end {
+                let mergedEnd = max(last.silenceRange.end, proposal.silenceRange.end)
+                last.silenceRange = CMTimeRange(start: last.silenceRange.start, end: mergedEnd)
+                coalesced[coalesced.count - 1] = last
+            } else {
+                coalesced.append(proposal)
+            }
+        }
+
+        // Apply in reverse time order so earlier offsets remain valid.
+        let reversed = coalesced.sorted { $0.silenceRange.start > $1.silenceRange.start }
+
         performUndoable("Remove Silences") {
-            for proposal in selected {
+            for proposal in reversed {
                 applySingleProposal(proposal)
             }
             silenceProposals = []
-            statusMessage = "Applied \(selected.count) silence cut(s)."
+            statusMessage = "Applied \(coalesced.count) silence cut(s)."
             scheduleRebuild()
         }
     }
