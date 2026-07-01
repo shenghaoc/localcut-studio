@@ -25,6 +25,9 @@ public enum CapabilityFeature: Sendable, Hashable {
     case frameInterpolation
     case simultaneousCaptureStreams(count: Int)
     case metalEffectChain
+    /// Phase 45: Program Mode requires accelerated tier (hardware encoder +
+    /// Apple Silicon or equivalent).
+    case programMode
 }
 
 /// A tier choice with the human-readable reason behind it. Surfaced in the
@@ -192,6 +195,8 @@ extension Capabilities {
             return resolveSimultaneousCaptureStreams(count: count)
         case .metalEffectChain:
             return resolveMetalEffectChain()
+        case .programMode:
+            return resolveProgramMode()
         }
     }
 
@@ -294,6 +299,38 @@ extension Capabilities {
         return CapabilityVerdict(
             tier: .pro,
             reason: "Apple Silicon M\(generation); ≥ 16 GiB unified memory")
+    }
+
+    private func resolveProgramMode() -> CapabilityVerdict {
+        // Program Mode requires hardware encoders and Apple Silicon (or
+        // equivalent) for real-time multi-source capture + compositing.
+        if chip == .intel {
+            return CapabilityVerdict(
+                tier: .baseline,
+                reason: "Program Mode requires Apple Silicon — Intel Mac")
+        }
+        if videoEncoderCount <= 0 {
+            return CapabilityVerdict(
+                tier: .baseline,
+                reason: "No hardware video encoders reported by VideoToolbox")
+        }
+        guard let generation = chip.generation, generation > 0 else {
+            return CapabilityVerdict(
+                tier: .baseline,
+                reason: "Unknown Apple Silicon generation — treating as baseline")
+        }
+        // Minimum: accelerated tier. Pro tier for 3+ sources with
+        // sufficient memory.
+        if generation >= 2 || unifiedMemoryGiB >= 16 {
+            return CapabilityVerdict(
+                tier: .accelerated,
+                reason: "Apple Silicon M\(generation); "
+                    + "\(videoEncoderCount) hardware encoder(s)")
+        }
+        return CapabilityVerdict(
+            tier: .accelerated,
+            reason: "Apple Silicon M\(generation); "
+                + "\(videoEncoderCount) hardware encoder(s)")
     }
 
     private var osVersionString: String {

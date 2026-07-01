@@ -16,6 +16,12 @@ public final class DiagnosticsBridge: Sendable {
         public let lastRenderTime: Double
         public let decoderCount: Int
         public let totalFrameCount: Int
+        /// Phase 45: current encoder lease count.
+        public let encoderLeaseCount: Int
+        /// Phase 45: maximum encoder budget.
+        public let encoderBudgetMax: Int
+        /// Phase 45: encoder lease ledger (consumer labels).
+        public let encoderLedger: [String]
     }
 
     private struct State {
@@ -23,6 +29,9 @@ public final class DiagnosticsBridge: Sendable {
         var lastRenderTime: Double = 0
         var decoderCount: Int = 0
         var totalFrameCount: Int = 0
+        var encoderLeaseCount: Int = 0
+        var encoderBudgetMax: Int = 0
+        var encoderLedger: [String] = []
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
@@ -57,7 +66,28 @@ public final class DiagnosticsBridge: Sendable {
             Snapshot(renderTimes: s.renderTimes,
                      lastRenderTime: s.lastRenderTime,
                      decoderCount: s.decoderCount,
-                     totalFrameCount: s.totalFrameCount)
+                     totalFrameCount: s.totalFrameCount,
+                     encoderLeaseCount: s.encoderLeaseCount,
+                     encoderBudgetMax: s.encoderBudgetMax,
+                     encoderLedger: s.encoderLedger)
+        }
+    }
+
+    /// Phase 45: updates encoder budget diagnostics.
+    public func setEncoderBudget(active: Int, max: Int, ledger: [String]) {
+        state.withLock { s in
+            s.encoderLeaseCount = active
+            s.encoderBudgetMax = max
+            s.encoderLedger = ledger
+        }
+    }
+
+    /// Phase 45: clears encoder budget diagnostics.
+    public func clearEncoderBudget() {
+        state.withLock { s in
+            s.encoderLeaseCount = 0
+            s.encoderBudgetMax = 0
+            s.encoderLedger = []
         }
     }
 
