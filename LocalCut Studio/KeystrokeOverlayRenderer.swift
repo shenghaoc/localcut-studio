@@ -109,7 +109,7 @@ nonisolated enum KeystrokeOverlayRenderer {
         var image = CIImage(cgImage: cgImage)
         if overlayOpacity < 1 {
             image = image.applyingFilter("CIColorMatrix", parameters: [
-                "inputA": overlayOpacity
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(overlayOpacity))
             ])
         }
         return image
