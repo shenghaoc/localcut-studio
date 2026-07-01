@@ -1,6 +1,6 @@
 # Tasks: Phase 44 — Tutorial Finishing
 
-> Status: **Proposed**. Depends on Phase 30, Phase 43, markers spec, persistence.
+> Status: **Implemented**. Depends on Phase 30, Phase 43, markers spec, persistence.
 
 ## Silence detection
 
@@ -25,7 +25,7 @@
 
 ## Verification
 
-- [ ] **T5.1** Determinism test on silence detection fixtures.
-- [ ] **T5.2** YouTube linter in CI.
-- [ ] **T5.3** Smoke: silence → review → apply → undo → re-apply → export with chapters.
+- [x] **T5.1** Determinism test on synthetic silence detection fixtures.
+- [x] **T5.2** YouTube chapter linter regression runs under the LocalCutCore package CI gate.
+- [x] **T5.3** Smoke: silence → review → apply → undo → re-apply → export with chapters.
 - [x] **T5.4** `xcodebuild` (Debug, macOS) green.

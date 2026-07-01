@@ -541,6 +541,10 @@ final class RenderQueue {
         let project = reconstructed.project
         let heldSources = reconstructed.accessedSources
         let missingSources = reconstructed.missingBookmarks
+        // Chapter markers are authored on the project timeline. Keep UI
+        // preflight, sidecar writing, and embedded metadata on that same
+        // duration source instead of the derived composition duration.
+        let chapterDuration = project.duration
         defer { for url in heldSources { url.stopAccessingSecurityScopedResource() } }
 
         // If any referenced source bookmark didn't resolve, the export would
@@ -574,14 +578,13 @@ final class RenderQueue {
             }
 
             let chapterMarkers = snapshot.markers.filter { $0.kind == .chapter }
-            let projectDuration = CMTime(seconds: built.duration, preferredTimescale: 600)
             if !chapterMarkers.isEmpty {
                 let chapters = YouTubeChapterValidator.chapters(
                     from: chapterMarkers,
-                    projectDuration: projectDuration)
+                    projectDuration: chapterDuration)
                 let chapterIssues = YouTubeChapterValidator.validate(
                     chapters,
-                    projectDuration: projectDuration)
+                    projectDuration: chapterDuration)
                 if !chapterIssues.isEmpty {
                     let detail = chapterIssues
                         .map(\.localizedDescription)
@@ -615,18 +618,20 @@ final class RenderQueue {
                 try await exportWithSession(
                     presetName: presetName, preset: preset,
                     built: built, outputURL: outputURL, jobID: id,
-                    chapterMarkers: chapterMarkers)
+                    chapterMarkers: chapterMarkers,
+                    chapterDuration: chapterDuration)
             } else {
                 try await exportWithWriter(
                     preset: preset, built: built, outputURL: outputURL, jobID: id,
-                    chapterMarkers: chapterMarkers)
+                    chapterMarkers: chapterMarkers,
+                    chapterDuration: chapterDuration)
             }
 
             // Write YouTube chapter sidecar when chapter markers exist.
             if !chapterMarkers.isEmpty {
                 let sidecarResult = ChapterExporter.writeYouTubeSidecar(
                     markers: chapterMarkers,
-                    projectDuration: projectDuration,
+                    projectDuration: chapterDuration,
                     outputURL: outputURL)
                 if let note = sidecarResult.embeddedChapterNote {
                     logger.warning("Chapter sidecar write issue: \(note)")
@@ -698,7 +703,8 @@ final class RenderQueue {
     private func exportWithSession(presetName: String, preset: ExportPreset,
                                    built: BuiltComposition, outputURL: URL,
                                    jobID: UUID,
-                                   chapterMarkers: [TimelineMarker] = []) async throws {
+                                   chapterMarkers: [TimelineMarker] = [],
+                                   chapterDuration: CMTime = .zero) async throws {
         guard let session = AVAssetExportSession(asset: built.composition,
                                                  presetName: presetName) else {
             throw RenderQueueError.exportSessionCreationFailed
@@ -706,10 +712,9 @@ final class RenderQueue {
         session.videoComposition = built.videoComposition
         session.audioMix = built.audioMix
         if !chapterMarkers.isEmpty {
-            let projectDuration = CMTime(seconds: built.duration, preferredTimescale: 600)
             let chapterItems = ChapterExporter.chapterMetadataItems(
                 from: chapterMarkers,
-                projectDuration: projectDuration)
+                projectDuration: chapterDuration)
             if !chapterItems.isEmpty {
                 session.metadata = (session.metadata ?? []) + chapterItems
             }
@@ -739,7 +744,8 @@ final class RenderQueue {
     /// parameters land here in a future spec.
     private func exportWithWriter(preset: ExportPreset, built: BuiltComposition,
                                   outputURL: URL, jobID: UUID,
-                                  chapterMarkers: [TimelineMarker] = []) async throws {
+                                  chapterMarkers: [TimelineMarker] = [],
+                                  chapterDuration: CMTime = .zero) async throws {
         let writer: AVAssetWriter
         do {
             writer = try AVAssetWriter(outputURL: outputURL, fileType: preset.containerType)
@@ -749,9 +755,8 @@ final class RenderQueue {
 
         // Add chapter metadata items if available.
         if !chapterMarkers.isEmpty {
-            let projectDuration = CMTime(seconds: built.duration, preferredTimescale: 600)
             let chapterItems = ChapterExporter.chapterMetadataItems(
-                from: chapterMarkers, projectDuration: projectDuration)
+                from: chapterMarkers, projectDuration: chapterDuration)
             if !chapterItems.isEmpty {
                 writer.metadata.append(contentsOf: chapterItems)
             }

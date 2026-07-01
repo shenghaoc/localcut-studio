@@ -82,8 +82,9 @@ public enum SilenceDetectionCore: Sendable {
         }
 
         // Convert silences to proposed cuts.
-        let proposedCuts = silences.map { silence in
+        let proposedCuts = silences.enumerated().map { index, silence in
             ProposedCut(
+                id: proposedCutID(index: index, silence: silence),
                 silenceRange: silence.range,
                 unpaddedSilenceRange: silence.unpaddedRange,
                 suggestedAction: .trim,
@@ -137,5 +138,30 @@ public enum SilenceDetectionCore: Sendable {
         let paddedRange = CMTimeRange(start: paddedStart, duration: paddedDuration)
 
         silences.append(DetectedSilence(range: paddedRange, unpaddedRange: unpaddedRange))
+    }
+
+    private static func proposedCutID(index: Int, silence: DetectedSilence) -> UUID {
+        var fingerprint: UInt64 = 0xcbf2_9ce4_8422_2325
+        func mix(_ value: UInt64) {
+            var remaining = value
+            for _ in 0..<8 {
+                fingerprint ^= remaining & 0xff
+                fingerprint &*= 0x0000_0100_0000_01b3
+                remaining >>= 8
+            }
+        }
+
+        mix(UInt64(index))
+        mix(UInt64(bitPattern: Int64(silence.range.start.value)))
+        mix(UInt64(UInt32(bitPattern: silence.range.start.timescale)))
+        mix(UInt64(bitPattern: Int64(silence.range.duration.value)))
+        mix(UInt64(UInt32(bitPattern: silence.range.duration.timescale)))
+        mix(UInt64(bitPattern: Int64(silence.unpaddedRange.start.value)))
+        mix(UInt64(UInt32(bitPattern: silence.unpaddedRange.start.timescale)))
+        mix(UInt64(bitPattern: Int64(silence.unpaddedRange.duration.value)))
+        mix(UInt64(UInt32(bitPattern: silence.unpaddedRange.duration.timescale)))
+
+        let tail = fingerprint & 0x0000_ffff_ffff_ffff
+        return UUID(uuidString: String(format: "00000000-0000-4000-8000-%012llx", tail))!
     }
 }

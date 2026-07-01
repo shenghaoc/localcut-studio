@@ -375,6 +375,85 @@ func projectDocumentPureRoundTrip() throws {
 
 // MARK: - Chapter export tests (Phase 44)
 
+@Test("Silence detection is deterministic on a fixed fixture")
+func silenceDetectionDeterministicOnFixture() {
+    let sampleRate = 1_000.0
+    let samples =
+        [Float](repeating: 0.08, count: 1_000) +
+        [Float](repeating: 0, count: 1_000) +
+        [Float](repeating: 0.08, count: 1_000)
+    let parameters = SilenceDetectionParameters(
+        openThresholdDB: -40,
+        closeThresholdDB: -35,
+        minimumSilenceDuration: time(0.5),
+        padding: .zero)
+
+    let first = SilenceDetectionCore.analyze(
+        samples: samples,
+        sampleRate: sampleRate,
+        parameters: parameters)
+    let second = SilenceDetectionCore.analyze(
+        samples: samples,
+        sampleRate: sampleRate,
+        parameters: parameters)
+
+    #expect(first.0 == second.0)
+    #expect(first.1 == second.1)
+    #expect(first.0.count == 1)
+    #expect(first.1.count == 1)
+    #expect(approximatelyEqual(first.0[0].unpaddedRange.start.seconds, 1))
+    #expect(approximatelyEqual(first.0[0].unpaddedRange.duration.seconds, 1))
+    #expect(first.1[0].id == second.1[0].id)
+}
+
+@Test("YouTube chapter linter covers CI validation rules")
+func youTubeChapterLinterCoversCIValidationRules() {
+    let valid = [
+        YouTubeChapterLine(time: time(0), title: "Intro"),
+        YouTubeChapterLine(time: time(12), title: "Demo"),
+        YouTubeChapterLine(time: time(25), title: "Wrap"),
+    ]
+
+    #expect(YouTubeChapterValidator.validate(valid, projectDuration: time(40)).isEmpty)
+    #expect(YouTubeChapterValidator.format(valid) == """
+    00:00 Intro
+    00:12 Demo
+    00:25 Wrap
+    """)
+    #expect(YouTubeChapterValidator.validate(
+        Array(valid.prefix(2)),
+        projectDuration: time(40)
+    ).contains(.insufficientChapters(count: 2)))
+    #expect(YouTubeChapterValidator.validate(
+        [
+            YouTubeChapterLine(time: time(1), title: "Intro"),
+            YouTubeChapterLine(time: time(12), title: "Demo"),
+            YouTubeChapterLine(time: time(25), title: "Wrap"),
+        ],
+        projectDuration: time(40)
+    ).contains(.firstChapterNotAtZero))
+    #expect(YouTubeChapterValidator.validate(
+        [
+            YouTubeChapterLine(time: time(0), title: "Intro"),
+            YouTubeChapterLine(time: time(12), title: "   "),
+            YouTubeChapterLine(time: time(25), title: "Wrap"),
+        ],
+        projectDuration: time(40)
+    ).contains(.emptyTitle(index: 1)))
+    #expect(YouTubeChapterValidator.validate(
+        [
+            YouTubeChapterLine(time: time(0), title: "Intro"),
+            YouTubeChapterLine(time: time(20), title: "Demo"),
+            YouTubeChapterLine(time: time(18), title: "Wrap"),
+        ],
+        projectDuration: time(40)
+    ).contains(.nonMonotonicTime(index: 2)))
+    #expect(YouTubeChapterValidator.validate(
+        valid,
+        projectDuration: time(30)
+    ).contains(.spanTooShort(index: 2, duration: 5)))
+}
+
 @Test("YouTube chapter validator checks final span against project duration")
 func youTubeChapterValidatorChecksFinalSpan() {
     let chapters = [
