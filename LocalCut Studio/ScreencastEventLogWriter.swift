@@ -199,10 +199,12 @@ final class ScreencastEventLogWriter {
 
         let kind: ScreencastEventKind
         var position: CGPoint?
+        let keyPhase: ScreencastKeyPhase?
 
         switch eventType {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
             kind = .mouseDown
+            keyPhase = nil
             position = normalizedPositionFromMonitor(
                 locationInWindow: locationInWindow,
                 screenLocation: screenLocation,
@@ -210,6 +212,7 @@ final class ScreencastEventLogWriter {
                 source: source)
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             kind = .mouseUp
+            keyPhase = nil
             position = normalizedPositionFromMonitor(
                 locationInWindow: locationInWindow,
                 screenLocation: screenLocation,
@@ -217,14 +220,18 @@ final class ScreencastEventLogWriter {
                 source: source)
         case .scrollWheel:
             kind = .scroll
+            keyPhase = nil
             position = normalizedPositionFromMonitor(
                 locationInWindow: locationInWindow,
                 screenLocation: screenLocation,
                 windowSize: windowSize,
                 source: source)
-        case .keyDown where source == .ownAppLocal,
-             .keyUp where source == .ownAppLocal:
+        case .keyDown where source == .ownAppLocal:
             kind = .key
+            keyPhase = .down
+        case .keyUp where source == .ownAppLocal:
+            kind = .key
+            keyPhase = .up
         default:
             return
         }
@@ -238,7 +245,8 @@ final class ScreencastEventLogWriter {
             kind: kind,
             position: position,
             keyCode: source == .ownAppLocal ? keyCode : nil,
-            modifierFlagsRaw: source == .ownAppLocal ? modifierFlags.rawValue : nil))
+            modifierFlagsRaw: source == .ownAppLocal ? modifierFlags.rawValue : nil,
+            keyPhase: keyPhase))
     }
 
     /// Compute normalised position from pre-extracted Sendable values.

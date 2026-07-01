@@ -53,6 +53,22 @@ func keyframedFloatSortedInterpolationAndReplacement() {
     #expect(approximatelyEqual(Double(value.value(at: time(3))), 0.25))
 }
 
+@Test("Keyframed<Float>: shifting rebases at the split and drops negative keys")
+func keyframedFloatShiftRebasesAtSplit() {
+    let value = Keyframed<Float>(
+        keyframes: [
+            Keyframe(time: time(0), value: 0),
+            Keyframe(time: time(10), value: 10),
+        ],
+        defaultValue: 0)
+
+    let shifted = value.shifted(by: time(5))
+
+    #expect(shifted.defaultValue == 5)
+    #expect(shifted.keyframes.map { $0.time } == [time(0), time(5)])
+    #expect(shifted.keyframes.map { $0.value } == [5, 10])
+}
+
 @Test("Look effects clamp authored and keyframed values")
 func lookEffectsClampValues() {
     let incoming = KeyframeHandle(x: 0.2, y: 0.3)
@@ -371,6 +387,151 @@ func projectDocumentPureRoundTrip() throws {
     #expect(decoded == document)
     #expect(decoded.videoTracks[0].clips[0].makeClip().transition?.type == .wipe)
     #expect(decoded.audioBus.trackInputs[0].trackInput.gain == 1.2)
+}
+
+// MARK: - Chapter export tests (Phase 44)
+
+@Test("Silence detection is deterministic on a fixed fixture")
+func silenceDetectionDeterministicOnFixture() {
+    let sampleRate = 1_000.0
+    let samples =
+        [Float](repeating: 0.08, count: 1_000) +
+        [Float](repeating: 0, count: 1_000) +
+        [Float](repeating: 0.08, count: 1_000)
+    let parameters = SilenceDetectionParameters(
+        openThresholdDB: -40,
+        closeThresholdDB: -35,
+        minimumSilenceDuration: time(0.5),
+        padding: .zero)
+
+    let first = SilenceDetectionCore.analyze(
+        samples: samples,
+        sampleRate: sampleRate,
+        parameters: parameters)
+    let second = SilenceDetectionCore.analyze(
+        samples: samples,
+        sampleRate: sampleRate,
+        parameters: parameters)
+
+    #expect(first.0 == second.0)
+    #expect(first.1 == second.1)
+    #expect(first.0.count == 1)
+    #expect(first.1.count == 1)
+    #expect(approximatelyEqual(first.0[0].unpaddedRange.start.seconds, 1))
+    #expect(approximatelyEqual(first.0[0].unpaddedRange.duration.seconds, 1))
+    #expect(first.1[0].id == second.1[0].id)
+}
+
+@Test("YouTube chapter linter covers CI validation rules")
+func youTubeChapterLinterCoversCIValidationRules() {
+    let valid = [
+        YouTubeChapterLine(time: time(0), title: "Intro"),
+        YouTubeChapterLine(time: time(12), title: "Demo"),
+        YouTubeChapterLine(time: time(25), title: "Wrap"),
+    ]
+
+    #expect(YouTubeChapterValidator.validate(valid, projectDuration: time(40)).isEmpty)
+    #expect(YouTubeChapterValidator.format(valid) == """
+    00:00 Intro
+    00:12 Demo
+    00:25 Wrap
+    """)
+    #expect(YouTubeChapterValidator.validate(
+        Array(valid.prefix(2)),
+        projectDuration: time(40)
+    ).contains(.insufficientChapters(count: 2)))
+    #expect(YouTubeChapterValidator.validate(
+        [
+            YouTubeChapterLine(time: time(1), title: "Intro"),
+            YouTubeChapterLine(time: time(12), title: "Demo"),
+            YouTubeChapterLine(time: time(25), title: "Wrap"),
+        ],
+        projectDuration: time(40)
+    ).contains(.firstChapterNotAtZero))
+    #expect(YouTubeChapterValidator.validate(
+        [
+            YouTubeChapterLine(time: time(0), title: "Intro"),
+            YouTubeChapterLine(time: time(12), title: "   "),
+            YouTubeChapterLine(time: time(25), title: "Wrap"),
+        ],
+        projectDuration: time(40)
+    ).contains(.emptyTitle(index: 1)))
+    #expect(YouTubeChapterValidator.validate(
+        [
+            YouTubeChapterLine(time: time(0), title: "Intro"),
+            YouTubeChapterLine(time: time(20), title: "Demo"),
+            YouTubeChapterLine(time: time(18), title: "Wrap"),
+        ],
+        projectDuration: time(40)
+    ).contains(.nonMonotonicTime(index: 2)))
+    #expect(YouTubeChapterValidator.validate(
+        valid,
+        projectDuration: time(30)
+    ).contains(.spanTooShort(index: 2, duration: 5)))
+}
+
+@Test("YouTube chapter validator checks final span against project duration")
+func youTubeChapterValidatorChecksFinalSpan() {
+    let chapters = [
+        YouTubeChapterLine(time: time(0), title: "Intro"),
+        YouTubeChapterLine(time: time(12), title: "Demo"),
+        YouTubeChapterLine(time: time(25), title: "Wrap"),
+    ]
+
+    let issues = YouTubeChapterValidator.validate(chapters, projectDuration: time(30))
+
+    #expect(issues.contains(.spanTooShort(index: 2, duration: 5)))
+}
+
+@Test("Chapter merge repair removes the following boundary for a short span")
+func chapterMergeRepairRemovesFollowingBoundary() {
+    let shortBoundaryID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000002")!
+    let markers = [
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000001")!,
+                       time: time(0), name: "Intro", kind: .chapter),
+        TimelineMarker(id: shortBoundaryID,
+                       time: time(5), name: "Setup", kind: .chapter),
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000003")!,
+                       time: time(16), name: "Demo", kind: .chapter),
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000004")!,
+                       time: time(32), name: "Wrap", kind: .chapter),
+    ]
+
+    let repaired = YouTubeChapterValidator.repairedMarkers(
+        from: markers,
+        projectDuration: time(45),
+        strategy: .merge)
+    let chapters = YouTubeChapterValidator.chapters(from: repaired, projectDuration: time(45))
+
+    #expect(!repaired.contains { $0.id == shortBoundaryID })
+    #expect(chapters.map(\.title) == ["Intro", "Demo", "Wrap"])
+    #expect(YouTubeChapterValidator.validate(chapters, projectDuration: time(45)).isEmpty)
+}
+
+@Test("Chapter drop repair removes the short chapter while preserving the zero marker")
+func chapterDropRepairRemovesShortChapter() {
+    let shortChapterID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000012")!
+    let markers = [
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000011")!,
+                       time: time(0), name: "Intro", kind: .chapter),
+        TimelineMarker(id: shortChapterID,
+                       time: time(12), name: "Aside", kind: .chapter),
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000013")!,
+                       time: time(18), name: "Demo", kind: .chapter),
+        TimelineMarker(id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-000000000014")!,
+                       time: time(32), name: "Wrap", kind: .chapter),
+    ]
+
+    let repaired = YouTubeChapterValidator.repairedMarkers(
+        from: markers,
+        projectDuration: time(50),
+        strategy: .drop)
+    let chapters = YouTubeChapterValidator.chapters(from: repaired, projectDuration: time(50))
+
+    #expect(!repaired.contains { $0.id == shortChapterID })
+    #expect(chapters.map(\.title) == ["Intro", "Demo", "Wrap"])
+    #expect(chapters.first?.time == time(0))
+    #expect(YouTubeChapterValidator.validate(chapters, projectDuration: time(50)).isEmpty)
 }
 
 // MARK: - Overlay model tests (Phase 38b)

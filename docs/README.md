@@ -6,6 +6,7 @@ User-facing docs are the single source of truth for how the app behaves. Keep th
 
 - [Getting Started](getting-started.md) — import, edit, preview, export your first project.
 - [Keyboard Shortcuts](keyboard-shortcuts.md) — reference table.
+- [Chapter Export Verification](chapter-export-verification.md) — manual VLC, QuickTime Player, and YouTube chapter playback checklist.
 
 ## What is LocalCut Studio?
 

@@ -44,6 +44,7 @@ struct InspectorView: View {
             projectSection
             overlayListSection
             ScreencastInspectorView(model: model)
+            TutorialFinishingInspectorView(model: model)
         }
         .formStyle(.grouped)
         .fileImporter(

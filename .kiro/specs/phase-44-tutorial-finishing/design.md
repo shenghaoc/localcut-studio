@@ -1,6 +1,6 @@
 # Design: Phase 44 — Tutorial Finishing
 
-> Status: **Proposed**. Target tag: **v0.1.11**.
+> Status: **Implemented**. Target tag: **v0.1.11**.
 
 ## Goal
 

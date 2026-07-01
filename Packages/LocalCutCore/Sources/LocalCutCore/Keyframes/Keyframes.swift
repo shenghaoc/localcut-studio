@@ -86,6 +86,34 @@ public struct Keyframed<T: Interpolatable>: Hashable, Codable, Sendable {
 
     public var isAnimated: Bool { !keyframes.isEmpty }
 
+    /// Returns a copy with keyframes re-anchored after trimming `offset`
+    /// from the head. The returned track starts with the value at the split
+    /// boundary and drops keyframes that would otherwise become negative.
+    public func shifted(by offset: CMTime) -> Keyframed<T> {
+        guard offset != .zero, !keyframes.isEmpty else { return self }
+        let anchor: Keyframe<T>
+        if let exact = keyframes.first(where: { $0.time == offset }) {
+            anchor = Keyframe(
+                id: exact.id,
+                time: .zero,
+                value: exact.value,
+                incomingHandle: nil,
+                outgoingHandle: exact.outgoingHandle)
+        } else {
+            anchor = Keyframe(time: .zero, value: value(at: offset))
+        }
+        let shifted = keyframes.compactMap { kf -> Keyframe<T>? in
+            guard kf.time > offset else { return nil }
+            return Keyframe(
+                id: kf.id,
+                time: kf.time - offset,
+                value: kf.value,
+                incomingHandle: kf.incomingHandle,
+                outgoingHandle: kf.outgoingHandle)
+        }
+        return Keyframed(keyframes: [anchor] + shifted, defaultValue: anchor.value)
+    }
+
     /// Linearly interpolates between the two surrounding keyframes.
     /// O(log n) via binary search for the lower bound.
     public func value(at time: CMTime) -> T {

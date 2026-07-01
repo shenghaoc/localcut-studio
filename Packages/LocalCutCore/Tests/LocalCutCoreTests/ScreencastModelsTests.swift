@@ -443,3 +443,97 @@ struct AutoZoomProposalGeneratorTests {
         #expect(proposals[0].keyframes.count == 4)
     }
 }
+
+// MARK: - KeystrokeOverlayGenerator
+
+@Suite("KeystrokeOverlayGenerator")
+struct KeystrokeOverlayGeneratorTests {
+    @Test("Repeated same-key presses at distinct times are preserved")
+    func repeatedKeyPressesArePreserved() throws {
+        let events = [
+            ScreencastEvent(
+                time: CMTime(seconds: 1, preferredTimescale: 600),
+                kind: .key,
+                keyCode: 0x00,
+                modifierFlagsRaw: 0,
+                keyPhase: .down),
+            ScreencastEvent(
+                time: CMTime(seconds: 1.4, preferredTimescale: 600),
+                kind: .key,
+                keyCode: 0x00,
+                modifierFlagsRaw: 0,
+                keyPhase: .down),
+        ]
+        let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
+        let clip = try #require(KeystrokeOverlayGenerator.generate(from: log))
+
+        #expect(clip.events.map(\.displayText) == ["A", "A"])
+        #expect(clip.events.map { $0.time.seconds } == [1.0, 1.4])
+    }
+
+    @Test("Key-up events are dropped when the log carries key phase")
+    func keyUpEventsAreDropped() throws {
+        let events = [
+            ScreencastEvent(
+                time: CMTime(seconds: 2, preferredTimescale: 600),
+                kind: .key,
+                keyCode: 0x0B,
+                modifierFlagsRaw: 0,
+                keyPhase: .down),
+            ScreencastEvent(
+                time: CMTime(seconds: 2.1, preferredTimescale: 600),
+                kind: .key,
+                keyCode: 0x0B,
+                modifierFlagsRaw: 0,
+                keyPhase: .up),
+        ]
+        let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
+        let clip = try #require(KeystrokeOverlayGenerator.generate(from: log))
+
+        #expect(clip.events.map(\.displayText) == ["B"])
+    }
+
+    @Test("Legacy duplicate key events at the same timestamp are de-duplicated")
+    func legacyDuplicateEventsAreDeduplicated() throws {
+        let timestamp = CMTime(seconds: 3, preferredTimescale: 600)
+        let events = [
+            ScreencastEvent(time: timestamp, kind: .key, keyCode: 0x08, modifierFlagsRaw: 0),
+            ScreencastEvent(time: timestamp, kind: .key, keyCode: 0x08, modifierFlagsRaw: 0),
+        ]
+        let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
+        let clip = try #require(KeystrokeOverlayGenerator.generate(from: log))
+
+        #expect(clip.events.map(\.displayText) == ["C"])
+    }
+
+    @Test("Legacy v1 events without keyPhase are included")
+    func legacyEventsWithoutKeyPhaseAreIncluded() throws {
+        let events = [
+            ScreencastEvent(
+                time: CMTime(seconds: 5, preferredTimescale: 600),
+                kind: .key,
+                keyCode: 0x00,
+                modifierFlagsRaw: 0),
+        ]
+        let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
+        let clip = try #require(KeystrokeOverlayGenerator.generate(from: log))
+
+        #expect(clip.events.map(\.displayText) == ["A"])
+    }
+
+    @Test("Minus key maps to correct character")
+    func minusKeyMapsCorrectly() throws {
+        let events = [
+            ScreencastEvent(
+                time: CMTime(seconds: 6, preferredTimescale: 600),
+                kind: .key,
+                keyCode: 0x1B,
+                modifierFlagsRaw: 0,
+                keyPhase: .down),
+        ]
+        let log = ScreencastEventLog(schemaVersion: 1, sessionID: UUID(), events: events)
+        let clip = try #require(KeystrokeOverlayGenerator.generate(from: log))
+
+        #expect(clip.events.map(\.displayText) == ["-"])
+    }
+}

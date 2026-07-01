@@ -6,13 +6,14 @@ import CoreGraphics
 /// Codable snapshot of a `Project`, split from the runtime model. Holds plain
 /// values plus security-scoped bookmarks instead of live `AVURLAsset`s.
 public struct ProjectDocument: Codable, Equatable, Sendable {
-    // Bumped to 8 in Phase 43: `callouts` and `paddedBackground` added.
+    // Bumped to 9 in Phase 44: `keystrokeOverlayClips` added.
+    // Prior bump to 8 was in Phase 43: `callouts` and `paddedBackground` added.
     // Prior bump to 7 (single-file 6) was in Phase 38b for `OverlayClip`
     // persistence. Prior bump (6/5) was for look effects in Phase 38a.
     // Single-file bumped to 7 in Phase 43: `callouts`, `paddedBackground`,
     // and per-clip `transformKeyframes` added.
-    public static let currentSchemaVersion = 8
-    public static let singleFileSchemaVersion = 7
+    public static let currentSchemaVersion = 9
+    public static let singleFileSchemaVersion = 9
     public static let currentBundleFormat = "1"
     public static let fileExtension = "lcstudio"
 
@@ -36,6 +37,8 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     public var paddedBackground: PaddedBackgroundPreset?
     /// Phase 43 screencast event logs persisted with the project.
     public var screencastEventLogs: [ScreencastEventLog]
+    /// Phase 44 keystroke overlay clips derived from event logs.
+    public var keystrokeOverlayClips: [KeystrokeOverlayClip]
     public var aspect: ProjectAspect
     public var coverFrame: CoverFrameDoc?
 
@@ -56,6 +59,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
                 callouts: [CalloutClip] = [],
                 paddedBackground: PaddedBackgroundPreset? = nil,
                 screencastEventLogs: [ScreencastEventLog] = [],
+                keystrokeOverlayClips: [KeystrokeOverlayClip] = [],
                 aspect: ProjectAspect? = nil,
                 coverFrame: CoverFrameDoc? = nil) {
         self.schemaVersion = schemaVersion
@@ -75,6 +79,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         self.callouts = callouts
         self.paddedBackground = paddedBackground
         self.screencastEventLogs = screencastEventLogs
+        self.keystrokeOverlayClips = keystrokeOverlayClips
         self.aspect = aspect ?? ProjectAspect.infer(width: renderWidth, height: renderHeight)
         self.coverFrame = coverFrame
     }
@@ -83,7 +88,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         case schemaVersion, bundleFormat, name, renderWidth, renderHeight, frameRate,
              workingColourSpace, media, videoTracks, audioTracks, captionTracks,
              markers, audioBus, overlays, callouts, paddedBackground, screencastEventLogs,
-             aspect, coverFrame
+             keystrokeOverlayClips, aspect, coverFrame
     }
 
     public init(from decoder: any Decoder) throws {
@@ -109,6 +114,7 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         callouts = try c.decodeIfPresent([CalloutClip].self, forKey: .callouts) ?? []
         paddedBackground = try c.decodeIfPresent(PaddedBackgroundPreset.self, forKey: .paddedBackground)
         screencastEventLogs = try c.decodeIfPresent([ScreencastEventLog].self, forKey: .screencastEventLogs) ?? []
+        keystrokeOverlayClips = try c.decodeIfPresent([KeystrokeOverlayClip].self, forKey: .keystrokeOverlayClips) ?? []
         // Lenient: an unknown future aspect raw value falls back to render-size
         // inference rather than failing the whole document open.
         if let rawAspect = try c.decodeIfPresent(String.self, forKey: .aspect) {

@@ -125,6 +125,8 @@ nonisolated enum RenderQueueError: Error, LocalizedError {
     case hostNotCapable(String)
     case outputDestinationUnavailable
     case compositionEmpty
+    case chapterValidationFailed(String)
+    case chapterSidecarWriteFailed(String)
     case exportSessionCreationFailed
     case writerInitializationFailed(String)
 
@@ -138,6 +140,10 @@ nonisolated enum RenderQueueError: Error, LocalizedError {
             "Output destination unavailable."
         case .compositionEmpty:
             "Nothing to export — the project's timeline is empty."
+        case .chapterValidationFailed(let detail):
+            "Fix chapter markers before export: \(detail)"
+        case .chapterSidecarWriteFailed(let detail):
+            "Chapter sidecar was not written: \(detail)"
         case .exportSessionCreationFailed:
             "Could not create an export session for this preset."
         case .writerInitializationFailed(let detail):
@@ -570,6 +576,23 @@ final class RenderQueue {
                 return
             }
 
+            let chapterMarkers = snapshot.markers.filter { $0.kind == .chapter }
+            let chapterDuration = CMTime(seconds: built.duration, preferredTimescale: 600)
+            if !chapterMarkers.isEmpty {
+                let chapters = YouTubeChapterValidator.chapters(
+                    from: chapterMarkers,
+                    projectDuration: chapterDuration)
+                let chapterIssues = YouTubeChapterValidator.validate(
+                    chapters,
+                    projectDuration: chapterDuration)
+                if !chapterIssues.isEmpty {
+                    let detail = chapterIssues
+                        .map(\.localizedDescription)
+                        .joined(separator: " ")
+                    throw RenderQueueError.chapterValidationFailed(detail)
+                }
+            }
+
             // Replace any existing file so the writer/session doesn't trip
             // over a stale artefact from a previous run. Past this point the
             // user's pre-existing file is gone, so a cancel may safely delete
@@ -580,7 +603,10 @@ final class RenderQueue {
             let hasAudio = !built.composition.tracks(withMediaType: .audio).isEmpty
             let shouldUseWriterForOfflineMeter = offlineMeterSink != nil && hasAudio
             let shouldUseWriterForVoiceCleanup = built.audioCleanup.requiresOfflineProcessing && hasAudio
-            let shouldUseWriter = shouldUseWriterForOfflineMeter || shouldUseWriterForVoiceCleanup
+            let shouldUseWriterForChapters = !chapterMarkers.isEmpty
+            let shouldUseWriter = shouldUseWriterForOfflineMeter
+                || shouldUseWriterForVoiceCleanup
+                || shouldUseWriterForChapters
             if shouldUseWriterForOfflineMeter {
                 offlineMeterActivitySink?(true)
             }
@@ -594,10 +620,37 @@ final class RenderQueue {
                let presetName = preset.assetExportSessionPresetName {
                 try await exportWithSession(
                     presetName: presetName, preset: preset,
-                    built: built, outputURL: outputURL, jobID: id)
+                    built: built, outputURL: outputURL, jobID: id,
+                    chapterMarkers: chapterMarkers,
+                    chapterDuration: chapterDuration)
             } else {
                 try await exportWithWriter(
-                    preset: preset, built: built, outputURL: outputURL, jobID: id)
+                    preset: preset, built: built, outputURL: outputURL, jobID: id,
+                    chapterMarkers: chapterMarkers,
+                    chapterDuration: chapterDuration)
+            }
+
+            // Write YouTube chapter sidecar when chapter markers exist. The
+            // sidecar is part of the promised output, so a write failure must be
+            // visible in the queue instead of completing silently.
+            if !chapterMarkers.isEmpty {
+                let sidecarResult = ChapterExporter.writeYouTubeSidecar(
+                    markers: chapterMarkers,
+                    projectDuration: chapterDuration,
+                    outputURL: outputURL)
+                if !sidecarResult.issues.isEmpty {
+                    let detail = sidecarResult.issues
+                        .map(\.localizedDescription)
+                        .joined(separator: " ")
+                    throw RenderQueueError.chapterValidationFailed(detail)
+                }
+                guard sidecarResult.sidecarPath != nil else {
+                    throw RenderQueueError.chapterSidecarWriteFailed(
+                        sidecarResult.embeddedChapterNote ?? "unknown write error")
+                }
+                if let note = sidecarResult.embeddedChapterNote {
+                    logger.warning("Chapter sidecar write issue: \(note)")
+                }
             }
 
             if cancelInFlightID == id {
@@ -664,13 +717,24 @@ final class RenderQueue {
 
     private func exportWithSession(presetName: String, preset: ExportPreset,
                                    built: BuiltComposition, outputURL: URL,
-                                   jobID: UUID) async throws {
+                                   jobID: UUID,
+                                   chapterMarkers: [TimelineMarker] = [],
+                                   chapterDuration: CMTime = .zero) async throws {
         guard let session = AVAssetExportSession(asset: built.composition,
                                                  presetName: presetName) else {
             throw RenderQueueError.exportSessionCreationFailed
         }
         session.videoComposition = built.videoComposition
         session.audioMix = built.audioMix
+        if !chapterMarkers.isEmpty {
+            let chapterItems = ChapterExporter.chapterMetadataItems(
+                from: chapterMarkers,
+                projectDuration: chapterDuration)
+                .filter { $0.duration.isValid && $0.duration > .zero }
+            if !chapterItems.isEmpty {
+                session.metadata = (session.metadata ?? []) + chapterItems
+            }
+        }
         activeExportSession = session
 
         let progressTask = Task { [weak self] in
@@ -695,14 +759,38 @@ final class RenderQueue {
     /// settings dicts are populated — colour management + advanced codec
     /// parameters land here in a future spec.
     private func exportWithWriter(preset: ExportPreset, built: BuiltComposition,
-                                  outputURL: URL, jobID: UUID) async throws {
+                                  outputURL: URL, jobID: UUID,
+                                  chapterMarkers: [TimelineMarker] = [],
+                                  chapterDuration: CMTime = .zero) async throws {
         let writer: AVAssetWriter
         do {
             writer = try AVAssetWriter(outputURL: outputURL, fileType: preset.containerType)
         } catch {
             throw RenderQueueError.writerInitializationFailed(error.localizedDescription)
         }
+
+        // Add asset-level chapter metadata as a secondary compatibility hint.
+        if !chapterMarkers.isEmpty {
+            let chapterItems = ChapterExporter.chapterMetadataItems(
+                from: chapterMarkers, projectDuration: chapterDuration)
+            if !chapterItems.isEmpty {
+                writer.metadata.append(contentsOf: chapterItems)
+            }
+        }
         activeWriter = writer
+
+        let timedChapterMetadata: (input: AVAssetWriterInput, adaptor: AVAssetWriterInputMetadataAdaptor, groups: [AVTimedMetadataGroup])?
+        do {
+            timedChapterMetadata = try makeTimedChapterMetadataInput(
+                writer: writer,
+                markers: chapterMarkers,
+                chapterDuration: chapterDuration)
+        } catch {
+            // Chapter metadata track rejected by the container/codec
+            // combination. Fall back to sidecar-only — the movie export
+            // continues without embedded chapters.
+            timedChapterMetadata = nil
+        }
 
         let renderSize = preset.targetSize.cgSize
         // The bracket bitrate scales with frame rate too — honour the
@@ -813,6 +901,15 @@ final class RenderQueue {
         }
         writer.startSession(atSourceTime: .zero)
 
+        if let timedChapterMetadata {
+            do {
+                try appendTimedChapterMetadata(timedChapterMetadata, writer: writer)
+            } catch {
+                logger.warning("Failed to append timed chapter metadata: \(error.localizedDescription). Falling back to sidecar-only.")
+                timedChapterMetadata.input.markAsFinished()
+            }
+        }
+
         let totalDuration = built.duration
 
         // Pump video then audio sequentially. The writer accepts both inputs
@@ -857,6 +954,49 @@ final class RenderQueue {
         if writer.status == .failed, let error = writer.error {
             throw error
         }
+    }
+
+    private func makeTimedChapterMetadataInput(
+        writer: AVAssetWriter,
+        markers: [TimelineMarker],
+        chapterDuration: CMTime
+    ) throws -> (input: AVAssetWriterInput, adaptor: AVAssetWriterInputMetadataAdaptor, groups: [AVTimedMetadataGroup])? {
+        guard !markers.isEmpty else { return nil }
+        let groups = ChapterExporter.chapterTimedMetadataGroups(
+            from: markers,
+            projectDuration: chapterDuration)
+        guard !groups.isEmpty else { return nil }
+        guard let formatDescription = ChapterExporter.chapterMetadataFormatDescription() else {
+            throw RenderQueueError.writerInitializationFailed("Could not create chapter metadata format description.")
+        }
+
+        let input = AVAssetWriterInput(
+            mediaType: .metadata,
+            outputSettings: nil,
+            sourceFormatHint: formatDescription)
+        input.expectsMediaDataInRealTime = false
+        guard writer.canAdd(input) else {
+            throw RenderQueueError.writerInitializationFailed("Chapter metadata input was rejected.")
+        }
+        writer.add(input)
+        let adaptor = AVAssetWriterInputMetadataAdaptor(assetWriterInput: input)
+        return (input, adaptor, groups)
+    }
+
+    private func appendTimedChapterMetadata(
+        _ metadata: (input: AVAssetWriterInput, adaptor: AVAssetWriterInputMetadataAdaptor, groups: [AVTimedMetadataGroup]),
+        writer: AVAssetWriter
+    ) throws {
+        for group in metadata.groups {
+            guard metadata.input.isReadyForMoreMediaData else {
+                throw RenderQueueError.writerInitializationFailed("Chapter metadata input was not ready.")
+            }
+            guard metadata.adaptor.append(group) else {
+                throw RenderQueueError.writerInitializationFailed(
+                    writer.error?.localizedDescription ?? "Chapter metadata append failed.")
+            }
+        }
+        metadata.input.markAsFinished()
     }
 
     /// Shared serial queue used by every pump invocation — there's at most
