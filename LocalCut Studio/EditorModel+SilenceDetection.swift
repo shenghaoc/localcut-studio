@@ -164,6 +164,9 @@ extension EditorModel {
                 // Shift source-local keyframes (speedCurve, transformKeyframes)
                 // backward by rightSourceOffset so they stay aligned with the
                 // right portion's new sourceStart.
+                // Drop the original transition: the silence cut is not a
+                // transition boundary, so keeping it would make
+                // TransitionLayout treat the cut as a cross-dissolve/wipe.
                 if overlapEnd < clipEnd {
                     let rightOutputOffset = overlapEnd - clipStart
                     let rightSourceOffset = clip.sourceOffset(forOutputOffset: rightOutputOffset)
@@ -175,7 +178,7 @@ extension EditorModel {
                         opacity: clip.opacity,
                         geometry: clip.geometry,
                         effects: clip.effects,
-                        transition: clip.transition,
+                        transition: nil,
                         volumeEnvelope: clip.volumeEnvelope,
                         transformKeyframes: clip.transformKeyframes.shifted(by: rightSourceOffset),
                         speedCurve: clip.speedCurve.shifted(by: rightSourceOffset),
