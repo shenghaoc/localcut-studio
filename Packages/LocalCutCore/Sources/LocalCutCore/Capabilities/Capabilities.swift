@@ -319,11 +319,10 @@ extension Capabilities {
                 tier: .baseline,
                 reason: "Unknown Apple Silicon generation — treating as baseline")
         }
-        // Minimum: accelerated tier. Pro tier for 3+ sources with
-        // sufficient memory.
+        // Minimum: accelerated tier. Pro tier for M2+ or ≥ 16 GiB.
         if generation >= 2 || unifiedMemoryGiB >= 16 {
             return CapabilityVerdict(
-                tier: .accelerated,
+                tier: .pro,
                 reason: "Apple Silicon M\(generation); "
                     + "\(videoEncoderCount) hardware encoder(s)")
         }

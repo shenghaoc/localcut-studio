@@ -25,7 +25,9 @@ enum ProgramLanding {
         for (sourceID, fileURL) in result.isoTrackURLs.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
             let source = result.manifest.header?.sources.first(where: { $0.id == sourceID })
             let trackName = source?.displayName ?? sourceID.uuidString.prefix(8).description
-            let item = MediaItem(url: fileURL, id: sourceID)
+            // Use a fresh UUID for the MediaItem so multiple sessions
+            // recording from the same source don't collide.
+            let item = MediaItem(url: fileURL, id: UUID())
             item.name = "Program \(trackName)"
             item.duration = mediaDuration(for: sourceID, result: result, endedRecords: endedRecords)
             item.wantsBundling = true

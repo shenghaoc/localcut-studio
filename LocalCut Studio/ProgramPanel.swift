@@ -58,6 +58,15 @@ struct ProgramPanel: View {
         .onDisappear {
             programState.teardownIfRunning()
         }
+        .onKeyPress { press in
+            guard programState.isRunning,
+                  let char = press.characters.first.map(String.init),
+                  let scene = scenes.first(where: { $0.hotkey == char }) else {
+                return .ignored
+            }
+            programState.switchScene(to: scene.id)
+            return .handled
+        }
         .sheet(isPresented: isEditingScene) {
             if let draft = editingSceneDraft {
                 SceneEditorSheet(

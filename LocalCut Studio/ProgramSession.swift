@@ -259,9 +259,7 @@ actor ProgramSession {
 
             for captureSource in captureSources {
                 let source = captureSource.descriptor
-                let tap = LiveComposeTap(sourceID: source.id) { [weak self] in
-                    Task { await self?.tapDidDispose(sourceID: source.id) }
-                }
+                let tap = LiveComposeTap(sourceID: source.id)
                 taps[source.id] = tap
 
                 let writer: ContinuousCaptureWriter
