@@ -113,6 +113,7 @@ extension MediaRef {
             preferredTransform: TransformCode(item.preferredTransform),
             hasVideo: item.hasVideo,
             hasAudio: item.hasAudio,
-            bundleRelativePath: item.bundleRelativePath)
+            bundleRelativePath: item.bundleRelativePath,
+            captureSourceID: item.captureSourceID)
     }
 }

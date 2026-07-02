@@ -56,7 +56,7 @@ struct ProgramPanel: View {
             programState.refreshCapability(budget: model.encoderBudget)
         }
         .onDisappear {
-            programState.teardownIfRunning(budget: model.encoderBudget)
+            programState.teardownIfRunning(budget: model.encoderBudget, model: model)
         }
         .onKeyPress { press in
             guard programState.isRunning,
@@ -683,13 +683,14 @@ final class ProgramPanelState {
     }
 
     /// Tears down the session if the panel disappears while recording.
-    /// Best-effort: errors are logged, not surfaced (panel is gone).
-    func teardownIfRunning(budget: EncoderBudget) {
+    /// Lands the result so ISO/layout tracks are not lost.
+    func teardownIfRunning(budget: EncoderBudget, model: EditorModel) {
         guard isRunning, let session else { return }
         isRunning = false
         Task {
             do {
-                _ = try await session.stop()
+                let result = try await session.stop()
+                ProgramLanding.land(result: result, model: model)
             } catch {
                 NSLog("[ProgramPanelState] teardown stop failed: \(error)")
             }

@@ -592,6 +592,7 @@ final class DocumentController {
         item.preferredTransform = ref.preferredTransform.cgTransform.sanitized
         item.hasVideo = ref.hasVideo
         item.hasAudio = ref.hasAudio
+        item.captureSourceID = ref.captureSourceID
     }
 
     private func write(to url: URL, model: EditorModel) async {

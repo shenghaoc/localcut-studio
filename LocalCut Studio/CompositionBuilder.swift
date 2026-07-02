@@ -35,6 +35,7 @@ enum CompositionBuilder {
     /// transition so the compositor can blend it with its predecessor.
     private struct VideoSegment {
         let clipID: UUID
+        let mediaID: UUID
         let compTrackID: CMPersistentTrackID
         let timeRange: CMTimeRange
         let transform: CGAffineTransform
@@ -48,6 +49,9 @@ enum CompositionBuilder {
         let clipSourceStart: CMTime
         let sourceRange: CMTimeRange
         let orderingStart: CMTime
+        /// A25: Scene z-order for layout override sorting. Higher values
+        /// render on top. Default 0 for non-layout segments.
+        let zOrder: Int
         /// Phase 43: keyframed transform for zoom-n-pan animation.
         let transformKeyframes: Keyframed<Transform2D>
 
@@ -61,14 +65,14 @@ enum CompositionBuilder {
 
         func withTimeRange(_ newRange: CMTimeRange) -> VideoSegment {
             VideoSegment(
-                clipID: clipID, compTrackID: compTrackID,
+                clipID: clipID, mediaID: mediaID, compTrackID: compTrackID,
                 timeRange: newRange, transform: transform, opacity: opacity,
                 mask: mask, effects: effects,
                 transitionRange: transitionRange, transitionType: transitionType,
                 transitionWipeAngle: transitionWipeAngle,
                 showSkinMask: showSkinMask,
                 clipSourceStart: clipSourceStart, sourceRange: sourceRange,
-                orderingStart: orderingStart,
+                orderingStart: orderingStart, zOrder: zOrder,
                 transformKeyframes: transformKeyframes)
         }
 
@@ -175,6 +179,7 @@ enum CompositionBuilder {
                         let segmentStart = start + (remapSegment.outputOffset - piece.outputOffset)
                         segments.append(VideoSegment(
                             clipID: clip.id,
+                            mediaID: clip.mediaID,
                             compTrackID: compTrack.trackID,
                             timeRange: CMTimeRange(start: segmentStart,
                                                    duration: remapSegment.outputDuration),
@@ -189,6 +194,7 @@ enum CompositionBuilder {
                             clipSourceStart: clip.sourceStart,
                             sourceRange: remapSegment.sourceRange,
                             orderingStart: piece.effectiveStart,
+                            zOrder: 0,
                             transformKeyframes: clip.transformKeyframes))
                     }
                 }
@@ -502,14 +508,14 @@ enum CompositionBuilder {
                 .filter { $0.visible }
                 .sorted { $0.zIndex < $1.zIndex }
 
-            // Build a per-layer transform/opacity lookup by mediaID.
-            var layerByMediaID: [UUID: (transform: CGAffineTransform, opacity: Float)] = [:]
+            // Build a per-layer transform/opacity/zOrder lookup by mediaID.
+            var layerByMediaID: [UUID: (transform: CGAffineTransform, opacity: Float, zOrder: Int)] = [:]
             for layer in visibleLayers {
                 if case .captureSource(let sourceID) = layer.sourceRef,
                    let mediaID = sourceIDToMediaID[sourceID] {
                     let cgTransform = sceneLayerTransform(
                         layer: layer, canvasSize: renderSize)
-                    layerByMediaID[mediaID] = (cgTransform, layer.opacity)
+                    layerByMediaID[mediaID] = (cgTransform, layer.opacity, layer.zIndex)
                 }
             }
 
@@ -533,12 +539,17 @@ enum CompositionBuilder {
                         let overlapsLayout = pieceRange.end > clipStart
                             && pieceRange.start < clipEnd
 
-                        if overlapsLayout, let override = layerByMediaID[seg.clipID] {
+                        if overlapsLayout, let override = layerByMediaID[seg.mediaID] {
+                            // A30: Compose scene transform with the original
+                            // fit transform so sources with different natural
+                            // sizes still render at the correct scale.
+                            let composedTransform = seg.transform.concatenating(override.transform)
                             newSegments.append(VideoSegment(
                                 clipID: piece.clipID,
+                                mediaID: piece.mediaID,
                                 compTrackID: piece.compTrackID,
                                 timeRange: piece.timeRange,
-                                transform: override.transform,
+                                transform: composedTransform,
                                 opacity: seg.opacity * override.opacity,
                                 mask: piece.mask,
                                 effects: piece.effects,
@@ -549,6 +560,27 @@ enum CompositionBuilder {
                                 clipSourceStart: piece.clipSourceStart,
                                 sourceRange: piece.sourceRange,
                                 orderingStart: piece.orderingStart,
+                                zOrder: override.zOrder,
+                                transformKeyframes: piece.transformKeyframes))
+                        } else if overlapsLayout {
+                            // A24: Source not in the active scene — suppress it.
+                            newSegments.append(VideoSegment(
+                                clipID: piece.clipID,
+                                mediaID: piece.mediaID,
+                                compTrackID: piece.compTrackID,
+                                timeRange: piece.timeRange,
+                                transform: piece.transform,
+                                opacity: 0,
+                                mask: piece.mask,
+                                effects: piece.effects,
+                                transitionRange: piece.transitionRange,
+                                transitionType: piece.transitionType,
+                                transitionWipeAngle: piece.transitionWipeAngle,
+                                showSkinMask: piece.showSkinMask,
+                                clipSourceStart: piece.clipSourceStart,
+                                sourceRange: piece.sourceRange,
+                                orderingStart: piece.orderingStart,
+                                zOrder: 0,
                                 transformKeyframes: piece.transformKeyframes))
                         } else {
                             newSegments.append(piece)
@@ -578,34 +610,81 @@ enum CompositionBuilder {
     }
 
     /// Splits a video segment at layout clip boundaries so each piece can
-    /// have its own transform.
+    /// have its own transform. Adjusts sourceRange proportionally so
+    /// time-based effects/keyframes map correctly.
     private static func splitSegmentAtLayoutBoundaries(
         seg: VideoSegment, clipRange: CMTimeRange
     ) -> [VideoSegment] {
         let segStart = seg.timeRange.start
         let segEnd = seg.timeRange.end
+        let segDuration = seg.timeRange.duration
         let clipStart = clipRange.start
         let clipEnd = clipRange.end
+
+        func sourceRangeForPiece(_ pieceStart: CMTime, _ pieceEnd: CMTime) -> CMTimeRange {
+            guard segDuration > .zero else { return seg.sourceRange }
+            let startOffset = pieceStart - segStart
+            let endOffset = pieceEnd - segStart
+            let ratioStart = startOffset.seconds / segDuration.seconds
+            let ratioEnd = endOffset.seconds / segDuration.seconds
+            let srcDuration = seg.sourceRange.duration.seconds
+            let srcStart = seg.sourceRange.start + CMTime(seconds: ratioStart * srcDuration, preferredTimescale: 600)
+            let srcEnd = seg.sourceRange.start + CMTime(seconds: ratioEnd * srcDuration, preferredTimescale: 600)
+            return CMTimeRange(start: srcStart, end: srcEnd)
+        }
 
         var pieces: [VideoSegment] = []
 
         // Piece before the layout clip (if any).
         if segStart < clipStart {
             let end = CMTimeMinimum(segEnd, clipStart)
-            pieces.append(seg.withTimeRange(CMTimeRange(start: segStart, end: end)))
+            let piece = seg.withTimeRange(CMTimeRange(start: segStart, end: end))
+            pieces.append(VideoSegment(
+                clipID: piece.clipID, mediaID: piece.mediaID, compTrackID: piece.compTrackID,
+                timeRange: piece.timeRange, transform: piece.transform, opacity: piece.opacity,
+                mask: piece.mask, effects: piece.effects,
+                transitionRange: piece.transitionRange, transitionType: piece.transitionType,
+                transitionWipeAngle: piece.transitionWipeAngle,
+                showSkinMask: piece.showSkinMask,
+                clipSourceStart: piece.clipSourceStart,
+                sourceRange: sourceRangeForPiece(segStart, end),
+                orderingStart: piece.orderingStart, zOrder: piece.zOrder,
+                transformKeyframes: piece.transformKeyframes))
         }
 
         // Piece overlapping the layout clip.
         let overlapStart = CMTimeMaximum(segStart, clipStart)
         let overlapEnd = CMTimeMinimum(segEnd, clipEnd)
         if overlapEnd > overlapStart {
-            pieces.append(seg.withTimeRange(CMTimeRange(start: overlapStart, end: overlapEnd)))
+            let piece = seg.withTimeRange(CMTimeRange(start: overlapStart, end: overlapEnd))
+            pieces.append(VideoSegment(
+                clipID: piece.clipID, mediaID: piece.mediaID, compTrackID: piece.compTrackID,
+                timeRange: piece.timeRange, transform: piece.transform, opacity: piece.opacity,
+                mask: piece.mask, effects: piece.effects,
+                transitionRange: piece.transitionRange, transitionType: piece.transitionType,
+                transitionWipeAngle: piece.transitionWipeAngle,
+                showSkinMask: piece.showSkinMask,
+                clipSourceStart: piece.clipSourceStart,
+                sourceRange: sourceRangeForPiece(overlapStart, overlapEnd),
+                orderingStart: piece.orderingStart, zOrder: piece.zOrder,
+                transformKeyframes: piece.transformKeyframes))
         }
 
         // Piece after the layout clip (if any).
         if segEnd > clipEnd {
             let start = CMTimeMaximum(segStart, clipEnd)
-            pieces.append(seg.withTimeRange(CMTimeRange(start: start, end: segEnd)))
+            let piece = seg.withTimeRange(CMTimeRange(start: start, end: segEnd))
+            pieces.append(VideoSegment(
+                clipID: piece.clipID, mediaID: piece.mediaID, compTrackID: piece.compTrackID,
+                timeRange: piece.timeRange, transform: piece.transform, opacity: piece.opacity,
+                mask: piece.mask, effects: piece.effects,
+                transitionRange: piece.transitionRange, transitionType: piece.transitionType,
+                transitionWipeAngle: piece.transitionWipeAngle,
+                showSkinMask: piece.showSkinMask,
+                clipSourceStart: piece.clipSourceStart,
+                sourceRange: sourceRangeForPiece(start, segEnd),
+                orderingStart: piece.orderingStart, zOrder: piece.zOrder,
+                transformKeyframes: piece.transformKeyframes))
         }
 
         return pieces.isEmpty ? [seg] : pieces

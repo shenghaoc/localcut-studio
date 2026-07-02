@@ -139,6 +139,9 @@ actor ProgramSession {
     /// Per-source encoder leases.
     private var leases: [EncoderLease] = []
 
+    /// Manifest write errors accumulated during the session.
+    private var manifestErrors: [String] = []
+
     /// The program compositor.
     private var compositor: ProgramCompositor?
 
@@ -194,13 +197,16 @@ actor ProgramSession {
         isStarting = true
         let sources = captureSources.map(\.descriptor)
         guard !sources.isEmpty else {
+            isStarting = false
             throw ProgramSessionError.noSources
         }
         guard !scenes.isEmpty else {
+            isStarting = false
             throw ProgramSessionError.noScenes
         }
         let conflicts = detectHotkeyConflicts(in: scenes)
         guard conflicts.isEmpty else {
+            isStarting = false
             throw ProgramSessionError.hotkeyConflict(conflicts)
         }
         self.onFrame = onFrame
@@ -446,6 +452,7 @@ actor ProgramSession {
         // Return partial results even when some writers failed. The
         // successfully ended records are already persisted and the UI
         // can land the sources that finished cleanly.
+        let allWarnings = finishFailures + manifestErrors
         return ProgramSessionResult(
             sessionID: sid,
             sessionURL: dir,
@@ -453,7 +460,7 @@ actor ProgramSession {
             isoTrackURLs: isoURLs,
             duration: CaptureManifest.time(fromMicroseconds: durationUs),
             sceneSwitches: manifest.resolvedSceneSwitches,
-            writerWarnings: finishFailures)
+            writerWarnings: allWarnings)
     }
 
     // MARK: - Private
@@ -471,18 +478,24 @@ actor ProgramSession {
         do {
             try manifestWriter?.append(record)
         } catch {
-            // Manifest write failure is non-fatal for the running session
-            // (in-memory records are still available for landing), but
-            // crash recovery will be incomplete. Log for diagnostics.
+            manifestErrors.append(error.localizedDescription)
             NSLog("[ProgramSession] manifest append failed: \(error)")
         }
     }
 
     /// Called when a screen capture session stops with an error (e.g. window
-    /// closed, permission revoked). Logs the error; the session continues
-    /// running for remaining sources.
+    /// closed, permission revoked). Stops the entire program session so the
+    /// user knows the recording is compromised.
     private func handleCaptureStopError(sourceID: UUID, error: Error) {
         NSLog("[ProgramSession] capture stop error for source \(sourceID): \(error)")
+        guard isRunning else { return }
+        Task {
+            do {
+                _ = try await stop()
+            } catch {
+                NSLog("[ProgramSession] failed to stop after capture error: \(error)")
+            }
+        }
     }
 
     private func runningSession(for captureSource: ProgramCaptureSource,

@@ -134,9 +134,12 @@ enum ProgramLanding {
     ) -> CMTime {
         guard let durationUs = endedRecords[sourceID]?.first?.durationUs,
               durationUs > 0 else {
-            // Zero-sample source (never delivered frames). Use zero duration
-            // so the clip is skipped rather than filling the entire session.
-            return .zero
+            // A21: No source-ended record. For recovered sessions the
+            // files may still be readable; fall back to session duration
+            // so recovery lands non-empty clips. For normal sessions
+            // where a source genuinely delivered zero frames, the clip
+            // will be short but not zero-length.
+            return result.duration
         }
         return CaptureManifest.time(fromMicroseconds: durationUs)
     }

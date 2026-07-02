@@ -368,6 +368,9 @@ public struct MediaRef: Codable, Equatable, Sendable {
     public var hasVideo: Bool
     public var hasAudio: Bool
     public var bundleRelativePath: String?
+    /// The capture source UUID from Program Mode landing. Used to match
+    /// scene-layer source refs to MediaItems for layout track replay.
+    public var captureSourceID: UUID?
 
     public init(id: UUID,
                 displayName: String,
@@ -378,7 +381,8 @@ public struct MediaRef: Codable, Equatable, Sendable {
                 preferredTransform: TransformCode,
                 hasVideo: Bool,
                 hasAudio: Bool,
-                bundleRelativePath: String? = nil) {
+                bundleRelativePath: String? = nil,
+                captureSourceID: UUID? = nil) {
         self.id = id
         self.displayName = displayName
         self.bookmark = bookmark
@@ -389,11 +393,13 @@ public struct MediaRef: Codable, Equatable, Sendable {
         self.hasVideo = hasVideo
         self.hasAudio = hasAudio
         self.bundleRelativePath = bundleRelativePath
+        self.captureSourceID = captureSourceID
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, displayName, bookmark, duration, naturalWidth, naturalHeight,
-             preferredTransform, hasVideo, hasAudio, bundleRelativePath
+             preferredTransform, hasVideo, hasAudio, bundleRelativePath,
+             captureSourceID
     }
 
     public init(from decoder: any Decoder) throws {
@@ -408,6 +414,7 @@ public struct MediaRef: Codable, Equatable, Sendable {
         hasVideo = try c.decodeIfPresent(Bool.self, forKey: .hasVideo) ?? false
         hasAudio = try c.decodeIfPresent(Bool.self, forKey: .hasAudio) ?? false
         bundleRelativePath = try c.decodeIfPresent(String.self, forKey: .bundleRelativePath)
+        captureSourceID = try c.decodeIfPresent(UUID.self, forKey: .captureSourceID)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -422,6 +429,7 @@ public struct MediaRef: Codable, Equatable, Sendable {
         try c.encode(hasVideo, forKey: .hasVideo)
         try c.encode(hasAudio, forKey: .hasAudio)
         try c.encodeIfPresent(bundleRelativePath, forKey: .bundleRelativePath)
+        try c.encodeIfPresent(captureSourceID, forKey: .captureSourceID)
     }
 }
 
