@@ -38,6 +38,13 @@ public struct EncoderLease: Sendable, Identifiable {
     public func relinquish() {
         release()
     }
+
+    /// Releases this lease and waits for the actor to observe the release.
+    /// Use when the caller needs the budget ledger to reflect the release
+    /// before acquiring another lease.
+    public func relinquish(budget: EncoderBudget) async {
+        await budget.releaseLease(id: id)
+    }
 }
 
 // MARK: - Budget error
@@ -132,7 +139,7 @@ public actor EncoderBudget {
 
     /// Releases a lease by ID. Idempotent — releasing an already-released
     /// lease is a no-op.
-    private func releaseLease(id: UUID) {
+    func releaseLease(id: UUID) {
         leases.removeValue(forKey: id)
     }
 

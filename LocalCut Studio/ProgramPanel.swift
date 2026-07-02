@@ -623,8 +623,7 @@ final class ProgramPanelState {
                 try await programSession.start(
                     captureSources: captureSources,
                     scenes: initialScenes,
-                    renderSize: renderSize,
-                    onFrame: { _ in })
+                    renderSize: renderSize)
                 isRunning = true
                 statusMessage = "Program session recording."
             } catch {

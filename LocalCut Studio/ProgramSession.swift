@@ -163,7 +163,7 @@ actor ProgramSession {
     func start(sources: [CaptureSourceDescriptor],
                scenes: [SceneDefinition],
                renderSize: CGSize,
-               onFrame: @escaping @Sendable (CVPixelBuffer) -> Void) async throws {
+               onFrame: (@Sendable (CVPixelBuffer) -> Void)? = nil) async throws {
         try await start(
             captureSources: sources.map { ProgramCaptureSource(descriptor: $0) },
             scenes: scenes,
@@ -181,7 +181,7 @@ actor ProgramSession {
     func start(captureSources: [ProgramCaptureSource],
                scenes: [SceneDefinition],
                renderSize: CGSize,
-               onFrame: @escaping @Sendable (CVPixelBuffer) -> Void) async throws {
+               onFrame: (@Sendable (CVPixelBuffer) -> Void)? = nil) async throws {
         guard !isRunning, !isStarting else {
             throw ProgramSessionError.sessionAlreadyRunning
         }
@@ -343,7 +343,9 @@ actor ProgramSession {
         let pixelBuffer = buffer.pixelBuffer
         taps[sourceID]?.feed(pixelBuffer)
         compositor?.updateSource(sourceID, buffer: pixelBuffer)
-        if let frame = compositor?.renderFrame() {
+        // Only render the composited frame when the caller needs it.
+        // Rendering is expensive (full-resolution CoreImage/Metal composite).
+        if onFrame != nil, let frame = compositor?.renderFrame() {
             onFrame?(frame)
         }
     }
