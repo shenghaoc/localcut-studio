@@ -133,7 +133,9 @@ enum ProgramLanding {
     ) -> CMTime {
         guard let durationUs = endedRecords[sourceID]?.first?.durationUs,
               durationUs > 0 else {
-            return result.duration
+            // Zero-sample source (never delivered frames). Use zero duration
+            // so the clip is skipped rather than filling the entire session.
+            return .zero
         }
         return CaptureManifest.time(fromMicroseconds: durationUs)
     }

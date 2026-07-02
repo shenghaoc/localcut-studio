@@ -649,7 +649,11 @@ final class ProgramPanelState {
             do {
                 let result = try await session.stop()
                 ProgramLanding.land(result: result, model: model)
-                statusMessage = "Program session landed."
+                if result.writerWarnings.isEmpty {
+                    statusMessage = "Program session landed."
+                } else {
+                    statusMessage = "Landed with warnings: \(result.writerWarnings.joined(separator: "; "))"
+                }
             } catch {
                 statusMessage = error.localizedDescription
             }

@@ -82,6 +82,10 @@ struct ProgramSessionResult: Sendable {
     let isoTrackURLs: [UUID: URL] // sourceID -> file URL
     let duration: CMTime
     let sceneSwitches: [(sceneId: UUID, atUs: Int64, sceneDoc: SceneDoc)]
+    /// Non-empty when one or more writers failed to finish cleanly.
+    /// The UI should surface these as warnings while still landing
+    /// the successfully recorded sources.
+    let writerWarnings: [String]
 }
 
 // MARK: - ProgramSession actor
@@ -437,16 +441,17 @@ actor ProgramSession {
         startScenes.removeAll()
         onFrame = nil
 
-        if !finishFailures.isEmpty {
-            throw ProgramSessionError.writerFinishFailed(finishFailures)
-        }
+        // Return partial results even when some writers failed. The
+        // successfully ended records are already persisted and the UI
+        // can land the sources that finished cleanly.
         return ProgramSessionResult(
             sessionID: sid,
             sessionURL: dir,
             manifest: manifest,
             isoTrackURLs: isoURLs,
             duration: CaptureManifest.time(fromMicroseconds: durationUs),
-            sceneSwitches: manifest.resolvedSceneSwitches)
+            sceneSwitches: manifest.resolvedSceneSwitches,
+            writerWarnings: finishFailures)
     }
 
     // MARK: - Private
