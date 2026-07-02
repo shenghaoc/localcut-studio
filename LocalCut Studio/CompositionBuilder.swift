@@ -56,7 +56,11 @@ enum CompositionBuilder {
         let transformKeyframes: Keyframed<Transform2D>
 
         var layer: CompositorLayer {
-            CompositorLayer(clipID: clipID, trackID: compTrackID, transform: transform, opacity: opacity, mask: mask, effects: effects, showSkinMask: showSkinMask, clipSourceStart: clipSourceStart, sourceRange: sourceRange, timeRange: timeRange, transformKeyframes: transformKeyframes)
+            CompositorLayer(clipID: clipID, trackID: compTrackID, zOrder: zOrder,
+                            transform: transform, opacity: opacity, mask: mask,
+                            effects: effects, showSkinMask: showSkinMask,
+                            clipSourceStart: clipSourceStart, sourceRange: sourceRange,
+                            timeRange: timeRange, transformKeyframes: transformKeyframes)
         }
 
         func contains(_ seconds: Double) -> Bool {
@@ -85,6 +89,27 @@ enum CompositionBuilder {
                 transitionEnd: transitionRange?.end.seconds,
                 transitionType: transitionType,
                 transitionWipeAngle: transitionWipeAngle)
+        }
+    }
+
+    private struct LayoutColourSegment {
+        let hex: String
+        let timeRange: CMTimeRange
+        let transform: CGAffineTransform
+        let opacity: Float
+        let zOrder: Int
+
+        var layer: ColourCompositorLayer {
+            ColourCompositorLayer(
+                hex: hex,
+                transform: transform,
+                opacity: opacity,
+                timeRange: timeRange,
+                zOrder: zOrder)
+        }
+
+        func contains(_ seconds: Double) -> Bool {
+            timeRange.start.seconds <= seconds && seconds < timeRange.end.seconds
         }
     }
 
@@ -327,12 +352,18 @@ enum CompositionBuilder {
         let activeLayoutClips = project.layoutTracks
             .filter { !$0.isMuted }
             .flatMap(\.clips)
+        let layoutColourSegments: [LayoutColourSegment]
         if !activeLayoutClips.isEmpty {
+            layoutColourSegments = makeLayoutColourSegments(
+                layoutClips: activeLayoutClips,
+                renderSize: renderSize)
             projectTrackSegments = applyLayoutOverrides(
                 segments: projectTrackSegments,
                 layoutClips: activeLayoutClips,
                 sourceIDToMediaID: sourceIDToMediaID,
                 renderSize: renderSize)
+        } else {
+            layoutColourSegments = []
         }
 
         // Insert a black-frame filler track wherever the project has visual
@@ -359,6 +390,7 @@ enum CompositionBuilder {
             overlays: project.overlays,
             callouts: project.callouts,
             keystrokeOverlays: project.keystrokeOverlayClips)
+            + layoutColourSegments.map(\.timeRange)
         let videoRanges = projectTrackSegments.flatMap { segments in
             segments.map(\.timeRange)
         }
@@ -422,6 +454,7 @@ enum CompositionBuilder {
             composition: composition,
             projectTrackSegments: projectTrackSegments,
             captionTracks: captionTracks,
+            layoutColourSegments: layoutColourSegments,
             overlays: project.overlays,
             callouts: project.callouts,
             keystrokeOverlays: project.keystrokeOverlayClips,
@@ -509,9 +542,7 @@ enum CompositionBuilder {
                 .sorted { $0.zIndex < $1.zIndex }
 
             // Build a per-layer transform/opacity/zOrder lookup by mediaID.
-            // A26: Also track colour layers for composition insertion.
             var layerByMediaID: [UUID: (transform: CGAffineTransform, opacity: Float, zOrder: Int)] = [:]
-            var colourLayers: [(hex: String, transform: CGAffineTransform, opacity: Float, zOrder: Int)] = []
             for layer in visibleLayers {
                 switch layer.sourceRef {
                 case .captureSource(let sourceID):
@@ -520,11 +551,7 @@ enum CompositionBuilder {
                             layer: layer, canvasSize: renderSize)
                         layerByMediaID[mediaID] = (cgTransform, layer.opacity, layer.zIndex)
                     }
-                case .colour(let hex):
-                    let cgTransform = sceneLayerTransform(
-                        layer: layer, canvasSize: renderSize)
-                    colourLayers.append((hex, cgTransform, layer.opacity, layer.zIndex))
-                case .still:
+                case .colour, .still:
                     break
                 }
             }
@@ -598,6 +625,32 @@ enum CompositionBuilder {
                     }
                 }
                 result[trackIndex] = newSegments
+            }
+        }
+        return result
+    }
+
+    /// Extracts Program Mode colour scene layers as synthetic compositor units
+    /// so AVFoundation re-export matches the live ProgramCompositor.
+    private static func makeLayoutColourSegments(
+        layoutClips: [LayoutClip],
+        renderSize: CGSize
+    ) -> [LayoutColourSegment] {
+        var result: [LayoutColourSegment] = []
+        for layoutClip in layoutClips {
+            let clipStart = layoutClip.timelineStart.cmTime
+            let clipEnd = layoutClip.timelineEnd.cmTime
+            let clipRange = CMTimeRange(start: clipStart, end: clipEnd)
+            guard clipRange.duration > .zero else { continue }
+
+            for layer in layoutClip.sceneSnapshot.layers where layer.visible {
+                guard case .colour(let hex) = layer.sourceRef else { continue }
+                result.append(LayoutColourSegment(
+                    hex: hex,
+                    timeRange: clipRange,
+                    transform: sceneLayerTransform(layer: layer, canvasSize: renderSize),
+                    opacity: layer.opacity,
+                    zOrder: layer.zIndex))
             }
         }
         return result
@@ -915,6 +968,7 @@ enum CompositionBuilder {
         composition: AVComposition,
         projectTrackSegments: [[VideoSegment]],
         captionTracks: [CaptionTrack],
+        layoutColourSegments: [LayoutColourSegment] = [],
         overlays: [OverlayClip],
         callouts: [CalloutClip] = [],
         keystrokeOverlays: [KeystrokeOverlayClip] = [],
@@ -935,6 +989,7 @@ enum CompositionBuilder {
         // path).
         let hasAnySegment = projectTrackSegments.contains { !$0.isEmpty }
             || fillerTrackID != kCMPersistentTrackID_Invalid
+            || !layoutColourSegments.isEmpty
             || !overlays.isEmpty
             || !keystrokeOverlays.isEmpty
             || !callouts.isEmpty
@@ -954,6 +1009,10 @@ enum CompositionBuilder {
                     boundarySet.insert(overlap.end.seconds)
                 }
             }
+        }
+        for segment in layoutColourSegments {
+            boundarySet.insert(segment.timeRange.start.seconds)
+            boundarySet.insert(segment.timeRange.end.seconds)
         }
         for track in captionTracks {
             for line in track.lines {
@@ -1006,12 +1065,18 @@ enum CompositionBuilder {
                 }
             }
 
+            for segment in layoutColourSegments where segment.contains(midpoint) {
+                units.append(.colour(segment.layer))
+            }
+
             // Visual-only intervals have no clip segment, but
             // the export pipeline still needs a `requiredSourceTrackIDs` entry
             // to schedule the compositor — surface the filler as a layer so
-            // its track ID flows into the instruction. The layer renders as
-            // black; captions and overlays composite on top.
-            if units.isEmpty,
+            // its track ID flows into the instruction. Colour-only layout
+            // intervals also need this source even though the colour layer
+            // itself does not read a frame. The layer renders as black behind
+            // other render units.
+            if units.flatMap(\.trackIDs).isEmpty,
                fillerTrackID != kCMPersistentTrackID_Invalid,
                let fillerRange = fillerVisualRanges.first(where: {
                    $0.containsTime(CMTime(seconds: midpoint, preferredTimescale: 600))
@@ -1019,6 +1084,7 @@ enum CompositionBuilder {
                 units.append(.layer(CompositorLayer(
                     clipID: UUID(),  // filler; no real clip
                     trackID: fillerTrackID,
+                    zOrder: Int.min,
                     transform: .identity,
                     opacity: 1,
                     mask: .none,
@@ -1029,6 +1095,15 @@ enum CompositionBuilder {
                     timeRange: fillerRange,
                     transformKeyframes: Keyframed(defaultValue: .identity))))
             }
+
+            units = units.enumerated()
+                .sorted { lhs, rhs in
+                    if lhs.element.zOrder == rhs.element.zOrder {
+                        return lhs.offset < rhs.offset
+                    }
+                    return lhs.element.zOrder < rhs.element.zOrder
+                }
+                .map(\.element)
 
             let captionsForInterval = activeCaptionItems(
                 in: captionTracks, midpoint: midpoint)

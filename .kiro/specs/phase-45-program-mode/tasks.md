@@ -1,7 +1,9 @@
 # Tasks: Phase 45 — Program Mode
 
 > Status: **Draft implementation**. Depends on Phase 41, `feature-colour-grading`, keyframes.
-> `swift test --package-path Packages/LocalCutCore` and `xcodebuild build`
+> `swift test --package-path Packages/LocalCutCore`,
+> `xcodebuild -quiet -scheme "LocalCut Studio" -destination "platform=macOS" build`,
+> and `xcodebuild -quiet -scheme "LocalCut Studio" -destination "platform=macOS" build-for-testing`
 > pass locally. `xcodebuild test` still hangs in this environment on
 > pre-Phase-45 tests too and is tracked as pre-existing infrastructure, not a
 > Phase 45 regression.
@@ -32,8 +34,10 @@
 - [x] **T4.3** Single-transaction landing of ISO + layout tracks.
   - Layout tracks are now consumed by `CompositionBuilder`: scene-layer
     transforms override ISO track transforms during layout clip time ranges,
-    so preview/export replay the live switch layout. `MediaItem.captureSourceID`
-    bridges scene-layer source refs to MediaItem IDs.
+    scene colour layers become synthetic compositor units for export, and
+    colour-only layout spans use the existing filler source so AVFoundation
+    schedules the compositor. `MediaItem.captureSourceID` bridges scene-layer
+    source refs to MediaItem IDs.
 
 ## UI
 
@@ -54,6 +58,6 @@
   - Requires physical capture hardware. Mocked coverage lives in
     `ProgramSessionTests` and `ProgramLandingTests`.
 - [ ] **T6.5** `xcodebuild` (Debug, macOS) green.
-  - `xcodebuild build` passes. `xcodebuild test` runner hangs in this
+  - `xcodebuild build` and `xcodebuild build-for-testing` pass. `xcodebuild test` runner hangs in this
     environment on pre-Phase-45 tests too; do not count it as a Phase 45
     regression without a separate infrastructure fix.

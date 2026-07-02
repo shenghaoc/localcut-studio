@@ -144,6 +144,45 @@ struct ProgramLandingTests {
         #expect(clips[0].sceneSnapshot.name == "Saved")
     }
 
+    @Test("Re-export schedules colour-only layout layers")
+    @MainActor
+    func reExportSchedulesColourOnlyLayoutLayers() async throws {
+        let project = Project()
+        project.renderSize = CGSize(width: 32, height: 32)
+        project.frameRate = 30
+
+        let scene = SceneDefinition(name: "Colour", layers: [
+            SceneLayer(sourceRef: .colour(hex: "#FF0000"), zIndex: 0)
+        ])
+        let layoutTrack = LayoutTrack()
+        layoutTrack.clips = [
+            LayoutClip(
+                timelineStart: CMTimeCode(.zero),
+                duration: CMTimeCode(CMTime(seconds: 2, preferredTimescale: 600)),
+                sceneSnapshot: scene)
+        ]
+        project.layoutTracks = [layoutTrack]
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+        let videoComposition = try #require(built.videoComposition)
+        let instruction = try #require(videoComposition.instructions.compactMap {
+            $0 as? EffectCompositionInstruction
+        }.first { instruction in
+            instruction.timeRange.containsTime(CMTime(seconds: 1, preferredTimescale: 600))
+        })
+
+        let hasColourUnit = instruction.units.contains { unit in
+            if case .colour(let layer) = unit {
+                return layer.hex == "#FF0000"
+            }
+            return false
+        }
+
+        #expect(abs(built.duration - 2) < 0.05)
+        #expect(hasColourUnit)
+        #expect(!instruction.units.flatMap(\.trackIDs).isEmpty)
+    }
+
     @Test("Host-time scene switches are normalized to session-relative layout clips")
     func hostTimeSwitchesNormalize() {
         let sceneA = SceneDefinition(name: "A", layers: [])
