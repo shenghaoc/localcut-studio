@@ -18,11 +18,24 @@ nonisolated final class LiveComposeTap: @unchecked Sendable {
     /// The source ID this tap is attached to.
     let sourceID: UUID
 
-    /// The latest pixel buffer for compositing.
-    private(set) var latestBuffer: CVPixelBuffer?
+    /// Lock protecting all mutable state.
+    private let lock = NSLock()
 
-    /// Whether this tap has been disposed.
-    private(set) var isDisposed = false
+    /// The latest pixel buffer for compositing.
+    private var _latestBuffer: CVPixelBuffer?
+    private var _isDisposed = false
+
+    var latestBuffer: CVPixelBuffer? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _latestBuffer
+    }
+
+    var isDisposed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isDisposed
+    }
 
     /// Callback invoked when the tap is disposed (once).
     private let onDispose: (@Sendable () -> Void)?
@@ -34,16 +47,20 @@ nonisolated final class LiveComposeTap: @unchecked Sendable {
 
     /// Feeds a new frame to the tap. The previous buffer is released.
     func feed(_ buffer: CVPixelBuffer) {
-        guard !isDisposed else { return }
-        latestBuffer = buffer
+        lock.lock()
+        guard !_isDisposed else { lock.unlock(); return }
+        _latestBuffer = buffer
+        lock.unlock()
     }
 
     /// Disposes the tap, releasing the held buffer. Safe to call multiple
     /// times — only the first call triggers the `onDispose` callback.
     func dispose() {
-        guard !isDisposed else { return }
-        isDisposed = true
-        latestBuffer = nil
+        lock.lock()
+        guard !_isDisposed else { lock.unlock(); return }
+        _isDisposed = true
+        _latestBuffer = nil
+        lock.unlock()
         onDispose?()
     }
 
