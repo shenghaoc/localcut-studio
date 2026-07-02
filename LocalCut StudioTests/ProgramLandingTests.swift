@@ -215,12 +215,16 @@ struct ProgramLandingTests {
             manifest: manifest,
             isoTrackURLs: [sourceID: fileURL],
             duration: CaptureManifest.time(fromMicroseconds: durationUs),
-            sceneSwitches: manifest.resolvedSceneSwitches)
+            sceneSwitches: manifest.resolvedSceneSwitches,
+            writerWarnings: [])
 
         ProgramLanding.land(result: result, model: model)
 
-        #expect(model.project.mediaItems.contains(where: { $0.id == sourceID }))
-        #expect(model.project.videoTracks.last?.clips.first?.mediaID == sourceID)
+        // MediaItem uses a unique ID per landing (not sourceID) to avoid
+        // collisions across sessions.
+        let landedItem = model.project.mediaItems.first(where: { $0.url == fileURL })
+        #expect(landedItem != nil)
+        #expect(model.project.videoTracks.last?.clips.first?.mediaID == landedItem?.id)
         #expect(model.project.layoutTracks.last?.clips.count == 1)
     }
 }
