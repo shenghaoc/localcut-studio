@@ -20,6 +20,10 @@ final class EditorModel {
     /// project does not start audio hardware until metering or cleanup needs it.
     let audioBus = AudioMasterBus()
 
+    /// Shared encoder budget for all hardware encoder consumers
+    /// (export, capture, Program Mode). Created once per editor lifetime.
+    let encoderBudget = EncoderBudget()
+
     // Selection
     var selectedClipID: Clip.ID?
     var selectedMediaID: MediaItem.ID?

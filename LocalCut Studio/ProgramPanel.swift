@@ -566,8 +566,7 @@ final class ProgramPanelState {
             statusMessage = "Hardware insufficient: \(verdict.reason)"
         }
         Task {
-            let budget = EncoderBudget()
-            budgetMax = await budget.maxConcurrent
+            budgetMax = await model.encoderBudget.maxConcurrent
             updateBudgetReadout()
         }
     }
@@ -609,7 +608,7 @@ final class ProgramPanelState {
             statusMessage = "Choose a recordings folder before starting Program Mode."
             return
         }
-        let programSession = ProgramSession(budget: EncoderBudget(), rootURL: root)
+        let programSession = ProgramSession(budget: model.encoderBudget, rootURL: root)
         let captureSources = sourceBindings
         let initialScenes = scenes
         let renderSize = model.project.renderSize

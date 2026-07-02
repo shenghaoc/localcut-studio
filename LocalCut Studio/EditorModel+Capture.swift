@@ -689,11 +689,45 @@ extension EditorModel {
         }
     }
 
+    /// Lands a recovered Program Mode session using `ProgramRecovery` to
+    /// reconstruct layout clips from the manifest's scene-switch records.
+    @discardableResult
+    private func landProgramRecovery(_ result: CaptureSessionResult) -> Bool {
+        guard let root = resolvedRecordingsFolder(promptIfMissing: false) else {
+            statusMessage = "Cannot recover Program Mode session: recordings folder missing."
+            return false
+        }
+        guard let recovery = ProgramRecovery.recover(from: result, rootURL: root) else {
+            statusMessage = "Program Mode recovery produced no usable data."
+            return false
+        }
+        // Build a ProgramSessionResult for ProgramLanding.land().
+        let programResult = ProgramSessionResult(
+            sessionID: recovery.sessionResult.id,
+            sessionURL: recovery.sessionResult.directoryURL,
+            manifest: recovery.sessionResult.manifest,
+            isoTrackURLs: recovery.isoTrackURLs,
+            duration: recovery.duration,
+            sceneSwitches: recovery.sessionResult.manifest.resolvedSceneSwitches,
+            writerWarnings: recovery.issues.map { $0.localizedDescription })
+        ProgramLanding.land(result: programResult, model: self)
+        if recovery.issues.isEmpty {
+            statusMessage = "Recovered Program Mode session landed."
+        } else {
+            statusMessage = "Recovered with \(recovery.issues.count) issue(s)."
+        }
+        return true
+    }
+
     func importRecoveredCaptureSession(_ result: CaptureSessionResult) {
         Task {
             // Keep the recovery row until landing actually succeeds, so a
             // temporarily unreadable source can be retried instead of vanishing.
-            if await landCaptureSession(result) {
+            if ProgramRecovery.hasProgramData(manifest: result.manifest) {
+                if landProgramRecovery(result) {
+                    recoveredCaptureSessions.removeAll { $0.id == result.id }
+                }
+            } else if await landCaptureSession(result) {
                 recoveredCaptureSessions.removeAll { $0.id == result.id }
             }
         }

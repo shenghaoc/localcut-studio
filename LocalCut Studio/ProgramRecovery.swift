@@ -108,8 +108,15 @@ struct ProgramRecoveryResult: Sendable {
 
 // MARK: - Recovery issue
 
-enum ProgramRecoveryIssue: Sendable, Hashable {
+enum ProgramRecoveryIssue: Sendable, Hashable, LocalizedError {
     /// A scene-switch referenced a scene ID not found in the preceding
     /// scene-doc snapshot. The layout clip gets a placeholder scene.
     case unresolvableScene(sceneId: UUID, atUs: Int64)
+
+    var errorDescription: String? {
+        switch self {
+        case .unresolvableScene(let sceneId, _):
+            "Scene \(sceneId.uuidString.prefix(8)) could not be resolved from manifest."
+        }
+    }
 }
