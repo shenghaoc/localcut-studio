@@ -20,11 +20,9 @@ enum ProgramLanding {
     static func land(result: ProgramSessionResult,
                      model: EditorModel,
                      scenes: [SceneDefinition]) {
-        let before = model.captureState()
-
         // Build ISO tracks: one per video source.
         var isoTracks: [Track] = []
-        for (sourceID, fileURL) in result.isoTrackURLs.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
+        for (sourceID, _) in result.isoTrackURLs.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
             let source = result.manifest.header?.sources.first(where: { $0.id == sourceID })
             let trackName = source?.displayName ?? sourceID.uuidString.prefix(8).description
             let track = Track(name: "ISO: \(trackName)", kind: .video)
