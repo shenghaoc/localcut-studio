@@ -24,6 +24,8 @@ final class DocumentController {
         model.project.paddedBackground = nil
         model.project.screencastEventLogs = []
         model.project.keystrokeOverlayClips = []
+        model.project.sceneDoc = SceneDoc()
+        model.project.layoutTracks = []
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -67,6 +69,8 @@ final class DocumentController {
         model.project.paddedBackground = nil
         model.project.screencastEventLogs.removeAll()
         model.project.keystrokeOverlayClips.removeAll()
+        model.project.sceneDoc = SceneDoc()
+        model.project.layoutTracks = []
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()

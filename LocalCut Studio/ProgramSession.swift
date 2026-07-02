@@ -102,6 +102,10 @@ actor ProgramSession {
     /// Whether a session is currently running. One session at a time.
     private(set) var isRunning = false
 
+    /// Whether a session is in the process of starting. Guards against
+    /// reentrant `start()` calls during the async capture startup phase.
+    private var isStarting = false
+
     /// The encoder budget shared across the app.
     private let budget: EncoderBudget
 
@@ -178,9 +182,10 @@ actor ProgramSession {
                scenes: [SceneDefinition],
                renderSize: CGSize,
                onFrame: @escaping @Sendable (CVPixelBuffer) -> Void) async throws {
-        guard !isRunning else {
+        guard !isRunning, !isStarting else {
             throw ProgramSessionError.sessionAlreadyRunning
         }
+        isStarting = true
         let sources = captureSources.map(\.descriptor)
         guard !sources.isEmpty else {
             throw ProgramSessionError.noSources
@@ -299,11 +304,14 @@ actor ProgramSession {
                 throw ProgramSessionError.captureFailed(error.localizedDescription)
             }
 
+            isStarting = false
             isRunning = true
         } catch let error as EncoderBudgetError {
+            isStarting = false
             await cleanupFailedStart(removeDirectory: true)
             throw ProgramSessionError.budgetExhausted(error)
         } catch {
+            isStarting = false
             await cleanupFailedStart(removeDirectory: true)
             throw error
         }
@@ -453,12 +461,21 @@ actor ProgramSession {
     /// Appends a record to both the in-memory list and the file writer.
     private func appendRecord(_ record: CaptureManifestRecord) {
         manifestRecords.append(record)
-        try? manifestWriter?.append(record)
+        do {
+            try manifestWriter?.append(record)
+        } catch {
+            // Manifest write failure is non-fatal for the running session
+            // (in-memory records are still available for landing), but
+            // crash recovery will be incomplete. Log for diagnostics.
+            NSLog("[ProgramSession] manifest append failed: \(error)")
+        }
     }
 
-    /// Called when a tap's deinit fires without an explicit dispose.
-    private func tapDidDispose(sourceID: UUID) {
-        // No-op — the tap was already cleaned up.
+    /// Called when a screen capture session stops with an error (e.g. window
+    /// closed, permission revoked). Logs the error; the session continues
+    /// running for remaining sources.
+    private func handleCaptureStopError(sourceID: UUID, error: Error) {
+        NSLog("[ProgramSession] capture stop error for source \(sourceID): \(error)")
     }
 
     private func runningSession(for captureSource: ProgramCaptureSource,
@@ -476,6 +493,9 @@ actor ProgramSession {
                 frameRate: captureSource.descriptor.frameRate ?? 30,
                 videoWriter: writer,
                 audioWriter: nil,
+                onStop: { [weak self] error in
+                    Task { await self?.handleCaptureStopError(sourceID: sourceID, error: error) }
+                },
                 onVideoFrame: frameCallback)
         case .webcam(let deviceID):
             return AVCaptureSampleSession(

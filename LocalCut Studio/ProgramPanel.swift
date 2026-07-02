@@ -55,6 +55,9 @@ struct ProgramPanel: View {
         .onAppear {
             programState.refreshCapability()
         }
+        .onDisappear {
+            programState.teardownIfRunning()
+        }
         .sheet(isPresented: isEditingScene) {
             if let draft = editingSceneDraft {
                 SceneEditorSheet(
@@ -642,6 +645,22 @@ final class ProgramPanelState {
             } catch {
                 statusMessage = error.localizedDescription
             }
+        }
+    }
+
+    /// Tears down the session if the panel disappears while recording.
+    /// Best-effort: errors are logged, not surfaced (panel is gone).
+    func teardownIfRunning() {
+        guard isRunning, let session else { return }
+        isRunning = false
+        Task {
+            do {
+                _ = try await session.stop()
+            } catch {
+                NSLog("[ProgramPanelState] teardown stop failed: \(error)")
+            }
+            self.session = nil
+            currentSceneId = nil
         }
     }
 

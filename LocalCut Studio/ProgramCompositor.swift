@@ -20,6 +20,12 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
     /// The Metal-backed CIContext used for compositing.
     private let ciContext: CIContext
 
+    /// Pool for recycling output pixel buffers.
+    private let pixelBufferPool: CVPixelBufferPool?
+
+    /// Lock protecting all mutable state below.
+    private let lock = NSLock()
+
     /// Per-source latest pixel buffer.
     private var sourceBuffers: [UUID: CVPixelBuffer] = [:]
 
@@ -38,20 +44,38 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
         } else {
             self.ciContext = CIContext()
         }
+        let poolAttrs: [String: Any] = [
+            kCVPixelBufferPoolMinimumBufferCountKey as String: 2
+        ]
+        let pixelAttrs: [String: Any] = [
+            kCVPixelBufferWidthKey as String: Int(renderSize.width),
+            kCVPixelBufferHeightKey as String: Int(renderSize.height),
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
+        ]
+        var pool: CVPixelBufferPool?
+        CVPixelBufferPoolCreate(nil, poolAttrs as CFDictionary, pixelAttrs as CFDictionary, &pool)
+        self.pixelBufferPool = pool
     }
 
     /// Updates the source buffer for a given source.
     func updateSource(_ sourceID: UUID, buffer: CVPixelBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
         sourceBuffers[sourceID] = buffer
     }
 
     /// Removes a source's buffer (on source disconnect).
     func removeSource(_ sourceID: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
         sourceBuffers.removeValue(forKey: sourceID)
     }
 
     /// Sets the current scene. Called when the user switches scenes.
     func switchScene(to sceneId: UUID, enableTransitions: Bool = false) {
+        lock.lock()
+        defer { lock.unlock() }
         let newScene = scenes.first(where: { $0.id == sceneId })
         let changed = currentScene?.id != sceneId
         currentScene = newScene
@@ -64,6 +88,8 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
 
     /// Updates the full scene list (called when scenes are edited).
     func updateScenes(_ scenes: [SceneDefinition]) {
+        lock.lock()
+        defer { lock.unlock() }
         self.scenes = scenes
         if let currentId = currentScene?.id {
             currentScene = scenes.first(where: { $0.id == currentId })
@@ -72,8 +98,9 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
 
     /// Composites one output frame from the current scene's layers.
     func compositeFrame() -> CIImage? {
-        guard let scene = currentScene else { return nil }
-
+        // Snapshot mutable state under lock; render outside lock.
+        lock.lock()
+        let scene = currentScene
         let transitionAlpha: Float
         if let start = transitionStartTime {
             let elapsed = Date().timeIntervalSince(start)
@@ -86,6 +113,10 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
         } else {
             transitionAlpha = 1.0
         }
+        let buffers = sourceBuffers
+        lock.unlock()
+
+        guard let scene else { return nil }
 
         let layers = scene.layers
             .filter { $0.visible }
@@ -98,7 +129,7 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
             let ciImage: CIImage
             switch layer.sourceRef {
             case .captureSource(let id), .still(let id):
-                guard let buffer = sourceBuffers[id] else { continue }
+                guard let buffer = buffers[id] else { continue }
                 ciImage = CIImage(cvPixelBuffer: buffer)
             case .colour(let hex):
                 ciImage = colourImage(hex: hex)
@@ -122,10 +153,17 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
     func renderFrame() -> CVPixelBuffer? {
         guard let composited = compositeFrame() else { return nil }
 
+        var pixelBuffer: CVPixelBuffer?
+        if let pool = pixelBufferPool {
+            let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+            guard status == kCVReturnSuccess, let output = pixelBuffer else { return nil }
+            ciContext.render(composited, to: output)
+            return output
+        }
+
+        // Fallback: one-shot allocation.
         let width = Int(renderSize.width)
         let height = Int(renderSize.height)
-
-        var pixelBuffer: CVPixelBuffer?
         let attrs: [String: Any] = [
             kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
         ]
@@ -136,7 +174,6 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
             attrs as CFDictionary,
             &pixelBuffer)
         guard status == kCVReturnSuccess, let output = pixelBuffer else { return nil }
-
         ciContext.render(composited, to: output)
         return output
     }
@@ -152,6 +189,7 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
             : ciImage.extent
         let layerW = extent.width
         let layerH = extent.height
+        guard layerW > 0, layerH > 0 else { return ciImage }
         let canvasW = canvasSize.width
         let canvasH = canvasSize.height
 
@@ -168,10 +206,15 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
         t = t.translatedBy(x: tx, y: ty)
         t = t.scaledBy(x: scale, y: scale)
 
+        // SceneLayer.transform is normalised: tx/ty are in ±0.5 canvas units.
+        // Scale translations to render-space pixels before concatenating.
         let lt = layer.transform.cgTransform
+        let scaledLt = CGAffineTransform(
+            a: lt.a, b: lt.b, c: lt.c, d: lt.d,
+            tx: lt.tx * canvasW, ty: lt.ty * canvasH)
         let centreT = CGAffineTransform(translationX: canvasW / 2, y: canvasH / 2)
         let invCentreT = centreT.inverted()
-        t = t.concatenating(invCentreT).concatenating(lt).concatenating(centreT)
+        t = t.concatenating(invCentreT).concatenating(scaledLt).concatenating(centreT)
 
         var result = ciImage.transformed(by: t)
 
