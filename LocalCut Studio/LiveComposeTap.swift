@@ -13,8 +13,7 @@ import CoreMedia
 /// underlying `IOSurface`; no pixel copy is performed. The previous
 /// wrapper is released only when a newer one arrives or the session is
 /// disposed.
-@MainActor
-final class LiveComposeTap {
+nonisolated final class LiveComposeTap: @unchecked Sendable {
 
     /// The source ID this tap is attached to.
     let sourceID: UUID

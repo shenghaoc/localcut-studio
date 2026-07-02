@@ -6,7 +6,7 @@ import LocalCutCore
 
 // MARK: - Program session error
 
-enum ProgramSessionError: Error, Sendable, Equatable {
+enum ProgramSessionError: Error, Sendable, Equatable, LocalizedError {
     /// Another program session is already running.
     case sessionAlreadyRunning
     /// Encoder budget exhausted before any encoder opens.
@@ -19,9 +19,61 @@ enum ProgramSessionError: Error, Sendable, Equatable {
     case noScenes
     /// Hotkey conflict detected.
     case hotkeyConflict([String])
+    /// One of the underlying capture sessions failed.
+    case captureFailed(String)
+    /// One or more ISO writers failed to finish cleanly.
+    case writerFinishFailed([String])
+
+    var errorDescription: String? {
+        switch self {
+        case .sessionAlreadyRunning:
+            "A program session is already running."
+        case .budgetExhausted(let error):
+            error.localizedDescription
+        case .cancelled:
+            "The program session was cancelled."
+        case .noSources:
+            "Select at least one program source."
+        case .noScenes:
+            "Create at least one program scene."
+        case .hotkeyConflict(let conflicts):
+            "Program scene hotkey conflict: \(conflicts.joined(separator: ", "))."
+        case .captureFailed(let reason):
+            "Program capture failed: \(reason)"
+        case .writerFinishFailed(let failures):
+            "Program recording could not finish: \(failures.joined(separator: "; "))"
+        }
+    }
 }
 
 // MARK: - Program session result
+
+nonisolated enum ProgramCaptureEndpoint: Hashable, Sendable {
+    case screen(CaptureTarget)
+    case webcam(deviceID: String)
+    case microphone(deviceID: String)
+    case detached
+}
+
+nonisolated struct ProgramCaptureSource: Identifiable, Hashable, Sendable {
+    var descriptor: CaptureSourceDescriptor
+    var endpoint: ProgramCaptureEndpoint
+
+    var id: UUID { descriptor.id }
+
+    init(descriptor: CaptureSourceDescriptor, endpoint: ProgramCaptureEndpoint = .detached) {
+        self.descriptor = descriptor
+        self.endpoint = endpoint
+    }
+}
+
+nonisolated struct ProgramFrameBuffer: @unchecked Sendable {
+    let pixelBuffer: CVPixelBuffer
+
+    init(_ pixelBuffer: CVPixelBuffer) {
+        self.pixelBuffer = pixelBuffer
+    }
+}
 
 struct ProgramSessionResult: Sendable {
     let sessionID: UUID
@@ -80,6 +132,9 @@ actor ProgramSession {
     /// The program compositor.
     private var compositor: ProgramCompositor?
 
+    /// Live program frame callback supplied by the caller.
+    private var onFrame: (@Sendable (CVPixelBuffer) -> Void)?
+
     /// The current scene document (snapshot at session start or last edit).
     private var currentSceneDoc: SceneDoc?
 
@@ -99,20 +154,34 @@ actor ProgramSession {
 
     // MARK: - Start
 
+    /// Starts a descriptor-only program session for tests and recovery-style
+    /// fixtures that inject frames manually through `feedFrame`.
+    func start(sources: [CaptureSourceDescriptor],
+               scenes: [SceneDefinition],
+               renderSize: CGSize,
+               onFrame: @escaping @Sendable (CVPixelBuffer) -> Void) async throws {
+        try await start(
+            captureSources: sources.map { ProgramCaptureSource(descriptor: $0) },
+            scenes: scenes,
+            renderSize: renderSize,
+            onFrame: onFrame)
+    }
+
     /// Starts a new program session. Fails if a session is already running.
     ///
     /// - Parameters:
-    ///   - sources: Capture source descriptors (from the capture catalog).
+    ///   - captureSources: Source descriptors plus their live capture binding.
     ///   - scenes: The scene definitions to use.
     ///   - renderSize: The output canvas size.
     ///   - onFrame: Called when a new composited frame is available.
-    func start(sources: [CaptureSourceDescriptor],
+    func start(captureSources: [ProgramCaptureSource],
                scenes: [SceneDefinition],
                renderSize: CGSize,
                onFrame: @escaping @Sendable (CVPixelBuffer) -> Void) async throws {
         guard !isRunning else {
             throw ProgramSessionError.sessionAlreadyRunning
         }
+        let sources = captureSources.map(\.descriptor)
         guard !sources.isEmpty else {
             throw ProgramSessionError.noSources
         }
@@ -123,91 +192,121 @@ actor ProgramSession {
         guard conflicts.isEmpty else {
             throw ProgramSessionError.hotkeyConflict(conflicts)
         }
+        self.onFrame = onFrame
 
-        // Acquire encoder leases up front. One per video source.
-        let videoSources = sources.filter { $0.kind.isVideo }
         do {
+            // Acquire encoder leases up front. One per video source.
+            let videoSources = sources.filter { $0.kind.isVideo }
             leases = try await budget.acquire(.programIso, count: videoSources.count)
-        } catch let error as EncoderBudgetError {
-            throw ProgramSessionError.budgetExhausted(error)
-        }
+            let sid = UUID()
+            sessionID = sid
+            let dir = rootURL.appendingPathComponent(sid.uuidString)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            sessionURL = dir
 
-        // Set up session directory.
-        let sid = UUID()
-        sessionID = sid
-        let dir = rootURL.appendingPathComponent(sid.uuidString)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        sessionURL = dir
+            let manifestURL = dir.appendingPathComponent("manifest.ndjson")
+            let manifest = try CaptureManifestFileWriter(url: manifestURL)
+            manifestWriter = manifest
 
-        // Open manifest writer.
-        let manifestURL = dir.appendingPathComponent("manifest.ndjson")
-        manifestWriter = try CaptureManifestFileWriter(url: manifestURL)
+            sessionStartHostTimeUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
 
-        // Record session start time.
-        sessionStartHostTimeUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
-
-        // Build encoder configs.
-        var encoderConfigs: [UUID: CaptureEncoderConfig] = [:]
-        for source in sources where source.kind.isVideo {
-            let pixels = (source.width ?? 1920) * (source.height ?? 1080)
-            let fps = source.frameRate ?? 30
-            let bitrate = min(80_000_000, max(4_000_000, Int(Double(pixels) * fps * 0.08)))
-            encoderConfigs[source.id] = CaptureEncoderConfig(
-                codec: "h264",
-                bitrate: bitrate,
-                fragmentIntervalUs: 2_000_000)
-        }
-
-        // Write header.
-        let header = CaptureManifestHeader(
-            sessionID: sid,
-            createdAt: Date(),
-            sessionStartHostTimeUs: sessionStartHostTimeUs,
-            sources: sources,
-            encoders: encoderConfigs)
-        appendRecord(.header(header))
-
-        // Write epoch.
-        let epoch = CaptureEpochRecord(
-            atUs: sessionStartHostTimeUs,
-            wallClock: Date())
-        appendRecord(.epoch(epoch))
-
-        // Write initial scene-doc.
-        let sceneDoc = SceneDoc(scenes: scenes)
-        currentSceneDoc = sceneDoc
-        startScenes = scenes
-        appendRecord(.sceneDoc(CaptureSceneDocRecord(
-            atUs: sessionStartHostTimeUs,
-            scenes: sceneDoc)))
-
-        // Create compositor.
-        compositor = ProgramCompositor(renderSize: renderSize)
-        await compositor?.updateScenes(scenes)
-
-        // Create taps and writers for each source.
-        for source in sources {
-            let tap = LiveComposeTap(sourceID: source.id) { [weak self] in
-                Task { await self?.tapDidDispose(sourceID: source.id) }
+            var encoderConfigs: [UUID: CaptureEncoderConfig] = [:]
+            for source in sources {
+                if source.kind.isVideo {
+                    let pixels = (source.width ?? 1920) * (source.height ?? 1080)
+                    let fps = source.frameRate ?? 30
+                    let bitrate = min(80_000_000, max(4_000_000, Int(Double(pixels) * fps * 0.08)))
+                    encoderConfigs[source.id] = CaptureEncoderConfig(
+                        codec: "h264",
+                        bitrate: bitrate,
+                        fragmentIntervalUs: 2_000_000)
+                } else {
+                    encoderConfigs[source.id] = CaptureEncoderConfig(
+                        codec: "aac",
+                        bitrate: source.kind == .microphone ? 96_000 : 192_000,
+                        fragmentIntervalUs: 2_000_000)
+                }
             }
-            taps[source.id] = tap
 
-            if source.kind.isVideo {
-                // Create a writer for this source.
-                let fileURL = dir.appendingPathComponent(source.relativePath)
-                let writer = try ContinuousCaptureWriter(
-                    source: source,
-                    outputURL: fileURL,
-                    mediaType: .video,
-                    outputSettings: videoOutputSettings(for: source),
-                    fragmentInterval: CMTime(value: 2, timescale: 1),
-                    sessionStartHostTimeUs: sessionStartHostTimeUs,
-                    manifest: manifestWriter!)
+            appendRecord(.header(CaptureManifestHeader(
+                sessionID: sid,
+                createdAt: Date(),
+                sessionStartHostTimeUs: sessionStartHostTimeUs,
+                sources: sources,
+                encoders: encoderConfigs)))
+            appendRecord(.epoch(CaptureEpochRecord(
+                atUs: sessionStartHostTimeUs,
+                wallClock: Date())))
+
+            let sceneDoc = SceneDoc(scenes: scenes)
+            currentSceneDoc = sceneDoc
+            startScenes = scenes
+            appendRecord(.sceneDoc(CaptureSceneDocRecord(
+                atUs: sessionStartHostTimeUs,
+                scenes: sceneDoc)))
+
+            compositor = ProgramCompositor(renderSize: renderSize)
+            compositor?.updateScenes(scenes)
+            compositor?.switchScene(to: scenes[0].id)
+            appendRecord(.sceneSwitch(CaptureSceneSwitchRecord(
+                sceneId: scenes[0].id,
+                atUs: sessionStartHostTimeUs)))
+
+            for captureSource in captureSources {
+                let source = captureSource.descriptor
+                let tap = LiveComposeTap(sourceID: source.id) { [weak self] in
+                    Task { await self?.tapDidDispose(sourceID: source.id) }
+                }
+                taps[source.id] = tap
+
+                let writer: ContinuousCaptureWriter
+                if source.kind.isVideo {
+                    writer = try ContinuousCaptureWriter(
+                        source: source,
+                        outputURL: dir.appendingPathComponent(source.relativePath),
+                        mediaType: .video,
+                        outputSettings: videoOutputSettings(for: source),
+                        fragmentInterval: CMTime(value: 2, timescale: 1),
+                        sessionStartHostTimeUs: sessionStartHostTimeUs,
+                        manifest: manifest)
+                } else {
+                    writer = try ContinuousCaptureWriter(
+                        source: source,
+                        outputURL: dir.appendingPathComponent(source.relativePath),
+                        mediaType: .audio,
+                        outputSettings: audioOutputSettings(for: source),
+                        fragmentInterval: CMTime(value: 2, timescale: 1),
+                        sessionStartHostTimeUs: sessionStartHostTimeUs,
+                        manifest: manifest)
+                }
                 writers[source.id] = writer
-            }
-        }
 
-        isRunning = true
+                if let running = runningSession(for: captureSource, writer: writer) {
+                    runningSessions[source.id] = running
+                }
+            }
+
+            var startedSessions: [CaptureRunningSession] = []
+            do {
+                for session in runningSessions.values {
+                    try await session.start()
+                    startedSessions.append(session)
+                }
+            } catch {
+                for session in startedSessions {
+                    await session.stop()
+                }
+                throw ProgramSessionError.captureFailed(error.localizedDescription)
+            }
+
+            isRunning = true
+        } catch let error as EncoderBudgetError {
+            await cleanupFailedStart(removeDirectory: true)
+            throw ProgramSessionError.budgetExhausted(error)
+        } catch {
+            await cleanupFailedStart(removeDirectory: true)
+            throw error
+        }
     }
 
     // MARK: - Scene switch
@@ -217,7 +316,7 @@ actor ProgramSession {
         guard isRunning else { return }
         let atUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
         appendRecord(.sceneSwitch(CaptureSceneSwitchRecord(sceneId: sceneId, atUs: atUs)))
-        await compositor?.switchScene(to: sceneId, enableTransitions: enableTransitions)
+        compositor?.switchScene(to: sceneId, enableTransitions: enableTransitions)
     }
 
     /// Updates scenes mid-session (e.g. user edited a scene). Writes a
@@ -228,16 +327,19 @@ actor ProgramSession {
         let sceneDoc = SceneDoc(scenes: scenes)
         currentSceneDoc = sceneDoc
         appendRecord(.sceneDoc(CaptureSceneDocRecord(atUs: atUs, scenes: sceneDoc)))
-        await compositor?.updateScenes(scenes)
+        compositor?.updateScenes(scenes)
     }
 
     // MARK: - Feed frames
 
     /// Feeds a captured frame to the compositor via the source's tap.
-    func feedFrame(sourceID: UUID, buffer: CVPixelBuffer) async {
-        // CVPixelBuffer is IOSurface-backed and safe to share across actors.
-        await taps[sourceID]?.feed(buffer)
-        await compositor?.updateSource(sourceID, buffer: buffer)
+    func feedFrame(sourceID: UUID, buffer: ProgramFrameBuffer) async {
+        let pixelBuffer = buffer.pixelBuffer
+        taps[sourceID]?.feed(pixelBuffer)
+        compositor?.updateSource(sourceID, buffer: pixelBuffer)
+        if let frame = compositor?.renderFrame() {
+            onFrame?(frame)
+        }
     }
 
     // MARK: - Stop
@@ -256,23 +358,36 @@ actor ProgramSession {
 
         let stopTimeUs = CaptureManifest.microseconds(from: CMClockGetTime(CMClockGetHostTimeClock()))
 
+        // Stop live capture before closing taps/writers so no late samples race
+        // with writer finalization.
+        for session in runningSessions.values {
+            await session.stop()
+        }
+
         // Dispose all taps (close exactly once).
         for tap in taps.values {
-            await tap.dispose()
+            tap.dispose()
         }
 
         // Finish all writers concurrently.
         var endedRecords: [UUID: CaptureSourceEndedRecord] = [:]
-        await withTaskGroup(of: (UUID, CaptureSourceEndedRecord?).self) { group in
+        var finishFailures: [String] = []
+        await withTaskGroup(of: (UUID, Result<CaptureSourceEndedRecord, Error>).self) { group in
             for (sourceID, writer) in writers {
                 group.addTask {
-                    let record = try? await writer.finish()
-                    return (sourceID, record)
+                    do {
+                        return (sourceID, .success(try await writer.finish()))
+                    } catch {
+                        return (sourceID, .failure(error))
+                    }
                 }
             }
-            for await (sourceID, record) in group {
-                if let record {
+            for await (sourceID, result) in group {
+                switch result {
+                case .success(let record):
                     endedRecords[sourceID] = record
+                case .failure(let error):
+                    finishFailures.append(error.localizedDescription)
                 }
             }
         }
@@ -310,7 +425,13 @@ actor ProgramSession {
         manifestWriter = nil
         sessionURL = nil
         sessionID = nil
+        currentSceneDoc = nil
+        startScenes.removeAll()
+        onFrame = nil
 
+        if !finishFailures.isEmpty {
+            throw ProgramSessionError.writerFinishFailed(finishFailures)
+        }
         return ProgramSessionResult(
             sessionID: sid,
             sessionURL: dir,
@@ -340,14 +461,87 @@ actor ProgramSession {
         // No-op — the tap was already cleaned up.
     }
 
+    private func runningSession(for captureSource: ProgramCaptureSource,
+                                writer: ContinuousCaptureWriter) -> CaptureRunningSession? {
+        let sourceID = captureSource.id
+        let frameCallback: @Sendable (CVPixelBuffer) -> Void = { [weak self] buffer in
+            let frameBuffer = ProgramFrameBuffer(buffer)
+            Task { await self?.feedFrame(sourceID: sourceID, buffer: frameBuffer) }
+        }
+
+        switch captureSource.endpoint {
+        case .screen(let target):
+            return ScreenCaptureSession(
+                target: target,
+                frameRate: captureSource.descriptor.frameRate ?? 30,
+                videoWriter: writer,
+                audioWriter: nil,
+                onVideoFrame: frameCallback)
+        case .webcam(let deviceID):
+            return AVCaptureSampleSession(
+                deviceID: deviceID,
+                mediaType: .video,
+                writer: writer,
+                onVideoFrame: frameCallback)
+        case .microphone(let deviceID):
+            return AVCaptureSampleSession(
+                deviceID: deviceID,
+                mediaType: .audio,
+                writer: writer)
+        case .detached:
+            return nil
+        }
+    }
+
+    private func cleanupFailedStart(removeDirectory: Bool) async {
+        for session in runningSessions.values {
+            await session.stop()
+        }
+        await withTaskGroup(of: Void.self) { group in
+            for writer in writers.values {
+                group.addTask {
+                    _ = try? await writer.finish()
+                }
+            }
+        }
+        manifestWriter?.close()
+        await budget.releaseAll(leases)
+        if removeDirectory, let sessionURL {
+            try? FileManager.default.removeItem(at: sessionURL)
+        }
+
+        isRunning = false
+        runningSessions.removeAll()
+        writers.removeAll()
+        taps.removeAll()
+        leases.removeAll()
+        compositor = nil
+        manifestRecords.removeAll()
+        manifestWriter = nil
+        sessionURL = nil
+        sessionID = nil
+        currentSceneDoc = nil
+        startScenes.removeAll()
+        onFrame = nil
+    }
+
     /// Video output settings for a capture source.
     private func videoOutputSettings(for source: CaptureSourceDescriptor) -> [String: Any] {
         let width = source.width ?? 1920
-        let height = source.height ?? 1920
+        let height = source.height ?? 1080
         return [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
+        ]
+    }
+
+    private func audioOutputSettings(for source: CaptureSourceDescriptor) -> [String: Any] {
+        [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: source.sampleRate ?? 48_000,
+            AVNumberOfChannelsKey: source.channels ?? 1,
+            AVEncoderBitRateKey: source.kind == .microphone ? 96_000 : 192_000,
         ]
     }
 }

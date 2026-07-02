@@ -59,6 +59,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     private let frameScaler: FrameScaler?
     private let outputQueue = DispatchQueue(label: "com.localcutstudio.capture.screen.output")
     private let onStop: (@Sendable (Error) -> Void)?
+    private let onVideoFrame: (@Sendable (CVPixelBuffer) -> Void)?
     private var stream: SCStream?
     /// When true, the next `.screen` frame is dropped (used after source switch
     /// to discard the transitional frame).
@@ -78,7 +79,8 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
          audioWriter: ContinuousCaptureWriter?,
          captureRegion: CaptureRegion? = nil,
          excludingWindowIDs: Set<CGWindowID> = [],
-         onStop: (@Sendable (Error) -> Void)? = nil) {
+         onStop: (@Sendable (Error) -> Void)? = nil,
+         onVideoFrame: (@Sendable (CVPixelBuffer) -> Void)? = nil) {
         self.target = target
         self.frameRate = frameRate
         self.videoWriter = videoWriter
@@ -94,6 +96,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         }
         self.excludingWindowIDs = Set(excludingWindowIDs.filter { $0 != 0 })
         self.onStop = onStop
+        self.onVideoFrame = onVideoFrame
     }
 
     func start() async throws {
@@ -285,12 +288,14 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         }
         guard let writerCanvasSize else {
             videoWriter.append(sampleBuffer)
+            onVideoFrame?(sourceBuffer)
             return
         }
         let width = CVPixelBufferGetWidth(sourceBuffer)
         let height = CVPixelBufferGetHeight(sourceBuffer)
         guard width != writerCanvasSize.width || height != writerCanvasSize.height else {
             videoWriter.append(sampleBuffer)
+            onVideoFrame?(sourceBuffer)
             return
         }
         guard let scaledBuffer = frameScaler?.scale(sourceBuffer),
@@ -298,6 +303,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
             return
         }
         videoWriter.append(scaledSample)
+        onVideoFrame?(scaledBuffer)
     }
 
     private static func makeSampleBuffer(from imageBuffer: CVPixelBuffer,
@@ -332,16 +338,19 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
     private let session = AVCaptureSession()
     private let queue: DispatchQueue
     private let onAudioLevel: (@Sendable (Float) -> Void)?
+    private let onVideoFrame: (@Sendable (CVPixelBuffer) -> Void)?
     private var lastAudioLevelEmission = CFAbsoluteTimeGetCurrent()
 
     init(deviceID: String,
          mediaType: AVMediaType,
          writer: ContinuousCaptureWriter,
-         onAudioLevel: (@Sendable (Float) -> Void)? = nil) {
+         onAudioLevel: (@Sendable (Float) -> Void)? = nil,
+         onVideoFrame: (@Sendable (CVPixelBuffer) -> Void)? = nil) {
         self.deviceID = deviceID
         self.mediaType = mediaType
         self.writer = writer
         self.onAudioLevel = onAudioLevel
+        self.onVideoFrame = onVideoFrame
         self.queue = DispatchQueue(label: "com.localcutstudio.capture.av.\(deviceID)")
         super.init()
     }
@@ -429,6 +438,10 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
             }
         }
         writer.append(sampleBuffer)
+        if mediaType == .video,
+           let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            onVideoFrame?(buffer)
+        }
     }
 
     nonisolated static func audioPeakLevel(from sampleBuffer: CMSampleBuffer) -> Float? {

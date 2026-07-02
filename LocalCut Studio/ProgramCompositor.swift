@@ -12,8 +12,7 @@ import LocalCutCore
 ///
 /// Scene switches update only the current scene state; no pipeline rebuild,
 /// no texture reallocation, no encoder restart.
-@MainActor
-final class ProgramCompositor {
+nonisolated final class ProgramCompositor: @unchecked Sendable {
 
     /// The render canvas size (matches the project's render size).
     let renderSize: CGSize
@@ -81,6 +80,9 @@ final class ProgramCompositor {
             let progress = min(elapsed / transitionDuration, 1.0)
             let t = 1.0 - pow(1.0 - progress, 3)
             transitionAlpha = Float(t)
+            if progress >= 1.0 {
+                transitionStartTime = nil
+            }
         } else {
             transitionAlpha = 1.0
         }
@@ -93,8 +95,14 @@ final class ProgramCompositor {
 
         var composite: CIImage?
         for layer in layers {
-            guard let buffer = sourceBuffers[layerSourceId(layer)] else { continue }
-            let ciImage = CIImage(cvPixelBuffer: buffer)
+            let ciImage: CIImage
+            switch layer.sourceRef {
+            case .captureSource(let id), .still(let id):
+                guard let buffer = sourceBuffers[id] else { continue }
+                ciImage = CIImage(cvPixelBuffer: buffer)
+            case .colour(let hex):
+                ciImage = colourImage(hex: hex)
+            }
             let transformed = applyLayerTransform(
                 ciImage: ciImage,
                 layer: layer,
@@ -135,20 +143,15 @@ final class ProgramCompositor {
 
     // MARK: - Private
 
-    private func layerSourceId(_ layer: SceneLayer) -> UUID {
-        switch layer.sourceRef {
-        case .captureSource(let id): id
-        case .still(let id): id
-        case .colour: UUID()
-        }
-    }
-
     private func applyLayerTransform(ciImage: CIImage,
                                      layer: SceneLayer,
                                      canvasSize: CGSize,
                                      transitionAlpha: Float) -> CIImage {
-        let layerW = ciImage.extent.width
-        let layerH = ciImage.extent.height
+        let extent = ciImage.extent.isInfinite
+            ? CGRect(origin: .zero, size: canvasSize)
+            : ciImage.extent
+        let layerW = extent.width
+        let layerH = extent.height
         let canvasW = canvasSize.width
         let canvasH = canvasSize.height
 
@@ -183,5 +186,34 @@ final class ProgramCompositor {
         }
 
         return result
+    }
+
+    private func colourImage(hex: String) -> CIImage {
+        CIImage(color: ciColor(hex: hex))
+            .cropped(to: CGRect(origin: .zero, size: renderSize))
+    }
+
+    private func ciColor(hex: String) -> CIColor {
+        let trimmed = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard trimmed.count == 6 || trimmed.count == 8,
+              let value = UInt64(trimmed, radix: 16) else {
+            return CIColor(red: 0, green: 0, blue: 0, alpha: 1)
+        }
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+        let alpha: CGFloat
+        if trimmed.count == 8 {
+            red = CGFloat((value >> 24) & 0xff) / 255
+            green = CGFloat((value >> 16) & 0xff) / 255
+            blue = CGFloat((value >> 8) & 0xff) / 255
+            alpha = CGFloat(value & 0xff) / 255
+        } else {
+            red = CGFloat((value >> 16) & 0xff) / 255
+            green = CGFloat((value >> 8) & 0xff) / 255
+            blue = CGFloat(value & 0xff) / 255
+            alpha = 1
+        }
+        return CIColor(red: red, green: green, blue: blue, alpha: alpha)
     }
 }

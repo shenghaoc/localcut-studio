@@ -21,6 +21,8 @@ struct ProgramPanel: View {
 
     private var canStart: Bool {
         !programState.isRunning
+            && !programState.isStarting
+            && !programState.isStopping
             && !programState.sources.isEmpty
             && !scenes.isEmpty
             && hotkeyConflicts.isEmpty
@@ -253,7 +255,7 @@ struct ProgramPanel: View {
             HStack {
                 if programState.isRunning {
                     Button {
-                        programState.stop()
+                        programState.stop(model: model)
                     } label: {
                         Label("Stop", systemImage: "stop.fill")
                             .frame(maxWidth: .infinity)
@@ -262,7 +264,7 @@ struct ProgramPanel: View {
                     .tint(.red)
                 } else {
                     Button {
-                        programState.start(scenes: scenes)
+                        programState.start(model: model, scenes: scenes)
                     } label: {
                         Label("Start Program", systemImage: "play.fill")
                             .frame(maxWidth: .infinity)
@@ -528,7 +530,6 @@ private struct SceneLayerEditorRow: View {
 @MainActor
 final class ProgramPanelState {
     var isRunning = false
-    var sources: [CaptureSourceDescriptor] = []
     var currentSceneId: UUID?
     var activeVideoSourceCount = 0
     var budgetMax = 4
@@ -536,8 +537,15 @@ final class ProgramPanelState {
     var capabilitySufficient = true
     var statusMessage = ""
     var isRefreshingSources = false
+    var isStarting = false
+    var isStopping = false
+
+    var sources: [CaptureSourceDescriptor] {
+        sourceBindings.map(\.descriptor)
+    }
 
     private var session: ProgramSession?
+    private var sourceBindings: [ProgramCaptureSource] = []
 
     func refreshCapability() {
         let verdict = Capabilities.current.tier(for: .programMode)
@@ -557,7 +565,7 @@ final class ProgramPanelState {
         isRefreshingSources = true
         defer { isRefreshingSources = false }
 
-        var refreshed: [CaptureSourceDescriptor] = []
+        var refreshed: [ProgramCaptureSource] = []
         do {
             let screenOptions = try await CaptureSourceCatalog.screenOptions()
             refreshed.append(contentsOf: screenOptions.map(Self.descriptor(for:)))
@@ -567,7 +575,7 @@ final class ProgramPanelState {
 
         refreshed.append(contentsOf: CaptureSourceCatalog.webcamOptions().map(Self.webcamDescriptor(for:)))
         refreshed.append(contentsOf: CaptureSourceCatalog.microphoneOptions().map(Self.microphoneDescriptor(for:)))
-        sources = refreshed
+        sourceBindings = refreshed
         updateBudgetReadout()
         if sources.isEmpty, statusMessage.isEmpty {
             statusMessage = "No capture sources found."
@@ -583,18 +591,58 @@ final class ProgramPanelState {
         }
     }
 
-    func start(scenes: [SceneDefinition]) {
-        guard !isRunning, !sources.isEmpty, let first = scenes.first else { return }
-        isRunning = true
+    func start(model: EditorModel, scenes: [SceneDefinition]) {
+        guard !isRunning, !isStarting, !sourceBindings.isEmpty, let first = scenes.first else { return }
+        guard let root = model.resolvedRecordingsFolder(promptIfMissing: true) else {
+            statusMessage = "Choose a recordings folder before starting Program Mode."
+            return
+        }
+        let programSession = ProgramSession(budget: EncoderBudget(), rootURL: root)
+        let captureSources = sourceBindings
+        let initialScenes = scenes
+        let renderSize = model.project.renderSize
+        session = programSession
+        isStarting = true
         currentSceneId = first.id
-        statusMessage = "Program session armed."
+        statusMessage = "Starting Program Mode..."
+        Task {
+            defer { isStarting = false }
+            do {
+                try await programSession.start(
+                    captureSources: captureSources,
+                    scenes: initialScenes,
+                    renderSize: renderSize,
+                    onFrame: { _ in })
+                isRunning = true
+                statusMessage = "Program session recording."
+            } catch {
+                session = nil
+                isRunning = false
+                currentSceneId = nil
+                statusMessage = error.localizedDescription
+            }
+        }
     }
 
-    func stop() {
-        guard isRunning else { return }
+    func stop(model: EditorModel) {
+        guard isRunning, !isStopping, let session else { return }
+        isStopping = true
         isRunning = false
-        currentSceneId = nil
-        statusMessage = "Program session stopped."
+        statusMessage = "Stopping Program Mode..."
+        Task {
+            defer {
+                isStopping = false
+                self.session = nil
+                currentSceneId = nil
+            }
+            do {
+                let result = try await session.stop()
+                ProgramLanding.land(result: result, model: model)
+                statusMessage = "Program session landed."
+            } catch {
+                statusMessage = error.localizedDescription
+            }
+        }
     }
 
     private func updateBudgetReadout() {
@@ -602,9 +650,9 @@ final class ProgramPanelState {
         isBudgetExhausted = activeVideoSourceCount > budgetMax
     }
 
-    private static func descriptor(for option: CaptureSourceOption) -> CaptureSourceDescriptor {
+    private static func descriptor(for option: CaptureSourceOption) -> ProgramCaptureSource {
         let size = option.target.outputSize
-        return CaptureSourceDescriptor(
+        let descriptor = CaptureSourceDescriptor(
             id: stableUUID(for: "screen:\(option.id)"),
             kind: option.target.sourceKind,
             displayName: option.title,
@@ -612,10 +660,11 @@ final class ProgramPanelState {
             width: size.width,
             height: size.height,
             frameRate: 30)
+        return ProgramCaptureSource(descriptor: descriptor, endpoint: .screen(option.target))
     }
 
-    private static func webcamDescriptor(for option: CaptureDeviceOption) -> CaptureSourceDescriptor {
-        CaptureSourceDescriptor(
+    private static func webcamDescriptor(for option: CaptureDeviceOption) -> ProgramCaptureSource {
+        let descriptor = CaptureSourceDescriptor(
             id: stableUUID(for: "webcam:\(option.id)"),
             kind: .webcam,
             displayName: option.title,
@@ -623,16 +672,18 @@ final class ProgramPanelState {
             width: 1920,
             height: 1080,
             frameRate: 30)
+        return ProgramCaptureSource(descriptor: descriptor, endpoint: .webcam(deviceID: option.id))
     }
 
-    private static func microphoneDescriptor(for option: CaptureDeviceOption) -> CaptureSourceDescriptor {
-        CaptureSourceDescriptor(
+    private static func microphoneDescriptor(for option: CaptureDeviceOption) -> ProgramCaptureSource {
+        let descriptor = CaptureSourceDescriptor(
             id: stableUUID(for: "microphone:\(option.id)"),
             kind: .microphone,
             displayName: option.title,
-            relativePath: "\(filenameStem(from: "microphone-\(option.id)")).m4a",
+            relativePath: "\(filenameStem(from: "microphone-\(option.id)")).mov",
             sampleRate: 48_000,
             channels: 1)
+        return ProgramCaptureSource(descriptor: descriptor, endpoint: .microphone(deviceID: option.id))
     }
 
     private static func filenameStem(from value: String) -> String {

@@ -8,6 +8,23 @@ import LocalCutCore
 @Suite("ProgramSession")
 struct ProgramSessionTests {
 
+    private nonisolated final class FrameCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage = 0
+
+        var value: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+
+        func increment() {
+            lock.lock()
+            storage += 1
+            lock.unlock()
+        }
+    }
+
     private func tempDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ProgramSessionTests-\(UUID().uuidString)")
@@ -30,6 +47,21 @@ struct ProgramSessionTests {
         SceneDefinition(name: "Test", layers: [
             SceneLayer(sourceRef: .captureSource(sourceId), zIndex: 0)
         ])
+    }
+
+    private func makeTestBuffer(width: Int = 64, height: Int = 64) throws -> CVPixelBuffer {
+        var pixelBuffer: CVPixelBuffer?
+        let attrs: [String: Any] = [
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
+        ]
+        CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            width,
+            height,
+            kCVPixelFormatType_32BGRA,
+            attrs as CFDictionary,
+            &pixelBuffer)
+        return try #require(pixelBuffer)
     }
 
     @Test("Starting a second session fails clearly")
@@ -144,8 +176,30 @@ struct ProgramSessionTests {
         let result = try await session.stop()
         // Verify scene-switch records are in the manifest.
         let switches = result.manifest.sceneSwitchRecords
-        #expect(switches.count == 1)
-        #expect(switches[0].sceneId == sceneB.id)
+        #expect(switches.count == 2)
+        #expect(switches[0].sceneId == sceneA.id)
+        #expect(switches[1].sceneId == sceneB.id)
+    }
+
+    @Test("Feeding a video frame emits a program frame")
+    func feedFrameEmitsProgramFrame() async throws {
+        let budget = EncoderBudget(maxConcurrent: 4)
+        let dir = try tempDir()
+        let session = ProgramSession(budget: budget, rootURL: dir)
+        let source = testSource()
+        let scene = testScene(sourceId: source.id)
+        let counter = FrameCounter()
+
+        try await session.start(
+            sources: [source],
+            scenes: [scene],
+            renderSize: CGSize(width: 64, height: 64),
+            onFrame: { _ in counter.increment() })
+
+        await session.feedFrame(sourceID: source.id, buffer: ProgramFrameBuffer(try makeTestBuffer()))
+
+        #expect(counter.value == 1)
+        _ = try await session.stop()
     }
 
     @Test("Source list supports screen, camera, and mic inputs")

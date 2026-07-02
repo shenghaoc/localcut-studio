@@ -30,8 +30,8 @@ enum ProgramRecovery {
 
         return ProgramLanding.buildLayoutClips(
             switches: resolved,
-            sessionDuration: sessionDuration,
-            scenes: []) // Scenes come from the resolved scene-doc, not current.
+            sessionStartHostTimeUs: manifest.header?.sessionStartHostTimeUs ?? 0,
+            sessionDuration: sessionDuration)
     }
 
     /// Reconstructs the full recovery result: ISO track URLs + layout

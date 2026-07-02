@@ -151,11 +151,9 @@ struct ProgramCompositorTests {
         compositor.updateScenes([scene])
         compositor.switchScene(to: scene.id)
 
-        // Colour layers don't have source buffers — frame should be nil
-        // (no pixel data to composite). This is expected; colour layers
-        // are background fills that need a source layer above them.
         let frame = compositor.compositeFrame()
-        #expect(frame == nil)
+        #expect(frame != nil)
+        #expect(frame?.extent == CGRect(origin: .zero, size: CGSize(width: 1920, height: 1080)))
     }
 
     @Test("Invisible layer is excluded")
