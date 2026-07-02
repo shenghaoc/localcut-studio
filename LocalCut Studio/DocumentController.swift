@@ -71,6 +71,7 @@ final class DocumentController {
         model.project.keystrokeOverlayClips.removeAll()
         model.project.sceneDoc = SceneDoc()
         model.project.layoutTracks = []
+        model.programSession = nil
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()

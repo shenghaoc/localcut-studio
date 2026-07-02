@@ -509,13 +509,23 @@ enum CompositionBuilder {
                 .sorted { $0.zIndex < $1.zIndex }
 
             // Build a per-layer transform/opacity/zOrder lookup by mediaID.
+            // A26: Also track colour layers for composition insertion.
             var layerByMediaID: [UUID: (transform: CGAffineTransform, opacity: Float, zOrder: Int)] = [:]
+            var colourLayers: [(hex: String, transform: CGAffineTransform, opacity: Float, zOrder: Int)] = []
             for layer in visibleLayers {
-                if case .captureSource(let sourceID) = layer.sourceRef,
-                   let mediaID = sourceIDToMediaID[sourceID] {
+                switch layer.sourceRef {
+                case .captureSource(let sourceID):
+                    if let mediaID = sourceIDToMediaID[sourceID] {
+                        let cgTransform = sceneLayerTransform(
+                            layer: layer, canvasSize: renderSize)
+                        layerByMediaID[mediaID] = (cgTransform, layer.opacity, layer.zIndex)
+                    }
+                case .colour(let hex):
                     let cgTransform = sceneLayerTransform(
                         layer: layer, canvasSize: renderSize)
-                    layerByMediaID[mediaID] = (cgTransform, layer.opacity, layer.zIndex)
+                    colourLayers.append((hex, cgTransform, layer.opacity, layer.zIndex))
+                case .still:
+                    break
                 }
             }
 

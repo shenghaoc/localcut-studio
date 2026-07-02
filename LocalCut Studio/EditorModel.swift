@@ -24,6 +24,10 @@ final class EditorModel {
     /// (export, capture, Program Mode). Created once per editor lifetime.
     let encoderBudget = EncoderBudget()
 
+    /// The active Program Mode session. Shared across all ProgramPanel
+    /// instances to enforce the one-session invariant.
+    var programSession: ProgramSession?
+
     // Selection
     var selectedClipID: Clip.ID?
     var selectedMediaID: MediaItem.ID?
@@ -270,6 +274,7 @@ final class EditorModel {
         // Initialise the render queue first — it's the one `let` without an
         // inline default, so it must be set before any other access on self.
         self.renderQueue = RenderQueue()
+        renderQueue.encoderBudget = encoderBudget
         let audioBus = self.audioBus
         renderQueue.setOfflineMeterSink(
             audioBus.offlineMeterSnapshotPublisher,

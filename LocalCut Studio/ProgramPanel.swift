@@ -64,7 +64,7 @@ struct ProgramPanel: View {
                   let scene = scenes.first(where: { $0.hotkey == char }) else {
                 return .ignored
             }
-            programState.switchScene(to: scene.id)
+            programState.switchScene(to: scene.id, model: model)
             return .handled
         }
         .sheet(isPresented: isEditingScene) {
@@ -262,7 +262,7 @@ struct ProgramPanel: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if programState.isRunning {
-                programState.switchScene(to: scene.id)
+                programState.switchScene(to: scene.id, model: model)
             }
         }
     }
@@ -572,7 +572,6 @@ final class ProgramPanelState {
         sourceBindings.map(\.descriptor)
     }
 
-    private var session: ProgramSession?
     var sourceBindings: [ProgramCaptureSource] = []
 
     func refreshCapability(budget: EncoderBudget) {
@@ -612,10 +611,10 @@ final class ProgramPanelState {
         }
     }
 
-    func switchScene(to sceneId: UUID) {
+    func switchScene(to sceneId: UUID, model: EditorModel) {
         currentSceneId = sceneId
         Task {
-            await session?.switchScene(to: sceneId)
+            await model.programSession?.switchScene(to: sceneId)
         }
     }
 
@@ -631,7 +630,7 @@ final class ProgramPanelState {
         let captureSources = enabledBindings
         let initialScenes = scenes
         let renderSize = model.project.renderSize
-        session = programSession
+        model.programSession = programSession
         isStarting = true
         currentSceneId = first.id
         statusMessage = "Starting Program Mode..."
@@ -647,7 +646,7 @@ final class ProgramPanelState {
                 statusMessage = "Program session recording."
             } catch {
                 await publishEncoderBudget(model.encoderBudget)
-                session = nil
+                model.programSession = nil
                 isRunning = false
                 currentSceneId = nil
                 statusMessage = error.localizedDescription
@@ -656,14 +655,14 @@ final class ProgramPanelState {
     }
 
     func stop(model: EditorModel) {
-        guard isRunning, !isStopping, let session else { return }
+        guard isRunning, !isStopping, let session = model.programSession else { return }
         isStopping = true
         isRunning = false
         statusMessage = "Stopping Program Mode..."
         Task {
             defer {
                 isStopping = false
-                self.session = nil
+                model.programSession = nil
                 currentSceneId = nil
             }
             do {
@@ -685,7 +684,7 @@ final class ProgramPanelState {
     /// Tears down the session if the panel disappears while recording.
     /// Lands the result so ISO/layout tracks are not lost.
     func teardownIfRunning(budget: EncoderBudget, model: EditorModel) {
-        guard isRunning, let session else { return }
+        guard isRunning, let session = model.programSession else { return }
         isRunning = false
         Task {
             do {
@@ -695,7 +694,7 @@ final class ProgramPanelState {
                 NSLog("[ProgramPanelState] teardown stop failed: \(error)")
             }
             await publishEncoderBudget(budget)
-            self.session = nil
+            model.programSession = nil
             currentSceneId = nil
         }
     }

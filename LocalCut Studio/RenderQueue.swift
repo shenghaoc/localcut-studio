@@ -267,6 +267,15 @@ final class RenderQueue {
     /// (R3.6, codex P1).
     @ObservationIgnored private var refusingPersist: Bool = false
 
+    /// Shared encoder budget. Acquires a lease before each export job
+    /// and releases it when the job finishes.
+    @ObservationIgnored
+    var encoderBudget: EncoderBudget?
+
+    /// The lease acquired for the current export job, if any.
+    @ObservationIgnored
+    private var activeLease: EncoderLease?
+
     init(
         jobs: [QueueJob] = [],
         persistsToDisk: Bool = true,
@@ -475,7 +484,22 @@ final class RenderQueue {
             currentJobID = nil
             activeExportSession = nil
             activeWriter = nil
+            activeLease?.relinquish()
+            activeLease = nil
             recomputeTotalProgress()
+        }
+
+        // Acquire an encoder lease from the shared budget. If the budget is
+        // exhausted (e.g. Program Mode is recording), the job fails cleanly.
+        if let budget = encoderBudget {
+            do {
+                activeLease = try await budget.acquire(.export)
+            } catch {
+                finish(jobID: id, status: .failed,
+                       message: "Encoder budget exhausted: \(error.localizedDescription)",
+                       startWall: startWall)
+                return
+            }
         }
 
         // Resolve the output bookmark. A stale / missing target is a clean
