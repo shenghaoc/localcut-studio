@@ -174,6 +174,21 @@ struct DiagnosticsTests {
         #expect(agent.decoderCount == 4)
     }
 
+    @Test("Encoder budget published to the bridge surfaces on the next tick")
+    func encoderBudgetPropagates() {
+        let bridge = DiagnosticsBridge()
+        let agent = DiagnosticsAgent(bridge: bridge)
+        agent.start()
+        defer { agent.stop() }
+
+        bridge.setEncoderBudget(active: 2, max: 4, ledger: ["export", "programIso"])
+        agent.tickForTesting()
+
+        #expect(agent.encoderLeaseCount == 2)
+        #expect(agent.encoderBudgetMax == 4)
+        #expect(agent.encoderLedger == ["export", "programIso"])
+    }
+
     @Test("Decoder count published before start() survives the start reset (Codex P1)")
     func decoderCountSurvivesStart() {
         let bridge = DiagnosticsBridge()

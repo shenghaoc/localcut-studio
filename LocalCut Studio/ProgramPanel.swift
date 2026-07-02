@@ -56,7 +56,7 @@ struct ProgramPanel: View {
             programState.refreshCapability(budget: model.encoderBudget)
         }
         .onDisappear {
-            programState.teardownIfRunning()
+            programState.teardownIfRunning(budget: model.encoderBudget)
         }
         .onKeyPress { press in
             guard programState.isRunning,
@@ -568,6 +568,7 @@ final class ProgramPanelState {
         Task {
             budgetMax = await budget.maxConcurrent
             updateBudgetReadout()
+            await publishEncoderBudget(budget)
         }
     }
 
@@ -623,9 +624,11 @@ final class ProgramPanelState {
                     captureSources: captureSources,
                     scenes: initialScenes,
                     renderSize: renderSize)
+                await publishEncoderBudget(model.encoderBudget)
                 isRunning = true
                 statusMessage = "Program session recording."
             } catch {
+                await publishEncoderBudget(model.encoderBudget)
                 session = nil
                 isRunning = false
                 currentSceneId = nil
@@ -647,6 +650,7 @@ final class ProgramPanelState {
             }
             do {
                 let result = try await session.stop()
+                await publishEncoderBudget(model.encoderBudget)
                 ProgramLanding.land(result: result, model: model)
                 if result.writerWarnings.isEmpty {
                     statusMessage = "Program session landed."
@@ -654,6 +658,7 @@ final class ProgramPanelState {
                     statusMessage = "Landed with warnings: \(result.writerWarnings.joined(separator: "; "))"
                 }
             } catch {
+                await publishEncoderBudget(model.encoderBudget)
                 statusMessage = error.localizedDescription
             }
         }
@@ -661,7 +666,7 @@ final class ProgramPanelState {
 
     /// Tears down the session if the panel disappears while recording.
     /// Best-effort: errors are logged, not surfaced (panel is gone).
-    func teardownIfRunning() {
+    func teardownIfRunning(budget: EncoderBudget) {
         guard isRunning, let session else { return }
         isRunning = false
         Task {
@@ -670,6 +675,7 @@ final class ProgramPanelState {
             } catch {
                 NSLog("[ProgramPanelState] teardown stop failed: \(error)")
             }
+            await publishEncoderBudget(budget)
             self.session = nil
             currentSceneId = nil
         }
@@ -678,6 +684,19 @@ final class ProgramPanelState {
     private func updateBudgetReadout() {
         activeVideoSourceCount = sources.filter(\.kind.isVideo).count
         isBudgetExhausted = activeVideoSourceCount > budgetMax
+    }
+
+    private func publishEncoderBudget(_ budget: EncoderBudget) async {
+        let active = await budget.activeCount
+        let max = await budget.maxConcurrent
+        let ledgerSnapshot = await budget.ledger
+        let ledger = ledgerSnapshot
+            .map(\.consumer.rawValue)
+            .sorted()
+        DiagnosticsBridge.shared.setEncoderBudget(
+            active: active,
+            max: max,
+            ledger: ledger)
     }
 
     private static func descriptor(for option: CaptureSourceOption) -> ProgramCaptureSource {
