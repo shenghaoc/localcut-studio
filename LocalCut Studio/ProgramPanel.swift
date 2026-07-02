@@ -53,7 +53,7 @@ struct ProgramPanel: View {
         .padding()
         .frame(minWidth: 280)
         .onAppear {
-            programState.refreshCapability()
+            programState.refreshCapability(budget: model.encoderBudget)
         }
         .onDisappear {
             programState.teardownIfRunning()
@@ -559,14 +559,14 @@ final class ProgramPanelState {
     private var session: ProgramSession?
     private var sourceBindings: [ProgramCaptureSource] = []
 
-    func refreshCapability() {
+    func refreshCapability(budget: EncoderBudget) {
         let verdict = Capabilities.current.tier(for: .programMode)
         capabilitySufficient = verdict.tier >= .accelerated
         if !capabilitySufficient {
             statusMessage = "Hardware insufficient: \(verdict.reason)"
         }
         Task {
-            budgetMax = await model.encoderBudget.maxConcurrent
+            budgetMax = await budget.maxConcurrent
             updateBudgetReadout()
         }
     }
