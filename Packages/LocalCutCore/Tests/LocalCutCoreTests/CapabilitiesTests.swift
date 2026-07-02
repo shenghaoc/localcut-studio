@@ -326,15 +326,15 @@ func programModeUnknownGenBaseline() {
     #expect(verdict.reason.contains("Unknown"))
 }
 
-@Test("Program Mode: M2 with encoders resolves to accelerated")
-func programModeM2Accelerated() {
+@Test("Program Mode: M2 with encoders resolves to pro")
+func programModeM2Pro() {
     let caps = Capabilities(
         chip: .appleSilicon(generation: 2),
         unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
         videoEncoderCount: 2,
         osVersion: .init(major: 26, minor: 0))
     let verdict = caps.tier(for: .programMode)
-    #expect(verdict.tier == .accelerated)
+    #expect(verdict.tier == .pro)
 }
 
 @Test("Program Mode: M1 with encoders resolves to accelerated")
