@@ -59,6 +59,19 @@ enum CompositionBuilder {
             timeRange.start.seconds <= seconds && seconds < timeRange.end.seconds
         }
 
+        func withTimeRange(_ newRange: CMTimeRange) -> VideoSegment {
+            VideoSegment(
+                clipID: clipID, compTrackID: compTrackID,
+                timeRange: newRange, transform: transform, opacity: opacity,
+                mask: mask, effects: effects,
+                transitionRange: transitionRange, transitionType: transitionType,
+                transitionWipeAngle: transitionWipeAngle,
+                showSkinMask: showSkinMask,
+                clipSourceStart: clipSourceStart, sourceRange: sourceRange,
+                orderingStart: orderingStart,
+                transformKeyframes: transformKeyframes)
+        }
+
         var descriptor: VisibleSegment {
             VisibleSegment(
                 compTrackID: compTrackID,
@@ -295,6 +308,27 @@ enum CompositionBuilder {
 
         let captionTracks = project.captionTracks.filter { !$0.isMuted }
 
+        // Apply layout track scene transforms to video segments. When layout
+        // clips are present (from Program Mode landing), the scene's layer
+        // definitions override the per-clip transforms so preview/export
+        // replay the live switch layout.
+        let sourceIDToMediaID = Dictionary(
+            project.mediaItems.compactMap { item -> (UUID, UUID)? in
+                guard let sid = item.captureSourceID else { return nil }
+                return (sid, item.id)
+            },
+            uniquingKeysWith: { first, _ in first })
+        let activeLayoutClips = project.layoutTracks
+            .filter { !$0.isMuted }
+            .flatMap(\.clips)
+        if !activeLayoutClips.isEmpty {
+            projectTrackSegments = applyLayoutOverrides(
+                segments: projectTrackSegments,
+                layoutClips: activeLayoutClips,
+                sourceIDToMediaID: sourceIDToMediaID,
+                renderSize: renderSize)
+        }
+
         // Insert a black-frame filler track wherever the project has visual
         // activity (captions or animated overlays) but no video clip to render
         // it over. Comparing against the last VIDEO segment end (not
@@ -442,6 +476,139 @@ enum CompositionBuilder {
             }
         }
         return remapSegments
+    }
+
+    // MARK: - Layout track overrides
+
+    /// Applies scene-based transforms from layout clips to video segments.
+    /// Each layout clip's scene layers override the corresponding ISO track
+    /// segments' transforms/opacity for the clip's time range.
+    private static func applyLayoutOverrides(
+        segments: [[VideoSegment]],
+        layoutClips: [LayoutClip],
+        sourceIDToMediaID: [UUID: UUID],
+        renderSize: CGSize
+    ) -> [[VideoSegment]] {
+        var result = segments
+
+        for layoutClip in layoutClips {
+            let clipStart = layoutClip.timelineStart.cmTime
+            let clipEnd = layoutClip.timelineEnd.cmTime
+            let clipRange = CMTimeRange(start: clipStart, end: clipEnd)
+            guard clipRange.duration > .zero else { continue }
+
+            let scene = layoutClip.sceneSnapshot
+            let visibleLayers = scene.layers
+                .filter { $0.visible }
+                .sorted { $0.zIndex < $1.zIndex }
+
+            // Build a per-layer transform/opacity lookup by mediaID.
+            var layerByMediaID: [UUID: (transform: CGAffineTransform, opacity: Float)] = [:]
+            for layer in visibleLayers {
+                if case .captureSource(let sourceID) = layer.sourceRef,
+                   let mediaID = sourceIDToMediaID[sourceID] {
+                    let cgTransform = sceneLayerTransform(
+                        layer: layer, canvasSize: renderSize)
+                    layerByMediaID[mediaID] = (cgTransform, layer.opacity)
+                }
+            }
+
+            // Override segments that overlap this layout clip.
+            for trackIndex in result.indices {
+                var newSegments: [VideoSegment] = []
+                for seg in result[trackIndex] {
+                    let segRange = seg.timeRange
+                    // No overlap — keep as-is.
+                    guard segRange.end > clipStart && segRange.start < clipEnd else {
+                        newSegments.append(seg)
+                        continue
+                    }
+
+                    // Split the segment at layout clip boundaries.
+                    let pieces = splitSegmentAtLayoutBoundaries(
+                        seg: seg, clipRange: clipRange)
+
+                    for piece in pieces {
+                        let pieceRange = piece.timeRange
+                        let overlapsLayout = pieceRange.end > clipStart
+                            && pieceRange.start < clipEnd
+
+                        if overlapsLayout, let override = layerByMediaID[seg.clipID] {
+                            newSegments.append(VideoSegment(
+                                clipID: piece.clipID,
+                                compTrackID: piece.compTrackID,
+                                timeRange: piece.timeRange,
+                                transform: override.transform,
+                                opacity: seg.opacity * override.opacity,
+                                mask: piece.mask,
+                                effects: piece.effects,
+                                transitionRange: piece.transitionRange,
+                                transitionType: piece.transitionType,
+                                transitionWipeAngle: piece.transitionWipeAngle,
+                                showSkinMask: piece.showSkinMask,
+                                clipSourceStart: piece.clipSourceStart,
+                                sourceRange: piece.sourceRange,
+                                orderingStart: piece.orderingStart,
+                                transformKeyframes: piece.transformKeyframes))
+                        } else {
+                            newSegments.append(piece)
+                        }
+                    }
+                }
+                result[trackIndex] = newSegments
+            }
+        }
+        return result
+    }
+
+    /// Converts a scene layer's normalised transform to canvas-pixel coordinates.
+    private static func sceneLayerTransform(
+        layer: SceneLayer, canvasSize: CGSize
+    ) -> CGAffineTransform {
+        let lt = layer.transform.cgTransform
+        let canvasW = canvasSize.width
+        let canvasH = canvasSize.height
+        // Scale normalised ±0.5 translations to canvas pixels.
+        let scaledLt = CGAffineTransform(
+            a: lt.a, b: lt.b, c: lt.c, d: lt.d,
+            tx: lt.tx * canvasW, ty: lt.ty * canvasH)
+        let centreT = CGAffineTransform(translationX: canvasW / 2, y: canvasH / 2)
+        let invCentreT = centreT.inverted()
+        return invCentreT.concatenating(scaledLt).concatenating(centreT)
+    }
+
+    /// Splits a video segment at layout clip boundaries so each piece can
+    /// have its own transform.
+    private static func splitSegmentAtLayoutBoundaries(
+        seg: VideoSegment, clipRange: CMTimeRange
+    ) -> [VideoSegment] {
+        let segStart = seg.timeRange.start
+        let segEnd = seg.timeRange.end
+        let clipStart = clipRange.start
+        let clipEnd = clipRange.end
+
+        var pieces: [VideoSegment] = []
+
+        // Piece before the layout clip (if any).
+        if segStart < clipStart {
+            let end = CMTimeMinimum(segEnd, clipStart)
+            pieces.append(seg.withTimeRange(CMTimeRange(start: segStart, end: end)))
+        }
+
+        // Piece overlapping the layout clip.
+        let overlapStart = CMTimeMaximum(segStart, clipStart)
+        let overlapEnd = CMTimeMinimum(segEnd, clipEnd)
+        if overlapEnd > overlapStart {
+            pieces.append(seg.withTimeRange(CMTimeRange(start: overlapStart, end: overlapEnd)))
+        }
+
+        // Piece after the layout clip (if any).
+        if segEnd > clipEnd {
+            let start = CMTimeMaximum(segStart, clipEnd)
+            pieces.append(seg.withTimeRange(CMTimeRange(start: start, end: segEnd)))
+        }
+
+        return pieces.isEmpty ? [seg] : pieces
     }
 
     private static func visualActivityRanges(captionTracks: [CaptionTrack],

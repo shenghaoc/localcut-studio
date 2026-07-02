@@ -19,6 +19,10 @@ final class MediaItem: Identifiable {
     let asset: AVURLAsset
 
     var name: String
+    /// The original capture source UUID from Program Mode landing. Used by
+    /// `CompositionBuilder` to match scene-layer source refs to MediaItems
+    /// when replaying layout tracks. `nil` for non-Program-Mode media.
+    var captureSourceID: UUID?
     var duration: CMTime = .zero
     var naturalSize: CGSize = .zero
     var preferredTransform: CGAffineTransform = .identity

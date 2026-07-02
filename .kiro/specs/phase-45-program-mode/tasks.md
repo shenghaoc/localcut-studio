@@ -30,10 +30,16 @@
 - [x] **T4.1** Layout track type + `LayoutClip` model.
 - [x] **T4.2** Stop -> segment partition -> `LayoutClip` array -> new track.
 - [x] **T4.3** Single-transaction landing of ISO + layout tracks.
+  - Layout tracks are now consumed by `CompositionBuilder`: scene-layer
+    transforms override ISO track transforms during layout clip time ranges,
+    so preview/export replay the live switch layout. `MediaItem.captureSourceID`
+    bridges scene-layer source refs to MediaItem IDs.
 
 ## UI
 
-- [x] **T5.1** `ProgramPanel` view: sources, scenes, hotkeys, start / stop, budget readout.
+- [x] **T5.1** `ProgramPanel` view: sources (with per-source enable/disable toggles),
+  scenes, hotkeys (wired to live scene switching via `onKeyPress`), start / stop,
+  budget readout (reflects only enabled sources), shared `EncoderBudget`.
 - [ ] **T5.2** Full-resolution program monitor sharing the existing preview output.
   - Draft gap: the panel is now reachable and supports persisted scene editing,
     but the monitor remains the existing preview surface rather than a dedicated

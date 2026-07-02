@@ -29,6 +29,7 @@ enum ProgramLanding {
             // recording from the same source don't collide.
             let item = MediaItem(url: fileURL, id: UUID())
             item.name = "Program \(trackName)"
+            item.captureSourceID = sourceID
             item.duration = mediaDuration(for: sourceID, result: result, endedRecords: endedRecords)
             item.wantsBundling = true
             if source?.kind.isVideo == true {

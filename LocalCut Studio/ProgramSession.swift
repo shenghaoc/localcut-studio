@@ -58,6 +58,8 @@ nonisolated enum ProgramCaptureEndpoint: Hashable, Sendable {
 nonisolated struct ProgramCaptureSource: Identifiable, Hashable, Sendable {
     var descriptor: CaptureSourceDescriptor
     var endpoint: ProgramCaptureEndpoint
+    /// Whether this source is selected for the next Program Mode session.
+    var isEnabled: Bool = true
 
     var id: UUID { descriptor.id }
 

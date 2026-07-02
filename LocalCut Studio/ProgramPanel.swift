@@ -158,17 +158,24 @@ struct ProgramPanel: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             } else {
-                ForEach(programState.sources, id: \.id) { source in
+                ForEach(Array(programState.sourceBindings.enumerated()), id: \.element.id) { index, binding in
                     HStack {
-                        Image(systemName: sourceIcon(for: source.kind))
+                        Toggle("", isOn: sourceToggleBinding(index: index))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .disabled(programState.isRunning)
+                            .accessibilityLabel("Enable \(binding.descriptor.displayName)")
+                        Image(systemName: sourceIcon(for: binding.descriptor.kind))
                             .frame(width: 16)
                             .accessibilityHidden(true)
-                        Text(source.displayName)
+                        Text(binding.descriptor.displayName)
                             .font(.caption)
                             .lineLimit(1)
+                            .opacity(binding.isEnabled ? 1.0 : 0.5)
                         Spacer()
-                        if source.kind.isVideo {
-                            Text("\(source.width ?? 0)x\(source.height ?? 0)")
+                        if binding.descriptor.kind.isVideo {
+                            Text("\(binding.descriptor.width ?? 0)x\(binding.descriptor.height ?? 0)")
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
                         }
@@ -325,6 +332,15 @@ struct ProgramPanel: View {
     }
 
     // MARK: - Helpers
+
+    private func sourceToggleBinding(index: Int) -> Binding<Bool> {
+        Binding(
+            get: { programState.sourceBindings[index].isEnabled },
+            set: { newValue in
+                programState.sourceBindings[index].isEnabled = newValue
+                programState.updateBudgetReadout()
+            })
+    }
 
     private func sourceIcon(for kind: CaptureSourceKind) -> String {
         switch kind {
@@ -557,7 +573,7 @@ final class ProgramPanelState {
     }
 
     private var session: ProgramSession?
-    private var sourceBindings: [ProgramCaptureSource] = []
+    var sourceBindings: [ProgramCaptureSource] = []
 
     func refreshCapability(budget: EncoderBudget) {
         let verdict = Capabilities.current.tier(for: .programMode)
@@ -604,13 +620,15 @@ final class ProgramPanelState {
     }
 
     func start(model: EditorModel, scenes: [SceneDefinition]) {
-        guard !isRunning, !isStarting, !sourceBindings.isEmpty, let first = scenes.first else { return }
+        guard !isRunning, !isStarting else { return }
+        let enabledBindings = sourceBindings.filter(\.isEnabled)
+        guard !enabledBindings.isEmpty, let first = scenes.first else { return }
         guard let root = model.resolvedRecordingsFolder(promptIfMissing: true) else {
             statusMessage = "Choose a recordings folder before starting Program Mode."
             return
         }
         let programSession = ProgramSession(budget: model.encoderBudget, rootURL: root)
-        let captureSources = sourceBindings
+        let captureSources = enabledBindings
         let initialScenes = scenes
         let renderSize = model.project.renderSize
         session = programSession
@@ -681,8 +699,8 @@ final class ProgramPanelState {
         }
     }
 
-    private func updateBudgetReadout() {
-        activeVideoSourceCount = sources.filter(\.kind.isVideo).count
+    func updateBudgetReadout() {
+        activeVideoSourceCount = sourceBindings.filter { $0.isEnabled && $0.descriptor.kind.isVideo }.count
         isBudgetExhausted = activeVideoSourceCount > budgetMax
     }
 
