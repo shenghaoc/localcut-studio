@@ -112,7 +112,7 @@ struct ProgramSessionTests {
                 onFrame: { _ in })
         }
         #expect(await !session.isRunning)
-        preLease.relinquish()
+        await preLease.relinquish(budget: budget)
     }
 
     @Test("Partial setup failure cleans up leases")

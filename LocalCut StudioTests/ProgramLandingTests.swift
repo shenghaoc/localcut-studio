@@ -266,4 +266,83 @@ struct ProgramLandingTests {
         #expect(model.project.videoTracks.last?.clips.first?.mediaID == landedItem?.id)
         #expect(model.project.layoutTracks.last?.clips.count == 1)
     }
+
+    @Test("Landing skips ISO sources that recorded zero samples")
+    @MainActor
+    func landingSkipsZeroSampleSources() {
+        let model = EditorModel()
+        let activeSourceID = UUID()
+        let emptySourceID = UUID()
+        let scene = SceneDefinition(name: "Full", layers: [
+            SceneLayer(sourceRef: .captureSource(activeSourceID), zIndex: 0),
+            SceneLayer(sourceRef: .captureSource(emptySourceID), zIndex: 1),
+        ])
+        let sceneDoc = SceneDoc(scenes: [scene])
+        let durationUs: Int64 = 5_000_000
+        let activeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProgramLanding-active-\(UUID().uuidString).mov")
+        let emptyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProgramLanding-empty-\(UUID().uuidString).mov")
+        #expect(FileManager.default.createFile(atPath: activeURL.path, contents: Data([1])))
+        #expect(FileManager.default.createFile(atPath: emptyURL.path, contents: Data()))
+        defer {
+            try? FileManager.default.removeItem(at: activeURL)
+            try? FileManager.default.removeItem(at: emptyURL)
+        }
+
+        let activeSource = CaptureSourceDescriptor(
+            id: activeSourceID,
+            kind: .display,
+            displayName: "Display",
+            relativePath: activeURL.lastPathComponent,
+            width: 1920,
+            height: 1080,
+            frameRate: 30)
+        let emptySource = CaptureSourceDescriptor(
+            id: emptySourceID,
+            kind: .webcam,
+            displayName: "Camera",
+            relativePath: emptyURL.lastPathComponent,
+            width: 1280,
+            height: 720,
+            frameRate: 30)
+        let manifest = CaptureManifest(records: [
+            .header(CaptureManifestHeader(
+                sessionID: UUID(),
+                createdAt: Date(timeIntervalSince1970: 0),
+                sessionStartHostTimeUs: 1_000,
+                sources: [activeSource, emptySource],
+                encoders: [:])),
+            .sceneDoc(CaptureSceneDocRecord(atUs: 1_000, scenes: sceneDoc)),
+            .sceneSwitch(CaptureSceneSwitchRecord(sceneId: scene.id, atUs: 1_000)),
+            .sourceEnded(CaptureSourceEndedRecord(
+                sourceID: activeSourceID,
+                atUs: 1_000 + durationUs,
+                durationUs: durationUs,
+                sampleCount: 10)),
+            .sourceEnded(CaptureSourceEndedRecord(
+                sourceID: emptySourceID,
+                atUs: 1_000 + durationUs,
+                durationUs: durationUs,
+                sampleCount: 0)),
+            .finalize(CaptureFinalizeRecord(atUs: 1_000 + durationUs, durationUs: durationUs)),
+        ])
+        let result = ProgramSessionResult(
+            sessionID: UUID(),
+            sessionURL: activeURL.deletingLastPathComponent(),
+            manifest: manifest,
+            isoTrackURLs: [
+                activeSourceID: activeURL,
+                emptySourceID: emptyURL,
+            ],
+            duration: CaptureManifest.time(fromMicroseconds: durationUs),
+            sceneSwitches: manifest.resolvedSceneSwitches,
+            writerWarnings: [])
+
+        ProgramLanding.land(result: result, model: model)
+
+        #expect(model.project.mediaItems.contains { $0.url == activeURL })
+        #expect(!model.project.mediaItems.contains { $0.url == emptyURL })
+        #expect(model.project.videoTracks.last?.clips.count == 1)
+    }
 }

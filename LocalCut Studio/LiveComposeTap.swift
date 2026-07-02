@@ -5,14 +5,12 @@ import CoreMedia
 // MARK: - LiveComposeTap
 
 /// Per-source bridge from each capture pipeline's frame reader to the
-/// `ProgramCompositor`. The tap retains the latest `CVPixelBuffer` wrapper
-/// for compositing. Frames stay warm even for invisible sources so that a
-/// scene switch revealing a slow-FPS source has a frame ready immediately.
+/// `ProgramCompositor`. The compositor owns the latest `CVPixelBuffer` cache;
+/// the tap gates frame delivery after disposal so closed sources cannot feed
+/// new frames.
 ///
 /// The encode path and compose path retain references to the same
-/// underlying `IOSurface`; no pixel copy is performed. The previous
-/// wrapper is released only when a newer one arrives or the session is
-/// disposed.
+/// underlying `IOSurface`; no pixel copy is performed.
 nonisolated final class LiveComposeTap: @unchecked Sendable {
 
     /// The source ID this tap is attached to.
@@ -21,15 +19,7 @@ nonisolated final class LiveComposeTap: @unchecked Sendable {
     /// Lock protecting all mutable state.
     private let lock = NSLock()
 
-    /// The latest pixel buffer for compositing.
-    private var _latestBuffer: CVPixelBuffer?
     private var _isDisposed = false
-
-    var latestBuffer: CVPixelBuffer? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _latestBuffer
-    }
 
     var isDisposed: Bool {
         lock.lock()
@@ -45,21 +35,23 @@ nonisolated final class LiveComposeTap: @unchecked Sendable {
         self.onDispose = onDispose
     }
 
-    /// Feeds a new frame to the tap. The previous buffer is released.
-    func feed(_ buffer: CVPixelBuffer) {
+    /// Returns the frame when the tap is still active; nil after disposal.
+    func feed(_ buffer: CVPixelBuffer) -> CVPixelBuffer? {
         lock.lock()
-        guard !_isDisposed else { lock.unlock(); return }
-        _latestBuffer = buffer
+        guard !_isDisposed else {
+            lock.unlock()
+            return nil
+        }
         lock.unlock()
+        return buffer
     }
 
-    /// Disposes the tap, releasing the held buffer. Safe to call multiple
-    /// times — only the first call triggers the `onDispose` callback.
+    /// Disposes the tap. Safe to call multiple times — only the first call
+    /// triggers the `onDispose` callback.
     func dispose() {
         lock.lock()
         guard !_isDisposed else { lock.unlock(); return }
         _isDisposed = true
-        _latestBuffer = nil
         lock.unlock()
         onDispose?()
     }

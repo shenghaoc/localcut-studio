@@ -25,12 +25,15 @@ enum ProgramLanding {
         for (sourceID, fileURL) in result.isoTrackURLs.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
             let source = result.manifest.header?.sources.first(where: { $0.id == sourceID })
             let trackName = source?.displayName ?? sourceID.uuidString.prefix(8).description
+            guard let duration = mediaDuration(for: sourceID, result: result, endedRecords: endedRecords) else {
+                continue
+            }
             // Use a fresh UUID for the MediaItem so multiple sessions
             // recording from the same source don't collide.
             let item = MediaItem(url: fileURL, id: UUID())
             item.name = "Program \(trackName)"
             item.captureSourceID = sourceID
-            item.duration = mediaDuration(for: sourceID, result: result, endedRecords: endedRecords)
+            item.duration = duration
             item.wantsBundling = true
             if source?.kind.isVideo == true {
                 item.hasVideo = true
@@ -131,17 +134,17 @@ enum ProgramLanding {
         for sourceID: UUID,
         result: ProgramSessionResult,
         endedRecords: [UUID: [CaptureSourceEndedRecord]]
-    ) -> CMTime {
-        guard let durationUs = endedRecords[sourceID]?.first?.durationUs,
-              durationUs > 0 else {
-            // A21: No source-ended record. For recovered sessions the
-            // files may still be readable; fall back to session duration
-            // so recovery lands non-empty clips. For normal sessions
-            // where a source genuinely delivered zero frames, the clip
-            // will be short but not zero-length.
-            return result.duration
+    ) -> CMTime? {
+        if let ended = endedRecords[sourceID]?.first {
+            guard ended.durationUs > 0, ended.sampleCount > 0 else {
+                return nil
+            }
+            return CaptureManifest.time(fromMicroseconds: ended.durationUs)
         }
-        return CaptureManifest.time(fromMicroseconds: durationUs)
+        // Recovered Program Mode sessions may have readable fragmented movie
+        // files but no source-ended records. In that case, use the recovered
+        // session duration rather than dropping the source.
+        return result.duration > .zero ? result.duration : nil
     }
 
     private static func timelineStart(

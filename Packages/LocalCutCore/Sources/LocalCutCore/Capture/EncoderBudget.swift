@@ -49,9 +49,16 @@ public struct EncoderLease: Sendable, Identifiable {
 
 // MARK: - Budget error
 
-public enum EncoderBudgetError: Error, Sendable, Equatable {
+public enum EncoderBudgetError: Error, Sendable, Equatable, LocalizedError {
     /// Acquiring the requested leases would exceed the budget.
     case budgetExhausted(requested: Int, available: Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case .budgetExhausted(let requested, let available):
+            "Encoder budget exhausted: requested \(requested), available \(available)."
+        }
+    }
 }
 
 // MARK: - EncoderBudget actor

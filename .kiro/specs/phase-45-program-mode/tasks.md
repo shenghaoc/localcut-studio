@@ -10,9 +10,12 @@
 
 ## Engine
 
-- [x] **T1.1** `EncoderBudget` actor with `acquire(.programIso)` + lease ledger.
+- [x] **T1.1** `EncoderBudget` actor with shared `.export`, `.isoRecord`,
+  and `.programIso` lease ledger; app paths await release when the next budget
+  observation must be current.
 - [x] **T1.2** `ProgramCompositor` over existing Metal compositor; per-source `CVPixelBuffer` cache.
-- [x] **T1.3** `LiveComposeTap` per source; clone-before-encode discipline.
+- [x] **T1.3** `LiveComposeTap` per source; zero-copy pass-through plus
+  dispose-time late-frame gating.
 - [x] **T1.4** `ProgramSession` orchestrator over the Phase 41 session model.
 
 ## Scene model

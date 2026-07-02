@@ -148,6 +148,9 @@ actor ProgramSession {
     /// Live program frame callback supplied by the caller.
     private var onFrame: (@Sendable (CVPixelBuffer) -> Void)?
 
+    /// Main-actor callback for capture failures that happen after start.
+    private var onCaptureFailure: (@MainActor @Sendable (ProgramSessionResult?, String) -> Void)?
+
     /// The current scene document (snapshot at session start or last edit).
     private var currentSceneDoc: SceneDoc?
 
@@ -172,12 +175,14 @@ actor ProgramSession {
     func start(sources: [CaptureSourceDescriptor],
                scenes: [SceneDefinition],
                renderSize: CGSize,
-               onFrame: (@Sendable (CVPixelBuffer) -> Void)? = nil) async throws {
+               onFrame: (@Sendable (CVPixelBuffer) -> Void)? = nil,
+               onCaptureFailure: (@MainActor @Sendable (ProgramSessionResult?, String) -> Void)? = nil) async throws {
         try await start(
             captureSources: sources.map { ProgramCaptureSource(descriptor: $0) },
             scenes: scenes,
             renderSize: renderSize,
-            onFrame: onFrame)
+            onFrame: onFrame,
+            onCaptureFailure: onCaptureFailure)
     }
 
     /// Starts a new program session. Fails if a session is already running.
@@ -190,7 +195,8 @@ actor ProgramSession {
     func start(captureSources: [ProgramCaptureSource],
                scenes: [SceneDefinition],
                renderSize: CGSize,
-               onFrame: (@Sendable (CVPixelBuffer) -> Void)? = nil) async throws {
+               onFrame: (@Sendable (CVPixelBuffer) -> Void)? = nil,
+               onCaptureFailure: (@MainActor @Sendable (ProgramSessionResult?, String) -> Void)? = nil) async throws {
         guard !isRunning, !isStarting else {
             throw ProgramSessionError.sessionAlreadyRunning
         }
@@ -210,6 +216,7 @@ actor ProgramSession {
             throw ProgramSessionError.hotkeyConflict(conflicts)
         }
         self.onFrame = onFrame
+        self.onCaptureFailure = onCaptureFailure
 
         do {
             // Acquire encoder leases up front. One per video source.
@@ -353,8 +360,8 @@ actor ProgramSession {
     /// Feeds a captured frame to the compositor via the source's tap.
     func feedFrame(sourceID: UUID, buffer: ProgramFrameBuffer) async {
         let pixelBuffer = buffer.pixelBuffer
-        taps[sourceID]?.feed(pixelBuffer)
-        compositor?.updateSource(sourceID, buffer: pixelBuffer)
+        guard let acceptedBuffer = taps[sourceID]?.feed(pixelBuffer) else { return }
+        compositor?.updateSource(sourceID, buffer: acceptedBuffer)
         // Only render the composited frame when the caller needs it.
         // Rendering is expensive (full-resolution CoreImage/Metal composite).
         if onFrame != nil, let frame = compositor?.renderFrame() {
@@ -433,6 +440,10 @@ actor ProgramSession {
             result[sourceID] = dir.appendingPathComponent(
                 sources.first(where: { $0.id == sourceID })?.relativePath ?? "\(sourceID).mov")
         }
+        // Return partial results even when some writers failed. The
+        // successfully ended records are already persisted and the UI
+        // can land the sources that finished cleanly.
+        let allWarnings = finishFailures + manifestErrors
 
         // Clean up state.
         isRunning = false
@@ -448,11 +459,9 @@ actor ProgramSession {
         currentSceneDoc = nil
         startScenes.removeAll()
         onFrame = nil
+        onCaptureFailure = nil
+        manifestErrors.removeAll()
 
-        // Return partial results even when some writers failed. The
-        // successfully ended records are already persisted and the UI
-        // can land the sources that finished cleanly.
-        let allWarnings = finishFailures + manifestErrors
         return ProgramSessionResult(
             sessionID: sid,
             sessionURL: dir,
@@ -489,11 +498,20 @@ actor ProgramSession {
     private func handleCaptureStopError(sourceID: UUID, error: Error) {
         NSLog("[ProgramSession] capture stop error for source \(sourceID): \(error)")
         guard isRunning else { return }
+        let failureMessage = ProgramSessionError.captureFailed(error.localizedDescription).errorDescription
+            ?? "Program capture failed: \(error.localizedDescription)"
+        let handler = onCaptureFailure
         Task {
             do {
-                _ = try await stop()
+                let result = try await stop()
+                if let handler {
+                    await handler(result, failureMessage)
+                }
             } catch {
                 NSLog("[ProgramSession] failed to stop after capture error: \(error)")
+                if let handler {
+                    await handler(nil, "\(failureMessage) Stop failed: \(error.localizedDescription)")
+                }
             }
         }
     }
@@ -563,6 +581,8 @@ actor ProgramSession {
         currentSceneDoc = nil
         startScenes.removeAll()
         onFrame = nil
+        onCaptureFailure = nil
+        manifestErrors.removeAll()
     }
 
     /// Video output settings for a capture source.

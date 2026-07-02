@@ -10,9 +10,7 @@ struct EncoderBudgetTests {
         let budget = EncoderBudget(maxConcurrent: 4)
         let lease = try await budget.acquire(.export)
         #expect(await budget.activeCount == 1)
-        lease.relinquish()
-        // Release is async (Task); yield to let it complete.
-        try await Task.sleep(for: .milliseconds(10))
+        await lease.relinquish(budget: budget)
         #expect(await budget.activeCount == 0)
     }
 
@@ -47,12 +45,10 @@ struct EncoderBudgetTests {
         let budget = EncoderBudget(maxConcurrent: 4)
         let lease = try await budget.acquire(.export)
         #expect(await budget.activeCount == 1)
-        lease.relinquish()
-        try await Task.sleep(for: .milliseconds(10))
+        await lease.relinquish(budget: budget)
         #expect(await budget.activeCount == 0)
         // Double release should be a no-op.
-        lease.relinquish()
-        try await Task.sleep(for: .milliseconds(10))
+        await lease.relinquish(budget: budget)
         #expect(await budget.activeCount == 0)
     }
 
@@ -95,7 +91,6 @@ struct EncoderBudgetTests {
         #expect(await budget.activeCount == 3)
         #expect(await budget.availableCount == 1)
         await budget.releaseAll(leases)
-        try await Task.sleep(for: .milliseconds(10))
         #expect(await budget.activeCount == 0)
     }
 

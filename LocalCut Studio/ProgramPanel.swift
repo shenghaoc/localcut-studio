@@ -640,7 +640,26 @@ final class ProgramPanelState {
                 try await programSession.start(
                     captureSources: captureSources,
                     scenes: initialScenes,
-                    renderSize: renderSize)
+                    renderSize: renderSize,
+                    onCaptureFailure: { [weak self, weak model] result, message in
+                        guard let self, let model else { return }
+                        self.isRunning = false
+                        self.isStarting = false
+                        self.isStopping = false
+                        self.currentSceneId = nil
+                        model.programSession = nil
+                        if let result {
+                            ProgramLanding.land(result: result, model: model)
+                            if result.writerWarnings.isEmpty {
+                                self.statusMessage = "\(message) Program session stopped and landed."
+                            } else {
+                                self.statusMessage = "\(message) Landed with warnings: \(result.writerWarnings.joined(separator: "; "))"
+                            }
+                        } else {
+                            self.statusMessage = message
+                        }
+                        Task { await self.publishEncoderBudget(model.encoderBudget) }
+                    })
                 await publishEncoderBudget(model.encoderBudget)
                 isRunning = true
                 statusMessage = "Program session recording."

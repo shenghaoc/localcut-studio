@@ -234,7 +234,7 @@ extension EditorModel {
         activePiPPreset = pipPreset
         lastRecordingPiPPreset = pipPreset
         do {
-            try await captureCoordinator.start(request, onStreamStopped: { [weak self] error in
+            try await captureCoordinator.start(request, encoderBudget: encoderBudget, onStreamStopped: { [weak self] error in
                 // The screen stream ended unexpectedly mid-recording; stop and
                 // finalize so the toolbar doesn't keep showing an active capture.
                 Task { @MainActor in
