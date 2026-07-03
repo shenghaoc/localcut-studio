@@ -28,10 +28,10 @@ public struct ReplayBufferConfig: Hashable, Sendable {
     }
 
     public init(memoryBudgetBytes: Int = 256 * 1024 * 1024,
-                maxDurationSeconds: Double = 30,
+                maxDurationSeconds: Double? = nil,
                 durationOption: DurationOption = .seconds30) {
         self.memoryBudgetBytes = memoryBudgetBytes
-        self.maxDurationSeconds = maxDurationSeconds
+        self.maxDurationSeconds = maxDurationSeconds ?? Double(durationOption.rawValue)
         self.durationOption = durationOption
     }
 

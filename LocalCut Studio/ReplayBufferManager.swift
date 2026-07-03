@@ -152,9 +152,11 @@ final class ReplayBufferManager {
         await ring.diagnostics()
     }
 
-    /// Cleans up all replay buffer resources for this session.
+    /// Cleans up replay buffer spill data for this session.
+    /// Saved clips are preserved since they may be referenced by the timeline.
     func cleanup() async {
         await ring.clear()
-        try? FileManager.default.removeItem(at: savedClipsDirectory.deletingLastPathComponent())
+        // Only remove spill files, not saved clips (which may be in use by
+        // the timeline as MediaItem URLs).
     }
 }

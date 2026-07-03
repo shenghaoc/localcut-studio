@@ -358,6 +358,11 @@ extension EditorModel {
                         }
                     }
                 }
+                // Update replay buffer diagnostics periodically.
+                if let replayManager = self.replayBufferManager {
+                    let diag = await replayManager.diagnostics()
+                    self.diagnosticsAgent.updateReplayBufferDiagnostics(diag)
+                }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -1012,7 +1017,8 @@ extension EditorModel {
     // MARK: - Replay buffer (Phase 46)
 
     /// Saves the last N seconds from the replay buffer.
-    func saveReplayBuffer(seconds: Double = 30) {
+    func saveReplayBuffer(seconds: Double? = nil) {
+        let saveSeconds = seconds ?? Double(replayBufferDuration.rawValue)
         guard let manager = replayBufferManager else {
             statusMessage = "Replay buffer is not active."
             return
@@ -1026,7 +1032,7 @@ extension EditorModel {
         replaySaveMessage = nil
 
         Task {
-            await manager.saveLast(seconds: seconds)
+            await manager.saveLast(seconds: saveSeconds)
             replaySaveInProgress = false
             if let error = manager.lastSaveError {
                 statusMessage = error
