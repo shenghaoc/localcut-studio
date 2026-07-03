@@ -32,7 +32,9 @@
 
 ## Landing
 
-- [x] **T4.1** Layout track type + `LayoutClip` model.
+- [x] **T4.1** Layout track type + `LayoutClip` model. `LayoutClip.timelineEnd`
+  and `LayoutTrack.endTime` normalize through `CMTime` so mixed-timescale
+  persisted clips cannot inflate replay/export ranges.
 - [x] **T4.2** Stop -> segment partition -> `LayoutClip` array -> new track.
 - [x] **T4.3** Single-transaction landing of ISO + layout tracks.
   - Layout tracks are now consumed by `CompositionBuilder`: scene-layer

@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import CoreMedia
 @testable import LocalCutCore
 
 @Suite("Scene model")
@@ -178,6 +179,22 @@ struct SceneModelTests {
     @Test("Default scene returns nil for empty list")
     func defaultSceneNilForEmpty() {
         #expect(resolveDefaultScene(scenes: []) == nil)
+    }
+
+    // MARK: - Layout clips
+
+    @Test("Layout clip end normalizes mixed timescales")
+    @MainActor
+    func layoutClipEndNormalizesMixedTimescales() {
+        let clip = LayoutClip(
+            timelineStart: CMTimeCode(.zero),
+            duration: CMTimeCode(CMTime(seconds: 2, preferredTimescale: 600)),
+            sceneSnapshot: SceneDefinition(name: "Colour", layers: []))
+        let track = LayoutTrack()
+        track.clips = [clip]
+
+        #expect(abs(clip.timelineEnd.cmTime.seconds - 2) < 0.001)
+        #expect(abs(track.endTime.cmTime.seconds - 2) < 0.001)
     }
 
     // MARK: - ProjectDocument integration
