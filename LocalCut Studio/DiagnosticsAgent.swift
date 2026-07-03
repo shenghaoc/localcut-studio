@@ -44,6 +44,10 @@ final class DiagnosticsAgent {
         replayBufferChunkCount = diag.chunkCount
         replayBufferDurationSeconds = diag.bufferedDurationSeconds
         replayBufferSourceCount = diag.sourceCount
+        replayBufferResidentBytes = diag.residentMemoryBytes
+        replayBufferMaxMemoryBytes = diag.maxMemoryBytes
+        replayBufferSpillBytes = diag.spillBytes
+        replayBufferSpilledChunkCount = diag.spilledChunkCount
         liveMonitorLatencyMs = latencyMs
     }
     /// Current hardware encoder leases held across editor workflows.
@@ -61,6 +65,14 @@ final class DiagnosticsAgent {
     private(set) var replayBufferDurationSeconds: Double = 0
     /// Number of distinct source files in the replay buffer.
     private(set) var replayBufferSourceCount: Int = 0
+    /// Resident replay-buffer byte estimate.
+    private(set) var replayBufferResidentBytes: Int = 0
+    /// Replay-buffer resident byte budget.
+    private(set) var replayBufferMaxMemoryBytes: Int = ReplayBufferConfig.defaultMaxMemoryBytes
+    /// Replay-buffer spill bytes on disk.
+    private(set) var replayBufferSpillBytes: Int = 0
+    /// Number of chunks represented by spill records.
+    private(set) var replayBufferSpilledChunkCount: Int = 0
     /// Live monitor latency in milliseconds.
     private(set) var liveMonitorLatencyMs: Double = 0
 
@@ -231,6 +243,8 @@ final class DiagnosticsAgent {
             drops=\(self.frameDropsLastTick, privacy: .public) \
             replay_chunks=\(self.replayBufferChunkCount, privacy: .public) \
             replay_dur=\(self.replayBufferDurationSeconds, format: .fixed(precision: 1), privacy: .public) \
+            replay_mem=\(self.replayBufferResidentBytes, privacy: .public)/\(self.replayBufferMaxMemoryBytes, privacy: .public) \
+            replay_spill=\(self.replayBufferSpillBytes, privacy: .public) \
             latency_ms=\(self.liveMonitorLatencyMs, format: .fixed(precision: 1), privacy: .public)
             """)
     }

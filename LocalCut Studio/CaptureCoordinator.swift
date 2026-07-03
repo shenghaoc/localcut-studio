@@ -190,7 +190,8 @@ actor CaptureCoordinator {
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
                 manifest: manifest,
-                onSustainedBackpressure: onBackpressure)
+                onSustainedBackpressure: onBackpressure,
+                onEncodedChunk: onEncodedChunk)
             descriptors.append(source)
             encoders[source.id] = CaptureEncoderConfig(
                 codec: "aac",
@@ -260,7 +261,8 @@ actor CaptureCoordinator {
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
                 manifest: manifest,
-                onSustainedBackpressure: onBackpressure)
+                onSustainedBackpressure: onBackpressure,
+                onEncodedChunk: onEncodedChunk)
             descriptors.append(source)
             encoders[source.id] = CaptureEncoderConfig(
                 codec: "aac",
@@ -639,7 +641,8 @@ actor CaptureCoordinator {
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
                 manifest: manifest,
-                onSustainedBackpressure: active.onBackpressure)
+                onSustainedBackpressure: active.onBackpressure,
+                onEncodedChunk: active.onEncodedChunk)
             writers.append(writer)
             screenAudioWriter = writer
         }
@@ -703,7 +706,8 @@ actor CaptureCoordinator {
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
                 manifest: manifest,
-                onSustainedBackpressure: active.onBackpressure)
+                onSustainedBackpressure: active.onBackpressure,
+                onEncodedChunk: active.onEncodedChunk)
             writers.append(writer)
             sessions.append(AVCaptureSampleSession(
                 deviceID: microphoneDeviceID,

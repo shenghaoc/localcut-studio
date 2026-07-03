@@ -27,39 +27,72 @@ enum ReplayBufferFinalizer {
             throw ReplayBufferError.noChunks
         }
 
-        // Group chunks by source file and compute the overall time range.
+        // Group chunks by source file and build extraction plans. Chunk
+        // timestamps are session-relative; sourceTimeStamp is the time range
+        // inside the individual writer output file.
         let grouped = Dictionary(grouping: chunks, by: \.sourceFileURL)
-        let allPTS = chunks.map(\.presentationTimeStamp)
-        let overallStart = allPTS.min() ?? .zero
-        let overallEnd = chunks.map(\.endTime).max() ?? .zero
-        let overallDuration = overallEnd - overallStart
+
+        struct SourcePlan {
+            let sourceURL: URL
+            let sourceStart: CMTime
+            let sourceEnd: CMTime
+            let timelineOffset: CMTime
+
+            var timelineStart: CMTime { sourceStart + timelineOffset }
+            var timelineEnd: CMTime { sourceEnd + timelineOffset }
+            var sourceDuration: CMTime { sourceEnd - sourceStart }
+        }
+
+        var plans: [SourcePlan] = []
+
+        for (sourceURL, sourceChunks) in grouped.sorted(by: { $0.key.path < $1.key.path }) {
+            let sortedChunks = sourceChunks.sorted { $0.sourceTimeStamp < $1.sourceTimeStamp }
+            guard let firstChunk = sortedChunks.first,
+                  let lastChunk = sortedChunks.last else { continue }
+
+            var sourceStart = firstChunk.sourceTimeStamp
+            let sourceEnd = lastChunk.sourceTimeStamp + lastChunk.duration
+            guard sourceEnd > sourceStart else { continue }
+
+            let asset = AVURLAsset(url: sourceURL)
+            if sourceChunks.contains(where: { $0.mediaType == .video }) {
+                let videoTracks = (try? await asset.loadTracks(withMediaType: .video)) ?? []
+                if let videoTrack = videoTracks.first {
+                    sourceStart = await alignedVideoStart(
+                        asset: asset,
+                        track: videoTrack,
+                        requestedStart: sourceStart)
+                }
+            }
+
+            plans.append(SourcePlan(
+                sourceURL: sourceURL,
+                sourceStart: sourceStart,
+                sourceEnd: sourceEnd,
+                timelineOffset: firstChunk.presentationTimeStamp - firstChunk.sourceTimeStamp))
+        }
+
+        guard !plans.isEmpty else {
+            throw ReplayBufferError.finalizeFailed("No valid source ranges found.")
+        }
+
+        let outputStart = plans.map(\.timelineStart).min() ?? .zero
+        let outputEnd = plans.map(\.timelineEnd).max() ?? .zero
+        let overallDuration = outputEnd - outputStart
 
         // Create the output writer.
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
         writer.movieFragmentInterval = CMTime(seconds: 2, preferredTimescale: 600)
+        let writerBox = WriterBox(writer)
 
         // Process each source file and collect reader/track info.
-        struct SourceReader {
-            let reader: AVAssetReader
-            let outputs: [AVAssetReaderTrackOutput]
-            let inputs: [AVAssetWriterInput]
-        }
         var sourceReaders: [SourceReader] = []
 
-        for (sourceURL, sourceChunks) in grouped.sorted(by: { $0.key.path < $1.key.path }) {
-            let sortedChunks = sourceChunks.sorted { $0.presentationTimeStamp < $1.presentationTimeStamp }
-            guard let firstChunk = sortedChunks.first,
-                  let lastChunk = sortedChunks.last else { continue }
-
-            let spanStart = firstChunk.presentationTimeStamp
-            let spanEnd = lastChunk.endTime
-            let spanDuration = spanEnd - spanStart
-            guard spanDuration.seconds > 0 else { continue }
-
-            let asset = AVURLAsset(url: sourceURL)
+        for plan in plans {
+            let asset = AVURLAsset(url: plan.sourceURL)
             let isReadable = (try? await asset.load(.isReadable)) ?? false
             guard isReadable else {
-                log.warning("Source file not readable: \(sourceURL.lastPathComponent)")
+                log.warning("Source file not readable: \(plan.sourceURL.lastPathComponent)")
                 continue
             }
 
@@ -67,17 +100,16 @@ enum ReplayBufferFinalizer {
             do {
                 reader = try AVAssetReader(asset: asset)
             } catch {
-                log.warning("Could not create reader for \(sourceURL.lastPathComponent): \(error.localizedDescription)")
+                log.warning("Could not create reader for \(plan.sourceURL.lastPathComponent): \(error.localizedDescription)")
                 continue
             }
 
-            reader.timeRange = CMTimeRange(start: spanStart, duration: spanDuration)
+            reader.timeRange = CMTimeRange(start: plan.sourceStart, duration: plan.sourceDuration)
 
             let videoTracks = (try? await asset.loadTracks(withMediaType: .video)) ?? []
             let audioTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
             let tracks = videoTracks + audioTracks
-            var outputs: [AVAssetReaderTrackOutput] = []
-            var inputs: [AVAssetWriterInput] = []
+            var pipes: [TrackPipe] = []
 
             for track in tracks {
                 let readerOutput = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
@@ -88,12 +120,14 @@ enum ReplayBufferFinalizer {
                 guard writer.canAdd(writerInput) else { continue }
                 writer.add(writerInput)
 
-                outputs.append(readerOutput)
-                inputs.append(writerInput)
+                pipes.append(TrackPipe(readerOutput: readerOutput, writerInput: writerInput))
             }
 
-            if !outputs.isEmpty {
-                sourceReaders.append(SourceReader(reader: reader, outputs: outputs, inputs: inputs))
+            if !pipes.isEmpty {
+                sourceReaders.append(SourceReader(
+                    reader: reader,
+                    pipes: pipes,
+                    timelineOffset: plan.timelineOffset))
             }
         }
 
@@ -119,17 +153,21 @@ enum ReplayBufferFinalizer {
                 let group = DispatchGroup()
                 let writerQueue = DispatchQueue(label: "com.localcutstudio.replay.writer")
 
-                for (readerOutput, writerInput) in zip(source.outputs, source.inputs) {
+                for pipe in source.pipes {
                     group.enter()
-                    writerInput.requestMediaDataWhenReady(on: writerQueue) {
-                        while writerInput.isReadyForMoreMediaData {
-                            guard let sample = readerOutput.copyNextSampleBuffer() else {
-                                writerInput.markAsFinished()
+                    pipe.writerInput.requestMediaDataWhenReady(on: writerQueue) {
+                        while pipe.writerInput.isReadyForMoreMediaData {
+                            guard let sample = pipe.readerOutput.copyNextSampleBuffer() else {
+                                pipe.writerInput.markAsFinished()
                                 group.leave()
                                 return
                             }
-                            if !writerInput.append(sample) {
-                                writerInput.markAsFinished()
+                            let rebased = sampleByRebasing(
+                                sample,
+                                timelineOffset: source.timelineOffset,
+                                outputStart: outputStart) ?? sample
+                            if !pipe.writerInput.append(rebased) {
+                                pipe.writerInput.markAsFinished()
                                 group.leave()
                                 return
                             }
@@ -145,8 +183,8 @@ enum ReplayBufferFinalizer {
 
         // Finish writing.
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            writer.finishWriting {
-                if let error = writer.error {
+            writerBox.writer.finishWriting {
+                if let error = writerBox.writer.error {
                     continuation.resume(throwing: error)
                 } else {
                     continuation.resume()
@@ -155,6 +193,103 @@ enum ReplayBufferFinalizer {
         }
 
         return overallDuration
+    }
+
+    private struct SourceReader {
+        let reader: AVAssetReader
+        let pipes: [TrackPipe]
+        let timelineOffset: CMTime
+    }
+
+    nonisolated private final class TrackPipe: @unchecked Sendable {
+        let readerOutput: AVAssetReaderTrackOutput
+        let writerInput: AVAssetWriterInput
+
+        init(readerOutput: AVAssetReaderTrackOutput,
+             writerInput: AVAssetWriterInput) {
+            self.readerOutput = readerOutput
+            self.writerInput = writerInput
+        }
+    }
+
+    nonisolated private final class WriterBox: @unchecked Sendable {
+        let writer: AVAssetWriter
+
+        init(_ writer: AVAssetWriter) {
+            self.writer = writer
+        }
+    }
+
+    nonisolated private static func alignedVideoStart(asset: AVAsset,
+                                                      track: AVAssetTrack,
+                                                      requestedStart: CMTime) async -> CMTime {
+        guard requestedStart > .zero else { return requestedStart }
+        do {
+            let reader = try AVAssetReader(asset: asset)
+            reader.timeRange = CMTimeRange(start: .zero, end: requestedStart)
+            let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+            output.alwaysCopiesSampleData = false
+            guard reader.canAdd(output) else { return requestedStart }
+            reader.add(output)
+            guard reader.startReading() else { return requestedStart }
+
+            var latestSync: CMTime?
+            while let sample = output.copyNextSampleBuffer() {
+                let pts = CMSampleBufferGetPresentationTimeStamp(sample)
+                if pts <= requestedStart, KeyframeDetector.isKeyframe(sample) {
+                    latestSync = pts
+                }
+            }
+            return latestSync ?? requestedStart
+        } catch {
+            return requestedStart
+        }
+    }
+
+    nonisolated private static func sampleByRebasing(_ sample: CMSampleBuffer,
+                                                     timelineOffset: CMTime,
+                                                     outputStart: CMTime) -> CMSampleBuffer? {
+        var timingCount: CMItemCount = 0
+        let countStatus = CMSampleBufferGetSampleTimingInfoArray(
+            sample,
+            entryCount: 0,
+            arrayToFill: nil,
+            entriesNeededOut: &timingCount)
+        guard countStatus == noErr, timingCount > 0 else { return nil }
+
+        var timing = Array(
+            repeating: CMSampleTimingInfo(
+                duration: .invalid,
+                presentationTimeStamp: .invalid,
+                decodeTimeStamp: .invalid),
+            count: Int(timingCount))
+        let timingStatus = CMSampleBufferGetSampleTimingInfoArray(
+            sample,
+            entryCount: timingCount,
+            arrayToFill: &timing,
+            entriesNeededOut: &timingCount)
+        guard timingStatus == noErr else { return nil }
+
+        for index in timing.indices {
+            if timing[index].presentationTimeStamp.isValid {
+                timing[index].presentationTimeStamp =
+                    timing[index].presentationTimeStamp + timelineOffset - outputStart
+            }
+            if timing[index].decodeTimeStamp.isValid {
+                timing[index].decodeTimeStamp =
+                    timing[index].decodeTimeStamp + timelineOffset - outputStart
+            }
+        }
+
+        var output: CMSampleBuffer?
+        let copyStatus = CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sample,
+            sampleTimingEntryCount: timingCount,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &output)
+        guard copyStatus == noErr else { return nil }
+        return output
     }
 }
 

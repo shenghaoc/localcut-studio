@@ -1,5 +1,6 @@
 import Testing
 import CoreMedia
+import Foundation
 @testable import LocalCutCore
 
 @Suite("EncodedChunkRing actor")
@@ -9,12 +10,15 @@ struct EncodedChunkRingTests {
                            duration: Double = 1.0,
                            size: Int = 1024,
                            isKeyframe: Bool = false,
+                           mediaType: EncodedChunkMediaType = .video,
                            sourceFile: URL? = nil) -> EncodedChunk {
         EncodedChunk(
             presentationTimeStamp: CMTime(seconds: seconds, preferredTimescale: 600),
+            sourceTimeStamp: CMTime(seconds: seconds, preferredTimescale: 600),
             duration: CMTime(seconds: duration, preferredTimescale: 600),
             byteSize: size,
             isKeyframe: isKeyframe,
+            mediaType: mediaType,
             sourceID: UUID(),
             sourceFileURL: sourceFile ?? URL(fileURLWithPath: "/tmp/test.mov"))
     }
@@ -46,7 +50,9 @@ struct EncodedChunkRingTests {
         // Should have evicted chunks older than 5 seconds from the end.
         #expect(count < 10)
         let diag = await ring.diagnostics()
-        #expect(diag.bufferedDurationSeconds <= 5.0 + 1.0) // +1 for the last chunk's duration
+        // Duration eviction keeps from a keyframe boundary, so the window may
+        // exceed the nominal cap by up to one GOP.
+        #expect(diag.bufferedDurationSeconds <= 8.0)
     }
 
     @Test("Diagnostics snapshot")
@@ -168,5 +174,56 @@ struct EncodedChunkRingTests {
         #expect(sources.count == 2)
         #expect(sources.contains(url1))
         #expect(sources.contains(url2))
+    }
+
+    @Test("Select save span includes audio overlapping video keyframe")
+    func selectSaveSpanIncludesAudio() async {
+        let ring = EncodedChunkRing(config: .default)
+        let videoURL = URL(fileURLWithPath: "/tmp/screen.mov")
+        let audioURL = URL(fileURLWithPath: "/tmp/microphone.mov")
+
+        await ring.append(makeChunk(seconds: 0, isKeyframe: true, mediaType: .video, sourceFile: videoURL))
+        await ring.append(makeChunk(seconds: 0.2, duration: 0.5, isKeyframe: true, mediaType: .audio, sourceFile: audioURL))
+        await ring.append(makeChunk(seconds: 1, isKeyframe: false, mediaType: .video, sourceFile: videoURL))
+
+        let (selected, _) = await ring.selectSaveSpan(seconds: 1, now: CMTime(seconds: 1.5, preferredTimescale: 600))
+
+        #expect(selected.contains { $0.mediaType == .video })
+        #expect(selected.contains { $0.mediaType == .audio })
+    }
+
+    @Test("Memory budget spills oldest keyframe-aligned resident segment")
+    func memoryBudgetSpillsOldestSegment() async throws {
+        let spillDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("encoded-ring-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: spillDirectory) }
+
+        let config = ReplayBufferConfig(maxDurationSeconds: 30, maxMemoryBytes: 1_500)
+        let ring = EncodedChunkRing(config: config, spillDirectory: spillDirectory)
+
+        await ring.append(makeChunk(seconds: 0, size: 1_000, isKeyframe: true))
+        await ring.append(makeChunk(seconds: 1, size: 1_000, isKeyframe: false))
+        await ring.append(makeChunk(seconds: 2, size: 1_000, isKeyframe: true))
+
+        let diag = await ring.diagnostics()
+        #expect(diag.residentMemoryBytes <= config.maxMemoryBytes)
+        #expect(diag.spilledChunkCount >= 2)
+        #expect(diag.spillBytes > 0)
+
+        let files = try FileManager.default.contentsOfDirectory(
+            at: spillDirectory,
+            includingPropertiesForKeys: nil)
+        #expect(!files.isEmpty)
+
+        await ring.clear()
+
+        let clearedDiag = await ring.diagnostics()
+        #expect(clearedDiag.chunkCount == 0)
+        #expect(clearedDiag.spillBytes == 0)
+
+        let remainingFiles = try FileManager.default.contentsOfDirectory(
+            at: spillDirectory,
+            includingPropertiesForKeys: nil)
+        #expect(remainingFiles.isEmpty)
     }
 }

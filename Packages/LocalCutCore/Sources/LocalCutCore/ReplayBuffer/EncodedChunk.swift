@@ -1,6 +1,13 @@
 import Foundation
 import CoreMedia
 
+// MARK: - Encoded chunk media type
+
+public enum EncodedChunkMediaType: String, Hashable, Sendable, Codable {
+    case video
+    case audio
+}
+
 // MARK: - Encoded chunk
 
 /// A reference to a segment of encoded video/audio in a capture writer's
@@ -13,16 +20,23 @@ import CoreMedia
 /// only during finalization.
 public struct EncodedChunk: Hashable, Sendable, Identifiable {
     public let id: UUID
-    /// Presentation timestamp of the first sample in this chunk.
+    /// Presentation timestamp of the first sample on the capture-session
+    /// timeline. This is used for cross-source alignment and save-span
+    /// selection.
     public let presentationTimeStamp: CMTime
-    /// Decode timestamp (may equal PTS for simple streams).
+    /// Decode timestamp on the capture-session timeline.
     public let decodeTimeStamp: CMTime
+    /// Presentation timestamp of the first sample in the source file.
+    public let sourceTimeStamp: CMTime
     /// Duration of this chunk, if known.
     public let duration: CMTime
     /// Byte size of the encoded data (for diagnostics/accounting).
     public let byteSize: Int
-    /// Whether this chunk starts on a keyframe / sync sample.
+    /// Whether this chunk starts on a video keyframe / sync sample. Audio
+    /// chunks are always sync chunks.
     public let isKeyframe: Bool
+    /// The media type carried by the chunk.
+    public let mediaType: EncodedChunkMediaType
     /// The track/source this chunk belongs to.
     public let sourceID: UUID
     /// The capture writer's output file containing this chunk's encoded data.
@@ -31,17 +45,21 @@ public struct EncodedChunk: Hashable, Sendable, Identifiable {
     public init(id: UUID = UUID(),
                 presentationTimeStamp: CMTime,
                 decodeTimeStamp: CMTime? = nil,
+                sourceTimeStamp: CMTime? = nil,
                 duration: CMTime,
                 byteSize: Int,
                 isKeyframe: Bool,
+                mediaType: EncodedChunkMediaType = .video,
                 sourceID: UUID,
                 sourceFileURL: URL) {
         self.id = id
         self.presentationTimeStamp = presentationTimeStamp
         self.decodeTimeStamp = decodeTimeStamp ?? presentationTimeStamp
+        self.sourceTimeStamp = sourceTimeStamp ?? presentationTimeStamp
         self.duration = duration
         self.byteSize = byteSize
         self.isKeyframe = isKeyframe
+        self.mediaType = mediaType
         self.sourceID = sourceID
         self.sourceFileURL = sourceFileURL
     }
@@ -54,6 +72,11 @@ public struct EncodedChunk: Hashable, Sendable, Identifiable {
     /// Time range for AVAssetReader extraction.
     public var timeRange: CMTimeRange {
         CMTimeRange(start: presentationTimeStamp, duration: duration)
+    }
+
+    /// Time range inside the source file for AVAssetReader extraction.
+    public var sourceTimeRange: CMTimeRange {
+        CMTimeRange(start: sourceTimeStamp, duration: duration)
     }
 }
 
@@ -74,6 +97,11 @@ public enum KeyframeDetector {
               let first = attachments.first else {
             // No attachments — assume keyframe (e.g., first frame).
             return true
+        }
+        // `kCMSampleAttachmentKey_NotSync` is commonly present on compressed
+        // inter frames read from AVAssetReader.
+        if let notSync = first[kCMSampleAttachmentKey_NotSync as String] as? Bool {
+            return !notSync
         }
         // `kCMSampleAttachmentKey_DependsOnOthers` is `true` for inter-frames.
         if let depends = first[kCMSampleAttachmentKey_DependsOnOthers as String] as? Bool {

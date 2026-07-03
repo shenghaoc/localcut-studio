@@ -36,6 +36,8 @@ struct DiagnosticsView: View {
                 row("Chunks", value: "\(agent.replayBufferChunkCount)")
                 row("Duration", value: String(format: "%.1fs", agent.replayBufferDurationSeconds))
                 row("Sources", value: "\(agent.replayBufferSourceCount)")
+                row("Resident", value: "\(byteString(agent.replayBufferResidentBytes)) / \(byteString(agent.replayBufferMaxMemoryBytes))")
+                row("Spill", value: "\(byteString(agent.replayBufferSpillBytes)) (\(agent.replayBufferSpilledChunkCount))")
                 if agent.liveMonitorLatencyMs > 0 {
                     row("Monitor latency", value: String(format: "%.1f ms", agent.liveMonitorLatencyMs))
                 }

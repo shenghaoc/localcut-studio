@@ -39,11 +39,11 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private let outputURL: URL
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
+    private let mediaType: AVMediaType
     private let sessionStartHostTimeUs: Int64
     private let manifest: CaptureManifestFileWriter
     private let onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)?
-    /// Called when new encoded fragment data is available for the replay buffer.
-    /// Receives the encoded chunk with data already loaded.
+    /// Called when a new sample boundary is available for the replay buffer.
     private let onEncodedChunk: (@Sendable (EncodedChunk) -> Void)?
     private let lock = NSLock()
 
@@ -61,10 +61,9 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private var didNotifyBackpressure = false
     private var writeStartupError: String?
     private var manifestAppendError: String?
-    /// Tracks the last known file size for fragment boundary detection.
+    /// Tracks file growth for encoded-byte accounting. Growth is not used as a
+    /// keyframe or chunk-boundary signal.
     private var lastKnownFileSize: UInt64 = 0
-    /// The PTS of the first sample in the current fragment being accumulated.
-    private var currentFragmentStartPTS: CMTime?
 
     init(source: CaptureSourceDescriptor,
          outputURL: URL,
@@ -79,6 +78,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         self.outputURL = outputURL
         self.writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
         self.writer.movieFragmentInterval = fragmentInterval
+        self.mediaType = mediaType
         self.input = AVAssetWriterInput(mediaType: mediaType, outputSettings: outputSettings)
         self.input.expectsMediaDataInRealTime = true
         self.sessionStartHostTimeUs = sessionStartHostTimeUs
@@ -131,7 +131,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         if input.append(sampleBuffer) {
             sampleCount += 1
             lastPresentationTime = pts
-            checkForFragmentFlush(currentPTS: pts)
+            emitReplayChunk(for: sampleBuffer, presentationTime: pts)
         } else {
             droppedSamples += 1
             recordBackpressure(reason: writer.error?.localizedDescription ?? "append failed")
@@ -217,51 +217,99 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         return max(0, firstUs - sessionStartHostTimeUs)
     }
 
-    /// Checks if the AVAssetWriter flushed a new fragment to disk. If so,
-    /// emits an `EncodedChunk` reference via the callback.
-    ///
-    /// `AVAssetWriter.movieFragmentInterval` causes the writer to flush
-    /// encoded data to disk at the configured interval. By tracking the file
-    /// size, we detect when a fragment boundary was crossed and record the
-    /// chunk metadata. Raw bytes are NOT read — the finalizer uses
-    /// AVAssetReader on the source file to extract segments.
-    private func checkForFragmentFlush(currentPTS: CMTime) {
+    /// Emits a replay index chunk for the appended sample. The timestamp used
+    /// for save-span selection is session-relative; the source timestamp is the
+    /// time range AVAssetReader needs inside this writer's output file.
+    private func emitReplayChunk(for sampleBuffer: CMSampleBuffer,
+                                 presentationTime pts: CMTime) {
         guard let onEncodedChunk else { return }
+        guard let firstPresentationTime else { return }
 
-        // Track fragment start PTS.
-        if currentFragmentStartPTS == nil {
-            currentFragmentStartPTS = currentPTS
-        }
+        let duration = sampleDuration(for: sampleBuffer)
+        let sourcePTS = pts - firstPresentationTime
+        let timelinePTS = sessionRelativeTime(from: pts)
+        let decodeTime = KeyframeDetector.decodeTimeStamp(sampleBuffer)
+        let timelineDTS = decodeTime.isValid ? sessionRelativeTime(from: decodeTime) : timelinePTS
+        let type: EncodedChunkMediaType = mediaType == .audio ? .audio : .video
+        let isSyncSample = type == .audio || KeyframeDetector.isKeyframe(sampleBuffer)
+        let byteSize = encodedByteEstimate(for: sampleBuffer, duration: duration)
 
-        // Check file size. If it grew, a fragment may have been flushed.
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: outputURL.path),
-              let fileSize = attrs[.size] as? UInt64 else { return }
-
-        let newSize = fileSize
-        guard newSize > lastKnownFileSize else { return }
-
-        let newBytesCount = Int(newSize - lastKnownFileSize)
-        guard newBytesCount > 0 else { return }
-
-        lastKnownFileSize = newSize
-
-        // Record the chunk reference (no raw data read).
-        let fragmentPTS = currentFragmentStartPTS ?? currentPTS
-        let fragmentDuration = currentPTS - fragmentPTS
         let chunk = EncodedChunk(
-            presentationTimeStamp: fragmentPTS,
-            decodeTimeStamp: fragmentPTS,
-            duration: fragmentDuration.isValid && fragmentDuration.seconds > 0
-                ? fragmentDuration
-                : CMTime(seconds: 1.0, preferredTimescale: 600),
-            byteSize: newBytesCount,
-            isKeyframe: true, // movieFragmentInterval fragments start with keyframes
+            presentationTimeStamp: timelinePTS,
+            decodeTimeStamp: timelineDTS,
+            sourceTimeStamp: sourcePTS,
+            duration: duration,
+            byteSize: byteSize,
+            isKeyframe: isSyncSample,
+            mediaType: type,
             sourceID: source.id,
             sourceFileURL: outputURL)
 
         onEncodedChunk(chunk)
+    }
 
-        // Start tracking the next fragment.
-        currentFragmentStartPTS = currentPTS
+    private func sampleDuration(for sampleBuffer: CMSampleBuffer) -> CMTime {
+        let duration = CMSampleBufferGetDuration(sampleBuffer)
+        if duration.isValid, duration.isNumeric, duration > .zero {
+            return duration
+        }
+        if mediaType == .video, let frameRate = source.frameRate, frameRate > 0 {
+            return CMTime(seconds: 1.0 / frameRate, preferredTimescale: 600)
+        }
+        if mediaType == .audio,
+           let sampleRate = source.sampleRate,
+           sampleRate > 0 {
+            let samples = max(1, CMSampleBufferGetNumSamples(sampleBuffer))
+            return CMTime(
+                seconds: Double(samples) / sampleRate,
+                preferredTimescale: 600)
+        }
+        return CMTime(value: 1, timescale: 600)
+    }
+
+    private func sessionRelativeTime(from time: CMTime) -> CMTime {
+        let timeUs = CaptureManifest.microseconds(from: time)
+        return CMTime(
+            value: max(0, timeUs - sessionStartHostTimeUs),
+            timescale: 1_000_000)
+    }
+
+    private func encodedByteEstimate(for sampleBuffer: CMSampleBuffer,
+                                     duration: CMTime) -> Int {
+        let fileGrowthBytes = fileGrowthByteCount()
+        if fileGrowthBytes > 0 {
+            return fileGrowthBytes
+        }
+        if mediaType == .video,
+           let frameRate = source.frameRate,
+           frameRate > 0,
+           let bitrate = videoBitrateFromInputSettings() {
+            return max(1, Int(Double(bitrate) / 8.0 / frameRate))
+        }
+        if mediaType == .audio,
+           duration.seconds.isFinite,
+           let bitrate = audioBitrateFromInputSettings() {
+            return max(1, Int(Double(bitrate) / 8.0 * max(0, duration.seconds)))
+        }
+        return max(1, KeyframeDetector.byteSize(sampleBuffer))
+    }
+
+    private func fileGrowthByteCount() -> Int {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: outputURL.path),
+              let fileSize = attrs[.size] as? UInt64 else { return 0 }
+        defer { lastKnownFileSize = fileSize }
+        guard fileSize > lastKnownFileSize else { return 0 }
+        return Int(fileSize - lastKnownFileSize)
+    }
+
+    private func videoBitrateFromInputSettings() -> Int? {
+        guard let properties = input.outputSettings?[AVVideoCompressionPropertiesKey] as? [String: Any] else {
+            return nil
+        }
+        return properties[AVVideoAverageBitRateKey] as? Int
+    }
+
+    private func audioBitrateFromInputSettings() -> Int? {
+        input.outputSettings?[AVEncoderBitRateKey] as? Int
     }
 }

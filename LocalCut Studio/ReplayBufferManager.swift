@@ -33,6 +33,8 @@ final class ReplayBufferManager {
 
     /// The URL where saved replay clips are written.
     private let savedClipsDirectory: URL
+    /// The URL where spilled replay metadata is written.
+    private let spillDirectory: URL
 
     /// Callback to insert a saved clip into the timeline.
     private let onClipSaved: (@MainActor (URL, CMTime) -> Void)?
@@ -53,8 +55,9 @@ final class ReplayBufferManager {
             .appendingPathComponent("ReplayBuffer", isDirectory: true)
             .appendingPathComponent(sessionUUID.uuidString, isDirectory: true)
         self.savedClipsDirectory = caches.appendingPathComponent("saved", isDirectory: true)
+        self.spillDirectory = caches.appendingPathComponent("spill", isDirectory: true)
 
-        self.ring = EncodedChunkRing(config: config)
+        self.ring = EncodedChunkRing(config: config, spillDirectory: spillDirectory)
     }
 
     /// Enables the replay buffer and prepares the saved clips directory.
@@ -62,6 +65,9 @@ final class ReplayBufferManager {
         guard !isEnabled else { return }
         try FileManager.default.createDirectory(
             at: savedClipsDirectory,
+            withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: spillDirectory,
             withIntermediateDirectories: true)
         isEnabled = true
         log.info("Replay buffer enabled (session \(self.sessionUUID.uuidString))")
@@ -124,7 +130,7 @@ final class ReplayBufferManager {
                 outputURL: outputURL)
 
             lastSavedDuration = duration.seconds
-            log.info("Saved replay clip: \(String(format: "%.1f", duration.seconds))s at \(outputURL.lastPathComponent)")
+            log.info("Saved replay clip: requested=\(String(format: "%.1f", seconds))s selected=\(String(format: "%.1f", actualSeconds))s written=\(String(format: "%.1f", duration.seconds))s at \(outputURL.lastPathComponent)")
 
             // Trigger timeline insertion.
             onClipSaved?(outputURL, duration)
