@@ -233,6 +233,30 @@ extension EditorModel {
         lastRecordingRequest = request
         activePiPPreset = pipPreset
         lastRecordingPiPPreset = pipPreset
+
+        // Set up replay buffer if enabled.
+        let sessionUUID = UUID()
+        var replayManager: ReplayBufferManager?
+        if replayBufferEnabled {
+            let config = ReplayBufferConfig(
+                durationOption: replayBufferDuration)
+            let manager = ReplayBufferManager(
+                sessionUUID: sessionUUID,
+                config: config,
+                onClipSaved: { [weak self] url, duration in
+                    Task { @MainActor in
+                        self?.insertReplayClip(url: url, duration: duration)
+                    }
+                })
+            do {
+                try await manager.enable()
+                replayManager = manager
+            } catch {
+                statusMessage = "Could not enable replay buffer: \(error.localizedDescription)"
+            }
+        }
+        replayBufferManager = replayManager
+
         do {
             try await captureCoordinator.start(request, encoderBudget: encoderBudget, onStreamStopped: { [weak self] error in
                 // The screen stream ended unexpectedly mid-recording; stop and
@@ -253,6 +277,10 @@ extension EditorModel {
                 Task { @MainActor in
                     guard let self, self.isRecording || self.isPaused else { return }
                     self.recordingMicLevel = level
+                }
+            }, onEncodedChunk: { [weak replayManager] chunk in
+                Task { @MainActor in
+                    replayManager?.appendChunk(chunk)
                 }
             })
             recordingStartedAt = Date()
@@ -360,6 +388,7 @@ extension EditorModel {
             do {
                 let result = try await self.captureCoordinator.stop()
                 self.resetRecordingRuntimeState()
+                self.cleanupReplayBuffer()
                 let manifestFinalizationError = result.manifestFinalizationError
                 _ = await self.landCaptureSession(result)
                 if let manifestFinalizationError {
@@ -978,5 +1007,72 @@ extension EditorModel {
             Task { await entry.item.loadThumbnail() }
         }
         return true
+    }
+
+    // MARK: - Replay buffer (Phase 46)
+
+    /// Saves the last N seconds from the replay buffer.
+    func saveReplayBuffer(seconds: Double = 30) {
+        guard let manager = replayBufferManager else {
+            statusMessage = "Replay buffer is not active."
+            return
+        }
+        guard !replaySaveInProgress else {
+            statusMessage = "A replay save is already in progress."
+            return
+        }
+
+        replaySaveInProgress = true
+        replaySaveMessage = nil
+
+        Task {
+            await manager.saveLast(seconds: seconds)
+            replaySaveInProgress = false
+            if let error = manager.lastSaveError {
+                statusMessage = error
+            } else if let duration = manager.lastSavedDuration {
+                replaySaveMessage = String(format: "Saved %.1fs replay clip.", duration)
+                statusMessage = replaySaveMessage!
+            }
+        }
+    }
+
+    /// Inserts a saved replay clip into the timeline at the current playhead.
+    func insertReplayClip(url: URL, duration: CMTime) {
+        guard duration.seconds > 0 else {
+            statusMessage = "Replay clip has no duration."
+            return
+        }
+
+        let mediaItem = MediaItem(url: url)
+        mediaItem.duration = duration
+        mediaItem.name = "Replay \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium))"
+
+        let playheadTime = CMTime(seconds: currentTime, preferredTimescale: 600)
+        let clip = Clip(
+            mediaID: mediaItem.id,
+            sourceStart: .zero,
+            duration: duration,
+            timelineStart: playheadTime)
+
+        performUndoable("Insert Replay Clip") {
+            project.mediaItems.append(mediaItem)
+            if project.videoTracks.isEmpty {
+                project.videoTracks.append(Track(name: "V1", kind: .video))
+            }
+            project.videoTracks[0].clips.append(clip)
+            scheduleRebuild()
+        }
+
+        statusMessage = String(format: "Inserted %.1fs replay clip at playhead.", duration.seconds)
+    }
+
+    /// Cleans up replay buffer resources on session end.
+    func cleanupReplayBuffer() {
+        guard let manager = replayBufferManager else { return }
+        Task {
+            await manager.cleanup()
+        }
+        replayBufferManager = nil
     }
 }

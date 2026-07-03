@@ -119,6 +119,19 @@ final class EditorModel {
     @ObservationIgnored let documentController = DocumentController()
     @ObservationIgnored let captureCoordinator = CaptureCoordinator()
 
+    // MARK: - Replay buffer (Phase 46)
+
+    /// The replay buffer manager for the current recording session, if any.
+    @ObservationIgnored var replayBufferManager: ReplayBufferManager?
+    /// Whether the replay buffer is enabled for the current session.
+    var replayBufferEnabled: Bool = false
+    /// Current replay buffer duration setting.
+    var replayBufferDuration: ReplayBufferConfig.DurationOption = .seconds30
+    /// Whether a replay save is currently in progress.
+    var replaySaveInProgress: Bool = false
+    /// The last saved replay duration message for UI display.
+    var replaySaveMessage: String?
+
     // Skin smoothing debug
     var showSkinMask = false
 

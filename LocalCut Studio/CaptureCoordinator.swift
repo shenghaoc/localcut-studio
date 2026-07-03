@@ -28,6 +28,7 @@ actor CaptureCoordinator {
         var onStreamStopped: (@Sendable (Error) -> Void)?
         var onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)?
         var onMicrophoneLevel: (@Sendable (Float) -> Void)?
+        var onEncodedChunk: (@Sendable (EncodedChunk) -> Void)?
         /// Monotonically increasing chunk counter for unique file names. Incremented
         /// once per resume cycle (not per source).
         var chunkIndex: Int = 1
@@ -55,7 +56,8 @@ actor CaptureCoordinator {
                encoderBudget: EncoderBudget? = nil,
                onStreamStopped: (@Sendable (Error) -> Void)? = nil,
                onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil,
-               onMicrophoneLevel: (@Sendable (Float) -> Void)? = nil) async throws {
+               onMicrophoneLevel: (@Sendable (Float) -> Void)? = nil,
+               onEncodedChunk: (@Sendable (EncodedChunk) -> Void)? = nil) async throws {
         guard state == .idle else { throw CaptureEngineError.alreadyRecording }
         state = .starting
         var didStartRecording = false
@@ -162,7 +164,8 @@ actor CaptureCoordinator {
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
                 manifest: manifest,
-                onSustainedBackpressure: onBackpressure)
+                onSustainedBackpressure: onBackpressure,
+                onEncodedChunk: onEncodedChunk)
             descriptors.append(source)
             encoders[source.id] = CaptureEncoderConfig(
                 codec: "h264",
@@ -231,7 +234,8 @@ actor CaptureCoordinator {
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
                 manifest: manifest,
-                onSustainedBackpressure: onBackpressure)
+                onSustainedBackpressure: onBackpressure,
+                onEncodedChunk: onEncodedChunk)
             descriptors.append(source)
             encoders[source.id] = CaptureEncoderConfig(
                 codec: "h264",
@@ -314,6 +318,7 @@ actor CaptureCoordinator {
                 onStreamStopped: onStreamStopped,
                 onBackpressure: onBackpressure,
                 onMicrophoneLevel: onMicrophoneLevel,
+                onEncodedChunk: onEncodedChunk,
                 currentTarget: request.target,
                 sourceIDs: sourceIDs,
                 eventLogWriter: eventLogWriter,
@@ -609,7 +614,8 @@ actor CaptureCoordinator {
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
                 manifest: manifest,
-                onSustainedBackpressure: active.onBackpressure)
+                onSustainedBackpressure: active.onBackpressure,
+                onEncodedChunk: active.onEncodedChunk)
             writers.append(writer)
             screenVideoWriter = writer
         }
@@ -672,7 +678,8 @@ actor CaptureCoordinator {
                 fragmentInterval: fragment,
                 sessionStartHostTimeUs: startHostTimeUs,
                 manifest: manifest,
-                onSustainedBackpressure: active.onBackpressure)
+                onSustainedBackpressure: active.onBackpressure,
+                onEncodedChunk: active.onEncodedChunk)
             writers.append(writer)
             sessions.append(AVCaptureSampleSession(deviceID: webcamDeviceID, mediaType: .video, writer: writer))
         }
