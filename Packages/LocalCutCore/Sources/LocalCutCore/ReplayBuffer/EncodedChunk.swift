@@ -3,13 +3,14 @@ import CoreMedia
 
 // MARK: - Encoded chunk
 
-/// A single encoded video/audio fragment from a capture writer, suitable for
-/// ring-buffer storage and eventual finalisation into a fragmented `.mov`.
+/// A reference to a segment of encoded video/audio in a capture writer's
+/// output file, suitable for ring-buffer storage and eventual finalisation
+/// into a playable `.mov`.
 ///
-/// Each chunk represents one self-contained, decodable fragment (typically a
-/// GOP) produced by `AVAssetWriter`'s `movieFragmentInterval` mechanism. The
-/// chunk stores the raw encoded bytes so they can be reassembled without
-/// re-encoding.
+/// Each chunk records the source file URL and time range so the finalizer
+/// can use `AVAssetReader` to extract the segment with proper movie headers.
+/// Raw encoded bytes are NOT stored in memory — the source file is read
+/// only during finalization.
 public struct EncodedChunk: Hashable, Sendable, Identifiable {
     public let id: UUID
     /// Presentation timestamp of the first sample in this chunk.
@@ -18,27 +19,14 @@ public struct EncodedChunk: Hashable, Sendable, Identifiable {
     public let decodeTimeStamp: CMTime
     /// Duration of this chunk, if known.
     public let duration: CMTime
-    /// Byte size of the encoded data.
+    /// Byte size of the encoded data (for diagnostics/accounting).
     public let byteSize: Int
-    /// Whether this chunk starts on a keyframe / sync sample. For
-    /// `movieFragmentInterval`-produced fragments this is always `true`.
+    /// Whether this chunk starts on a keyframe / sync sample.
     public let isKeyframe: Bool
     /// The track/source this chunk belongs to.
     public let sourceID: UUID
-    /// The encoded data. Nil when the chunk has been spilled to disk.
-    public private(set) var data: Data?
-
-    /// File URL where this chunk is spilled on disk. Nil when held in memory.
-    public internal(set) var spillURL: URL?
-
-    /// Whether this chunk's data is currently held in memory.
-    public var isInMemory: Bool { data != nil }
-
-    /// Whether this chunk has been spilled to disk.
-    public var isSpilled: Bool { spillURL != nil }
-
-    /// Effective byte size for memory accounting (only counts in-memory data).
-    public var memoryBytes: Int { data?.count ?? 0 }
+    /// The capture writer's output file containing this chunk's encoded data.
+    public let sourceFileURL: URL
 
     public init(id: UUID = UUID(),
                 presentationTimeStamp: CMTime,
@@ -47,7 +35,7 @@ public struct EncodedChunk: Hashable, Sendable, Identifiable {
                 byteSize: Int,
                 isKeyframe: Bool,
                 sourceID: UUID,
-                data: Data?) {
+                sourceFileURL: URL) {
         self.id = id
         self.presentationTimeStamp = presentationTimeStamp
         self.decodeTimeStamp = decodeTimeStamp ?? presentationTimeStamp
@@ -55,7 +43,7 @@ public struct EncodedChunk: Hashable, Sendable, Identifiable {
         self.byteSize = byteSize
         self.isKeyframe = isKeyframe
         self.sourceID = sourceID
-        self.data = data
+        self.sourceFileURL = sourceFileURL
     }
 
     /// End time of this chunk (PTS + duration).
@@ -63,15 +51,9 @@ public struct EncodedChunk: Hashable, Sendable, Identifiable {
         presentationTimeStamp + duration
     }
 
-    /// Clears the in-memory data after spilling to disk.
-    public mutating func clearMemoryData() {
-        data = nil
-    }
-
-    /// Loads data from the spill URL back into memory.
-    public mutating func loadDataFromSpill() throws {
-        guard let url = spillURL else { return }
-        data = try Data(contentsOf: url)
+    /// Time range for AVAssetReader extraction.
+    public var timeRange: CMTimeRange {
+        CMTimeRange(start: presentationTimeStamp, duration: duration)
     }
 }
 

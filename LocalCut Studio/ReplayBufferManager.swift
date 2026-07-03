@@ -54,15 +54,12 @@ final class ReplayBufferManager {
             .appendingPathComponent(sessionUUID.uuidString, isDirectory: true)
         self.savedClipsDirectory = caches.appendingPathComponent("saved", isDirectory: true)
 
-        self.ring = EncodedChunkRing(
-            config: config,
-            spillDirectory: caches.appendingPathComponent("spill", isDirectory: true))
+        self.ring = EncodedChunkRing(config: config)
     }
 
-    /// Enables the replay buffer and prepares the spill directory.
+    /// Enables the replay buffer and prepares the saved clips directory.
     func enable() async throws {
         guard !isEnabled else { return }
-        try await ring.prepareSpillDirectory()
         try FileManager.default.createDirectory(
             at: savedClipsDirectory,
             withIntermediateDirectories: true)
@@ -90,7 +87,7 @@ final class ReplayBufferManager {
     func appendChunk(_ chunk: EncodedChunk) {
         guard isEnabled else { return }
         Task {
-            await ring.appendWithSpill(chunk)
+            await ring.append(chunk)
         }
     }
 
@@ -118,19 +115,12 @@ final class ReplayBufferManager {
                 return
             }
 
-            // Load all chunks (including spilled) into memory.
-            let loaded = await ring.loadChunksForSave(span)
-            guard loaded.count == span.count else {
-                lastSaveError = "Could not load all chunks for save."
-                isSaving = false
-                return
-            }
-
-            // Finalise into a fragmented .mov.
+            // Finalise into a fragmented .mov using AVAssetReader on the
+            // source files.
             let outputURL = savedClipsDirectory
                 .appendingPathComponent("replay-\(UUID().uuidString).mov")
             let duration = try await ReplayBufferFinalizer.finalize(
-                chunks: loaded,
+                chunks: span,
                 outputURL: outputURL)
 
             lastSavedDuration = duration.seconds
@@ -152,11 +142,9 @@ final class ReplayBufferManager {
         await ring.diagnostics()
     }
 
-    /// Cleans up replay buffer spill data for this session.
+    /// Cleans up replay buffer resources for this session.
     /// Saved clips are preserved since they may be referenced by the timeline.
     func cleanup() async {
         await ring.clear()
-        // Only remove spill files, not saved clips (which may be in use by
-        // the timeline as MediaItem URLs).
     }
 }

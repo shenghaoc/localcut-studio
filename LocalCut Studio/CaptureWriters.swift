@@ -218,12 +218,13 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     }
 
     /// Checks if the AVAssetWriter flushed a new fragment to disk. If so,
-    /// reads the new bytes and emits an `EncodedChunk` via the callback.
+    /// emits an `EncodedChunk` reference via the callback.
     ///
     /// `AVAssetWriter.movieFragmentInterval` causes the writer to flush
     /// encoded data to disk at the configured interval. By tracking the file
-    /// size, we detect when a fragment boundary was crossed and capture the
-    /// newly-written encoded bytes.
+    /// size, we detect when a fragment boundary was crossed and record the
+    /// chunk metadata. Raw bytes are NOT read — the finalizer uses
+    /// AVAssetReader on the source file to extract segments.
     private func checkForFragmentFlush(currentPTS: CMTime) {
         guard let onEncodedChunk else { return }
 
@@ -239,26 +240,12 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         let newSize = fileSize
         guard newSize > lastKnownFileSize else { return }
 
-        // New bytes were written. Read them as a chunk.
         let newBytesCount = Int(newSize - lastKnownFileSize)
         guard newBytesCount > 0 else { return }
 
-        // Read the new bytes from the file. This is safe because
-        // AVAssetWriter writes synchronously during append(), so the data
-        // is fully flushed by the time we read here.
-        guard let handle = try? FileHandle(forReadingFrom: outputURL) else { return }
-        defer { try? handle.close() }
-
-        handle.seek(toFileOffset: lastKnownFileSize)
-        guard let data = try? handle.read(upToCount: newBytesCount), data.count == newBytesCount else {
-            return
-        }
-
         lastKnownFileSize = newSize
 
-        // Create the chunk. The fragment duration is approximate (based on
-        // the fragment interval); the exact duration isn't critical for the
-        // replay buffer since the PTS/byte-range tracking is what matters.
+        // Record the chunk reference (no raw data read).
         let fragmentPTS = currentFragmentStartPTS ?? currentPTS
         let fragmentDuration = currentPTS - fragmentPTS
         let chunk = EncodedChunk(
@@ -270,7 +257,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
             byteSize: newBytesCount,
             isKeyframe: true, // movieFragmentInterval fragments start with keyframes
             sourceID: source.id,
-            data: data)
+            sourceFileURL: outputURL)
 
         onEncodedChunk(chunk)
 

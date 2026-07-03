@@ -30,12 +30,12 @@ struct DiagnosticsView: View {
                 .help(agent.encoderLedger.isEmpty ? "No active encoder leases." : agent.encoderLedger.joined(separator: ", "))
 
             // MARK: - Replay buffer (Phase 46)
-            if agent.replayBufferBudgetBytes > 0 {
+            if agent.replayBufferChunkCount > 0 {
                 Divider()
                 Text("Replay Buffer").font(.headline)
-                row("Memory", value: byteString(agent.replayBufferMemoryBytes) + " / " + byteString(agent.replayBufferBudgetBytes))
-                row("Spill", value: byteString(agent.replayBufferSpillBytes))
+                row("Chunks", value: "\(agent.replayBufferChunkCount)")
                 row("Duration", value: String(format: "%.1fs", agent.replayBufferDurationSeconds))
+                row("Sources", value: "\(agent.replayBufferSourceCount)")
                 if agent.liveMonitorLatencyMs > 0 {
                     row("Monitor latency", value: String(format: "%.1f ms", agent.liveMonitorLatencyMs))
                 }

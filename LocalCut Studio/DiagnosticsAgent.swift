@@ -41,10 +41,9 @@ final class DiagnosticsAgent {
     /// Updates replay buffer diagnostics from an external snapshot.
     func updateReplayBufferDiagnostics(_ diag: ReplayBufferDiagnostics,
                                        latencyMs: Double = 0) {
-        replayBufferMemoryBytes = diag.memoryUsedBytes
-        replayBufferBudgetBytes = diag.memoryBudgetBytes
-        replayBufferSpillBytes = diag.spillUsedBytes
+        replayBufferChunkCount = diag.chunkCount
         replayBufferDurationSeconds = diag.bufferedDurationSeconds
+        replayBufferSourceCount = diag.sourceCount
         liveMonitorLatencyMs = latencyMs
     }
     /// Current hardware encoder leases held across editor workflows.
@@ -56,14 +55,12 @@ final class DiagnosticsAgent {
 
     // MARK: - Replay buffer diagnostics (Phase 46)
 
-    /// Replay buffer memory usage in bytes.
-    private(set) var replayBufferMemoryBytes: Int = 0
-    /// Replay buffer memory budget in bytes.
-    private(set) var replayBufferBudgetBytes: Int = 0
-    /// Replay buffer spill size in bytes.
-    private(set) var replayBufferSpillBytes: Int = 0
+    /// Replay buffer chunk count.
+    private(set) var replayBufferChunkCount: Int = 0
     /// Replay buffer duration available in seconds.
     private(set) var replayBufferDurationSeconds: Double = 0
+    /// Number of distinct source files in the replay buffer.
+    private(set) var replayBufferSourceCount: Int = 0
     /// Live monitor latency in milliseconds.
     private(set) var liveMonitorLatencyMs: Double = 0
 
@@ -232,8 +229,8 @@ final class DiagnosticsAgent {
             last_ms=\(self.lastFrameTime * 1000, format: .fixed(precision: 2), privacy: .public) \
             p95_ms=\(self.p95RenderTime * 1000, format: .fixed(precision: 2), privacy: .public) \
             drops=\(self.frameDropsLastTick, privacy: .public) \
-            replay_mem=\(self.replayBufferMemoryBytes, privacy: .public) \
-            replay_spill=\(self.replayBufferSpillBytes, privacy: .public) \
+            replay_chunks=\(self.replayBufferChunkCount, privacy: .public) \
+            replay_dur=\(self.replayBufferDurationSeconds, format: .fixed(precision: 1), privacy: .public) \
             latency_ms=\(self.liveMonitorLatencyMs, format: .fixed(precision: 1), privacy: .public)
             """)
     }
