@@ -47,6 +47,10 @@
 - [x] **T5.1** `ProgramPanel` view: sources (with per-source enable/disable toggles),
   scenes, hotkeys (wired to live scene switching via `onKeyPress`), start / stop,
   budget readout (reflects only enabled sources), shared `EncoderBudget`.
+  The UI is split across focused files (`ProgramPanel`, `ProgramPanelState`,
+  `ProgramSceneEditor`, `ProgramSceneEditing`) and gates starts on the shared
+  `EditorModel.programSession` so multiple panel instances cannot create
+  simultaneous Program sessions.
 - [ ] **T5.2** Full-resolution program monitor sharing the existing preview output.
   - Draft gap: the panel is now reachable and supports persisted scene editing,
     but the monitor remains the existing preview surface rather than a dedicated
