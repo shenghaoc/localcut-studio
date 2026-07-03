@@ -88,23 +88,31 @@ struct ClipTransformKeyframeEditor: View {
         }
         HStack {
             Text("Scale")
+                .accessibilityHidden(true)
             Slider(value: Binding(
                 get: { Double(model.selectedClipTransformAtPlayhead.decomposedScale) },
                 set: { model.updateSelectedClipTransformKeyframeValue(value.replacing(scale: Float($0))) }),
                    in: 0.25...4, step: 0.05)
+                .accessibilityLabel("Scale")
+                .accessibilityValue("\(Int((value.decomposedScale * 100).rounded())) percent")
             Text(String(format: "%.2fx", model.selectedClipTransformAtPlayhead.decomposedScale))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+                .accessibilityHidden(true)
         }
         HStack {
             Text("Rotation")
+                .accessibilityHidden(true)
             Slider(value: Binding(
                 get: { Double(model.selectedClipTransformAtPlayhead.decomposedRotation) * 180 / Double.pi },
                 set: { model.updateSelectedClipTransformKeyframeValue(value.replacing(rotationDegrees: Float($0))) }),
                    in: -180...180, step: 1)
+                .accessibilityLabel("Rotation")
+                .accessibilityValue("\(Int((Double(value.decomposedRotation) * 180 / Double.pi).rounded())) degrees")
             Text("\(Int(Double(model.selectedClipTransformAtPlayhead.decomposedRotation) * 180 / Double.pi)) deg")
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+                .accessibilityHidden(true)
         }
     }
 }
