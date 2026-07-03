@@ -473,18 +473,31 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
 
     /// Processes a CMSampleBuffer through VoiceCleanupDSP. Returns a new
     /// CMSampleBuffer with processed samples, or nil if processing fails.
+    ///
+    /// Handles Int16, Int32, and Float32 input formats by converting to
+    /// Float32 for DSP processing. Preserves interleaved layout.
     private static func processAudioCleanup(_ sampleBuffer: CMSampleBuffer,
                                             settings: VoiceCleanupSettings,
                                             state: inout VoiceCleanupProcessorState) -> CMSampleBuffer? {
         guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else { return nil }
         let format = AVAudioFormat(cmAudioFormatDescription: formatDescription)
         let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
-        guard frameCount > 0,
-              let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+        guard frameCount > 0 else { return nil }
+
+        // Create a Float32 PCM buffer for processing.
+        guard let floatFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: format.sampleRate,
+            channels: format.channelCount,
+            interleaved: true) else { return nil }
+        guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: floatFormat, frameCapacity: frameCount) else {
             return nil
         }
         pcmBuffer.frameLength = frameCount
 
+        // Extract samples from the source buffer, converting to Float32
+        // as needed. CMSampleBufferCopyPCMDataIntoAudioBufferList handles
+        // the conversion when the target format differs from the source.
         let copyStatus = CMSampleBufferCopyPCMDataIntoAudioBufferList(
             sampleBuffer, at: 0, frameCount: Int32(frameCount),
             into: pcmBuffer.mutableAudioBufferList)
@@ -507,7 +520,7 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
             &interleaved, channels: channels, sampleRate: sampleRate,
             settings: settings, state: &state)
 
-        // De-interleave back to PCM buffer.
+        // Write processed interleaved Float32 data back to the PCM buffer.
         for ch in 0..<channels {
             let dst = channelData[ch]
             for i in 0..<Int(frameCount) {
@@ -515,8 +528,20 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
             }
         }
 
-        // Create new CMSampleBuffer from the processed data using the
-        // AudioBufferList from the PCM buffer.
+        // Create a format description for the output (interleaved Float32).
+        var outputFormatDesc: CMAudioFormatDescription?
+        let fmtStatus = CMAudioFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            asbd: floatFormat.streamDescription,
+            layoutSize: 0,
+            layout: nil,
+            magicCookieSize: 0,
+            magicCookie: nil,
+            extensions: nil,
+            formatDescriptionOut: &outputFormatDesc)
+        guard fmtStatus == noErr, let outFmtDesc = outputFormatDesc else { return nil }
+
+        // Create new CMSampleBuffer with the Float32 format description.
         var timing = CMSampleTimingInfo(
             duration: CMSampleBufferGetDuration(sampleBuffer),
             presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer),
@@ -528,7 +553,7 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
             dataReady: false,
             makeDataReadyCallback: nil,
             refcon: nil,
-            formatDescription: formatDescription,
+            formatDescription: outFmtDesc,
             sampleCount: CMItemCount(frameCount),
             sampleTimingEntryCount: 1,
             sampleTimingArray: &timing,

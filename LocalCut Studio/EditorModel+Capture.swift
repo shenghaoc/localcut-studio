@@ -362,7 +362,7 @@ extension EditorModel {
                 // Update replay buffer diagnostics periodically.
                 if let replayManager = self.replayBufferManager {
                     let diag = await replayManager.diagnostics()
-                    self.diagnosticsAgent.updateReplayBufferDiagnostics(diag)
+                    self.diagnostics.updateReplayBufferDiagnostics(diag)
                 }
                 try? await Task.sleep(for: .seconds(1))
             }
