@@ -53,13 +53,13 @@ enum ReplayBufferFinalizer {
             let fileManager = FileManager.default
             fileManager.createFile(atPath: tempURL.path, contents: nil)
             let handle = try FileHandle(forWritingTo: tempURL)
+            defer { try? handle.close() }
 
             for chunk in chunks {
                 if let data = chunk.data {
-                    handle.write(data)
+                    try handle.write(contentsOf: data)
                 }
             }
-            handle.closeFile()
 
             // Re-mux into a proper fragmented .mov with correct headers.
             let duration = try await remuxToFragMOV(sourceURL: tempURL, outputURL: outputURL)

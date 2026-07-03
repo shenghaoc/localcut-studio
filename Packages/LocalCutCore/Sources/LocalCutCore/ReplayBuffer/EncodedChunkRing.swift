@@ -348,6 +348,7 @@ public actor EncodedChunkRing {
                 ?? chunks.count
 
             // Spill all chunks in this span.
+            var spillFailed = false
             for i in 0..<nextKFIdx {
                 guard chunks[i].isInMemory else { continue }
                 do {
@@ -361,11 +362,13 @@ public actor EncodedChunkRing {
                         evicted += 1
                     }
                 } catch {
-                    // If spill fails, keep in memory — we'll be over budget
-                    // but won't lose data.
+                    // If spill fails, stop evicting — we'll be over budget
+                    // but won't lose data or spin forever.
+                    spillFailed = true
                     break
                 }
             }
+            if spillFailed { break }
         }
 
         return evicted

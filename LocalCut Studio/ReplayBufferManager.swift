@@ -48,7 +48,8 @@ final class ReplayBufferManager {
         self.config = config
         self.onClipSaved = onClipSaved
 
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let caches = (FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
             .appendingPathComponent("ReplayBuffer", isDirectory: true)
             .appendingPathComponent(sessionUUID.uuidString, isDirectory: true)
         self.savedClipsDirectory = caches.appendingPathComponent("saved", isDirectory: true)
