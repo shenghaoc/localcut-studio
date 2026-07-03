@@ -42,6 +42,9 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private let sessionStartHostTimeUs: Int64
     private let manifest: CaptureManifestFileWriter
     private let onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)?
+    /// Called when new encoded fragment data is available for the replay buffer.
+    /// Receives the encoded chunk with data already loaded.
+    private let onEncodedChunk: (@Sendable (EncodedChunk) -> Void)?
     private let lock = NSLock()
 
     /// Roughly two seconds of drops at 30 fps before we warn the user; a single
@@ -58,6 +61,10 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private var didNotifyBackpressure = false
     private var writeStartupError: String?
     private var manifestAppendError: String?
+    /// Tracks the last known file size for fragment boundary detection.
+    private var lastKnownFileSize: UInt64 = 0
+    /// The PTS of the first sample in the current fragment being accumulated.
+    private var currentFragmentStartPTS: CMTime?
 
     init(source: CaptureSourceDescriptor,
          outputURL: URL,
@@ -66,7 +73,8 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
          fragmentInterval: CMTime,
          sessionStartHostTimeUs: Int64,
          manifest: CaptureManifestFileWriter,
-         onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil) throws {
+         onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil,
+         onEncodedChunk: (@Sendable (EncodedChunk) -> Void)? = nil) throws {
         self.source = source
         self.outputURL = outputURL
         self.writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
@@ -76,6 +84,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         self.sessionStartHostTimeUs = sessionStartHostTimeUs
         self.manifest = manifest
         self.onSustainedBackpressure = onSustainedBackpressure
+        self.onEncodedChunk = onEncodedChunk
 
         guard writer.canAdd(input) else {
             throw CaptureEngineError.writerRejectedInput(source.displayName)
@@ -122,6 +131,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         if input.append(sampleBuffer) {
             sampleCount += 1
             lastPresentationTime = pts
+            checkForFragmentFlush(currentPTS: pts)
         } else {
             droppedSamples += 1
             recordBackpressure(reason: writer.error?.localizedDescription ?? "append failed")
@@ -205,5 +215,66 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         guard let firstPresentationTime else { return source.timelineStartUs }
         let firstUs = CaptureManifest.microseconds(from: firstPresentationTime)
         return max(0, firstUs - sessionStartHostTimeUs)
+    }
+
+    /// Checks if the AVAssetWriter flushed a new fragment to disk. If so,
+    /// reads the new bytes and emits an `EncodedChunk` via the callback.
+    ///
+    /// `AVAssetWriter.movieFragmentInterval` causes the writer to flush
+    /// encoded data to disk at the configured interval. By tracking the file
+    /// size, we detect when a fragment boundary was crossed and capture the
+    /// newly-written encoded bytes.
+    private func checkForFragmentFlush(currentPTS: CMTime) {
+        guard let onEncodedChunk else { return }
+
+        // Track fragment start PTS.
+        if currentFragmentStartPTS == nil {
+            currentFragmentStartPTS = currentPTS
+        }
+
+        // Check file size. If it grew, a fragment may have been flushed.
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: outputURL.path),
+              let fileSize = attrs[.size] as? UInt64 else { return }
+
+        let newSize = fileSize
+        guard newSize > lastKnownFileSize else { return }
+
+        // New bytes were written. Read them as a chunk.
+        let newBytesCount = Int(newSize - lastKnownFileSize)
+        guard newBytesCount > 0 else { return }
+
+        // Read the new bytes from the file. This is safe because
+        // AVAssetWriter writes synchronously during append(), so the data
+        // is fully flushed by the time we read here.
+        guard let handle = try? FileHandle(forReadingFrom: outputURL) else { return }
+        defer { try? handle.close() }
+
+        handle.seek(toFileOffset: lastKnownFileSize)
+        guard let data = try? handle.read(upToCount: newBytesCount), data.count == newBytesCount else {
+            return
+        }
+
+        lastKnownFileSize = newSize
+
+        // Create the chunk. The fragment duration is approximate (based on
+        // the fragment interval); the exact duration isn't critical for the
+        // replay buffer since the PTS/byte-range tracking is what matters.
+        let fragmentPTS = currentFragmentStartPTS ?? currentPTS
+        let fragmentDuration = currentPTS - fragmentPTS
+        let chunk = EncodedChunk(
+            presentationTimeStamp: fragmentPTS,
+            decodeTimeStamp: fragmentPTS,
+            duration: fragmentDuration.isValid && fragmentDuration.seconds > 0
+                ? fragmentDuration
+                : CMTime(seconds: 1.0, preferredTimescale: 600),
+            byteSize: newBytesCount,
+            isKeyframe: true, // movieFragmentInterval fragments start with keyframes
+            sourceID: source.id,
+            data: data)
+
+        onEncodedChunk(chunk)
+
+        // Start tracking the next fragment.
+        currentFragmentStartPTS = currentPTS
     }
 }
