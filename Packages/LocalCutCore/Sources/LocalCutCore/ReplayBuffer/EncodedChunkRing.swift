@@ -241,22 +241,31 @@ public actor EncodedChunkRing {
         }
     }
 
-    /// Ensures all chunks in the given span are loaded into memory. Returns
-    /// the chunks with data populated, or an empty array if any chunk fails
-    /// to load.
+    /// Ensures all chunks in the given span have data loaded. Returns the
+    /// chunks with data populated, or an empty array if any chunk fails to
+    /// load. Reads spill data into returned copies without mutating the
+    /// ring's memory accounting (the caller is responsible for the data
+    /// lifetime during finalization).
     public func loadChunksForSave(_ span: [EncodedChunk]) -> [EncodedChunk] {
         var result: [EncodedChunk] = []
         result.reserveCapacity(span.count)
         for chunk in span {
             var c = chunk
             if c.isSpilled && !c.isInMemory {
-                guard let idx = chunks.firstIndex(where: { $0.id == c.id }) else { return [] }
-                do {
-                    try chunks[idx].loadDataFromSpill()
-                    c = chunks[idx]
-                } catch {
-                    return []
-                }
+                // Read spill data directly into the copy without mutating
+                // the ring's internal state. This avoids inflating
+                // memoryUsedBytes for transient save operations.
+                guard let url = c.spillURL,
+                      let data = try? Data(contentsOf: url) else { return [] }
+                c = EncodedChunk(
+                    id: c.id,
+                    presentationTimeStamp: c.presentationTimeStamp,
+                    decodeTimeStamp: c.decodeTimeStamp,
+                    duration: c.duration,
+                    byteSize: c.byteSize,
+                    isKeyframe: c.isKeyframe,
+                    sourceID: c.sourceID,
+                    data: data)
             }
             guard c.data != nil else { return [] }
             result.append(c)
@@ -304,29 +313,40 @@ public actor EncodedChunkRing {
         return evicted
     }
 
-    /// Evicts oldest chunks that exceed the duration cap.
+    /// Evicts oldest chunks that exceed the duration cap, respecting
+    /// keyframe boundaries. Also cleans up spill files for spilled chunks.
     private func evictByDuration() -> Int {
         guard let last = chunks.last else { return 0 }
         let cutoffTime = last.endTime - CMTime(seconds: config.maxDurationSeconds, preferredTimescale: 600)
 
-        var removeCount = 0
-        for chunk in chunks {
-            if chunk.endTime <= cutoffTime {
-                removeCount += 1
-            } else {
-                break
+        // Find the latest keyframe at or before the cutoff. Evict everything
+        // up to (but not including) the NEXT keyframe after it, so the ring
+        // always starts at a keyframe boundary.
+        var lastKeyframeBeforeCutoff: Int?
+        for i in 0..<chunks.count {
+            if chunks[i].isKeyframe && chunks[i].presentationTimeStamp <= cutoffTime {
+                lastKeyframeBeforeCutoff = i
             }
         }
+        guard let kfIdx = lastKeyframeBeforeCutoff else { return 0 }
 
-        guard removeCount > 0 else { return 0 }
+        // Find the next keyframe after the cutoff keyframe.
+        let afterKF = chunks.index(after: kfIdx)
+        let nextKFIdx = chunks[afterKF...].firstIndex { $0.isKeyframe }
+            ?? chunks.count
 
-        let removed = chunks.prefix(removeCount)
-        for chunk in removed {
-            memoryUsedBytes -= chunk.memoryBytes
-            spillUsedBytes -= chunk.spillURL != nil ? chunk.byteSize : 0
+        guard nextKFIdx > 0 else { return 0 }
+
+        // Clean up spill files for spilled chunks being evicted.
+        for i in 0..<nextKFIdx {
+            if let spillURL = chunks[i].spillURL {
+                try? FileManager.default.removeItem(at: spillURL)
+                spillUsedBytes -= chunks[i].byteSize
+            }
+            memoryUsedBytes -= chunks[i].memoryBytes
         }
-        chunks.removeFirst(removeCount)
-        return removeCount
+        chunks.removeFirst(nextKFIdx)
+        return nextKFIdx
     }
 
     /// Spills oldest keyframe-aligned spans to disk until memory budget is met.
