@@ -61,9 +61,6 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private var didNotifyBackpressure = false
     private var writeStartupError: String?
     private var manifestAppendError: String?
-    /// Tracks file growth for encoded-byte accounting. Growth is not used as a
-    /// keyframe or chunk-boundary signal.
-    private var lastKnownFileSize: UInt64 = 0
 
     init(source: CaptureSourceDescriptor,
          outputURL: URL,
@@ -276,10 +273,6 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
 
     private func encodedByteEstimate(for sampleBuffer: CMSampleBuffer,
                                      duration: CMTime) -> Int {
-        let fileGrowthBytes = fileGrowthByteCount()
-        if fileGrowthBytes > 0 {
-            return fileGrowthBytes
-        }
         if mediaType == .video,
            let frameRate = source.frameRate,
            frameRate > 0,
@@ -292,14 +285,6 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
             return max(1, Int(Double(bitrate) / 8.0 * max(0, duration.seconds)))
         }
         return max(1, KeyframeDetector.byteSize(sampleBuffer))
-    }
-
-    private func fileGrowthByteCount() -> Int {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: outputURL.path),
-              let fileSize = attrs[.size] as? UInt64 else { return 0 }
-        defer { lastKnownFileSize = fileSize }
-        guard fileSize > lastKnownFileSize else { return 0 }
-        return Int(fileSize - lastKnownFileSize)
     }
 
     private func videoBitrateFromInputSettings() -> Int? {
