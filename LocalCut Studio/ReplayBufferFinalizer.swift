@@ -141,18 +141,22 @@ enum ReplayBufferFinalizer {
         }
         writer.startSession(atSourceTime: .zero)
 
-        // Process all sources sequentially. Each source's samples are
-        // written in order, which preserves temporal alignment.
+        // Start all readers first to allow concurrent, interleaved writing.
         for source in sourceReaders {
             guard source.reader.startReading() else {
                 log.warning("Could not start reader: \(source.reader.error?.localizedDescription ?? "unknown")")
                 continue
             }
+        }
 
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                let group = DispatchGroup()
-                let writerQueue = DispatchQueue(label: "com.localcutstudio.replay.writer")
+        // Process all pipes concurrently across all sources to maintain
+        // proper interleaving for AVAssetWriter.
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let group = DispatchGroup()
+            let writerQueue = DispatchQueue(label: "com.localcutstudio.replay.writer")
 
+            for source in sourceReaders {
+                guard source.reader.status == .reading else { continue }
                 for pipe in source.pipes {
                     group.enter()
                     pipe.writerInput.requestMediaDataWhenReady(on: writerQueue) {
@@ -174,10 +178,10 @@ enum ReplayBufferFinalizer {
                         }
                     }
                 }
+            }
 
-                group.notify(queue: writerQueue) {
-                    continuation.resume()
-                }
+            group.notify(queue: writerQueue) {
+                continuation.resume()
             }
         }
 
@@ -221,12 +225,16 @@ enum ReplayBufferFinalizer {
     }
 
     nonisolated private static func alignedVideoStart(asset: AVAsset,
-                                                      track: AVAssetTrack,
-                                                      requestedStart: CMTime) async -> CMTime {
+                                                       track: AVAssetTrack,
+                                                       requestedStart: CMTime) async -> CMTime {
         guard requestedStart > .zero else { return requestedStart }
+        // Limit the scan window to 10 seconds before requestedStart to
+        // avoid a linear scan from .zero on long recordings.
+        let lookback = CMTime(seconds: 10, preferredTimescale: 600)
+        let scanStart = max(.zero, requestedStart - lookback)
         do {
             let reader = try AVAssetReader(asset: asset)
-            reader.timeRange = CMTimeRange(start: .zero, end: requestedStart)
+            reader.timeRange = CMTimeRange(start: scanStart, end: requestedStart)
             let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
             output.alwaysCopiesSampleData = false
             guard reader.canAdd(output) else { return requestedStart }
