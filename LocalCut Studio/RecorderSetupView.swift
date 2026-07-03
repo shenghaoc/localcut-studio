@@ -104,6 +104,19 @@ struct RecorderSetupView: View {
                     }
                 }
 
+                Section("Replay Buffer") {
+                    Toggle("Enable replay buffer", isOn: $model.replayBufferEnabled)
+                    Picker("Duration", selection: $model.replayBufferDuration) {
+                        ForEach(ReplayBufferConfig.DurationOption.allCases) { option in
+                            Text(option.displayName).tag(option)
+                        }
+                    }
+                    .disabled(!model.replayBufferEnabled)
+                    Text("Saves the last N seconds as a clip while recording continues.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Controls") {
                     Toggle("Hide floating controls while recording",
                            isOn: $model.hideFloatingPanelWhileRecording)
