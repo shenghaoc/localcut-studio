@@ -37,12 +37,35 @@ final class DiagnosticsAgent {
     private(set) var sampleCount: Int = 0
     /// The last ≤ 60 render-time samples in milliseconds, for the sparkline.
     private(set) var sparkline: [Double] = []
+
+    /// Updates replay buffer diagnostics from an external snapshot.
+    func updateReplayBufferDiagnostics(_ diag: ReplayBufferDiagnostics,
+                                       latencyMs: Double = 0) {
+        replayBufferMemoryBytes = diag.memoryUsedBytes
+        replayBufferBudgetBytes = diag.memoryBudgetBytes
+        replayBufferSpillBytes = diag.spillUsedBytes
+        replayBufferDurationSeconds = diag.bufferedDurationSeconds
+        liveMonitorLatencyMs = latencyMs
+    }
     /// Current hardware encoder leases held across editor workflows.
     private(set) var encoderLeaseCount: Int = 0
     /// Maximum concurrent hardware encoder leases allowed on this host.
     private(set) var encoderBudgetMax: Int = 0
     /// Labels for the current encoder budget consumers.
     private(set) var encoderLedger: [String] = []
+
+    // MARK: - Replay buffer diagnostics (Phase 46)
+
+    /// Replay buffer memory usage in bytes.
+    private(set) var replayBufferMemoryBytes: Int = 0
+    /// Replay buffer memory budget in bytes.
+    private(set) var replayBufferBudgetBytes: Int = 0
+    /// Replay buffer spill size in bytes.
+    private(set) var replayBufferSpillBytes: Int = 0
+    /// Replay buffer duration available in seconds.
+    private(set) var replayBufferDurationSeconds: Double = 0
+    /// Live monitor latency in milliseconds.
+    private(set) var liveMonitorLatencyMs: Double = 0
 
     // MARK: - Wiring
 
@@ -208,7 +231,10 @@ final class DiagnosticsAgent {
             encoders=\(self.encoderLeaseCount, privacy: .public)/\(self.encoderBudgetMax, privacy: .public) \
             last_ms=\(self.lastFrameTime * 1000, format: .fixed(precision: 2), privacy: .public) \
             p95_ms=\(self.p95RenderTime * 1000, format: .fixed(precision: 2), privacy: .public) \
-            drops=\(self.frameDropsLastTick, privacy: .public)
+            drops=\(self.frameDropsLastTick, privacy: .public) \
+            replay_mem=\(self.replayBufferMemoryBytes, privacy: .public) \
+            replay_spill=\(self.replayBufferSpillBytes, privacy: .public) \
+            latency_ms=\(self.liveMonitorLatencyMs, format: .fixed(precision: 1), privacy: .public)
             """)
     }
 

@@ -151,6 +151,9 @@ nonisolated struct CaptureStartRequest: Sendable {
     var capabilities: Capabilities
     var captureRegion: CaptureRegion? = nil
     var excludedWindowIDs: Set<CGWindowID> = []
+    /// Voice cleanup settings store for mic recording path (Phase 36/46).
+    /// When non-nil, mic audio is processed through VoiceCleanupDSP before encoding.
+    var voiceCleanupSettings: LiveVoiceCleanupSettingsStore? = nil
 }
 
 nonisolated struct CaptureSessionResult: Sendable, Identifiable {
