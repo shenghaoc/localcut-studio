@@ -1,0 +1,348 @@
+import Testing
+import Foundation
+import CoreMedia
+@testable import LocalCut_Studio
+import LocalCutCore
+
+@Suite("ProgramLanding")
+struct ProgramLandingTests {
+
+    @Test("Stop lands N ISO tracks plus 1 layout track")
+    func stopLandsTracks() {
+        let sourceId1 = UUID()
+        let sceneId = UUID()
+        let scene = SceneDefinition(id: sceneId, name: "Full", layers: [
+            SceneLayer(sourceRef: .captureSource(sourceId1), zIndex: 0)
+        ])
+        let sceneDoc = SceneDoc(scenes: [scene])
+        let duration = CMTime(value: 10, timescale: 1)
+
+        let switches: [(sceneId: UUID, atUs: Int64, sceneDoc: SceneDoc)] = [
+            (sceneId: sceneId, atUs: 0, sceneDoc: sceneDoc),
+        ]
+
+        let clips = ProgramLanding.buildLayoutClips(
+            switches: switches,
+            sessionStartHostTimeUs: 0,
+            sessionDuration: duration)
+        #expect(clips.count == 1)
+        #expect(clips[0].sceneSnapshot.name == "Full")
+    }
+
+    @Test("Scene switches partition into correct segment ranges")
+    func sceneSwitchesPartition() {
+        let sceneA = SceneDefinition(name: "A", layers: [])
+        let sceneB = SceneDefinition(name: "B", layers: [])
+        let sceneDoc = SceneDoc(scenes: [sceneA, sceneB])
+        let duration = CMTime(value: 10, timescale: 1)
+
+        let switches: [(sceneId: UUID, atUs: Int64, sceneDoc: SceneDoc)] = [
+            (sceneId: sceneA.id, atUs: 0, sceneDoc: sceneDoc),
+            (sceneId: sceneB.id, atUs: 3_000_000, sceneDoc: sceneDoc),
+            (sceneId: sceneA.id, atUs: 7_000_000, sceneDoc: sceneDoc),
+        ]
+
+        let clips = ProgramLanding.buildLayoutClips(
+            switches: switches,
+            sessionStartHostTimeUs: 0,
+            sessionDuration: duration)
+        #expect(clips.count == 3)
+        #expect(clips[0].sceneSnapshot.name == "A")
+        #expect(clips[1].sceneSnapshot.name == "B")
+        #expect(clips[2].sceneSnapshot.name == "A")
+    }
+
+    @Test("Layout clips store scene snapshots")
+    func clipsStoreSnapshots() {
+        let scene = SceneDefinition(name: "PiP", layers: [
+            SceneLayer(sourceRef: .captureSource(UUID()), zIndex: 0, opacity: 0.8)
+        ])
+        let sceneDoc = SceneDoc(scenes: [scene])
+        let duration = CMTime(value: 5, timescale: 1)
+
+        let switches: [(sceneId: UUID, atUs: Int64, sceneDoc: SceneDoc)] = [
+            (sceneId: scene.id, atUs: 0, sceneDoc: sceneDoc),
+        ]
+
+        let clips = ProgramLanding.buildLayoutClips(
+            switches: switches,
+            sessionStartHostTimeUs: 0,
+            sessionDuration: duration)
+        #expect(clips.count == 1)
+        #expect(clips[0].sceneSnapshot.layers.count == 1)
+        #expect(clips[0].sceneSnapshot.layers[0].opacity == 0.8)
+    }
+
+    @Test("Layout clips store correct duration")
+    func clipsStoreDuration() {
+        let sceneA = SceneDefinition(name: "A", layers: [])
+        let sceneB = SceneDefinition(name: "B", layers: [])
+        let sceneDoc = SceneDoc(scenes: [sceneA, sceneB])
+        let duration = CMTime(value: 10, timescale: 1)
+
+        let switches: [(sceneId: UUID, atUs: Int64, sceneDoc: SceneDoc)] = [
+            (sceneId: sceneA.id, atUs: 0, sceneDoc: sceneDoc),
+            (sceneId: sceneB.id, atUs: 5_000_000, sceneDoc: sceneDoc),
+        ]
+
+        let clips = ProgramLanding.buildLayoutClips(
+            switches: switches,
+            sessionStartHostTimeUs: 0,
+            sessionDuration: duration)
+        #expect(clips.count == 2)
+        // First clip: 0 to 5 seconds.
+        #expect(clips[0].duration.value == 5 * 600) // timescale 600
+        // Second clip: 5 to 10 seconds.
+        #expect(clips[1].duration.value == 5 * 600)
+    }
+
+    @Test("Empty switches returns empty clips")
+    func emptySwitches() {
+        let clips = ProgramLanding.buildLayoutClips(
+            switches: [],
+            sessionStartHostTimeUs: 0,
+            sessionDuration: CMTime(value: 10, timescale: 1))
+        #expect(clips.isEmpty)
+    }
+
+    @Test("Missing scene yields placeholder clip")
+    func missingSceneYieldsPlaceholder() {
+        let sceneDoc = SceneDoc(scenes: [])
+        let unknownId = UUID()
+        let duration = CMTime(value: 5, timescale: 1)
+
+        let switches: [(sceneId: UUID, atUs: Int64, sceneDoc: SceneDoc)] = [
+            (sceneId: unknownId, atUs: 0, sceneDoc: sceneDoc),
+        ]
+
+        let clips = ProgramLanding.buildLayoutClips(
+            switches: switches,
+            sessionStartHostTimeUs: 0,
+            sessionDuration: duration)
+        #expect(clips.count == 1)
+        #expect(clips[0].sceneSnapshot.name == "Unknown")
+        #expect(clips[0].sceneSnapshot.layers.isEmpty)
+    }
+
+    @Test("Re-export uses layout snapshots, not current scene list")
+    func reExportUsesSnapshots() {
+        let savedScene = SceneDefinition(name: "Saved", layers: [
+            SceneLayer(sourceRef: .captureSource(UUID()), zIndex: 0, opacity: 1.0)
+        ])
+        let sceneDoc = SceneDoc(scenes: [savedScene])
+        let duration = CMTime(value: 5, timescale: 1)
+
+        let switches: [(sceneId: UUID, atUs: Int64, sceneDoc: SceneDoc)] = [
+            (sceneId: savedScene.id, atUs: 0, sceneDoc: sceneDoc),
+        ]
+
+        let clips = ProgramLanding.buildLayoutClips(
+            switches: switches,
+            sessionStartHostTimeUs: 0,
+            sessionDuration: duration)
+        // The clip's snapshot is from the scene-doc, not the "current" scenes.
+        #expect(clips[0].sceneSnapshot.name == "Saved")
+    }
+
+    @Test("Re-export schedules colour-only layout layers")
+    @MainActor
+    func reExportSchedulesColourOnlyLayoutLayers() async throws {
+        let project = Project()
+        project.renderSize = CGSize(width: 32, height: 32)
+        project.frameRate = 30
+
+        let scene = SceneDefinition(name: "Colour", layers: [
+            SceneLayer(sourceRef: .colour(hex: "#FF0000"), zIndex: 0)
+        ])
+        let layoutTrack = LayoutTrack()
+        layoutTrack.clips = [
+            LayoutClip(
+                timelineStart: CMTimeCode(.zero),
+                duration: CMTimeCode(CMTime(seconds: 2, preferredTimescale: 600)),
+                sceneSnapshot: scene)
+        ]
+        project.layoutTracks = [layoutTrack]
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+        let videoComposition = try #require(built.videoComposition)
+        let instruction = try #require(videoComposition.instructions.compactMap {
+            $0 as? EffectCompositionInstruction
+        }.first { instruction in
+            instruction.timeRange.containsTime(CMTime(seconds: 1, preferredTimescale: 600))
+        })
+
+        let hasColourUnit = instruction.units.contains { unit in
+            if case .colour(let layer) = unit {
+                return layer.hex == "#FF0000"
+            }
+            return false
+        }
+
+        #expect(abs(built.duration - 2) < 0.05)
+        #expect(hasColourUnit)
+        #expect(!instruction.units.flatMap(\.trackIDs).isEmpty)
+    }
+
+    @Test("Host-time scene switches are normalized to session-relative layout clips")
+    func hostTimeSwitchesNormalize() {
+        let sceneA = SceneDefinition(name: "A", layers: [])
+        let sceneB = SceneDefinition(name: "B", layers: [])
+        let sceneDoc = SceneDoc(scenes: [sceneA, sceneB])
+        let duration = CMTime(value: 10, timescale: 1)
+        let sessionStartUs: Int64 = 1_000_000_000
+
+        let switches: [(sceneId: UUID, atUs: Int64, sceneDoc: SceneDoc)] = [
+            (sceneId: sceneA.id, atUs: sessionStartUs, sceneDoc: sceneDoc),
+            (sceneId: sceneB.id, atUs: sessionStartUs + 4_000_000, sceneDoc: sceneDoc),
+        ]
+
+        let clips = ProgramLanding.buildLayoutClips(
+            switches: switches,
+            sessionStartHostTimeUs: sessionStartUs,
+            sessionDuration: duration)
+
+        #expect(clips.count == 2)
+        #expect(clips[0].timelineStart.value == 0)
+        #expect(clips[0].duration.value == 4 * 600)
+        #expect(clips[1].timelineStart.value == 4 * 600)
+        #expect(clips[1].duration.value == 6 * 600)
+    }
+
+    @Test("Landing creates media items for ISO clips")
+    @MainActor
+    func landingCreatesMediaItemsForISOClips() {
+        let model = EditorModel()
+        let sourceID = UUID()
+        let scene = SceneDefinition(name: "Full", layers: [
+            SceneLayer(sourceRef: .captureSource(sourceID), zIndex: 0)
+        ])
+        let sceneDoc = SceneDoc(scenes: [scene])
+        let durationUs: Int64 = 5_000_000
+        let manifest = CaptureManifest(records: [
+            .header(CaptureManifestHeader(
+                sessionID: UUID(),
+                createdAt: Date(timeIntervalSince1970: 0),
+                sessionStartHostTimeUs: 1_000,
+                sources: [
+                    CaptureSourceDescriptor(
+                        id: sourceID,
+                        kind: .display,
+                        displayName: "Display",
+                        relativePath: "display.mov",
+                        width: 1920,
+                        height: 1080,
+                        frameRate: 30),
+                ],
+                encoders: [:])),
+            .sceneDoc(CaptureSceneDocRecord(atUs: 1_000, scenes: sceneDoc)),
+            .sceneSwitch(CaptureSceneSwitchRecord(sceneId: scene.id, atUs: 1_000)),
+            .sourceEnded(CaptureSourceEndedRecord(
+                sourceID: sourceID,
+                atUs: 1_000 + durationUs,
+                durationUs: durationUs,
+                sampleCount: 10)),
+            .finalize(CaptureFinalizeRecord(atUs: 1_000 + durationUs, durationUs: durationUs)),
+        ])
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProgramLanding-\(UUID().uuidString).mov")
+        FileManager.default.createFile(atPath: fileURL.path, contents: Data())
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let result = ProgramSessionResult(
+            sessionID: UUID(),
+            sessionURL: fileURL.deletingLastPathComponent(),
+            manifest: manifest,
+            isoTrackURLs: [sourceID: fileURL],
+            duration: CaptureManifest.time(fromMicroseconds: durationUs),
+            sceneSwitches: manifest.resolvedSceneSwitches,
+            writerWarnings: [])
+
+        ProgramLanding.land(result: result, model: model)
+
+        // MediaItem uses a unique ID per landing (not sourceID) to avoid
+        // collisions across sessions.
+        let landedItem = model.project.mediaItems.first(where: { $0.url == fileURL })
+        #expect(landedItem != nil)
+        #expect(model.project.videoTracks.last?.clips.first?.mediaID == landedItem?.id)
+        #expect(model.project.layoutTracks.last?.clips.count == 1)
+    }
+
+    @Test("Landing skips ISO sources that recorded zero samples")
+    @MainActor
+    func landingSkipsZeroSampleSources() {
+        let model = EditorModel()
+        let activeSourceID = UUID()
+        let emptySourceID = UUID()
+        let scene = SceneDefinition(name: "Full", layers: [
+            SceneLayer(sourceRef: .captureSource(activeSourceID), zIndex: 0),
+            SceneLayer(sourceRef: .captureSource(emptySourceID), zIndex: 1),
+        ])
+        let sceneDoc = SceneDoc(scenes: [scene])
+        let durationUs: Int64 = 5_000_000
+        let activeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProgramLanding-active-\(UUID().uuidString).mov")
+        let emptyURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProgramLanding-empty-\(UUID().uuidString).mov")
+        #expect(FileManager.default.createFile(atPath: activeURL.path, contents: Data([1])))
+        #expect(FileManager.default.createFile(atPath: emptyURL.path, contents: Data()))
+        defer {
+            try? FileManager.default.removeItem(at: activeURL)
+            try? FileManager.default.removeItem(at: emptyURL)
+        }
+
+        let activeSource = CaptureSourceDescriptor(
+            id: activeSourceID,
+            kind: .display,
+            displayName: "Display",
+            relativePath: activeURL.lastPathComponent,
+            width: 1920,
+            height: 1080,
+            frameRate: 30)
+        let emptySource = CaptureSourceDescriptor(
+            id: emptySourceID,
+            kind: .webcam,
+            displayName: "Camera",
+            relativePath: emptyURL.lastPathComponent,
+            width: 1280,
+            height: 720,
+            frameRate: 30)
+        let manifest = CaptureManifest(records: [
+            .header(CaptureManifestHeader(
+                sessionID: UUID(),
+                createdAt: Date(timeIntervalSince1970: 0),
+                sessionStartHostTimeUs: 1_000,
+                sources: [activeSource, emptySource],
+                encoders: [:])),
+            .sceneDoc(CaptureSceneDocRecord(atUs: 1_000, scenes: sceneDoc)),
+            .sceneSwitch(CaptureSceneSwitchRecord(sceneId: scene.id, atUs: 1_000)),
+            .sourceEnded(CaptureSourceEndedRecord(
+                sourceID: activeSourceID,
+                atUs: 1_000 + durationUs,
+                durationUs: durationUs,
+                sampleCount: 10)),
+            .sourceEnded(CaptureSourceEndedRecord(
+                sourceID: emptySourceID,
+                atUs: 1_000 + durationUs,
+                durationUs: durationUs,
+                sampleCount: 0)),
+            .finalize(CaptureFinalizeRecord(atUs: 1_000 + durationUs, durationUs: durationUs)),
+        ])
+        let result = ProgramSessionResult(
+            sessionID: UUID(),
+            sessionURL: activeURL.deletingLastPathComponent(),
+            manifest: manifest,
+            isoTrackURLs: [
+                activeSourceID: activeURL,
+                emptySourceID: emptyURL,
+            ],
+            duration: CaptureManifest.time(fromMicroseconds: durationUs),
+            sceneSwitches: manifest.resolvedSceneSwitches,
+            writerWarnings: [])
+
+        ProgramLanding.land(result: result, model: model)
+
+        #expect(model.project.mediaItems.contains { $0.url == activeURL })
+        #expect(!model.project.mediaItems.contains { $0.url == emptyURL })
+        #expect(model.project.videoTracks.last?.clips.count == 1)
+    }
+}

@@ -19,6 +19,10 @@ final class MediaItem: Identifiable {
     let asset: AVURLAsset
 
     var name: String
+    /// The original capture source UUID from Program Mode landing. Used by
+    /// `CompositionBuilder` to match scene-layer source refs to MediaItems
+    /// when replaying layout tracks. `nil` for non-Program-Mode media.
+    var captureSourceID: UUID?
     var duration: CMTime = .zero
     var naturalSize: CGSize = .zero
     var preferredTransform: CGAffineTransform = .identity
@@ -94,6 +98,10 @@ final class Project {
     var screencastEventLogs: [ScreencastEventLog] = []
     /// Phase 44 keystroke overlay clips derived from event logs.
     var keystrokeOverlayClips: [KeystrokeOverlayClip] = []
+    /// Phase 45 scene definitions for Program Mode.
+    var sceneDoc: SceneDoc = SceneDoc()
+    /// Phase 45 layout tracks from Program Mode sessions.
+    var layoutTracks: [LayoutTrack] = []
     /// Bookmark data for overlay source files, keyed by overlay ID.
     var overlayBookmarks: [UUID: Data] = [:]
     /// Bundle-relative paths for overlay source files, keyed by overlay ID.

@@ -40,7 +40,11 @@ extension ProjectDocument {
             screencastEventLogs: project.screencastEventLogs,
             keystrokeOverlayClips: project.keystrokeOverlayClips,
             aspect: project.aspect,
-            coverFrame: project.coverFrame)
+            coverFrame: project.coverFrame,
+            sceneDoc: project.sceneDoc,
+            layoutTracks: project.layoutTracks.map {
+                LayoutTrackDoc(id: $0.id, name: $0.name, isMuted: $0.isMuted, clips: $0.clips)
+            })
     }
 
     /// Captures a queue snapshot. Saved bundle documents intentionally strip
@@ -109,6 +113,7 @@ extension MediaRef {
             preferredTransform: TransformCode(item.preferredTransform),
             hasVideo: item.hasVideo,
             hasAudio: item.hasAudio,
-            bundleRelativePath: item.bundleRelativePath)
+            bundleRelativePath: item.bundleRelativePath,
+            captureSourceID: item.captureSourceID)
     }
 }

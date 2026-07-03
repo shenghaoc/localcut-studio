@@ -26,6 +26,8 @@ struct DiagnosticsView: View {
             row("GPU (est.)", value: percent(agent.gpuUtilisation))
                 .help("Estimated from the compositor's share of frame budget — macOS 26 has no public counter API without entitlements.")
             row("Decoders", value: "\(agent.decoderCount)")
+            row("Encoders", value: "\(agent.encoderLeaseCount) / \(agent.encoderBudgetMax)")
+                .help(agent.encoderLedger.isEmpty ? "No active encoder leases." : agent.encoderLedger.joined(separator: ", "))
             row("Last render", value: millis(agent.lastFrameTime))
             row("P95 render", value: millis(agent.p95RenderTime))
             row("Drops / s", value: "\(agent.frameDropsLastTick)")
@@ -155,4 +157,3 @@ struct DiagnosticsView: View {
         }
     }
 }
-

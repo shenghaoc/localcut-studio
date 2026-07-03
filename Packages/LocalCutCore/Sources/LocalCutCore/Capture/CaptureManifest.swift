@@ -181,6 +181,31 @@ public struct CaptureResumeRecord: Codable, Hashable, Sendable {
     }
 }
 
+/// Phase 45: full SceneDoc snapshot written at session start and on every
+/// mid-session scene edit. Recovery uses the LATEST `scene-doc` record
+/// found before the crash, NOT the current user's scenes.
+public struct CaptureSceneDocRecord: Codable, Hashable, Sendable {
+    public var atUs: Int64
+    public var scenes: SceneDoc
+
+    public init(atUs: Int64, scenes: SceneDoc) {
+        self.atUs = atUs
+        self.scenes = scenes
+    }
+}
+
+/// Phase 45: one record per scene switch during a live session. Recovery
+/// resolves each switch against the latest preceding `scene-doc` snapshot.
+public struct CaptureSceneSwitchRecord: Codable, Hashable, Sendable {
+    public var sceneId: UUID
+    public var atUs: Int64
+
+    public init(sceneId: UUID, atUs: Int64) {
+        self.sceneId = sceneId
+        self.atUs = atUs
+    }
+}
+
 public enum CaptureManifestRecord: Hashable, Sendable {
     case header(CaptureManifestHeader)
     case epoch(CaptureEpochRecord)
@@ -189,6 +214,11 @@ public enum CaptureManifestRecord: Hashable, Sendable {
     case pause(CapturePauseRecord)
     case resume(CaptureResumeRecord)
     case finalize(CaptureFinalizeRecord)
+    /// Phase 45: full SceneDoc snapshot written at session start and on
+    /// every mid-session scene edit.
+    case sceneDoc(CaptureSceneDocRecord)
+    /// Phase 45: one record per scene switch during a live session.
+    case sceneSwitch(CaptureSceneSwitchRecord)
     case unknown(kind: String)
 
     public var kind: String {
@@ -200,6 +230,8 @@ public enum CaptureManifestRecord: Hashable, Sendable {
         case .pause: "pause"
         case .resume: "resume"
         case .finalize: "finalize"
+        case .sceneDoc: "scene-doc"
+        case .sceneSwitch: "scene-switch"
         case .unknown(let kind): kind
         }
     }
@@ -222,6 +254,8 @@ extension CaptureManifestRecord: Codable {
         case timelineStartUs
         case droppedSamples
         case reason
+        case sceneId
+        case scenes
     }
 
     public init(from decoder: Decoder) throws {
@@ -242,6 +276,10 @@ extension CaptureManifestRecord: Codable {
             self = .resume(try CaptureResumeRecord(from: decoder))
         case "finalize":
             self = .finalize(try CaptureFinalizeRecord(from: decoder))
+        case "scene-doc":
+            self = .sceneDoc(try CaptureSceneDocRecord(from: decoder))
+        case "scene-switch":
+            self = .sceneSwitch(try CaptureSceneSwitchRecord(from: decoder))
         default:
             self = .unknown(kind: kind)
         }
@@ -279,6 +317,12 @@ extension CaptureManifestRecord: Codable {
         case .finalize(let value):
             try container.encode(value.atUs, forKey: .atUs)
             try container.encode(value.durationUs, forKey: .durationUs)
+        case .sceneDoc(let value):
+            try container.encode(value.atUs, forKey: .atUs)
+            try container.encode(value.scenes, forKey: .scenes)
+        case .sceneSwitch(let value):
+            try container.encode(value.sceneId, forKey: .sceneId)
+            try container.encode(value.atUs, forKey: .atUs)
         case .unknown(let kind):
             try container.encode(kind, forKey: .kind)
         }
@@ -327,6 +371,44 @@ public struct CaptureManifest: Hashable, Sendable {
     }
 
     public var isFinalized: Bool { finalize != nil }
+
+    // MARK: - Phase 45 scene recovery
+
+    /// All scene-doc records in order.
+    public var sceneDocRecords: [CaptureSceneDocRecord] {
+        records.compactMap {
+            if case .sceneDoc(let doc) = $0 { doc } else { nil }
+        }
+    }
+
+    /// All scene-switch records in order.
+    public var sceneSwitchRecords: [CaptureSceneSwitchRecord] {
+        records.compactMap {
+            if case .sceneSwitch(let sw) = $0 { sw } else { nil }
+        }
+    }
+
+    /// Resolves each scene-switch against the latest preceding scene-doc
+    /// snapshot. Returns an array of (sceneId, atUs, sceneDocSnapshot).
+    /// Recovery MUST use this — never the user's current scenes, which
+    /// may have been edited after the crash.
+    public var resolvedSceneSwitches: [(sceneId: UUID, atUs: Int64, sceneDoc: SceneDoc)] {
+        var result: [(sceneId: UUID, atUs: Int64, sceneDoc: SceneDoc)] = []
+        var latestSceneDoc: SceneDoc?
+        for record in records {
+            switch record {
+            case .sceneDoc(let doc):
+                latestSceneDoc = doc.scenes
+            case .sceneSwitch(let sw):
+                if let doc = latestSceneDoc {
+                    result.append((sceneId: sw.sceneId, atUs: sw.atUs, sceneDoc: doc))
+                }
+            default:
+                break
+            }
+        }
+        return result
+    }
 
     /// All source-ended records grouped by source ID. With pause/resume, a single
     /// source can have multiple ended records (one per chunk).

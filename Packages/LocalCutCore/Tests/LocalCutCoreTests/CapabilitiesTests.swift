@@ -287,3 +287,78 @@ func chipFamilyAccessors() {
     #expect(m3.isAppleSilicon == true)
     #expect(m3.generation == 3)
 }
+
+// MARK: - Phase 45: Program Mode capability
+
+@Test("Program Mode: Intel Mac resolves to baseline")
+func programModeIntelBaseline() {
+    let caps = Capabilities(
+        chip: .intel,
+        unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
+        videoEncoderCount: 0,
+        osVersion: .init(major: 26, minor: 0))
+    let verdict = caps.tier(for: .programMode)
+    #expect(verdict.tier == .baseline)
+    #expect(verdict.reason.contains("Intel"))
+}
+
+@Test("Program Mode: no hardware encoders resolves to baseline")
+func programModeNoEncodersBaseline() {
+    let caps = Capabilities(
+        chip: .appleSilicon(generation: 2),
+        unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
+        videoEncoderCount: 0,
+        osVersion: .init(major: 26, minor: 0))
+    let verdict = caps.tier(for: .programMode)
+    #expect(verdict.tier == .baseline)
+    #expect(verdict.reason.contains("No hardware"))
+}
+
+@Test("Program Mode: unknown Apple Silicon generation resolves to baseline")
+func programModeUnknownGenBaseline() {
+    let caps = Capabilities(
+        chip: .appleSilicon(generation: 0),
+        unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
+        videoEncoderCount: 2,
+        osVersion: .init(major: 26, minor: 0))
+    let verdict = caps.tier(for: .programMode)
+    #expect(verdict.tier == .baseline)
+    #expect(verdict.reason.contains("Unknown"))
+}
+
+@Test("Program Mode: M2 with encoders resolves to pro")
+func programModeM2Pro() {
+    let caps = Capabilities(
+        chip: .appleSilicon(generation: 2),
+        unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
+        videoEncoderCount: 2,
+        osVersion: .init(major: 26, minor: 0))
+    let verdict = caps.tier(for: .programMode)
+    #expect(verdict.tier == .pro)
+}
+
+@Test("Program Mode: M1 with encoders resolves to accelerated")
+func programModeM1Accelerated() {
+    let caps = Capabilities(
+        chip: .appleSilicon(generation: 1),
+        unifiedMemoryBytes: 8 * 1024 * 1024 * 1024,
+        videoEncoderCount: 1,
+        osVersion: .init(major: 26, minor: 0))
+    let verdict = caps.tier(for: .programMode)
+    #expect(verdict.tier == .accelerated)
+}
+
+@Test("DiagnosticsBridge: encoder budget tracking")
+func diagnosticsEncoderBudget() {
+    let bridge = DiagnosticsBridge()
+    bridge.setEncoderBudget(active: 2, max: 4, ledger: ["export", "programIso"])
+    let snap = bridge.snapshot()
+    #expect(snap.encoderLeaseCount == 2)
+    #expect(snap.encoderBudgetMax == 4)
+    #expect(snap.encoderLedger.count == 2)
+    bridge.clearEncoderBudget()
+    let cleared = bridge.snapshot()
+    #expect(cleared.encoderLeaseCount == 0)
+    #expect(cleared.encoderBudgetMax == 0)
+    #expect(cleared.encoderLedger.isEmpty)
+}

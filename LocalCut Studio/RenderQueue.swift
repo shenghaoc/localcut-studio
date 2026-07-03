@@ -267,6 +267,15 @@ final class RenderQueue {
     /// (R3.6, codex P1).
     @ObservationIgnored private var refusingPersist: Bool = false
 
+    /// Shared encoder budget. Acquires a lease before each export job
+    /// and releases it when the job finishes.
+    @ObservationIgnored
+    var encoderBudget: EncoderBudget?
+
+    /// The lease acquired for the current export job, if any.
+    @ObservationIgnored
+    private var activeLease: EncoderLease?
+
     init(
         jobs: [QueueJob] = [],
         persistsToDisk: Bool = true,
@@ -475,7 +484,18 @@ final class RenderQueue {
             currentJobID = nil
             activeExportSession = nil
             activeWriter = nil
+            activeLease = nil
             recomputeTotalProgress()
+        }
+
+        func releaseActiveLease() async {
+            guard let lease = activeLease else { return }
+            activeLease = nil
+            if let budget = encoderBudget {
+                await lease.relinquish(budget: budget)
+            } else {
+                lease.relinquish()
+            }
         }
 
         // Resolve the output bookmark. A stale / missing target is a clean
@@ -593,6 +613,21 @@ final class RenderQueue {
                 }
             }
 
+            // Acquire an encoder lease from the shared budget immediately
+            // before opening the export encoder. If the budget is exhausted
+            // (for example, capture or Program Mode is recording), the job
+            // fails cleanly without consuming a stale ledger slot.
+            if let budget = encoderBudget {
+                do {
+                    activeLease = try await budget.acquire(.export)
+                } catch {
+                    finish(jobID: id, status: .failed,
+                           message: "Encoder budget exhausted: \(error.localizedDescription)",
+                           startWall: startWall)
+                    return
+                }
+            }
+
             // Replace any existing file so the writer/session doesn't trip
             // over a stale artefact from a previous run. Past this point the
             // user's pre-existing file is gone, so a cancel may safely delete
@@ -656,16 +691,20 @@ final class RenderQueue {
             if cancelInFlightID == id {
                 cancelInFlightID = nil
                 removePartialOutput()
+                await releaseActiveLease()
                 finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
                 return
             }
 
+            await releaseActiveLease()
             finish(jobID: id, status: .completed, message: nil, startWall: startWall)
         } catch is CancellationError {
             cancelInFlightID = nil
             removePartialOutput()
+            await releaseActiveLease()
             finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
         } catch {
+            await releaseActiveLease()
             // `AVAssetExportSession.cancelExport()` makes the awaited export
             // throw a generic error, not `CancellationError`. If a cancel is
             // in flight for this job, treat any failure as the cancellation

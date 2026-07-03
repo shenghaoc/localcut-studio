@@ -24,6 +24,8 @@ final class DocumentController {
         model.project.paddedBackground = nil
         model.project.screencastEventLogs = []
         model.project.keystrokeOverlayClips = []
+        model.project.sceneDoc = SceneDoc()
+        model.project.layoutTracks = []
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -67,6 +69,9 @@ final class DocumentController {
         model.project.paddedBackground = nil
         model.project.screencastEventLogs.removeAll()
         model.project.keystrokeOverlayClips.removeAll()
+        model.project.sceneDoc = SceneDoc()
+        model.project.layoutTracks = []
+        model.programSession = nil
         model.project.masterGain = 1
         model.project.trackInputs = []
         model.project.voiceCleanup = VoiceCleanupSettings()
@@ -231,6 +236,14 @@ final class DocumentController {
             model.autoZoomProposals.removeAll()
         }
         model.project.keystrokeOverlayClips = document.keystrokeOverlayClips
+        // Phase 45: scene doc is migrated on decode (in ProjectDocument.init(from:)).
+        model.project.sceneDoc = document.sceneDoc
+        model.project.layoutTracks = document.layoutTracks.map {
+            let track = LayoutTrack(id: $0.id, name: $0.name)
+            track.isMuted = $0.isMuted
+            track.clips = $0.clips
+            return track
+        }
 
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
         model.documentURL = isNewerSchema ? nil : url
@@ -580,6 +593,7 @@ final class DocumentController {
         item.preferredTransform = ref.preferredTransform.cgTransform.sanitized
         item.hasVideo = ref.hasVideo
         item.hasAudio = ref.hasAudio
+        item.captureSourceID = ref.captureSourceID
     }
 
     private func write(to url: URL, model: EditorModel) async {

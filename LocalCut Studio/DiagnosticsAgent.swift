@@ -37,6 +37,12 @@ final class DiagnosticsAgent {
     private(set) var sampleCount: Int = 0
     /// The last ≤ 60 render-time samples in milliseconds, for the sparkline.
     private(set) var sparkline: [Double] = []
+    /// Current hardware encoder leases held across editor workflows.
+    private(set) var encoderLeaseCount: Int = 0
+    /// Maximum concurrent hardware encoder leases allowed on this host.
+    private(set) var encoderBudgetMax: Int = 0
+    /// Labels for the current encoder budget consumers.
+    private(set) var encoderLedger: [String] = []
 
     // MARK: - Wiring
 
@@ -190,12 +196,16 @@ final class DiagnosticsAgent {
         }
 
         decoderCount = snapshot.decoderCount
+        encoderLeaseCount = snapshot.encoderLeaseCount
+        encoderBudgetMax = snapshot.encoderBudgetMax
+        encoderLedger = snapshot.encoderLedger
         sampleCount += 1
 
         log.info("""
             sample cpu=\(self.cpuUtilisation, format: .fixed(precision: 3), privacy: .public) \
             gpu_est=\(self.gpuUtilisation, format: .fixed(precision: 3), privacy: .public) \
             decoders=\(self.decoderCount, privacy: .public) \
+            encoders=\(self.encoderLeaseCount, privacy: .public)/\(self.encoderBudgetMax, privacy: .public) \
             last_ms=\(self.lastFrameTime * 1000, format: .fixed(precision: 2), privacy: .public) \
             p95_ms=\(self.p95RenderTime * 1000, format: .fixed(precision: 2), privacy: .public) \
             drops=\(self.frameDropsLastTick, privacy: .public)

@@ -6,14 +6,15 @@ import CoreGraphics
 /// Codable snapshot of a `Project`, split from the runtime model. Holds plain
 /// values plus security-scoped bookmarks instead of live `AVURLAsset`s.
 public struct ProjectDocument: Codable, Equatable, Sendable {
-    // Bumped to 9 in Phase 44: `keystrokeOverlayClips` added.
+    // Bumped to 10 in Phase 45: `sceneDoc` added.
+    // Prior bump to 9 was in Phase 44: `keystrokeOverlayClips` added.
     // Prior bump to 8 was in Phase 43: `callouts` and `paddedBackground` added.
     // Prior bump to 7 (single-file 6) was in Phase 38b for `OverlayClip`
     // persistence. Prior bump (6/5) was for look effects in Phase 38a.
     // Single-file bumped to 7 in Phase 43: `callouts`, `paddedBackground`,
     // and per-clip `transformKeyframes` added.
-    public static let currentSchemaVersion = 9
-    public static let singleFileSchemaVersion = 9
+    public static let currentSchemaVersion = 10
+    public static let singleFileSchemaVersion = 10
     public static let currentBundleFormat = "1"
     public static let fileExtension = "lcstudio"
 
@@ -41,6 +42,10 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     public var keystrokeOverlayClips: [KeystrokeOverlayClip]
     public var aspect: ProjectAspect
     public var coverFrame: CoverFrameDoc?
+    /// Phase 45 scene definitions for Program Mode.
+    public var sceneDoc: SceneDoc
+    /// Phase 45 layout tracks from Program Mode sessions.
+    public var layoutTracks: [LayoutTrackDoc]
 
     public init(schemaVersion: Int = ProjectDocument.currentSchemaVersion,
                 bundleFormat: String? = nil,
@@ -61,7 +66,9 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
                 screencastEventLogs: [ScreencastEventLog] = [],
                 keystrokeOverlayClips: [KeystrokeOverlayClip] = [],
                 aspect: ProjectAspect? = nil,
-                coverFrame: CoverFrameDoc? = nil) {
+                coverFrame: CoverFrameDoc? = nil,
+                sceneDoc: SceneDoc = SceneDoc(),
+                layoutTracks: [LayoutTrackDoc] = []) {
         self.schemaVersion = schemaVersion
         self.bundleFormat = bundleFormat
         self.name = name
@@ -82,13 +89,15 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         self.keystrokeOverlayClips = keystrokeOverlayClips
         self.aspect = aspect ?? ProjectAspect.infer(width: renderWidth, height: renderHeight)
         self.coverFrame = coverFrame
+        self.sceneDoc = sceneDoc
+        self.layoutTracks = layoutTracks
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, bundleFormat, name, renderWidth, renderHeight, frameRate,
              workingColourSpace, media, videoTracks, audioTracks, captionTracks,
              markers, audioBus, overlays, callouts, paddedBackground, screencastEventLogs,
-             keystrokeOverlayClips, aspect, coverFrame
+             keystrokeOverlayClips, aspect, coverFrame, sceneDoc, layoutTracks
     }
 
     public init(from decoder: any Decoder) throws {
@@ -125,6 +134,12 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
         }
         // Lenient: malformed cover metadata drops to nil instead of failing the open.
         coverFrame = (try? c.decodeIfPresent(CoverFrameDoc.self, forKey: .coverFrame)) ?? nil
+        // Phase 45: migrate scene doc on read. Old docs without the key get an
+        // empty SceneDoc; the migration function is the single place where
+        // future schema upgrades are applied.
+        let rawSceneDoc = try c.decodeIfPresent(SceneDoc.self, forKey: .sceneDoc) ?? SceneDoc()
+        sceneDoc = migrateSceneDoc(rawSceneDoc)
+        layoutTracks = try c.decodeIfPresent([LayoutTrackDoc].self, forKey: .layoutTracks) ?? []
     }
 
     public func encoded() throws -> Data {
@@ -353,6 +368,9 @@ public struct MediaRef: Codable, Equatable, Sendable {
     public var hasVideo: Bool
     public var hasAudio: Bool
     public var bundleRelativePath: String?
+    /// The capture source UUID from Program Mode landing. Used to match
+    /// scene-layer source refs to MediaItems for layout track replay.
+    public var captureSourceID: UUID?
 
     public init(id: UUID,
                 displayName: String,
@@ -363,7 +381,8 @@ public struct MediaRef: Codable, Equatable, Sendable {
                 preferredTransform: TransformCode,
                 hasVideo: Bool,
                 hasAudio: Bool,
-                bundleRelativePath: String? = nil) {
+                bundleRelativePath: String? = nil,
+                captureSourceID: UUID? = nil) {
         self.id = id
         self.displayName = displayName
         self.bookmark = bookmark
@@ -374,11 +393,13 @@ public struct MediaRef: Codable, Equatable, Sendable {
         self.hasVideo = hasVideo
         self.hasAudio = hasAudio
         self.bundleRelativePath = bundleRelativePath
+        self.captureSourceID = captureSourceID
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, displayName, bookmark, duration, naturalWidth, naturalHeight,
-             preferredTransform, hasVideo, hasAudio, bundleRelativePath
+             preferredTransform, hasVideo, hasAudio, bundleRelativePath,
+             captureSourceID
     }
 
     public init(from decoder: any Decoder) throws {
@@ -393,6 +414,7 @@ public struct MediaRef: Codable, Equatable, Sendable {
         hasVideo = try c.decodeIfPresent(Bool.self, forKey: .hasVideo) ?? false
         hasAudio = try c.decodeIfPresent(Bool.self, forKey: .hasAudio) ?? false
         bundleRelativePath = try c.decodeIfPresent(String.self, forKey: .bundleRelativePath)
+        captureSourceID = try c.decodeIfPresent(UUID.self, forKey: .captureSourceID)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -407,6 +429,7 @@ public struct MediaRef: Codable, Equatable, Sendable {
         try c.encode(hasVideo, forKey: .hasVideo)
         try c.encode(hasAudio, forKey: .hasAudio)
         try c.encodeIfPresent(bundleRelativePath, forKey: .bundleRelativePath)
+        try c.encodeIfPresent(captureSourceID, forKey: .captureSourceID)
     }
 }
 
@@ -438,7 +461,13 @@ public struct TrackDoc: Codable, Equatable, Sendable {
         clips = try c.decodeIfPresent([ClipDoc].self, forKey: .clips) ?? []
     }
 
-    public var trackKind: TrackKind { kind == "audio" ? .audio : .video }
+    public var trackKind: TrackKind {
+        switch kind {
+        case "audio": .audio
+        case "layout": .layout
+        default: .video
+        }
+    }
 }
 
 public struct ClipDoc: Codable, Equatable, Sendable {

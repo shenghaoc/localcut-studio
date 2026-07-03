@@ -62,6 +62,10 @@ struct ProjectState: Equatable {
     var screencastEventLogs: [ScreencastEventLog]
     /// Phase 44 keystroke overlay clips.
     var keystrokeOverlayClips: [KeystrokeOverlayClip]
+    /// Phase 45 scene definitions.
+    var sceneDoc: SceneDoc
+    /// Phase 45 layout tracks.
+    var layoutTracks: [LayoutTrackDoc]
     var selectedClipID: Clip.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
@@ -91,6 +95,8 @@ struct ProjectState: Equatable {
             && lhs.paddedBackground == rhs.paddedBackground
             && lhs.screencastEventLogs == rhs.screencastEventLogs
             && lhs.keystrokeOverlayClips == rhs.keystrokeOverlayClips
+            && lhs.sceneDoc == rhs.sceneDoc
+            && lhs.layoutTracks == rhs.layoutTracks
             && lhs.selectedClipID == rhs.selectedClipID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
@@ -147,6 +153,10 @@ extension EditorModel {
             paddedBackground: project.paddedBackground,
             screencastEventLogs: project.screencastEventLogs,
             keystrokeOverlayClips: project.keystrokeOverlayClips,
+            sceneDoc: project.sceneDoc,
+            layoutTracks: project.layoutTracks.map {
+                LayoutTrackDoc(id: $0.id, name: $0.name, isMuted: $0.isMuted, clips: $0.clips)
+            },
             selectedClipID: selectedClipID,
             selectedTransitionClipID: selectedTransitionClipID,
             selectedMarkerID: selectedMarkerID,
@@ -221,6 +231,13 @@ extension EditorModel {
         project.paddedBackground = state.paddedBackground
         project.screencastEventLogs = state.screencastEventLogs
         project.keystrokeOverlayClips = state.keystrokeOverlayClips
+        project.sceneDoc = state.sceneDoc
+        project.layoutTracks = state.layoutTracks.map {
+            let track = LayoutTrack(id: $0.id, name: $0.name)
+            track.isMuted = $0.isMuted
+            track.clips = $0.clips
+            return track
+        }
         selectedClipID = state.selectedClipID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID

@@ -43,12 +43,16 @@ actor CaptureCoordinator {
         /// Event log writer for screen/application/window targets. Own-app
         /// targets include key codes; non-own targets record mouse/scroll only.
         var eventLogWriter: ScreencastEventLogWriter?
+        /// Shared encoder-budget leases held by the active video encoders.
+        var encoderLeases: [EncoderLease] = []
+        var encoderBudget: EncoderBudget?
     }
 
     private var state: State = .idle
     private var activeSession: ActiveSession?
 
     func start(_ request: CaptureStartRequest,
+               encoderBudget: EncoderBudget? = nil,
                onStreamStopped: (@Sendable (Error) -> Void)? = nil,
                onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil,
                onMicrophoneLevel: (@Sendable (Float) -> Void)? = nil) async throws {
@@ -266,14 +270,6 @@ actor CaptureCoordinator {
                 onAudioLevel: onMicrophoneLevel))
         }
 
-        try manifest.append(.header(CaptureManifestHeader(
-            sessionID: id,
-            createdAt: Date(),
-            sessionStartHostTimeUs: startHostTimeUs,
-            sources: descriptors,
-            encoders: encoders)))
-        try manifest.append(.epoch(CaptureEpochRecord(atUs: startHostTimeUs, wallClock: Date())))
-
         // Build source ID map so resumed chunks reuse the same IDs.
         var sourceIDs: [CaptureSourceKind: UUID] = [:]
         for descriptor in descriptors {
@@ -291,33 +287,53 @@ actor CaptureCoordinator {
                 captureRegion: request.captureRegion)
         }
 
-        let active = ActiveSession(
-            id: id,
-            directoryURL: directoryURL,
-            manifestURL: manifestURL,
-            manifest: manifest,
-            sessions: sessions,
-            writers: writers,
-            startHostTimeUs: startHostTimeUs,
-            startRequest: request,
-            onStreamStopped: onStreamStopped,
-            onBackpressure: onBackpressure,
-            onMicrophoneLevel: onMicrophoneLevel,
-            currentTarget: request.target,
-            sourceIDs: sourceIDs,
-            eventLogWriter: eventLogWriter)
-        activeSession = active
-
+        var encoderLeases: [EncoderLease] = []
+        var startedSessions: [CaptureRunningSession] = []
         do {
+            if let encoderBudget, videoStreamCount > 0 {
+                encoderLeases = try await encoderBudget.acquire(.isoRecord, count: videoStreamCount)
+            }
+
+            try manifest.append(.header(CaptureManifestHeader(
+                sessionID: id,
+                createdAt: Date(),
+                sessionStartHostTimeUs: startHostTimeUs,
+                sources: descriptors,
+                encoders: encoders)))
+            try manifest.append(.epoch(CaptureEpochRecord(atUs: startHostTimeUs, wallClock: Date())))
+
+            let active = ActiveSession(
+                id: id,
+                directoryURL: directoryURL,
+                manifestURL: manifestURL,
+                manifest: manifest,
+                sessions: sessions,
+                writers: writers,
+                startHostTimeUs: startHostTimeUs,
+                startRequest: request,
+                onStreamStopped: onStreamStopped,
+                onBackpressure: onBackpressure,
+                onMicrophoneLevel: onMicrophoneLevel,
+                currentTarget: request.target,
+                sourceIDs: sourceIDs,
+                eventLogWriter: eventLogWriter,
+                encoderLeases: encoderLeases,
+                encoderBudget: encoderBudget)
+            activeSession = active
+
             for session in sessions {
                 try await session.start()
+                startedSessions.append(session)
             }
         } catch {
-            for session in sessions {
+            for session in startedSessions {
                 await session.stop()
             }
             let cleanupErrors = await Self.finishWritersCollectingErrors(writers)
             manifest.close()
+            if let encoderBudget, !encoderLeases.isEmpty {
+                await encoderBudget.releaseAll(encoderLeases)
+            }
             // Clean up the session directory so a failed start (permission denied,
             // camera in use, etc.) doesn't appear as a crash-recovery candidate on
             // the next launch — no frames were ever captured, and recovery would
@@ -441,6 +457,13 @@ actor CaptureCoordinator {
             }
         }
         active.manifest.close()
+        if let encoderBudget = active.encoderBudget {
+            await encoderBudget.releaseAll(active.encoderLeases)
+        } else {
+            for lease in active.encoderLeases {
+                lease.relinquish()
+            }
+        }
         state = .idle
 
         let data = try Data(contentsOf: active.manifestURL)

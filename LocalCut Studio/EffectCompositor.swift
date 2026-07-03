@@ -14,6 +14,7 @@ struct CompositorLayer {
     /// post-effect-chain image is invalidated when the clip's effects mutate.
     let clipID: UUID
     let trackID: CMPersistentTrackID
+    let zOrder: Int
     let transform: CGAffineTransform
     let opacity: Float
     let mask: ClipMaskShape
@@ -37,6 +38,15 @@ struct CompositorLayer {
         let srcSec = sourceRange.start.seconds + (tDur > 0 ? rel.seconds * sDur / tDur : 0)
         return CMTime(seconds: srcSec, preferredTimescale: RenderCacheKey.normalisedTimescale)
     }
+}
+
+/// A synthetic solid-colour scene layer scheduled by Program Mode layout clips.
+struct ColourCompositorLayer {
+    let hex: String
+    let transform: CGAffineTransform
+    let opacity: Float
+    let timeRange: CMTimeRange
+    let zOrder: Int
 }
 
 /// One caption line scheduled inside a composition instruction. Carries everything
@@ -77,6 +87,7 @@ struct KeystrokeOverlayRenderItem: Sendable {
 /// derived progress through the overlap interval.
 enum RenderUnit {
     case layer(CompositorLayer)
+    case colour(ColourCompositorLayer)
     case transition(outgoing: CompositorLayer, incoming: CompositorLayer,
                     type: TransitionType, wipeAngle: Double, overlap: CMTimeRange)
 
@@ -84,7 +95,17 @@ enum RenderUnit {
     nonisolated var trackIDs: [CMPersistentTrackID] {
         switch self {
         case .layer(let layer): [layer.trackID]
+        case .colour: []
         case .transition(let outgoing, let incoming, _, _, _): [outgoing.trackID, incoming.trackID]
+        }
+    }
+
+    nonisolated var zOrder: Int {
+        switch self {
+        case .layer(let layer): layer.zOrder
+        case .colour(let layer): layer.zOrder
+        case .transition(let outgoing, let incoming, _, _, _):
+            max(outgoing.zOrder, incoming.zOrder)
         }
     }
 }
@@ -507,6 +528,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                                  frameRate: frameRate,
                                  workingColourSpace: workingColourSpace)
 
+        case .colour(let layer):
+            return renderedImage(for: layer, renderSize: request.renderContext.size)
+
         case .transition(let outgoing, let incoming, let type, let wipeAngle, let overlap):
             let out = renderedImage(for: outgoing, request: request,
                                     frameRate: frameRate,
@@ -525,6 +549,21 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                 return wipe(outgoing: out, incoming: into, progress: progress, angle: wipeAngle)
             }
         }
+    }
+
+    /// Renders a synthetic Program Mode colour layer without requiring a source track.
+    nonisolated private func renderedImage(for layer: ColourCompositorLayer,
+                                           renderSize: CGSize) -> CIImage? {
+        guard renderSize.width > 0, renderSize.height > 0 else { return nil }
+        let renderRect = CGRect(origin: .zero, size: renderSize)
+        var image = CIImage(color: ciColor(hex: layer.hex))
+            .cropped(to: renderRect)
+            .transformed(by: layer.transform)
+        if layer.opacity < 1 {
+            image = scaled(image, by: layer.opacity)
+        }
+        let canvas = CIImage(color: .clear).cropped(to: renderRect)
+        return image.composited(over: canvas).cropped(to: renderRect)
     }
 
     /// Applies the layer's effect chain, fit transform, and per-clip opacity to
@@ -625,6 +664,30 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let renderRect = CGRect(origin: .zero, size: request.renderContext.size)
         let canvas = CIImage(color: .clear).cropped(to: renderRect)
         return image.composited(over: canvas).cropped(to: renderRect)
+    }
+
+    nonisolated private func ciColor(hex: String) -> CIColor {
+        let trimmed = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard trimmed.count == 6 || trimmed.count == 8,
+              let value = UInt64(trimmed, radix: 16) else {
+            return CIColor(red: 0, green: 0, blue: 0, alpha: 1)
+        }
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+        let alpha: CGFloat
+        if trimmed.count == 8 {
+            red = CGFloat((value >> 24) & 0xff) / 255
+            green = CGFloat((value >> 16) & 0xff) / 255
+            blue = CGFloat((value >> 8) & 0xff) / 255
+            alpha = CGFloat(value & 0xff) / 255
+        } else {
+            red = CGFloat((value >> 16) & 0xff) / 255
+            green = CGFloat((value >> 8) & 0xff) / 255
+            blue = CGFloat(value & 0xff) / 255
+            alpha = 1
+        }
+        return CIColor(red: red, green: green, blue: blue, alpha: alpha)
     }
 
     nonisolated private func masked(_ image: CIImage, shape: ClipMaskShape) -> CIImage {
