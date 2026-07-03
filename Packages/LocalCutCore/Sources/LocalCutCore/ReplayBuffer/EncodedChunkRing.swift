@@ -225,6 +225,45 @@ public actor EncodedChunkRing {
         return (selected, max(0, actualDuration.seconds))
     }
 
+    /// Loads data for a spilled chunk back into memory. Returns the updated
+    /// chunk, or nil if the chunk is already in memory or not found.
+    public func loadSpilledChunk(id: UUID) -> EncodedChunk? {
+        guard let idx = chunks.firstIndex(where: { $0.id == id }),
+              chunks[idx].isSpilled else { return nil }
+        do {
+            try chunks[idx].loadDataFromSpill()
+            if let data = chunks[idx].data {
+                memoryUsedBytes += data.count
+            }
+            return chunks[idx]
+        } catch {
+            return nil
+        }
+    }
+
+    /// Ensures all chunks in the given span are loaded into memory. Returns
+    /// the chunks with data populated, or an empty array if any chunk fails
+    /// to load.
+    public func loadChunksForSave(_ span: [EncodedChunk]) -> [EncodedChunk] {
+        var result: [EncodedChunk] = []
+        result.reserveCapacity(span.count)
+        for chunk in span {
+            var c = chunk
+            if c.isSpilled && !c.isInMemory {
+                guard let idx = chunks.firstIndex(where: { $0.id == c.id }) else { return [] }
+                do {
+                    try chunks[idx].loadDataFromSpill()
+                    c = chunks[idx]
+                } catch {
+                    return []
+                }
+            }
+            guard c.data != nil else { return [] }
+            result.append(c)
+        }
+        return result
+    }
+
     /// Removes all chunks and cleans up spill files.
     public func clear() {
         cleanupSpillFiles()

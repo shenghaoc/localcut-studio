@@ -183,4 +183,106 @@ struct EncodedChunkRingTests {
         let countAfter = await ring.chunkCount
         #expect(countAfter < countBefore)
     }
+
+    @Test("Spill path is under Caches directory")
+    func spillPathUnderCaches() async {
+        let ring = EncodedChunkRing(config: .default)
+        let url = await ring.spillDirectoryURL
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        #expect(url.path.hasPrefix(caches.path))
+        #expect(url.path.contains("ReplayBuffer"))
+    }
+
+    @Test("Spill directory can be prepared without error")
+    func spillDirectoryPreparation() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayBufferTest-\(UUID().uuidString)")
+        let ring = EncodedChunkRing(
+            config: ReplayBufferConfig(memoryBudgetBytes: 2000, maxDurationSeconds: 60),
+            spillDirectory: tempDir)
+
+        try await ring.prepareSpillDirectory()
+        #expect(FileManager.default.fileExists(atPath: tempDir.path))
+
+        // Cleanup
+        try? FileManager.default.removeItem(at: tempDir)
+    }
+
+    @Test("Spilled chunks can be read back via unified index")
+    func spilledChunksReadable() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayBufferTest-\(UUID().uuidString)")
+        let config = ReplayBufferConfig(memoryBudgetBytes: 2000, maxDurationSeconds: 60)
+        let ring = EncodedChunkRing(config: config, spillDirectory: tempDir)
+
+        try await ring.prepareSpillDirectory()
+
+        // Add chunks that exceed memory budget to trigger spilling.
+        for i in 0..<6 {
+            let chunk = makeChunk(seconds: Double(i), size: 1024, isKeyframe: i % 2 == 0)
+            await ring.appendWithSpill(chunk)
+        }
+
+        let diag = await ring.diagnostics()
+        #expect(diag.spilledChunkCount > 0)
+
+        // Load a spilled chunk back.
+        let all = await ring.allChunks
+        if let spilled = all.first(where: { $0.isSpilled }) {
+            let loaded = await ring.loadSpilledChunk(id: spilled.id)
+            #expect(loaded != nil)
+            #expect(loaded?.data != nil)
+            #expect(loaded?.data?.count == spilled.byteSize)
+        }
+
+        // Cleanup
+        try? FileManager.default.removeItem(at: tempDir)
+    }
+
+    @Test("Save span works across memory and spill boundary")
+    func saveSpanAcrossSpillBoundary() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayBufferTest-\(UUID().uuidString)")
+        let config = ReplayBufferConfig(memoryBudgetBytes: 3000, maxDurationSeconds: 60)
+        let ring = EncodedChunkRing(config: config, spillDirectory: tempDir)
+
+        try await ring.prepareSpillDirectory()
+
+        // Add many chunks so some get spilled.
+        for i in 0..<10 {
+            let chunk = makeChunk(seconds: Double(i), size: 1024, isKeyframe: i % 3 == 0)
+            await ring.appendWithSpill(chunk)
+        }
+
+        let (span, _) = await ring.selectSaveSpan(seconds: 5, now: CMTime(seconds: 10, preferredTimescale: 600))
+        #expect(!span.isEmpty)
+        #expect(span.first?.isKeyframe == true)
+
+        // Load all chunks for save.
+        let loaded = await ring.loadChunksForSave(span)
+        #expect(loaded.count == span.count)
+        for chunk in loaded {
+            #expect(chunk.data != nil)
+        }
+
+        // Cleanup
+        try? FileManager.default.removeItem(at: tempDir)
+    }
+
+    @Test("Clear removes spill files")
+    func clearRemovesSpillFiles() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayBufferTest-\(UUID().uuidString)")
+        let config = ReplayBufferConfig(memoryBudgetBytes: 2000, maxDurationSeconds: 60)
+        let ring = EncodedChunkRing(config: config, spillDirectory: tempDir)
+
+        try await ring.prepareSpillDirectory()
+
+        for i in 0..<6 {
+            await ring.appendWithSpill(makeChunk(seconds: Double(i), size: 1024, isKeyframe: i % 2 == 0))
+        }
+
+        await ring.clear()
+        #expect(!FileManager.default.fileExists(atPath: tempDir.path))
+    }
 }
