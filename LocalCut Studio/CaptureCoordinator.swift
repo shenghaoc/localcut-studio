@@ -271,7 +271,8 @@ actor CaptureCoordinator {
                 deviceID: microphoneDeviceID,
                 mediaType: .audio,
                 writer: writer,
-                onAudioLevel: onMicrophoneLevel))
+                onAudioLevel: onMicrophoneLevel,
+                voiceCleanupSettings: request.voiceCleanupSettings))
         }
 
         // Build source ID map so resumed chunks reuse the same IDs.
@@ -708,7 +709,8 @@ actor CaptureCoordinator {
                 deviceID: microphoneDeviceID,
                 mediaType: .audio,
                 writer: writer,
-                onAudioLevel: active.onMicrophoneLevel))
+                onAudioLevel: active.onMicrophoneLevel,
+                voiceCleanupSettings: request.voiceCleanupSettings))
         }
 
         // Record resume event.

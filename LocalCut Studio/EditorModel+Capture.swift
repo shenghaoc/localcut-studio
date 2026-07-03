@@ -229,7 +229,8 @@ extension EditorModel {
             fragmentInterval: CMTime(seconds: 2, preferredTimescale: 600),
             capabilities: Capabilities.current,
             captureRegion: captureRegion,
-            excludedWindowIDs: excludedWindowIDs)
+            excludedWindowIDs: excludedWindowIDs,
+            voiceCleanupSettings: audioBus.voiceCleanupSettingsStore)
         lastRecordingRequest = request
         activePiPPreset = pipPreset
         lastRecordingPiPPreset = pipPreset
