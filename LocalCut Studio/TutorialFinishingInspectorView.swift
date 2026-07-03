@@ -35,20 +35,24 @@ struct TutorialFinishingInspectorView: View {
                     Slider(value: $silenceParams.openThresholdDB, in: -60 ... -20, step: 1) {
                         Text("dBFS")
                     }
+                    .accessibilityLabel("Open Threshold")
                     .frame(maxWidth: 160)
                     Text("\(Int(silenceParams.openThresholdDB)) dBFS")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
 
                 LabeledContent("Close Threshold") {
                     Slider(value: $silenceParams.closeThresholdDB, in: -50 ... -10, step: 1) {
                         Text("dBFS")
                     }
+                    .accessibilityLabel("Close Threshold")
                     .frame(maxWidth: 160)
                     Text("\(Int(silenceParams.closeThresholdDB)) dBFS")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                 }
 
                 LabeledContent("Min Duration") {
@@ -59,10 +63,12 @@ struct TutorialFinishingInspectorView: View {
                         ), in: 0.1 ... 5.0, step: 0.1) {
                             Text("seconds")
                         }
+                        .accessibilityLabel("Min Duration")
                         .frame(maxWidth: 120)
                         Text(String(format: "%.1fs", silenceParams.minimumSilenceDuration.seconds))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
                     }
                 }
 
@@ -74,10 +80,12 @@ struct TutorialFinishingInspectorView: View {
                         ), in: 0 ... 1.0, step: 0.05) {
                             Text("seconds")
                         }
+                        .accessibilityLabel("Padding")
                         .frame(maxWidth: 120)
                         Text(String(format: "%.2fs", silenceParams.padding.seconds))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
                     }
                 }
 
