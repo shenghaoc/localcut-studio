@@ -765,9 +765,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// Releases a single preview/export source map.
     nonisolated static func releaseOverlaySources(for registryID: UUID?) {
         guard let registryID else { return }
-        overlaySourceLock.lock()
-        overlaySourceRegistries.removeValue(forKey: registryID)
-        overlaySourceLock.unlock()
+        overlaySourceLock.withLock {
+            overlaySourceRegistries.removeValue(forKey: registryID)
+        }
     }
 
     /// Removes preview registries left behind by cancelled rebuilds while
