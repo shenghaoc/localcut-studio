@@ -5,14 +5,17 @@ logLevel: info
 logDestinations: [stdout]
 
 api: yes
-apiAddress: 0.0.0.0
-apiPort: 9997
+apiAddress: :9997
+
+rtsp: no
+rtmp: no
+hls: no
+srt: no
 
 webrtc: yes
-webrtcAddress: 0.0.0.0
-webrtcPort: 8889
+webrtcAddress: :8889
 webrtcEncryption: no
-webrtcAllowOrigin: "*"
+webrtcAllowOrigins: ["*"]
 
 paths:
   all_others:
