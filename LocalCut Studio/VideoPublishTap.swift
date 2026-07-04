@@ -62,6 +62,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
         #else
         lock.lock()
         latestPixelBuffer = buffer
+        lock.unlock()
         #endif
 
         lock.lock()

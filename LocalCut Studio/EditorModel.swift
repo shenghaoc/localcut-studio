@@ -31,6 +31,8 @@ final class EditorModel {
     /// The active WHIP publish session, if any. At most one publish session
     /// may be active at a time.
     var whipSession: WhipSession?
+    var publishVideoTap: VideoPublishTap?
+    var publishAudioBridge: AudioPublishBridge?
 
     /// Stored publish settings (endpoint, token, codec config).
     let publishSettings = PublishSettings()

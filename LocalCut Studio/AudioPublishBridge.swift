@@ -10,18 +10,27 @@ actor AudioPublishBridge {
     private var isRunning = false
     private var sampleRate: Double = 48_000
     private var channels: Int = 2
-    nonisolated(unsafe) private var ringBuffer: RingBuffer?
     private var captureThread: Thread?
     private let stopFlag = OSAllocatedUnfairLock<Bool>(initialState: false)
 
     #if canImport(WebRTC)
-    nonisolated(unsafe) private var adm: LocalCutAudioDeviceModule?
+    private var adm: LocalCutAudioDeviceModule?
     #endif
 
+    private struct SharedState {
+        var ringBuffer: RingBuffer?
+        #if !canImport(WebRTC)
+        var latestBuffer: [Float]?
+        var latestSampleRate: Double = 0
+        var latestChannels: Int = 0
+        #endif
+    }
+    private let sharedState = OSAllocatedUnfairLock(initialState: SharedState())
+
     #if !canImport(WebRTC)
-    nonisolated(unsafe) private(set) var latestBuffer: [Float]?
-    nonisolated(unsafe) private(set) var latestSampleRate: Double = 0
-    nonisolated(unsafe) private(set) var latestChannels: Int = 0
+    nonisolated var latestBuffer: [Float]? { sharedState.withLock { $0.latestBuffer } }
+    nonisolated var latestSampleRate: Double { sharedState.withLock { $0.latestSampleRate } }
+    nonisolated var latestChannels: Int { sharedState.withLock { $0.latestChannels } }
     #endif
 
     init() {}
@@ -32,12 +41,13 @@ actor AudioPublishBridge {
         self.channels = channels
         self.isRunning = true
         let frameSize = Int(sampleRate * Self.frameDurationSeconds) * channels
-        ringBuffer = RingBuffer(capacity: frameSize * 10)
+        let newRing = RingBuffer(capacity: frameSize * 10)
+        sharedState.withLock { $0.ringBuffer = newRing }
         stopFlag.withLock { $0 = false }
         #if canImport(WebRTC)
         adm = LocalCutAudioDeviceModule(sampleRate: sampleRate, channels: channels)
         #endif
-        startCaptureThread(frameSize: frameSize)
+        startCaptureThread(frameSize: frameSize, ring: newRing)
     }
 
     func stop() {
@@ -46,25 +56,26 @@ actor AudioPublishBridge {
         stopFlag.withLock { $0 = true }
         captureThread?.cancel()
         captureThread = nil
-        ringBuffer = nil
+        sharedState.withLock { $0.ringBuffer = nil }
         #if canImport(WebRTC)
         adm = nil
         #endif
     }
 
     nonisolated func pushSamples(_ buffer: [Float], sampleRate: Double, channels: Int) {
-        guard let ring = ringBuffer else { return }
-        ring.write(buffer)
-        #if !canImport(WebRTC)
-        latestBuffer = buffer
-        latestSampleRate = sampleRate
-        latestChannels = channels
-        #endif
+        sharedState.withLock { s in
+            guard let ring = s.ringBuffer else { return }
+            ring.write(buffer)
+            #if !canImport(WebRTC)
+            s.latestBuffer = buffer
+            s.latestSampleRate = sampleRate
+            s.latestChannels = channels
+            #endif
+        }
     }
 
-    private func startCaptureThread(frameSize: Int) {
+    private func startCaptureThread(frameSize: Int, ring: RingBuffer) {
         let stopFlag = stopFlag
-        let ring = ringBuffer
         #if canImport(WebRTC)
         let admRef = adm
         #endif
@@ -73,7 +84,6 @@ actor AudioPublishBridge {
             while true {
                 if stopFlag.withLock({ $0 }) { break }
                 Thread.sleep(forTimeInterval: Self.frameDurationSeconds)
-                guard let ring else { break }
                 let readSamples = ring.read(count: frameSize)
                 for i in 0..<readSamples.count { frameBuffer[i] = readSamples[i] }
                 for i in readSamples.count..<frameSize { frameBuffer[i] = 0 }

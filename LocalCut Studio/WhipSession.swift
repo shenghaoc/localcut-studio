@@ -53,6 +53,8 @@ actor WhipSession {
     private var encoderLease: EncoderLease?
     private var currentEndpointConfig: (endpoint: URL, authToken: String?)?
     private var iceServerUrls: [String] = []
+    private var videoTap: VideoPublishTap?
+    private var audioBridge: AudioPublishBridge?
 
     #if canImport(WebRTC)
     private let factory = RTCPeerConnectionFactory()
@@ -80,11 +82,13 @@ actor WhipSession {
         return stream
     }
 
-    func start(endpointURL: URL, authToken: String? = nil, config: PublishConfig? = nil) async throws {
+    func start(endpointURL: URL, authToken: String? = nil, config: PublishConfig? = nil, videoTap: VideoPublishTap? = nil, audioBridge: AudioPublishBridge? = nil) async throws {
         guard state == .idle || state == .ended || state == .failed("") else { return }
         state = .connecting
         self.authToken = authToken
         if let config { self.config = config }
+        self.videoTap = videoTap
+        self.audioBridge = audioBridge
 
         do {
             encoderLease = try await budget.acquire(.whipPublish)
@@ -109,6 +113,8 @@ actor WhipSession {
         if let url = resourceUrl {
             await client.teardown(resourceUrl: url, authToken: authToken)
         }
+        videoTap?.close()
+        await audioBridge?.stop()
         closeWebRTCResources()
         releaseEncoderBudget()
         resourceUrl = nil
@@ -202,6 +208,7 @@ actor WhipSession {
     }
 
     private func failAndCleanup(_ message: String) {
+        videoTap?.close()
         closeWebRTCResources()
         releaseEncoderBudget()
         resourceUrl = nil
@@ -217,6 +224,8 @@ actor WhipSession {
     private func closeWebRTCResources() {
         statsTask?.cancel()
         statsTask = nil
+        videoTap?.close()
+        videoTap = nil
         #if canImport(WebRTC)
         videoTransceiver = nil
         audioTransceiver = nil
@@ -232,7 +241,7 @@ actor WhipSession {
         rtcConfig.sdpSemantics = .unifiedPlan
         rtcConfig.continualGatheringPolicy = .gatherContinually
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: ["DtlsSrtpKeyAgreement": "true"])
-        guard let pc = factory.peerConnection(with: rtcConfig, constraints: constraints, delegate: nil) else {
+        guard let pc = factory.peerConnection(with: rtcConfig, constraints: constraints, delegate: self) else {
             throw WhipError.transport(statusCode: 0, message: "Failed to create RTCPeerConnection.")
         }
         peerConnection = pc
@@ -291,7 +300,7 @@ actor WhipSession {
             }
         }
         let prevBytes = stats.bytesSent
-        if newStats.bytesSent > prevBytes { newStats.bitrate = Double(newStats.bytesSent - prevBytes) * 8.0 }
+        if newStats.bytesSent > prevBytes { newStats.bitrate = Double(newStats.bytesSent - prevBytes) * 8.0 / 1000.0 }
         stats = newStats
     }
     #endif
@@ -303,3 +312,34 @@ extension WhipError {
         .httpStatus(statusCode, message.data(using: .utf8))
     }
 }
+
+// MARK: - RTCPeerConnectionDelegate
+
+#if canImport(WebRTC)
+extension WhipSession: RTCPeerConnectionDelegate {
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
+        switch newState {
+        case .disconnected:
+            Task { await self.handleDisconnect() }
+        case .failed:
+            Task { await self.handleDisconnect() }
+        default:
+            break
+        }
+    }
+
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCSignalingState) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
+    nonisolated func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChangeStandardizedIceConnectionState newState: RTCIceConnectionState) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange connectionState: RTCPeerConnectionState) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didStartReceivingOn transceiver: RTCRtpTransceiver) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didAdd rtpReceiver: RTCRtpReceiver, streams mediaStreams: [RTCMediaStream]) {}
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didRemove rtpReceiver: RTCRtpReceiver) {}
+}
+#endif

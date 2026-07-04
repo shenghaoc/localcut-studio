@@ -89,7 +89,7 @@ actor WhipClientImpl: WhipClient {
         var request = URLRequest(url: resourceUrl)
         request.httpMethod = "PATCH"
         request.setValue("application/trickle-ice-sdpfrag", forHTTPHeaderField: "Content-Type")
-        request.setValue(etag, forHTTPHeaderField: "If-Match")
+        request.setValue("*", forHTTPHeaderField: "If-Match")
         if let token = authToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }

@@ -86,7 +86,9 @@ nonisolated enum LinkHeaderParser {
         for segment in segments {
             guard let eqIndex = segment.firstIndex(of: "=") else { continue }
             let key = String(segment[..<eqIndex]).trimmingCharacters(in: .whitespaces).lowercased()
-            let value = String(segment[segment.index(after: eqIndex)...]).trimmingCharacters(in: .whitespaces)
+            let value = String(segment[segment.index(after: eqIndex)...])
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             result[key] = value
         }
         return result
