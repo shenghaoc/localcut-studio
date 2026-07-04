@@ -781,19 +781,16 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     }
 
     nonisolated static func purgeOverlaySourceCaches() {
+        // Snapshot source references under the lock, then purge outside it.
+        // The local array holds strong references so sources stay alive even if
+        // a concurrent rebuild replaces a registry. Each source protects its
+        // own cache with an internal lock, so concurrent purge calls are safe.
         let sources = overlaySourceLock.withLock {
             overlaySourceRegistries.values.flatMap { $0.sources.values }
         }
         for source in sources {
             source.purgeCachedFrames()
         }
-    }
-
-    nonisolated static var cachedOverlayFrameCount: Int {
-        let sources = overlaySourceLock.withLock {
-            overlaySourceRegistries.values.flatMap { $0.sources.values }
-        }
-        return sources.reduce(0) { $0 + $1.cachedFrameCount }
     }
 
     nonisolated static func hasOverlaySourceRegistry(_ registryID: UUID?) -> Bool {

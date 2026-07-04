@@ -10,7 +10,7 @@ nonisolated final class MemoryPressureHandler: Sendable {
 
     nonisolated static let shared = MemoryPressureHandler()
 
-    private let logger = Logger(subsystem: "com.localcut.studio", category: "MemoryPressure")
+    private let logger = Logger(subsystem: "com.shenghaoc.LocalCutStudio", category: "MemoryPressure")
     private let state = OSAllocatedUnfairLock<State>(uncheckedState: State())
 
     private init() {}
@@ -61,6 +61,9 @@ nonisolated final class MemoryPressureHandler: Sendable {
 
         // LUTCache: evict cached LUT lookups.
         EffectCompositor.purgeLUTCache()
+
+        // PaddedBackgroundRenderer: evict cached background images.
+        PaddedBackgroundRenderer.purgeCache()
 
         logger.warning("Cache eviction complete")
     }
