@@ -122,4 +122,12 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
 
         return ciImage
     }
+
+    nonisolated var cachedFrameCount: Int {
+        lock.withLock { cache.count }
+    }
+
+    nonisolated func purgeCachedFrames() {
+        lock.withLock { cache.removeAll() }
+    }
 }

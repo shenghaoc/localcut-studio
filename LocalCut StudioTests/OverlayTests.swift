@@ -86,6 +86,20 @@ func alphaVideoSourceMissingFile() async {
     #expect(source == nil)
 }
 
+@Test("AlphaVideoSource purges decoded frame cache")
+func alphaVideoSourcePurgesDecodedFrames() async throws {
+    let tmp = try makeOverlayTempDirectory("alpha-purge")
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let url = try await makeOverlayVideoFixture(seconds: 1, in: tmp)
+    let source = try #require(await AlphaVideoSource.make(url: url))
+
+    _ = await source.frame(at: .zero, endAction: .freeze)
+    #expect(source.cachedFrameCount > 0)
+
+    source.purgeCachedFrames()
+    #expect(source.cachedFrameCount == 0)
+}
+
 @MainActor
 @Test("Overlay import rejects files that do not match the chosen source type")
 func importOverlayRejectsMismatchedType() async throws {
@@ -301,6 +315,9 @@ func lottieFrameSourceDeterminism() async throws {
 
     #expect(first.naturalSize == CGSize(width: 8, height: 8))
     #expect(pngBytes(firstFrame, size: first.naturalSize) == pngBytes(secondFrame, size: second.naturalSize))
+    #expect(first.cachedFrameCount > 0)
+    first.purgeCachedFrames()
+    #expect(first.cachedFrameCount == 0)
     #expect(await first.frame(at: CMTime(seconds: 10, preferredTimescale: 600), endAction: .hide) == nil)
 }
 

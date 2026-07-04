@@ -211,6 +211,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         contextCache.withLock { $0.removeAll() }
     }
 
+    nonisolated static var contextCacheCount: Int {
+        contextCache.withLock { $0.count }
+    }
+
     /// Removes all cached LUT lookups. Called on memory pressure.
     nonisolated static func purgeLUTCache() {
         LUTCache.shared.purge()
@@ -742,15 +746,18 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// intentionally not shared globally by overlay ID: a preview rebuild and an
     /// export can overlap with different resolved files for the same overlay ID.
     nonisolated(unsafe) private static var overlaySourceLock = NSLock()
-    nonisolated(unsafe) private static var overlaySourceRegistries: [UUID: [UUID: any OverlayFrameSource]] = [:]
+    nonisolated(unsafe) private static var overlaySourceRegistries: [UUID: OverlaySourceRegistry] = [:]
 
     /// Registers one immutable source map for a preview/export session.
     @discardableResult
-    nonisolated static func registerOverlaySources(_ sources: [UUID: any OverlayFrameSource]) -> UUID? {
+    nonisolated static func registerOverlaySources(
+        _ sources: [UUID: any OverlayFrameSource],
+        purpose: OverlaySourceRegistryPurpose = .transient
+    ) -> UUID? {
         guard !sources.isEmpty else { return nil }
         let registryID = UUID()
         overlaySourceLock.lock()
-        overlaySourceRegistries[registryID] = sources
+        overlaySourceRegistries[registryID] = OverlaySourceRegistry(purpose: purpose, sources: sources)
         overlaySourceLock.unlock()
         return registryID
     }
@@ -763,6 +770,39 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         overlaySourceLock.unlock()
     }
 
+    /// Removes preview registries left behind by cancelled rebuilds while
+    /// preserving the current preview item and any concurrent export/cover work.
+    nonisolated static func releaseInactivePreviewOverlaySources(keeping retainedRegistryID: UUID?) {
+        overlaySourceLock.lock()
+        overlaySourceRegistries = overlaySourceRegistries.filter { registryID, registry in
+            registry.purpose != .preview || registryID == retainedRegistryID
+        }
+        overlaySourceLock.unlock()
+    }
+
+    nonisolated static func purgeOverlaySourceCaches() {
+        let sources = overlaySourceLock.withLock {
+            overlaySourceRegistries.values.flatMap { $0.sources.values }
+        }
+        for source in sources {
+            source.purgeCachedFrames()
+        }
+    }
+
+    nonisolated static var cachedOverlayFrameCount: Int {
+        let sources = overlaySourceLock.withLock {
+            overlaySourceRegistries.values.flatMap { $0.sources.values }
+        }
+        return sources.reduce(0) { $0 + $1.cachedFrameCount }
+    }
+
+    nonisolated static func hasOverlaySourceRegistry(_ registryID: UUID?) -> Bool {
+        guard let registryID else { return false }
+        return overlaySourceLock.withLock {
+            overlaySourceRegistries[registryID] != nil
+        }
+    }
+
     /// Renders one overlay for the current frame: resolves the frame source,
     /// decodes the frame at the overlay-local time, applies transform and
     /// opacity, and crops to the render canvas.
@@ -772,7 +812,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
                                           renderSize: CGSize) async -> CIImage? {
         // Resolve the frame source.
         let source = Self.overlaySourceLock.withLock {
-            registryID.flatMap { Self.overlaySourceRegistries[$0]?[item.overlayID] }
+            registryID.flatMap { Self.overlaySourceRegistries[$0]?.sources[item.overlayID] }
         }
         guard let source else { return nil }
 
@@ -1607,6 +1647,16 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 }
 
 // MARK: - LUT cache
+
+nonisolated enum OverlaySourceRegistryPurpose: Sendable {
+    case preview
+    case transient
+}
+
+nonisolated private struct OverlaySourceRegistry: Sendable {
+    let purpose: OverlaySourceRegistryPurpose
+    let sources: [UUID: any OverlayFrameSource]
+}
 
 private struct CachedLUT: Sendable {
     let dimension: Int

@@ -20,8 +20,7 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
     private let lock = NSLock()
     private var cache: [Int: CIImage] = [:]
     private var cacheOrder: [Int] = []
-    /// Maximum cached frames. Reduced from 8 to 4 to limit memory pressure
-    /// on lower-RAM Macs (bugfix: memory leak investigation).
+    /// Maximum cached frames retained for smooth short overlay playback.
     private let maxCachedFrames = 4
 
     private init(naturalSize: CGSize,
@@ -150,6 +149,17 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
         }
 
         return image
+    }
+
+    nonisolated var cachedFrameCount: Int {
+        lock.withLock { cache.count }
+    }
+
+    nonisolated func purgeCachedFrames() {
+        lock.withLock {
+            cache.removeAll()
+            cacheOrder.removeAll()
+        }
     }
 
     private func touchCachedFrame(at index: Int) {

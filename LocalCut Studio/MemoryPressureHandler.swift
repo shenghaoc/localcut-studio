@@ -11,25 +11,23 @@ nonisolated final class MemoryPressureHandler: Sendable {
     nonisolated static let shared = MemoryPressureHandler()
 
     private let logger = Logger(subsystem: "com.localcut.studio", category: "MemoryPressure")
-    private let activated = OSAllocatedUnfairLock(initialState: false)
+    private let state = OSAllocatedUnfairLock<State>(uncheckedState: State())
 
     private init() {}
 
     /// Activates memory pressure monitoring. Safe to call multiple times;
     /// only the first call has any effect.
     func activate() {
-        let wasActive = activated.withLock { state -> Bool in
-            if state { return true }
-            state = true
-            return false
+        let source = state.withLock { state -> DispatchSourceMemoryPressure? in
+            guard state.source == nil else { return nil }
+            let source = DispatchSource.makeMemoryPressureSource(
+                eventMask: [.warning, .critical],
+                queue: .global(qos: .utility)
+            )
+            state.source = source
+            return source
         }
-        guard !wasActive else { return }
-
-        // Use DispatchSource to monitor memory pressure on macOS.
-        let source = DispatchSource.makeMemoryPressureSource(
-            eventMask: [.warning, .critical],
-            queue: .global(qos: .utility)
-        )
+        guard let source else { return }
         source.setEventHandler { [weak self] in
             self?.handlePressure()
         }
@@ -38,8 +36,16 @@ nonisolated final class MemoryPressureHandler: Sendable {
         logger.info("Memory pressure handler activated")
     }
 
+    var isActive: Bool {
+        state.withLock { $0.source != nil }
+    }
+
     private func handlePressure() {
-        logger.warning("Memory pressure detected — evicting caches")
+        purgeCachesForMemoryPressure()
+    }
+
+    func purgeCachesForMemoryPressure() {
+        logger.warning("Memory pressure detected - evicting caches")
 
         // RenderCache: evict all in-memory and disk entries.
         RenderCache.shared.purge()
@@ -50,24 +56,16 @@ nonisolated final class MemoryPressureHandler: Sendable {
         // EffectCompositor: evict caption raster cache.
         EffectCompositor.purgeCaptionRasterCache()
 
+        // Overlay frame sources: keep active registries but drop decoded frames.
+        EffectCompositor.purgeOverlaySourceCaches()
+
         // LUTCache: evict cached LUT lookups.
-        LUTCachePurger.purge()
+        EffectCompositor.purgeLUTCache()
 
         logger.warning("Cache eviction complete")
     }
-}
 
-/// Thin access layer for the private `LUTCache.shared.purge()`.
-/// `LUTCache` is a private class inside `EffectCompositor.swift`,
-/// so we reach it through the existing `EffectCompositor` API.
-/// Since `LUTCache` is private, we add a static forwarding method
-/// on `EffectCompositor` instead.
-nonisolated enum LUTCachePurger {
-    static func purge() {
-        // LUTCache is private to EffectCompositor.swift.
-        // The purge() method was added there; this enum provides
-        // a call site for the pressure handler.
-        // Actual call goes through EffectCompositor.purgeLUTCache().
-        EffectCompositor.purgeLUTCache()
+    private struct State {
+        var source: DispatchSourceMemoryPressure?
     }
 }

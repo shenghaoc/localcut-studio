@@ -35,7 +35,8 @@ final class PreviewRebuildCoordinator {
     @MainActor
     func rebuild(model: EditorModel) async {
         let resumeAt = model.currentTime
-        let overlaySourceRegistryID = await model.registerOverlaySources()
+        EffectCompositor.releaseInactivePreviewOverlaySources(keeping: model.activeOverlaySourceRegistryID)
+        let overlaySourceRegistryID = await model.registerOverlaySources(purpose: .preview)
         var didInstallOverlaySourceRegistry = false
         defer {
             if !didInstallOverlaySourceRegistry {

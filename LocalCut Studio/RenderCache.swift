@@ -112,12 +112,10 @@ final class RenderCache: Sendable {
 
     /// Default in-memory budget in bytes (128 MiB). At 1080p (8 MiB/frame) the
     /// cache holds ~16 frames before LRU starts evicting; at 4K (33 MiB/frame)
-    /// ~3. Reduced from 256 MiB to limit memory pressure (bugfix: memory leak
-    /// investigation).
+    /// ~3.
     nonisolated static let defaultByteBudget: Int = 128 * 1024 * 1024
 
-    /// Default disk-spill budget (512 MiB). Reduced from 1 GiB to limit
-    /// disk cache growth (bugfix: memory leak investigation).
+    /// Default disk-spill budget (512 MiB).
     nonisolated static let defaultDiskByteBudget: Int = 512 * 1024 * 1024
 
     /// Shared singleton used by `EffectCompositor`. The compositor is created

@@ -234,7 +234,7 @@ extension EditorModel {
     /// Registers overlay frame sources with the compositor for the current
     /// project's overlays. Called during composition rebuild.
     @MainActor
-    func registerOverlaySources() async -> UUID? {
+    func registerOverlaySources(purpose: OverlaySourceRegistryPurpose = .transient) async -> UUID? {
         var sources: [UUID: any OverlayFrameSource] = [:]
         for overlay in project.overlays {
             guard let url = resolveOverlayURL(for: overlay) else { continue }
@@ -245,7 +245,7 @@ extension EditorModel {
             }
             sources[overlay.id] = source
         }
-        return EffectCompositor.registerOverlaySources(sources)
+        return EffectCompositor.registerOverlaySources(sources, purpose: purpose)
     }
 
     private func resolveBookmark(_ bookmark: Data) -> URL? {
