@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-#if canImport(WebRTC)
+#if LOCALCUT_ENABLE_WEBRTC
 import WebRTC
 #endif
 
@@ -23,16 +23,16 @@ actor AudioPublishBridge {
     private var sampleRate: Double = 48_000
     private var channels: Int = 2
     private var captureThread: Thread?
-    private let stopFlag = OSAllocatedUnfairLock<Bool>(initialState: false)
+    private var stopToken: AudioCaptureStopToken?
 
-    #if canImport(WebRTC)
+    #if LOCALCUT_ENABLE_WEBRTC
     /// The custom audio device injected into the peer connection factory.
     private var audioDevice: LocalCutAudioDevice?
     #endif
 
     private struct SharedState {
         var ringBuffer: RingBuffer?
-        #if !canImport(WebRTC)
+        #if !LOCALCUT_ENABLE_WEBRTC
         var latestBuffer: [Float]?
         var latestSampleRate: Double = 0
         var latestChannels: Int = 0
@@ -44,7 +44,7 @@ actor AudioPublishBridge {
     private let deliveredFrames = OSAllocatedUnfairLock(initialState: 0)
     private let droppedFrames = OSAllocatedUnfairLock(initialState: 0)
 
-    #if !canImport(WebRTC)
+    #if !LOCALCUT_ENABLE_WEBRTC
     nonisolated var latestBuffer: [Float]? { sharedState.withLock { $0.latestBuffer } }
     nonisolated var latestSampleRate: Double { sharedState.withLock { $0.latestSampleRate } }
     nonisolated var latestChannels: Int { sharedState.withLock { $0.latestChannels } }
@@ -52,10 +52,10 @@ actor AudioPublishBridge {
 
     init() {}
 
-    #if canImport(WebRTC)
+    #if LOCALCUT_ENABLE_WEBRTC
     /// Returns the custom audio device for injection into the peer connection factory.
     /// Returns nil when the bridge is not running.
-    nonisolated var rtcAudioDevice: LocalCutAudioDevice? {
+    var rtcAudioDevice: LocalCutAudioDevice? {
         audioDevice
     }
     #endif
@@ -67,12 +67,13 @@ actor AudioPublishBridge {
         self.isRunning = true
         let frameSize = Int(sampleRate * Self.frameDurationSeconds) * channels
         let newRing = RingBuffer(capacity: frameSize * 10)
+        let token = AudioCaptureStopToken()
         sharedState.withLock { $0.ringBuffer = newRing }
-        stopFlag.withLock { $0 = false }
+        stopToken = token
         deliveredFrames.withLock { $0 = 0 }
         droppedFrames.withLock { $0 = 0 }
 
-        #if canImport(WebRTC)
+        #if LOCALCUT_ENABLE_WEBRTC
         let device = LocalCutAudioDevice(
             sampleRate: sampleRate,
             channels: channels,
@@ -80,20 +81,23 @@ actor AudioPublishBridge {
         )
         audioDevice = device
         // Start the capture thread that feeds samples to the device.
-        startCaptureThread(frameSize: frameSize, ring: newRing, device: device)
+        startCaptureThread(frameSize: frameSize, ring: newRing, device: device, stopToken: token)
         #else
-        startCaptureThread(frameSize: frameSize, ring: newRing)
+        startCaptureThread(frameSize: frameSize, ring: newRing, stopToken: token)
         #endif
     }
 
     func stop() {
         guard isRunning else { return }
         isRunning = false
-        stopFlag.withLock { $0 = true }
-        captureThread?.cancel()
+        stopToken?.stop()
+        let thread = captureThread
+        thread?.cancel()
         captureThread = nil
+        stopToken = nil
+        waitForCaptureThreadToExit(thread)
         sharedState.withLock { $0.ringBuffer = nil }
-        #if canImport(WebRTC)
+        #if LOCALCUT_ENABLE_WEBRTC
         audioDevice = nil
         #endif
     }
@@ -102,7 +106,7 @@ actor AudioPublishBridge {
         sharedState.withLock { s in
             guard let ring = s.ringBuffer else { return }
             ring.write(buffer)
-            #if !canImport(WebRTC)
+            #if !LOCALCUT_ENABLE_WEBRTC
             s.latestBuffer = buffer
             s.latestSampleRate = sampleRate
             s.latestChannels = channels
@@ -112,15 +116,14 @@ actor AudioPublishBridge {
 
     // MARK: - Capture thread
 
-    #if canImport(WebRTC)
-    private func startCaptureThread(frameSize: Int, ring: RingBuffer, device: LocalCutAudioDevice) {
-        let stopFlag = stopFlag
+    #if LOCALCUT_ENABLE_WEBRTC
+    private func startCaptureThread(frameSize: Int, ring: RingBuffer, device: LocalCutAudioDevice, stopToken: AudioCaptureStopToken) {
         let delivered = deliveredFrames
         let dropped = droppedFrames
         let thread = Thread {
             var frameBuffer = [Float](repeating: 0, count: frameSize)
             while true {
-                if stopFlag.withLock({ $0 }) { break }
+                if stopToken.isStopped || Thread.current.isCancelled { break }
                 Thread.sleep(forTimeInterval: Self.frameDurationSeconds)
                 let readSamples = ring.read(count: frameSize)
                 if readSamples.isEmpty {
@@ -139,12 +142,11 @@ actor AudioPublishBridge {
         thread.start()
     }
     #else
-    private func startCaptureThread(frameSize: Int, ring: RingBuffer) {
-        let stopFlag = stopFlag
+    private func startCaptureThread(frameSize: Int, ring: RingBuffer, stopToken: AudioCaptureStopToken) {
         let thread = Thread {
             var frameBuffer = [Float](repeating: 0, count: frameSize)
             while true {
-                if stopFlag.withLock({ $0 }) { break }
+                if stopToken.isStopped || Thread.current.isCancelled { break }
                 Thread.sleep(forTimeInterval: Self.frameDurationSeconds)
                 let readSamples = ring.read(count: frameSize)
                 for i in 0..<readSamples.count { frameBuffer[i] = readSamples[i] }
@@ -157,11 +159,29 @@ actor AudioPublishBridge {
         thread.start()
     }
     #endif
+
+    private nonisolated func waitForCaptureThreadToExit(_ thread: Thread?) {
+        guard let thread else { return }
+        let deadline = Date().addingTimeInterval(0.25)
+        while thread.isExecuting && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+    }
+}
+
+private nonisolated final class AudioCaptureStopToken: @unchecked Sendable {
+    private let stopped = OSAllocatedUnfairLock<Bool>(initialState: false)
+
+    var isStopped: Bool { stopped.withLock { $0 } }
+
+    func stop() {
+        stopped.withLock { $0 = true }
+    }
 }
 
 // MARK: - LocalCutAudioDevice (RTCAudioDevice)
 
-#if canImport(WebRTC)
+#if LOCALCUT_ENABLE_WEBRTC
 /// Custom `RTCAudioDevice` that feeds master-bus samples into WebRTC's
 /// capture/recording transport.
 ///
@@ -169,7 +189,7 @@ actor AudioPublishBridge {
 /// Recording samples are delivered via `deliverSamples(_:)` from the
 /// capture thread, which calls the delegate's `deliverRecordedData`
 /// block to push PCM into WebRTC's native ADM.
-final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecked Sendable {
+nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecked Sendable {
     private let sampleRate: Double
     private let channels: Int
     private let frameDurationSeconds: Double
@@ -263,16 +283,8 @@ final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecked Sendable {
             int16Samples[i] = Int16(clamped * 32767.0)
         }
 
-        // Create AudioBufferList
-        let byteCount = int16Samples.count * MemoryLayout<Int16>.size
-        var audioBuffer = AudioBuffer(
-            mNumberChannels: UInt32(channels),
-            mDataByteSize: UInt32(byteCount),
-            mData: &int16Samples
-        )
-        var bufferList = AudioBufferList(mNumberBuffers: 1, mBuffers: audioBuffer)
-
-        let timestamp = AudioTimeStamp(
+        var actionFlags = AudioUnitRenderActionFlags()
+        var timestamp = AudioTimeStamp(
             mSampleTime: 0,
             mHostTime: 0,
             mRateScalar: 0,
@@ -284,7 +296,15 @@ final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecked Sendable {
 
         // Call the delegate's deliverRecordedData block
         let deliverBlock = delegate.deliverRecordedData
-        deliverBlock(nil, &timestamp, 0, UInt32(frameCount), &bufferList, nil, nil)
+        int16Samples.withUnsafeMutableBytes { rawBuffer in
+            let audioBuffer = AudioBuffer(
+                mNumberChannels: UInt32(channels),
+                mDataByteSize: UInt32(rawBuffer.count),
+                mData: rawBuffer.baseAddress
+            )
+            var bufferList = AudioBufferList(mNumberBuffers: 1, mBuffers: audioBuffer)
+            _ = deliverBlock(&actionFlags, &timestamp, 0, UInt32(frameCount), &bufferList, nil, nil)
+        }
 
         deliveredCount.withLock { $0 += 1 }
     }

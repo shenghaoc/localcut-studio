@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs the MediaMTX WHIP integration test for LocalCut Studio.
 #
-# Usage: ./Scripts/run-mediatx-whip-integration.sh
+# Usage: ./Scripts/run-mediamtx-whip-integration.sh
 #
 # Prerequisites: Docker or Podman installed and running.
 # Starts MediaMTX in a container, runs the integration test, then stops it.
@@ -10,7 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-CONTAINER_NAME="localcut-mediatx-test"
+CONTAINER_NAME="localcut-mediamtx-test"
 CONFIG_FILE="${PROJECT_DIR}/Tests/Fixtures/MediaMTX/mediamtx.yml"
 IMAGE="bluenviron/mediamtx:latest"
 
@@ -23,6 +23,10 @@ elif command -v podman &>/dev/null; then
     CONTAINER_CMD="podman"
 else
     echo "SKIP: No container runtime (docker/podman) found."
+    if [ "${CI:-}" = "true" ] || [ "${LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION:-0}" = "1" ]; then
+        echo "ERROR: MediaMTX integration is required in this environment."
+        exit 1
+    fi
     exit 0
 fi
 
@@ -63,7 +67,7 @@ done
 # Run the integration test via xcodebuild
 echo "Running integration test..."
 cd "${PROJECT_DIR}"
-xcodebuild test \
+LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 xcodebuild test \
     -project "LocalCut Studio.xcodeproj" \
     -scheme "LocalCut Studio" \
     -configuration Debug \

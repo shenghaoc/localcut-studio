@@ -22,12 +22,71 @@ PACKAGE_DIR="$(dirname "$SCRIPT_DIR")"
 DOWNLOAD_DIR="${PACKAGE_DIR}/.build/webrtc-download"
 XCFRAMEWORK="${PACKAGE_DIR}/WebRTC.xcframework"
 
+patch_macos_headers() {
+    local macos_headers="$1"
+
+    # stasel's M140 macOS slice is the newest usable binary, but its Obj-C
+    # umbrella/header set still carries a few iOS-only public headers when we
+    # fill missing imports from the iOS slice. Those headers pull UIKit or
+    # AVAudioSession into the macOS module and break `import WebRTC`.
+    local excluded_headers=(
+        "RTCAudioSession.h"
+        "RTCAudioSessionConfiguration.h"
+        "RTCCameraPreviewView.h"
+        "RTCEAGLVideoView.h"
+        "RTCMTLVideoView.h"
+        "UIDevice+RTCDevice.h"
+    )
+
+    local umbrella="${macos_headers}/WebRTC.h"
+    for header in "${excluded_headers[@]}"; do
+        local tmp="${umbrella}.tmp"
+        grep -vF "#import <WebRTC/${header}>" "${umbrella}" > "${tmp}"
+        mv "${tmp}" "${umbrella}"
+        rm -f "${macos_headers}/${header}"
+    done
+
+    if [ -f "${macos_headers}/RTCMTLNSVideoView.h" ] &&
+       ! grep -qF "#import <WebRTC/RTCMTLNSVideoView.h>" "${umbrella}"; then
+        local tmp="${umbrella}.tmp"
+        awk '
+            $0 == "#import <WebRTC/RTCNetworkMonitor.h>" {
+                print
+                print "#import <WebRTC/RTCMTLNSVideoView.h>"
+                next
+            }
+            { print }
+        ' "${umbrella}" > "${tmp}"
+        mv "${tmp}" "${umbrella}"
+    fi
+
+    local renderer="${macos_headers}/RTCVideoRenderer.h"
+    if [ -f "${renderer}" ] &&
+       grep -qF "#import <UIKit/UIKit.h>" "${renderer}" &&
+       ! grep -qF "#import <CoreGraphics/CoreGraphics.h>" "${renderer}"; then
+        local tmp="${renderer}.tmp"
+        awk '
+            $0 == "#import <UIKit/UIKit.h>" {
+                print "#if TARGET_OS_IPHONE"
+                print "#import <UIKit/UIKit.h>"
+                print "#else"
+                print "#import <CoreGraphics/CoreGraphics.h>"
+                print "#endif"
+                next
+            }
+            { print }
+        ' "${renderer}" > "${tmp}"
+        mv "${tmp}" "${renderer}"
+    fi
+}
+
 echo "=== LocalCutWebRTC: Downloading WebRTC ${VERSION} ==="
 
 # Skip if XCFramework already exists
 if [ -d "${XCFRAMEWORK}" ]; then
     echo "XCFramework already exists at ${XCFRAMEWORK}"
-    echo "Delete it to re-download."
+    echo "Validating existing macOS headers."
+    patch_macos_headers "${XCFRAMEWORK}/macos-x86_64_arm64/WebRTC.framework/Headers"
     exit 0
 fi
 
@@ -105,10 +164,10 @@ if [ "${MISSING}" -ne 0 ]; then
             echo "    WARNING: ${header} not found in iOS slice either"
         fi
     done
-    # Also copy the complete umbrella header from iOS
-    cp "${IOS_HEADERS}/WebRTC.h" "${MACOS_HEADERS}/WebRTC.h"
     echo "  Headers after fix: $(ls "${MACOS_HEADERS}" | wc -l | tr -d ' ')"
 fi
+
+patch_macos_headers "${MACOS_HEADERS}"
 
 # Move to final location
 echo "Installing XCFramework..."

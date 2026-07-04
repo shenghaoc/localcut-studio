@@ -1,27 +1,37 @@
 import Foundation
 import CoreVideo
 
-#if canImport(WebRTC)
+#if LOCALCUT_ENABLE_WEBRTC
 import WebRTC
 #endif
 
 nonisolated final class VideoPublishTap: @unchecked Sendable {
-    #if canImport(WebRTC)
-    let videoSource: RTCVideoSource
-    private let capturer: TapCapturer
+    #if LOCALCUT_ENABLE_WEBRTC
+    private var videoSource: RTCVideoSource?
+    private var capturer: TapCapturer?
 
-    init(videoSource: RTCVideoSource) {
-        self.videoSource = videoSource
-        self.capturer = TapCapturer(source: videoSource)
+    init() {}
+
+    nonisolated func attach(to factory: RTCPeerConnectionFactory) -> RTCVideoSource {
+        lock.lock()
+        defer { lock.unlock() }
+        if let videoSource { return videoSource }
+        let source = factory.videoSource()
+        videoSource = source
+        capturer = TapCapturer(source: source)
+        return source
     }
 
-    convenience init(factory: RTCPeerConnectionFactory) {
-        let source = factory.videoSource()
-        self.init(videoSource: source)
+    nonisolated func detachFromWebRTC() {
+        lock.lock()
+        videoSource = nil
+        capturer = nil
+        lock.unlock()
     }
     #else
     nonisolated(unsafe) private(set) var latestPixelBuffer: CVPixelBuffer?
     init() {}
+    nonisolated func detachFromWebRTC() {}
     #endif
 
     private let lock = NSLock()
@@ -52,13 +62,18 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     }
 
     private nonisolated func deliverFrame(_ buffer: CVPixelBuffer) {
-        #if canImport(WebRTC)
-        let frame = RTCVideoFrame(
-            buffer: RTCCVPixelBuffer(pixelBuffer: buffer),
-            rotation: ._0,
-            timeStampNs: Int64(Date().timeIntervalSince1970 * 1_000_000_000)
-        )
-        capturer.didCapture(frame)
+        #if LOCALCUT_ENABLE_WEBRTC
+        lock.lock()
+        let activeCapturer = capturer
+        lock.unlock()
+        if let activeCapturer {
+            let frame = RTCVideoFrame(
+                buffer: RTCCVPixelBuffer(pixelBuffer: buffer),
+                rotation: ._0,
+                timeStampNs: Int64(Date().timeIntervalSince1970 * 1_000_000_000)
+            )
+            activeCapturer.didCapture(frame)
+        }
         #else
         lock.lock()
         latestPixelBuffer = buffer
@@ -78,7 +93,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     }
 }
 
-#if canImport(WebRTC)
+#if LOCALCUT_ENABLE_WEBRTC
 private nonisolated final class TapCapturer: RTCVideoCapturer {
     init(source: RTCVideoSource) {
         super.init(delegate: source)

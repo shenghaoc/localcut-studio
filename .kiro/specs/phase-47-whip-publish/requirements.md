@@ -2,8 +2,8 @@
 
 ## R1 — WHIP client
 
-- **R1.1** RFC-9725 compliant: POST offer / accept answer + ICE servers via Link headers; PATCH ICE restart with `If-Match` ETag (§4.3.1); DELETE on stop.
-- **R1.2** ETag from the publish response is cached; every PATCH sends it as `If-Match`. The PATCH response's new ETag replaces the cached one for the next restart. Missing / stale validators yield 412 or 428; on either, the reconnect controller falls back to full re-POST as a new session.
+- **R1.1** RFC-9725 compliant: POST offer / accept answer + ICE servers via Link headers; PATCH ICE restart with `If-Match: *` (§4.3.1); DELETE on stop.
+- **R1.2** ETag from the publish response is cached; every successful PATCH response's new ETag replaces the cached one for the next restart. Missing / stale restart preconditions yield 412 or 428; on either, the reconnect controller falls back to full re-POST as a new session.
 - **R1.3** Bearer token sent on every verb; never echoed in errors, logs, diagnostics, telemetry, or persisted alongside `ProjectDoc`.
 - **R1.4** Error mapping returns typed results (`rejected-offer` | `auth` | `not-found` | `retryable`); `400` fails fast.
 

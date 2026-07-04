@@ -19,10 +19,10 @@ struct PublishPanel: View {
         .frame(minWidth: 280)
         .onAppear {
             publishState.refreshCapability(model: model)
-            if !model.publishSettings.endpointURL.isEmpty {
-                publishState.endpointURL = model.publishSettings.endpointURL
-                publishState.endpointType = model.publishSettings.endpointType
-            }
+            publishState.loadSettings(from: model)
+        }
+        .onChange(of: publishState.endpointType) { oldType, _ in
+            publishState.endpointTypeDidChange(from: oldType, model: model)
         }
         .onChange(of: model.programSession != nil) { _, _ in
             publishState.refreshCapability(model: model)
@@ -82,7 +82,7 @@ struct PublishPanel: View {
     private var codecSection: some View {
         Section {
             Picker("Codec", selection: $publishState.selectedCodec) {
-                ForEach(PublishCodec.allCases) { codec in
+                ForEach(publishState.availableCodecs) { codec in
                     Text(codec.displayName).tag(codec)
                 }
             }
@@ -118,7 +118,7 @@ struct PublishPanel: View {
 
             Stepper(value: $publishState.keyframeInterval, in: 1...10) {
                 HStack {
-                    Text("Keyframe Interval").font(.caption)
+                    Text("Keyframe Interval (Best Effort)").font(.caption)
                     Spacer()
                     Text("\(publishState.keyframeInterval)s")
                         .font(.caption.monospacedDigit())
@@ -126,7 +126,7 @@ struct PublishPanel: View {
                 }
             }
             .accessibilityLabel("Keyframe interval")
-            .accessibilityValue("\(publishState.keyframeInterval) seconds")
+            .accessibilityValue("\(publishState.keyframeInterval) seconds, best effort")
         } header: {
             Text("Codec")
                 .font(.caption.bold())

@@ -57,11 +57,13 @@ final class PublishSettings {
     }
 
     func tokenForCurrentEndpoint() -> String? {
+        guard endpointType.requiresToken else { return nil }
         if rememberToken { return KeychainHelper.load(key: keychainKey) ?? bearerToken }
         return bearerToken
     }
 
     func saveTokenToKeychain() {
+        guard endpointType.requiresToken else { return }
         guard let token = bearerToken, !token.isEmpty else { return }
         KeychainHelper.save(key: keychainKey, data: token)
     }
@@ -69,6 +71,7 @@ final class PublishSettings {
     func removeTokenFromKeychain() { KeychainHelper.delete(key: keychainKey) }
 
     func redactedTokenDisplay() -> String {
+        guard endpointType.requiresToken else { return "" }
         guard let token = bearerToken, !token.isEmpty else { return "" }
         return "••••••"
     }

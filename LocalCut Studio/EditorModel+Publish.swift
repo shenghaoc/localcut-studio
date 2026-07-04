@@ -2,13 +2,11 @@ import Foundation
 import AVFAudio
 import LocalCutCore
 
-#if canImport(WebRTC)
-import WebRTC
-#endif
-
 enum WhipPublishStartError: LocalizedError {
     case invalidEndpoint
     case programOutputUnavailable
+    case alreadyPublishing
+    case audioUnavailable(String)
 
     var errorDescription: String? {
         switch self {
@@ -16,12 +14,19 @@ enum WhipPublishStartError: LocalizedError {
             "Enter a valid WHIP endpoint URL."
         case .programOutputUnavailable:
             "Start Program Mode before publishing. WHIP streams the live program output."
+        case .alreadyPublishing:
+            "A WHIP publish session is already running."
+        case .audioUnavailable(let message):
+            "Could not start the live audio bus for publishing: \(message)"
         }
     }
 }
 
 extension EditorModel {
     func startWhipPublish(config: PublishConfig) async throws {
+        guard whipSession == nil else {
+            throw WhipPublishStartError.alreadyPublishing
+        }
         guard let endpointURL = URL(string: publishSettings.endpointURL) else {
             throw WhipPublishStartError.invalidEndpoint
         }
@@ -29,13 +34,13 @@ extension EditorModel {
             throw WhipPublishStartError.programOutputUnavailable
         }
         let token = publishSettings.tokenForCurrentEndpoint()
+        audioBus.prepareLive()
+        guard audioBus.isLiveRunning else {
+            throw WhipPublishStartError.audioUnavailable(
+                audioBus.lastStartError ?? "The audio device is unavailable.")
+        }
 
-        #if canImport(WebRTC)
-        let factory = RTCPeerConnectionFactory()
-        let videoTap = VideoPublishTap(factory: factory)
-        #else
         let videoTap = VideoPublishTap()
-        #endif
         let audioBridge = AudioPublishBridge()
         await audioBridge.start(
             sampleRate: AudioMasterBus.canonicalFormat.sampleRate,

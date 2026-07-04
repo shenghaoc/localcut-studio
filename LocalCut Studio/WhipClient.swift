@@ -40,7 +40,7 @@ nonisolated struct WhipResource: Sendable {
 
 protocol WhipClient: Sendable {
     func publish(endpoint: URL, offerSdp: String, authToken: String?) async throws -> (resourceUrl: URL, etag: String, iceServers: [ICEServerInfo], answerSdp: String)
-    func patchIceRestart(resourceUrl: URL, offerSdp: String, etag: String, authToken: String?) async throws -> (answerSdp: String, newEtag: String)
+    func patchIceRestart(resourceUrl: URL, sdpFragment: String, etag: String, authToken: String?) async throws -> (answerSdp: String, newEtag: String)
     func teardown(resourceUrl: URL, authToken: String?) async
 }
 
@@ -85,7 +85,7 @@ actor WhipClientImpl: WhipClient {
         return (resourceUrl: resourceUrl, etag: etag, iceServers: iceServers, answerSdp: answerSdp)
     }
 
-    func patchIceRestart(resourceUrl: URL, offerSdp: String, etag: String, authToken: String?) async throws -> (answerSdp: String, newEtag: String) {
+    func patchIceRestart(resourceUrl: URL, sdpFragment: String, etag: String, authToken: String?) async throws -> (answerSdp: String, newEtag: String) {
         var request = URLRequest(url: resourceUrl)
         request.httpMethod = "PATCH"
         request.setValue("application/trickle-ice-sdpfrag", forHTTPHeaderField: "Content-Type")
@@ -93,7 +93,7 @@ actor WhipClientImpl: WhipClient {
         if let token = authToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        request.httpBody = offerSdp.data(using: .utf8)
+        request.httpBody = sdpFragment.data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw WhipError.invalidResponse }

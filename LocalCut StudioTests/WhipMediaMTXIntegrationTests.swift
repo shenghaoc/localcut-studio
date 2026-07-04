@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import LocalCutCore
 @testable import LocalCut_Studio
 
 /// MediaMTX WHIP integration test.
@@ -7,11 +8,15 @@ import Testing
 /// Verifies that LocalCut can publish to a real WHIP ingest endpoint
 /// (MediaMTX running in a container), assert ingest, and tear down cleanly.
 ///
-/// This test requires a container runtime (Docker/Podman) with MediaMTX
-/// running on localhost:8889. When the container is not available, the
-/// test is skipped with a clear reason — CI must run it via the
-/// `run-mediatx-whip-integration.sh` script.
-@Suite("MediaMTX WHIP integration", .serialized)
+/// This test requires a container runtime (Docker/Podman) with MediaMTX running
+/// on localhost:8889. Normal local test runs leave the suite disabled; CI must
+/// run it through `run-mediamtx-whip-integration.sh`, which sets the opt-in
+/// environment variable after starting the container.
+@Suite(
+    "MediaMTX WHIP integration",
+    .serialized,
+    .enabled(if: ProcessInfo.processInfo.environment["LOCALCUT_RUN_MEDIAMTX_INTEGRATION"] == "1")
+)
 struct WhipMediaMTXIntegrationTests {
 
     private static let endpointURL = "http://localhost:8889/stream/test"
@@ -31,7 +36,7 @@ struct WhipMediaMTXIntegrationTests {
     @Test("WHIP POST returns SDP answer from MediaMTX")
     func whipPostReturnsAnswer() async throws {
         guard await Self.isMediaMTXAvailable() else {
-            Issue.record("MediaMTX not available on localhost:8889 — run Scripts/run-mediatx-whip-integration.sh")
+            Issue.record("MediaMTX not available on localhost:8889 — run Scripts/run-mediamtx-whip-integration.sh")
             return
         }
 
@@ -85,7 +90,7 @@ struct WhipMediaMTXIntegrationTests {
     @Test("Publish state reaches live and transitions to ended on stop")
     func publishStateTransitions() async throws {
         guard await Self.isMediaMTXAvailable() else {
-            Issue.record("MediaMTX not available on localhost:8889 — run Scripts/run-mediatx-whip-integration.sh")
+            Issue.record("MediaMTX not available on localhost:8889 — run Scripts/run-mediamtx-whip-integration.sh")
             return
         }
 

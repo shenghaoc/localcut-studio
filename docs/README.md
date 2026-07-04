@@ -5,6 +5,7 @@ User-facing docs are the single source of truth for how the app behaves. Keep th
 ## Contents
 
 - [Getting Started](getting-started.md) — import, edit, preview, export your first project.
+- [User Guide](USER-GUIDE.md) — publishing, stream keys, and dependency notes.
 - [Keyboard Shortcuts](keyboard-shortcuts.md) — reference table.
 - [Chapter Export Verification](chapter-export-verification.md) — manual VLC, QuickTime Player, and YouTube chapter playback checklist.
 

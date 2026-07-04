@@ -46,6 +46,16 @@ final class PublishPanelState {
     }
 
     var endpointRequiresToken: Bool { endpointType.requiresToken }
+    var availableCodecs: [PublishCodec] {
+        PublishCodec.allCases.filter { codec in
+            switch codec {
+            case .h264Baseline:
+                true
+            case .av1:
+                PublishCodecProber.isAV1Available(for: endpointType)
+            }
+        }
+    }
     private var canAttemptStartFromCurrentState: Bool {
         switch publishState {
         case .idle, .failed, .ended:
@@ -59,8 +69,39 @@ final class PublishPanelState {
     private var stateObservationTask: Task<Void, Never>?
     private var statsPollingTask: Task<Void, Never>?
 
+    func loadSettings(from model: EditorModel) {
+        endpointType = model.publishSettings.endpointType
+        endpointURL = model.publishSettings.endpointURL.isEmpty
+            ? endpointType.defaultEndpointURL
+            : model.publishSettings.endpointURL
+        rememberToken = model.publishSettings.rememberToken
+        bearerToken = endpointRequiresToken
+            ? (model.publishSettings.tokenForCurrentEndpoint() ?? "")
+            : ""
+        applyProfile(PublishEndpointDefaults.default(for: endpointType))
+        normalizeCodecForEndpoint()
+    }
+
+    func endpointTypeDidChange(from oldType: PublishEndpointType, model: EditorModel) {
+        if endpointURL.isEmpty || endpointURL == oldType.defaultEndpointURL {
+            endpointURL = endpointType.defaultEndpointURL
+        }
+        applyProfile(PublishEndpointDefaults.default(for: endpointType))
+        normalizeCodecForEndpoint()
+        if endpointRequiresToken {
+            model.publishSettings.endpointType = endpointType
+            model.publishSettings.endpointURL = endpointURL
+            rememberToken = model.publishSettings.rememberToken
+            bearerToken = model.publishSettings.tokenForCurrentEndpoint() ?? ""
+        } else {
+            bearerToken = ""
+            rememberToken = false
+        }
+    }
+
     func startPublish(model: EditorModel) {
         guard canStart else { return }
+        normalizeCodecForEndpoint()
         isStarting = true
         publishState = .connecting
         statusMessage = "Connecting to \(endpointType.displayName)..."
@@ -76,14 +117,12 @@ final class PublishPanelState {
         model.publishSettings.endpointURL = endpointURL
         model.publishSettings.endpointType = endpointType
 
-        // Always store the typed token in session settings so
-        // startWhipPublish can read it. Only persist to Keychain
-        // when the user explicitly opts in.
-        if !bearerToken.isEmpty {
-            model.publishSettings.bearerToken = bearerToken
-        }
-        if rememberToken && !bearerToken.isEmpty {
-            model.publishSettings.saveTokenToKeychain()
+        if endpointRequiresToken {
+            model.publishSettings.bearerToken = bearerToken.isEmpty ? nil : bearerToken
+            model.publishSettings.rememberToken = rememberToken
+        } else {
+            model.publishSettings.bearerToken = nil
+            model.publishSettings.rememberToken = false
         }
 
         Task {
@@ -171,7 +210,7 @@ final class PublishPanelState {
     }
 
     func refreshCapability(model: EditorModel) {
-        #if canImport(WebRTC)
+        #if LOCALCUT_ENABLE_WEBRTC
         isWebRTCAvailable = true
         #else
         isWebRTCAvailable = false
@@ -193,5 +232,18 @@ final class PublishPanelState {
 
     static func formattedRTT(_ rtt: TimeInterval) -> String {
         String(format: "%.0f ms", rtt * 1_000)
+    }
+
+    private func applyProfile(_ profile: PublishProfile) {
+        selectedCodec = profile.codec
+        videoBitrate = profile.videoBitrate / 1_000
+        audioBitrate = profile.audioBitrate / 1_000
+        keyframeInterval = profile.keyframeInterval
+    }
+
+    private func normalizeCodecForEndpoint() {
+        if !availableCodecs.contains(selectedCodec) {
+            selectedCodec = .h264Baseline
+        }
     }
 }

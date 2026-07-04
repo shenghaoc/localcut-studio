@@ -2,7 +2,7 @@ import Foundation
 import os
 import LocalCutCore
 
-#if canImport(WebRTC)
+#if LOCALCUT_ENABLE_WEBRTC
 import WebRTC
 #endif
 
@@ -55,18 +55,11 @@ actor WhipSession {
     private var iceServerUrls: [ICEServerInfo] = []
     private var videoTap: VideoPublishTap?
     private var audioBridge: AudioPublishBridge?
+    private var isReconnectInFlight = false
+    private var reconnectGeneration = 0
 
-    #if canImport(WebRTC)
-    private lazy var factory: RTCPeerConnectionFactory = {
-        if let audioDevice = audioBridge?.rtcAudioDevice {
-            return RTCPeerConnectionFactory(
-                encoderFactory: nil,
-                decoderFactory: nil,
-                audioDevice: audioDevice
-            )
-        }
-        return RTCPeerConnectionFactory()
-    }()
+    #if LOCALCUT_ENABLE_WEBRTC
+    private var factory: RTCPeerConnectionFactory?
     private var peerConnection: RTCPeerConnection?
     private var peerConnectionDelegate: WhipPeerConnectionDelegate?
     private var videoTransceiver: RTCRtpTransceiver?
@@ -120,10 +113,9 @@ actor WhipSession {
             if let resourceUrl {
                 await client.teardown(resourceUrl: resourceUrl, authToken: authToken)
             }
-            videoTap?.close()
             await audioBridge?.stop()
             self.audioBridge = nil
-            closeWebRTCResources()
+            closeWebRTCResources(closeMediaTap: true)
             releaseEncoderBudget()
             resourceUrl = nil
             etag = nil
@@ -139,10 +131,9 @@ actor WhipSession {
         if let url = resourceUrl {
             await client.teardown(resourceUrl: url, authToken: authToken)
         }
-        videoTap?.close()
         await audioBridge?.stop()
         audioBridge = nil
-        closeWebRTCResources()
+        closeWebRTCResources(closeMediaTap: true)
         releaseEncoderBudget()
         resourceUrl = nil
         etag = nil
@@ -151,6 +142,15 @@ actor WhipSession {
 
     func handleDisconnect() async {
         guard state == .live || state == .reconnecting else { return }
+        guard !isReconnectInFlight else { return }
+        isReconnectInFlight = true
+        reconnectGeneration += 1
+        let generation = reconnectGeneration
+        defer {
+            if reconnectGeneration == generation {
+                isReconnectInFlight = false
+            }
+        }
         statsTask?.cancel()
         statsTask = nil
         guard reconnectController.canAttemptReconnect else {
@@ -163,7 +163,7 @@ actor WhipSession {
         // allow transient WebRTC disconnects to recover.
         reconnectController.markDisconnected()
         try? await reconnectController.waitForGracePeriod()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, state == .reconnecting, reconnectGeneration == generation else { return }
 
         // Advance attempt count BEFORE reading backoff so the first
         // reconnect uses the correct backoff ladder entry.
@@ -172,14 +172,22 @@ actor WhipSession {
         if reconnectController.shouldTryIceRestart {
             let backoff = reconnectController.backoffDuration
             if backoff > 0 { try? await Task.sleep(for: .seconds(backoff)) }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, state == .reconnecting, reconnectGeneration == generation else { return }
             await attemptIceRestart()
         } else {
             let backoff = reconnectController.backoffDuration
             if backoff > 0 { try? await Task.sleep(for: .seconds(backoff)) }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, state == .reconnecting, reconnectGeneration == generation else { return }
             await attemptFullReconnect()
         }
+    }
+
+    func handleConnectionRecovered() {
+        guard state == .reconnecting else { return }
+        reconnectGeneration += 1
+        isReconnectInFlight = false
+        state = .live
+        startStatsPolling()
     }
 
     // MARK: - Private
@@ -195,14 +203,16 @@ actor WhipSession {
 
     private func connect(endpointURL: URL) async throws {
         currentEndpointConfig = (endpoint: endpointURL, authToken: authToken)
-        #if canImport(WebRTC)
-        try configurePeerConnection()
+        #if LOCALCUT_ENABLE_WEBRTC
+        try await configurePeerConnection()
         let offer = try await createOffer()
         let response = try await client.publish(endpoint: endpointURL, offerSdp: offer, authToken: authToken)
         resourceUrl = response.resourceUrl
         etag = response.etag
         reconnectController.updateETag(response.etag)
         iceServerUrls = response.iceServers
+        reconnectController.updateIceServers(response.iceServers.map { $0.url.absoluteString })
+        try applyIceServers(response.iceServers)
         try await applyAnswerSdp(response.answerSdp)
         #else
         try await Task.sleep(for: .milliseconds(100))
@@ -216,7 +226,7 @@ actor WhipSession {
             await attemptFullReconnect()
             return
         }
-        #if canImport(WebRTC)
+        #if LOCALCUT_ENABLE_WEBRTC
         do {
             guard let pc = peerConnection else { await attemptFullReconnect(); return }
             // Request an actual ICE restart by setting the iceRestart
@@ -227,14 +237,18 @@ actor WhipSession {
             )
             let offer = try await pc.offer(for: constraints)
             try await pc.setLocalDescription(offer)
-            let response = try await client.patchIceRestart(resourceUrl: url, offerSdp: offer.sdp, etag: etag, authToken: authToken)
+            let fragment = IceSdpFragmentBuilder.restartFragment(from: offer.sdp)
+            let response = try await client.patchIceRestart(resourceUrl: url, sdpFragment: fragment, etag: etag, authToken: authToken)
             self.etag = response.newEtag
             reconnectController.updateETag(response.newEtag)
-            let answer = RTCSessionDescription(type: .answer, sdp: response.answerSdp)
-            try await pc.setRemoteDescription(answer)
+            if response.answerSdp.hasPrefix("v=") {
+                let answer = RTCSessionDescription(type: .answer, sdp: response.answerSdp)
+                try await pc.setRemoteDescription(answer)
+            }
             state = .live
             startStatsPolling()
         } catch {
+            reconnectController.patchFailed()
             await attemptFullReconnect()
         }
         #else
@@ -252,7 +266,7 @@ actor WhipSession {
         if let oldUrl = resourceUrl {
             await client.teardown(resourceUrl: oldUrl, authToken: authToken)
         }
-        closeWebRTCResources()
+        closeWebRTCResources(closeMediaTap: false)
         if encoderLease == nil {
             do { encoderLease = try await budget.acquire(.whipPublish) }
             catch { await failAndCleanup("Budget re-acquire failed."); return }
@@ -265,10 +279,12 @@ actor WhipSession {
     }
 
     private func failAndCleanup(_ message: String) async {
-        videoTap?.close()
+        if let resourceUrl {
+            await client.teardown(resourceUrl: resourceUrl, authToken: authToken)
+        }
         await audioBridge?.stop()
         audioBridge = nil
-        closeWebRTCResources()
+        closeWebRTCResources(closeMediaTap: true)
         releaseEncoderBudget()
         resourceUrl = nil
         etag = nil
@@ -280,22 +296,35 @@ actor WhipSession {
         if let lease = encoderLease { lease.relinquish(); encoderLease = nil }
     }
 
-    private func closeWebRTCResources() {
+    private func closeWebRTCResources(closeMediaTap: Bool) {
         statsTask?.cancel()
         statsTask = nil
-        videoTap?.close()
-        videoTap = nil
-        #if canImport(WebRTC)
+        if closeMediaTap {
+            videoTap?.close()
+            videoTap = nil
+        } else {
+            videoTap?.detachFromWebRTC()
+        }
+        #if LOCALCUT_ENABLE_WEBRTC
         videoTransceiver = nil
         audioTransceiver = nil
         peerConnection?.close()
         peerConnection = nil
         peerConnectionDelegate = nil
+        factory = nil
         #endif
     }
 
-    #if canImport(WebRTC)
-    private func configurePeerConnection() throws {
+    #if LOCALCUT_ENABLE_WEBRTC
+    private func configurePeerConnection() async throws {
+        let audioDevice = await audioBridge?.rtcAudioDevice
+        let factory = RTCPeerConnectionFactory(
+            encoderFactory: nil,
+            decoderFactory: nil,
+            audioDevice: audioDevice
+        )
+        self.factory = factory
+
         let rtcConfig = RTCConfiguration()
         rtcConfig.iceServers = iceServerUrls.map { info in
             if let username = info.username, let credential = info.credential {
@@ -315,8 +344,9 @@ actor WhipSession {
         let sendOnly = RTCRtpTransceiverInit()
         sendOnly.direction = .sendOnly
         if let videoTap {
+            let videoSource = videoTap.attach(to: factory)
             let videoTrack = factory.videoTrack(
-                with: videoTap.videoSource,
+                with: videoSource,
                 trackId: "localcut-program-video")
             videoTransceiver = pc.addTransceiver(with: videoTrack, init: sendOnly)
         } else {
@@ -334,8 +364,8 @@ actor WhipSession {
             let codecs = factory.rtpSenderCapabilities(forKind: kRTCMediaStreamTrackKindVideo).codecs
             if !codecs.isEmpty {
                 let h264 = codecs.filter { $0.name == "H264" }
-                if !h264.isEmpty {
-                    videoTransceiver?.setCodecPreferences(h264)
+                if !h264.isEmpty, let videoTransceiver {
+                    try videoTransceiver.setCodecPreferences(h264, error: ())
                 }
             }
         }
@@ -347,6 +377,22 @@ actor WhipSession {
             params.encodings = [encoding]
         }
         videoTransceiver?.sender.parameters = params
+    }
+
+    private func applyIceServers(_ servers: [ICEServerInfo]) throws {
+        guard !servers.isEmpty, let pc = peerConnection else { return }
+        let rtcConfig = pc.configuration
+        rtcConfig.iceServers = servers.map(Self.rtcIceServer)
+        guard pc.setConfiguration(rtcConfig) else {
+            throw WhipError.transport(statusCode: 0, message: "Failed to apply WHIP ICE servers.")
+        }
+    }
+
+    private static func rtcIceServer(from info: ICEServerInfo) -> RTCIceServer {
+        if let username = info.username, let credential = info.credential {
+            return RTCIceServer(urlStrings: [info.url.absoluteString], username: username, credential: credential)
+        }
+        return RTCIceServer(urlStrings: [info.url.absoluteString])
     }
 
     private func createOffer() async throws -> String {
@@ -376,14 +422,14 @@ actor WhipSession {
     }
 
     private func collectStats() async {
-        #if canImport(WebRTC)
+        #if LOCALCUT_ENABLE_WEBRTC
         guard let pc = peerConnection else { return }
         let report = await pc.statistics()
         processStatsReport(report)
         #endif
     }
 
-    #if canImport(WebRTC)
+    #if LOCALCUT_ENABLE_WEBRTC
     private func processStatsReport(_ report: RTCStatisticsReport) {
         var newStats = PublishStats()
         for (_, stat) in report.statistics {
@@ -409,9 +455,52 @@ extension WhipError {
     }
 }
 
+nonisolated enum IceSdpFragmentBuilder {
+    static func restartFragment(from sdp: String) -> String {
+        let normalized = sdp.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let sessionIceLines = lines.filter(Self.isIceFragmentAttribute)
+
+        var sections: [[String]] = []
+        var current: [String] = []
+        for line in lines where !line.isEmpty {
+            if line.hasPrefix("m=") {
+                if !current.isEmpty { sections.append(current) }
+                current = [line]
+            } else if !current.isEmpty {
+                current.append(line)
+            }
+        }
+        if !current.isEmpty { sections.append(current) }
+
+        let fragmentLines = sections.flatMap { section -> [String] in
+            guard let media = section.first else { return [] }
+            let mediaAttributes = section.dropFirst().filter { line in
+                line.hasPrefix("a=mid:") || Self.isIceFragmentAttribute(line)
+            }
+            var output = [media]
+            output.append(contentsOf: mediaAttributes.isEmpty ? sessionIceLines : mediaAttributes)
+            return output
+        }
+
+        let selectedLines = fragmentLines.isEmpty ? sessionIceLines : fragmentLines
+        return selectedLines.joined(separator: "\r\n") + "\r\n"
+    }
+
+    private static func isIceFragmentAttribute(_ line: String) -> Bool {
+        line.hasPrefix("a=ice-ufrag:")
+        || line.hasPrefix("a=ice-pwd:")
+        || line.hasPrefix("a=ice-options:")
+        || line.hasPrefix("a=fingerprint:")
+        || line.hasPrefix("a=setup:")
+        || line.hasPrefix("a=candidate:")
+        || line == "a=end-of-candidates"
+    }
+}
+
 // MARK: - RTCPeerConnectionDelegate
 
-#if canImport(WebRTC)
+#if LOCALCUT_ENABLE_WEBRTC
 private nonisolated final class WhipPeerConnectionDelegate: NSObject, RTCPeerConnectionDelegate {
     private weak var session: WhipSession?
 
@@ -426,6 +515,8 @@ private nonisolated final class WhipPeerConnectionDelegate: NSObject, RTCPeerCon
             Task { [weak session] in await session?.handleDisconnect() }
         case .failed:
             Task { [weak session] in await session?.handleDisconnect() }
+        case .connected, .completed:
+            Task { [weak session] in await session?.handleConnectionRecovered() }
         default:
             break
         }
