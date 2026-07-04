@@ -245,9 +245,9 @@ extension EditorModel {
             let manager = ReplayBufferManager(
                 sessionUUID: sessionUUID,
                 config: config,
-                onClipSaved: { [weak self] url, duration in
+                onClipsSaved: { [weak self] clips in
                     Task { @MainActor in
-                        await self?.insertReplayClip(url: url, duration: duration)
+                        await self?.insertReplayClips(clips)
                     }
                 })
             do {
@@ -1053,63 +1053,13 @@ extension EditorModel {
             if let error = manager.lastSaveError {
                 statusMessage = error
             } else if let duration = manager.lastSavedDuration {
-                replaySaveMessage = String(format: "Saved %.1fs replay clip.", duration)
+                let clipCount = manager.lastSavedClipCount ?? 1
+                replaySaveMessage = clipCount == 1
+                    ? String(format: "Saved %.1fs replay clip.", duration)
+                    : String(format: "Saved %d replay clips spanning %.1fs.", clipCount, duration)
                 statusMessage = replaySaveMessage!
             }
         }
-    }
-
-    /// Inserts a saved replay clip into the timeline at the current playhead.
-    func insertReplayClip(url: URL, duration: CMTime) async {
-        guard duration.seconds > 0 else {
-            statusMessage = "Replay clip has no duration."
-            return
-        }
-
-        let mediaItem = MediaItem(url: url)
-        mediaItem.duration = duration
-        mediaItem.name = "Replay \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium))"
-
-        // Load asset tracks to populate media flags so CompositionBuilder
-        // recognises the clip for preview and export.
-        let asset = mediaItem.asset
-        if let videoTrack = try? await asset.loadTracks(withMediaType: .video).first {
-            mediaItem.hasVideo = true
-            mediaItem.naturalSize = (try? await videoTrack.load(.naturalSize)) ?? .zero
-            mediaItem.preferredTransform = (try? await videoTrack.load(.preferredTransform)) ?? .identity
-        }
-        mediaItem.hasAudio = (try? await !asset.loadTracks(withMediaType: .audio).isEmpty) ?? false
-
-        let playheadTime = CMTime(seconds: currentTime, preferredTimescale: 600)
-        let videoClip = Clip(
-            mediaID: mediaItem.id,
-            sourceStart: .zero,
-            duration: duration,
-            timelineStart: playheadTime)
-
-        performUndoable("Insert Replay Clip") {
-            project.mediaItems.append(mediaItem)
-            if mediaItem.hasVideo {
-                if project.videoTracks.isEmpty {
-                    project.videoTracks.append(Track(name: "V1", kind: .video))
-                }
-                project.videoTracks[0].clips.append(videoClip)
-            }
-            if mediaItem.hasAudio {
-                let audioClip = Clip(
-                    mediaID: mediaItem.id,
-                    sourceStart: .zero,
-                    duration: duration,
-                    timelineStart: playheadTime)
-                if project.audioTracks.isEmpty {
-                    project.audioTracks.append(Track(name: "A1", kind: .audio))
-                }
-                project.audioTracks[0].clips.append(audioClip)
-            }
-            scheduleRebuild()
-        }
-
-        statusMessage = String(format: "Inserted %.1fs replay clip at playhead.", duration.seconds)
     }
 
     /// Cleans up replay buffer resources on session end.

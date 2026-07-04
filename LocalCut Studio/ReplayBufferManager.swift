@@ -4,6 +4,30 @@ import CoreMedia
 import LocalCutCore
 import os
 
+/// A finalised replay source ready to be inserted into the timeline.
+struct ReplayBufferSavedClip: Hashable, Sendable {
+    let url: URL
+    let duration: CMTime
+    let timelineOffset: CMTime
+    let sourceFileURL: URL
+    let mediaTypes: Set<EncodedChunkMediaType>
+
+    init(url: URL,
+         duration: CMTime,
+         timelineOffset: CMTime = .zero,
+         sourceFileURL: URL,
+         mediaTypes: Set<EncodedChunkMediaType> = []) {
+        self.url = url
+        self.duration = duration
+        self.timelineOffset = timelineOffset
+        self.sourceFileURL = sourceFileURL
+        self.mediaTypes = mediaTypes
+    }
+
+    var hasVideo: Bool { mediaTypes.contains(.video) }
+    var hasAudio: Bool { mediaTypes.contains(.audio) }
+}
+
 /// Manages the replay buffer lifecycle for a capture session. Owns the
 /// `EncodedChunkRing` and coordinates between the capture writer's encoded
 /// output and the ring buffer. Provides the "save last N seconds" command.
@@ -24,6 +48,8 @@ final class ReplayBufferManager {
 
     /// The last saved span's actual duration, for UI display.
     private(set) var lastSavedDuration: Double?
+    /// Number of clips written by the last save.
+    private(set) var lastSavedClipCount: Int?
 
     /// The last save error message.
     private(set) var lastSaveError: String?
@@ -36,8 +62,8 @@ final class ReplayBufferManager {
     /// The URL where spilled replay metadata is written.
     private let spillDirectory: URL
 
-    /// Callback to insert a saved clip into the timeline.
-    private let onClipSaved: (@MainActor (URL, CMTime) -> Void)?
+    /// Callback to insert saved clips into the timeline.
+    private let onClipsSaved: (@MainActor ([ReplayBufferSavedClip]) -> Void)?
 
     private let log = Logger(
         subsystem: "com.localcutstudio.replay",
@@ -45,10 +71,10 @@ final class ReplayBufferManager {
 
     init(sessionUUID: UUID = UUID(),
          config: ReplayBufferConfig = .default,
-         onClipSaved: (@MainActor (URL, CMTime) -> Void)? = nil) {
+         onClipsSaved: (@MainActor ([ReplayBufferSavedClip]) -> Void)? = nil) {
         self.sessionUUID = sessionUUID
         self.config = config
-        self.onClipSaved = onClipSaved
+        self.onClipsSaved = onClipsSaved
 
         let caches = (FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory)
@@ -112,6 +138,7 @@ final class ReplayBufferManager {
         isSaving = true
         lastSaveError = nil
         lastSavedDuration = nil
+        lastSavedClipCount = nil
 
         do {
             let (span, actualSeconds) = await ring.selectSaveSpan(seconds: seconds)
@@ -121,19 +148,16 @@ final class ReplayBufferManager {
                 return
             }
 
-            // Finalise into a fragmented .mov using AVAssetReader on the
-            // source files.
-            let outputURL = savedClipsDirectory
-                .appendingPathComponent("replay-\(UUID().uuidString).mov")
-            let duration = try await ReplayBufferFinalizer.finalize(
-                chunks: span,
-                outputURL: outputURL)
-
-            lastSavedDuration = duration.seconds
-            log.info("Saved replay clip: requested=\(String(format: "%.1f", seconds))s selected=\(String(format: "%.1f", actualSeconds))s written=\(String(format: "%.1f", duration.seconds))s at \(outputURL.lastPathComponent)")
+            let savedClips = try await finalizeSavedClips(from: span)
+            let totalDuration = savedClips.reduce(CMTime.zero) { result, clip in
+                CMTimeMaximum(result, clip.timelineOffset + clip.duration)
+            }
+            lastSavedDuration = totalDuration.seconds
+            lastSavedClipCount = savedClips.count
+            log.info("Saved replay: requested=\(String(format: "%.1f", seconds))s selected=\(String(format: "%.1f", actualSeconds))s written=\(String(format: "%.1f", totalDuration.seconds))s clips=\(savedClips.count)")
 
             // Trigger timeline insertion.
-            onClipSaved?(outputURL, duration)
+            onClipsSaved?(savedClips)
 
         } catch {
             lastSaveError = "Save failed: \(error.localizedDescription)"
@@ -152,5 +176,50 @@ final class ReplayBufferManager {
     /// Saved clips are preserved since they may be referenced by the timeline.
     func cleanup() async {
         await ring.clear()
+    }
+
+    private func finalizeSavedClips(from chunks: [EncodedChunk]) async throws -> [ReplayBufferSavedClip] {
+        let globalStart = chunks.map(\.presentationTimeStamp).min() ?? .zero
+        let batchID = UUID().uuidString
+        let grouped = Dictionary(grouping: chunks, by: \.sourceFileURL)
+        var savedClips: [ReplayBufferSavedClip] = []
+        var outputURLs: [URL] = []
+
+        do {
+            for (index, entry) in grouped.sorted(by: replaySourceSort).enumerated() {
+                let outputURL = savedClipsDirectory
+                    .appendingPathComponent("replay-\(batchID)-\(index + 1).mov")
+                outputURLs.append(outputURL)
+                let sourceChunks = entry.value
+                let duration = try await ReplayBufferFinalizer.finalize(
+                    chunks: sourceChunks,
+                    outputURL: outputURL)
+                let sourceStart = sourceChunks.map(\.presentationTimeStamp).min() ?? globalStart
+                savedClips.append(ReplayBufferSavedClip(
+                    url: outputURL,
+                    duration: duration,
+                    timelineOffset: sourceStart - globalStart,
+                    sourceFileURL: entry.key,
+                    mediaTypes: Set(sourceChunks.map(\.mediaType))))
+            }
+        } catch {
+            for outputURL in outputURLs {
+                try? FileManager.default.removeItem(at: outputURL)
+            }
+            throw error
+        }
+
+        return savedClips
+    }
+
+    private func replaySourceSort(_ lhs: (key: URL, value: [EncodedChunk]),
+                                  _ rhs: (key: URL, value: [EncodedChunk])) -> Bool {
+        let lhsStart = lhs.value.map(\.presentationTimeStamp).min() ?? .zero
+        let rhsStart = rhs.value.map(\.presentationTimeStamp).min() ?? .zero
+        if lhsStart != rhsStart { return lhsStart < rhsStart }
+        let lhsHasVideo = lhs.value.contains { $0.mediaType == .video }
+        let rhsHasVideo = rhs.value.contains { $0.mediaType == .video }
+        if lhsHasVideo != rhsHasVideo { return lhsHasVideo }
+        return lhs.key.path < rhs.key.path
     }
 }

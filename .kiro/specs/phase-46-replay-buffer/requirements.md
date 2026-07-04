@@ -15,7 +15,7 @@
 ## R3 — Save command
 
 - **R3.1** "Save last N seconds" finalises a keyframe-aligned span starting from the **latest keyframe at or before** `now − N` (so the saved span is always ≥ N seconds, never silently shortened). When no in-buffer keyframe sits that far back (short ring / recent session start) the save returns whatever IS available, with the actual span surfaced in the UI.
-- **R3.2** Result lands as a new `Clip` at the playhead.
+- **R3.2** Result lands at the playhead as timeline clip(s). Multi-source saves preserve simultaneous video/audio sources as separate media items and place overlapping sources on distinct timeline tracks with their relative offsets intact.
 - **R3.3** Recording continues uninterrupted; no encoder restart.
 
 ## R4 — Live audio chain
