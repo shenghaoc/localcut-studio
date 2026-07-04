@@ -18,9 +18,10 @@ enum ReplayBufferFinalizer {
 
     /// Finalises the given chunks into a playable fragmented `.mov`.
     ///
-    /// Groups chunks by source file, then uses AVAssetReader to extract
-    /// each source's time range and writes them into the output via
-    /// AVAssetWriter with proper movie headers.
+    /// Finalises one source file's chunks by using AVAssetReader to extract
+    /// the requested source time range and AVAssetWriter to write proper
+    /// movie headers. Multi-source replay batches are split by
+    /// `ReplayBufferManager` before reaching this boundary.
     static func finalize(chunks: [EncodedChunk],
                          outputURL: URL) async throws -> CMTime {
         guard !chunks.isEmpty else {
@@ -31,6 +32,9 @@ enum ReplayBufferFinalizer {
         // timestamps are session-relative; sourceTimeStamp is the time range
         // inside the individual writer output file.
         let grouped = Dictionary(grouping: chunks, by: \.sourceFileURL)
+        guard grouped.count == 1 else {
+            throw ReplayBufferError.finalizeFailed("Replay finalizer expects a single source file per output.")
+        }
 
         struct SourcePlan {
             let sourceURL: URL
@@ -108,7 +112,7 @@ enum ReplayBufferFinalizer {
 
             let videoTracks = (try? await asset.loadTracks(withMediaType: .video)) ?? []
             let audioTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
-            let tracks = videoTracks + audioTracks
+            let tracks = Array(videoTracks.prefix(1)) + audioTracks
             var pipes: [TrackPipe] = []
 
             for track in tracks {

@@ -560,7 +560,11 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
         guard status == noErr, let createdBuffer = output else { return nil }
 
         // Use the block buffer to carry the processed audio data.
-        let dataLength = Int(frameCount) * channels * MemoryLayout<Float>.size
+        let audioBuffers = UnsafeMutableAudioBufferListPointer(pcmBuffer.mutableAudioBufferList)
+        let dataLength = audioBuffers.reduce(0) { result, buffer in
+            result + Int(buffer.mDataByteSize)
+        }
+        guard dataLength > 0 else { return nil }
         var blockBuffer: CMBlockBuffer?
         let bbStatus = CMBlockBufferCreateWithMemoryBlock(
             allocator: kCFAllocatorDefault,
@@ -574,15 +578,21 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
             blockBufferOut: &blockBuffer)
         guard bbStatus == noErr, let blockBuffer else { return nil }
 
-        // Copy interleaved data into the block buffer.
-        let copyBB = interleaved.withUnsafeBufferPointer { ptr in
-            CMBlockBufferReplaceDataBytes(
-                with: ptr.baseAddress!,
+        // Copy from the PCM buffer's AudioBufferList so the block payload
+        // matches the format description's declared layout.
+        var offset = 0
+        for audioBuffer in audioBuffers {
+            guard let data = audioBuffer.mData else { return nil }
+            let size = Int(audioBuffer.mDataByteSize)
+            let copyStatus = CMBlockBufferReplaceDataBytes(
+                with: data,
                 blockBuffer: blockBuffer,
-                offsetIntoDestination: 0,
-                dataLength: dataLength)
+                offsetIntoDestination: offset,
+                dataLength: size)
+            guard copyStatus == noErr else { return nil }
+            offset += size
         }
-        guard copyBB == noErr else { return nil }
+        guard offset == dataLength else { return nil }
 
         // Set the block buffer on the sample buffer.
         let setBB = CMSampleBufferSetDataBuffer(createdBuffer, newValue: blockBuffer)
