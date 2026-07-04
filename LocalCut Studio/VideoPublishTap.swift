@@ -56,7 +56,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
         let frame = RTCVideoFrame(
             buffer: RTCCVPixelBuffer(pixelBuffer: buffer),
             rotation: ._0,
-            timeStampNs: Int64(Date.timeIntervalSince1970 * 1_000_000_000)
+            timeStampNs: Int64(Date().timeIntervalSince1970 * 1_000_000_000)
         )
         capturer.didCapture(frame)
         #else
@@ -79,7 +79,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
 }
 
 #if canImport(WebRTC)
-private final class TapCapturer: RTCVideoCapturer {
+private nonisolated final class TapCapturer: RTCVideoCapturer {
     init(source: RTCVideoSource) {
         super.init(delegate: source)
     }

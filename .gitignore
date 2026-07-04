@@ -16,6 +16,7 @@ xcuserdata/
 # Swift Package Manager
 .swiftpm/
 .build/
+Packages/LocalCutWebRTC/WebRTC.xcframework/
 
 # Misc
 *.moved-aside

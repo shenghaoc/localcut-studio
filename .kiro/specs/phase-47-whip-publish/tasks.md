@@ -2,14 +2,16 @@
 
 > Status: **In progress — not merge-ready**. Depends on Phase 41 + Phase 45 + `EncoderBudget`.
 >
-> Pre-merge validation on 2026-07-04 left the phase blocked on the default
-> macOS WebRTC dependency, the real capture-side audio ADM bridge, and the
-> MediaMTX integration test. Do not mark this spec complete while T1.1, T4.2,
-> and T7.2 remain unchecked.
+> Pre-merge validation on 2026-07-05 found a working default macOS WebRTC
+> dependency: `stasel/WebRTC` 140.0.0 (M140), linked through
+> `Packages/LocalCutWebRTC` and verified by `xcodebuild test`. The phase still
+> remains blocked on the real capture-side audio ADM bridge and the MediaMTX
+> integration test. Do not mark this spec complete while T4.2 and T7.2 remain
+> unchecked.
 
 ## Dependency + entitlements
 
-- [ ] **T1.1** Add a macOS-capable WebRTC XCFramework via SPM (recommended primary: `stasel/WebRTC`; fallback: `webrtc-sdk/webrtc`), pinned to a stable release. The official GoogleWebRTC CocoaPods binary is iOS-only and would not link the macOS target. Document size + licence (BSD-3-Clause) in design.md and `docs/USER-GUIDE.md`; record which package + release we picked.
+- [ ] **T1.1** Add a macOS-capable WebRTC XCFramework via SPM (selected: `stasel/WebRTC` 140.0.0 through `Packages/LocalCutWebRTC`; 141.0.0+ release artifacts tested so far have broken macOS public headers), pinned to a stable release. The official GoogleWebRTC CocoaPods binary is iOS-only and would not link the macOS target. Document size + licence (BSD-3-Clause) in design.md and `docs/USER-GUIDE.md`; record which package + release we picked.
 - [ ] **T1.2** Build flag to drop the dep for users who don't need streaming.
 - [ ] **T1.3** Add `com.apple.security.network.client` to the entitlements file (sandbox blocks outgoing HTTP + WebRTC without it). Smoke-test that the publish flow makes its first POST under the sandbox.
 

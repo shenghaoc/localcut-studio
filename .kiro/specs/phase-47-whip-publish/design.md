@@ -17,17 +17,16 @@ The browser-editor's v1 leans entirely on the platform's `RTCPeerConnection`. Na
 
 ## Current pre-merge status
 
-Pre-merge validation on 2026-07-04 found that `stasel/WebRTC` releases 149.0.0 and 148.0.0 resolve through SwiftPM but do not compile for the macOS app target: the macOS framework slice exposes only `WebRTC.h`, while that umbrella header imports missing public headers such as `RTCAudioSource.h`. The fallback `webrtc-sdk/webrtc` repository does not currently provide a SwiftPM binary package that can be dropped into this Xcode project. Until the default macOS build links a WebRTC package successfully, all `#if canImport(WebRTC)` media/session code remains uncompiled in CI and the publish panel must stay in the reduced "WebRTC framework not available" state.
+Pre-merge validation on 2026-07-04 found that `stasel/WebRTC` releases 149.0.0 and 148.0.0 resolve through SwiftPM but do not compile for the macOS app target: the macOS framework slice exposes only `WebRTC.h`, while that umbrella header imports missing public headers such as `RTCAudioSource.h`. Follow-up validation on 2026-07-05 checked older stasel releases and selected **`stasel/WebRTC` 140.0.0 (M140)** as the newest verified stasel release before that macOS header-packaging regression. M140's macOS slice contains `RTCAudioSource.h`, all umbrella-header imports resolve inside the same framework slice, `canImport(WebRTC)` is true in the default app build, and the full macOS `xcodebuild test` suite passed with the local `LocalCutWebRTC` wrapper package linked.
 
-The WHIP HTTP client, settings storage, program-frame sink plumbing, and non-WebRTC safety tests are present, but the phase is not complete. The remaining blockers are:
+The WHIP HTTP client, settings storage, program-frame sink plumbing, WebRTC package linkage, and safety tests are present, but the phase is not complete. The remaining blockers are:
 
-- Pick and pin a macOS WebRTC package that compiles in the default app scheme, or rewrite this phase around a different supported WebRTC API surface.
 - Replace the placeholder `LocalCutAudioDeviceModule.deliverCaptureFrame(_:)` with a real capture-side ADM bridge that feeds master-bus samples to WebRTC.
 - Add the MediaMTX publish integration test required by the verification tasks.
 
 ## Approach
 
-1. **WebRTC stack.** Apple's `WKWebView` WebRTC implementation can't bridge to AVFoundation, and the official **GoogleWebRTC CocoaPods** binary is iOS-only with no macOS slice — adding it via SPM would not link on the macOS target. We need a community-maintained macOS-capable WebRTC XCFramework via SPM, but the candidate must compile in the default app scheme before this task can be closed. `stasel/WebRTC` was the recommended primary for SPM simplicity, but the 149.0.0 and 148.0.0 macOS slices failed validation as noted above; `webrtc-sdk/webrtc` remains a research lead rather than a drop-in SwiftPM package. A replacement must repackage upstream `webrtc.googlesource.com` sources without forking the API, so the public surface (`RTCPeerConnection`, `RTCVideoSource`, `AudioDeviceModule`, etc.) matches Google's documentation. **BSD-3-Clause** licence (upstream LICENSE; additional patent grants ride alongside). Size on disk: expected ~80 MB as an XCFramework. We justify this AGENTS.md-significant addition because:
+1. **WebRTC stack.** Apple's `WKWebView` WebRTC implementation can't bridge to AVFoundation, and the official **GoogleWebRTC CocoaPods** binary is iOS-only with no macOS slice — adding it via SPM would not link on the macOS target. We vendor `stasel/WebRTC` **140.0.0 (M140)** through the local `Packages/LocalCutWebRTC` SwiftPM binary wrapper. M140 is older than the latest stasel milestone, but it is the newest stasel release validated with a complete macOS public-header slice in this repo. Releases 141.0.0, 146.0.0, 148.0.0, and 149.0.0 expose only `WebRTC.h` in the macOS slice while the umbrella header imports missing `RTC*.h` headers. The wrapper download script pins the checksum and validates that every umbrella import exists before installing the XCFramework. **BSD-3-Clause** licence (upstream LICENSE; additional patent grants ride alongside). Size on disk: ~87 MB as an extracted XCFramework. We justify this AGENTS.md-significant addition because:
    - WHIP requires `RTCPeerConnection`; there is no Apple-native equivalent for SDP + ICE + DTLS-SRTP egress.
    - Apple's `WKWebView` WebRTC implementation cannot bridge to AVFoundation media pipelines.
    - All open-source alternatives (LiveKit-WebRTC, hand-rolled) wrap the same Google sources.
@@ -43,14 +42,14 @@ The WHIP HTTP client, settings storage, program-frame sink plumbing, and non-Web
 
 ## Trade-offs
 
-- The community WebRTC XCFramework (`stasel/WebRTC` / `webrtc-sdk/webrtc`) is an exception to "no third-party media libraries". We document this honestly: WHIP is otherwise impossible on macOS, and these packages repackage the same upstream sources Google maintains.
+- The community WebRTC XCFramework (`stasel/WebRTC`) is an exception to "no third-party media libraries". We document this honestly: WHIP is otherwise impossible on macOS, and stasel repackages the same upstream sources Google maintains.
 - WebRTC's media engine does the encoding (not VideoToolbox directly) — we lose some control vs. our normal pipeline, but get reconnect + congestion control + DTLS-SRTP for free.
 - RTMP-only platforms (YouTube, Douyin, Bilibili) are NOT supported directly; users run a WHIP → RTMP gateway (MediaMTX is the documented recipe). LocalCut never operates relay infra.
 
 ## Risks
 
-- The community WebRTC XCFramework's API surface drifts with upstream WebRTC; we pin to a milestone-tagged release and update on a deliberate cadence.
-- Build size bumps to ~150 MB total app (~70 MB current + ~80 MB community WebRTC XCFramework). Users see this clearly in release notes.
+- The community WebRTC XCFramework's API surface drifts with upstream WebRTC. M140 is deliberately pinned because newer stasel artifacts have a macOS packaging regression; upgrading needs a repeat header/import/build validation pass.
+- Build size bumps to roughly ~157 MB total app (~70 MB current + ~87 MB community WebRTC XCFramework). Users see this clearly in release notes.
 - Apple may ship a first-party `WebRTC` framework in a future macOS; we'd switch.
 
 ## Non-goals

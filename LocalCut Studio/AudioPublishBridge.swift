@@ -100,7 +100,7 @@ actor AudioPublishBridge {
 }
 
 #if canImport(WebRTC)
-final class LocalCutAudioDeviceModule: @unchecked Sendable {
+nonisolated final class LocalCutAudioDeviceModule: @unchecked Sendable {
     let sampleRate: Double
     let channels: Int
     init(sampleRate: Double, channels: Int) {
