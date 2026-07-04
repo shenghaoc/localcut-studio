@@ -52,7 +52,7 @@ actor WhipSession {
     private var authToken: String?
     private var encoderLease: EncoderLease?
     private var currentEndpointConfig: (endpoint: URL, authToken: String?)?
-    private var iceServerUrls: [String] = []
+    private var iceServerUrls: [ICEServerInfo] = []
     private var videoTap: VideoPublishTap?
     private var audioBridge: AudioPublishBridge?
 
@@ -101,6 +101,12 @@ actor WhipSession {
         do {
             try await connect(endpointURL: endpointURL)
         } catch {
+            // Tear down any partially-created server-side resource and
+            // WebRTC resources before releasing the encoder lease.
+            if resourceUrl != nil {
+                await client.teardown(resourceUrl: resourceUrl!, authToken: authToken)
+            }
+            closeWebRTCResources()
             releaseEncoderBudget()
             throw error
         }
@@ -131,15 +137,26 @@ actor WhipSession {
             return
         }
         state = .reconnecting
-        let backoff = reconnectController.backoffDuration
-        if backoff > 0 { try? await Task.sleep(for: .seconds(backoff)) }
+
+        // Wait for the 3-second grace period on first disconnect to
+        // allow transient WebRTC disconnects to recover.
+        reconnectController.markDisconnected()
+        try? await reconnectController.waitForGracePeriod()
         guard !Task.isCancelled else { return }
 
+        // Advance attempt count BEFORE reading backoff so the first
+        // reconnect uses the correct backoff ladder entry.
+        reconnectController.advanceAttempt()
+
         if reconnectController.shouldTryIceRestart {
-            reconnectController.advanceAttempt()
+            let backoff = reconnectController.backoffDuration
+            if backoff > 0 { try? await Task.sleep(for: .seconds(backoff)) }
+            guard !Task.isCancelled else { return }
             await attemptIceRestart()
         } else {
-            reconnectController.advanceAttempt()
+            let backoff = reconnectController.backoffDuration
+            if backoff > 0 { try? await Task.sleep(for: .seconds(backoff)) }
+            guard !Task.isCancelled else { return }
             await attemptFullReconnect()
         }
     }
@@ -172,7 +189,13 @@ actor WhipSession {
         #if canImport(WebRTC)
         do {
             guard let pc = peerConnection else { await attemptFullReconnect(); return }
-            let offer = try await pc.offer(for: .init())
+            // Request an actual ICE restart by setting the iceRestart
+            // option, which generates new ufrag/pwd in the SDP.
+            let constraints = RTCMediaConstraints(
+                mandatoryConstraints: ["IceRestart": "true"],
+                optionalConstraints: nil
+            )
+            let offer = try await pc.offer(for: constraints)
             try await pc.setLocalDescription(offer)
             let response = try await client.patchIceRestart(resourceUrl: url, offerSdp: offer.sdp, etag: etag, authToken: authToken)
             self.etag = response.newEtag
@@ -194,6 +217,10 @@ actor WhipSession {
         guard let config = currentEndpointConfig else {
             failAndCleanup("Cannot reconnect: endpoint not configured.")
             return
+        }
+        // DELETE the old server-side resource before opening a new session.
+        if let oldUrl = resourceUrl {
+            await client.teardown(resourceUrl: oldUrl, authToken: authToken)
         }
         closeWebRTCResources()
         if encoderLease == nil {
@@ -237,7 +264,12 @@ actor WhipSession {
     #if canImport(WebRTC)
     private func configurePeerConnection() throws {
         let rtcConfig = RTCConfiguration()
-        rtcConfig.iceServers = iceServerUrls.map { RTCIceServer(urlStrings: [$0]) }
+        rtcConfig.iceServers = iceServerUrls.map { info in
+            if let username = info.username, let credential = info.credential {
+                return RTCIceServer(urlStrings: [info.url.absoluteString], username: username, credential: credential)
+            }
+            return RTCIceServer(urlStrings: [info.url.absoluteString])
+        }
         rtcConfig.sdpSemantics = .unifiedPlan
         rtcConfig.continualGatheringPolicy = .gatherContinually
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: ["DtlsSrtpKeyAgreement": "true"])
@@ -249,6 +281,25 @@ actor WhipSession {
         videoTransceiver?.setDirection(.sendOnly, error: nil)
         audioTransceiver = pc.addTransceiver(of: .audio)
         audioTransceiver?.setDirection(.sendOnly, error: nil)
+
+        // Apply codec preferences from the publish config.
+        if config.videoCodec == "H264" {
+            if let videoSender = videoTransceiver?.sender,
+               let codecs = videoSender.capabilities(for: .video)?.codecs {
+                let h264 = codecs.filter { $0.name == "H264" }
+                if !h264.isEmpty {
+                    videoTransceiver?.setCodecPreferences(h264)
+                }
+            }
+        }
+
+        // Apply bitrate limits to the video sender.
+        let params = videoTransceiver?.sender.parameters ?? RTCRtpParameters()
+        if var encoding = params.encodings.first {
+            encoding.maxBitrate = NSNumber(value: config.videoBitrate)
+            params.encodings = [encoding]
+        }
+        videoTransceiver?.sender.parameters = params
     }
 
     private func createOffer() async throws -> String {

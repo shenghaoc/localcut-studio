@@ -39,7 +39,7 @@ nonisolated struct WhipResource: Sendable {
 }
 
 protocol WhipClient: Sendable {
-    func publish(endpoint: URL, offerSdp: String, authToken: String?) async throws -> (resourceUrl: URL, etag: String, iceServers: [String], answerSdp: String)
+    func publish(endpoint: URL, offerSdp: String, authToken: String?) async throws -> (resourceUrl: URL, etag: String, iceServers: [ICEServerInfo], answerSdp: String)
     func patchIceRestart(resourceUrl: URL, offerSdp: String, etag: String, authToken: String?) async throws -> (answerSdp: String, newEtag: String)
     func teardown(resourceUrl: URL, authToken: String?) async
 }
@@ -51,7 +51,7 @@ actor WhipClientImpl: WhipClient {
         self.session = session
     }
 
-    func publish(endpoint: URL, offerSdp: String, authToken: String?) async throws -> (resourceUrl: URL, etag: String, iceServers: [String], answerSdp: String) {
+    func publish(endpoint: URL, offerSdp: String, authToken: String?) async throws -> (resourceUrl: URL, etag: String, iceServers: [ICEServerInfo], answerSdp: String) {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
@@ -80,7 +80,7 @@ actor WhipClientImpl: WhipClient {
 
         let etag = http.value(forHTTPHeaderField: "ETag") ?? ""
         let linkHeaders = http.value(forHTTPHeaderField: "Link").map { [$0] } ?? []
-        let iceServers = LinkHeaderParser.parse(headerValues: linkHeaders).map(\.url.absoluteString)
+        let iceServers = LinkHeaderParser.parse(headerValues: linkHeaders)
 
         return (resourceUrl: resourceUrl, etag: etag, iceServers: iceServers, answerSdp: answerSdp)
     }

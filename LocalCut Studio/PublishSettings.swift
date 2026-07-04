@@ -17,7 +17,7 @@ nonisolated enum PublishEndpointType: String, Hashable, Sendable, CaseIterable, 
         switch self {
         case .twitch: "https://g.webrtc.live-video.net:443/v1/offer"
         case .cloudflare: "https://customer.cloudflarestream.com/whip"
-        case .mediaMTX: "http://localhost:8889/stream/whep"
+        case .mediaMTX: "http://localhost:8889/stream/whip"
         case .custom: ""
         }
     }

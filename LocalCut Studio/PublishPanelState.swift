@@ -45,6 +45,9 @@ final class PublishPanelState {
 
     var endpointRequiresToken: Bool { endpointType.requiresToken }
 
+    /// Task that observes the WhipSession state stream.
+    private var stateObservationTask: Task<Void, Never>?
+
     func startPublish(model: EditorModel) {
         guard canStart else { return }
         isStarting = true
@@ -62,8 +65,13 @@ final class PublishPanelState {
         model.publishSettings.endpointURL = endpointURL
         model.publishSettings.endpointType = endpointType
 
-        if rememberToken && !bearerToken.isEmpty {
+        // Always store the typed token in session settings so
+        // startWhipPublish can read it. Only persist to Keychain
+        // when the user explicitly opts in.
+        if !bearerToken.isEmpty {
             model.publishSettings.bearerToken = bearerToken
+        }
+        if rememberToken && !bearerToken.isEmpty {
             model.publishSettings.saveTokenToKeychain()
         }
 
@@ -71,8 +79,8 @@ final class PublishPanelState {
             defer { isStarting = false }
             do {
                 try await model.startWhipPublish(config: config)
-                publishState = .live
-                statusMessage = "Live — streaming to \(endpointType.displayName)."
+                // Observe session state changes instead of assuming Live.
+                observeSessionState(model: model)
             } catch {
                 publishState = .failed
                 statusMessage = error.localizedDescription
@@ -80,8 +88,57 @@ final class PublishPanelState {
         }
     }
 
+    /// Subscribes to the WhipSession state stream and updates the UI.
+    private func observeSessionState(model: EditorModel) {
+        stateObservationTask?.cancel()
+        stateObservationTask = Task { [weak self, weak model] in
+            guard let self, let model, let session = model.whipSession else { return }
+            for await state in await session.stateStream {
+                guard !Task.isCancelled else { break }
+                await MainActor.run {
+                    switch state {
+                    case .idle:
+                        self.publishState = .idle
+                        self.statusMessage = ""
+                    case .connecting:
+                        self.publishState = .connecting
+                        self.statusMessage = "Connecting..."
+                    case .live:
+                        self.publishState = .live
+                        self.statusMessage = "Live — streaming to \(self.endpointType.displayName)."
+                    case .reconnecting:
+                        self.publishState = .reconnecting
+                        self.statusMessage = "Reconnecting..."
+                    case .failed(let message):
+                        self.publishState = .failed
+                        self.statusMessage = message
+                    case .ended:
+                        self.publishState = .idle
+                        self.statusMessage = "Publish ended."
+                        self.stats = nil
+                    }
+                }
+            }
+            // Also poll stats while live.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let session = model.whipSession else { break }
+                let sessionStats = await session.stats
+                await MainActor.run {
+                    self.stats = PublishStatsDisplay(
+                        bytesSent: sessionStats.bytesSent,
+                        framesSent: sessionStats.framesSent,
+                        bitrate: sessionStats.bitrate,
+                        rtt: sessionStats.rtt
+                    )
+                }
+            }
+        }
+    }
+
     func stopPublish(model: EditorModel) {
-        guard publishState == .live || publishState == .reconnecting else { return }
+        guard publishState == .live || publishState == .reconnecting || publishState == .connecting else { return }
+        stateObservationTask?.cancel()
         isStopping = true
         publishState = .ended
         statusMessage = "Stopping..."
