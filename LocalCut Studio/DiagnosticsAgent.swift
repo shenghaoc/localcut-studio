@@ -37,12 +37,51 @@ final class DiagnosticsAgent {
     private(set) var sampleCount: Int = 0
     /// The last ≤ 60 render-time samples in milliseconds, for the sparkline.
     private(set) var sparkline: [Double] = []
+
+    /// Updates replay buffer diagnostics from an external snapshot.
+    func updateReplayBufferDiagnostics(_ diag: ReplayBufferDiagnostics,
+                                       latencyMs: Double? = nil) {
+        replayBufferChunkCount = diag.chunkCount
+        replayBufferDurationSeconds = diag.bufferedDurationSeconds
+        replayBufferSourceCount = diag.sourceCount
+        replayBufferResidentBytes = diag.residentMemoryBytes
+        replayBufferMaxMemoryBytes = diag.maxMemoryBytes
+        replayBufferSpillBytes = diag.spillBytes
+        replayBufferSpilledChunkCount = diag.spilledChunkCount
+        if let latencyMs {
+            updateLiveMonitorLatency(latencyMs)
+        }
+    }
+
+    /// Updates the Phase 46 live monitor latency measurement.
+    func updateLiveMonitorLatency(_ latencyMs: Double) {
+        liveMonitorLatencyMs = latencyMs.isFinite ? max(0, latencyMs) : 0
+    }
     /// Current hardware encoder leases held across editor workflows.
     private(set) var encoderLeaseCount: Int = 0
     /// Maximum concurrent hardware encoder leases allowed on this host.
     private(set) var encoderBudgetMax: Int = 0
     /// Labels for the current encoder budget consumers.
     private(set) var encoderLedger: [String] = []
+
+    // MARK: - Replay buffer diagnostics (Phase 46)
+
+    /// Replay buffer chunk count.
+    private(set) var replayBufferChunkCount: Int = 0
+    /// Replay buffer duration available in seconds.
+    private(set) var replayBufferDurationSeconds: Double = 0
+    /// Number of distinct source files in the replay buffer.
+    private(set) var replayBufferSourceCount: Int = 0
+    /// Resident replay-buffer byte estimate.
+    private(set) var replayBufferResidentBytes: Int = 0
+    /// Replay-buffer resident byte budget.
+    private(set) var replayBufferMaxMemoryBytes: Int = ReplayBufferConfig.defaultMaxMemoryBytes
+    /// Replay-buffer spill bytes on disk.
+    private(set) var replayBufferSpillBytes: Int = 0
+    /// Number of chunks represented by spill records.
+    private(set) var replayBufferSpilledChunkCount: Int = 0
+    /// Live monitor latency in milliseconds.
+    private(set) var liveMonitorLatencyMs: Double = 0
 
     // MARK: - Wiring
 
@@ -208,7 +247,12 @@ final class DiagnosticsAgent {
             encoders=\(self.encoderLeaseCount, privacy: .public)/\(self.encoderBudgetMax, privacy: .public) \
             last_ms=\(self.lastFrameTime * 1000, format: .fixed(precision: 2), privacy: .public) \
             p95_ms=\(self.p95RenderTime * 1000, format: .fixed(precision: 2), privacy: .public) \
-            drops=\(self.frameDropsLastTick, privacy: .public)
+            drops=\(self.frameDropsLastTick, privacy: .public) \
+            replay_chunks=\(self.replayBufferChunkCount, privacy: .public) \
+            replay_dur=\(self.replayBufferDurationSeconds, format: .fixed(precision: 1), privacy: .public) \
+            replay_mem=\(self.replayBufferResidentBytes, privacy: .public)/\(self.replayBufferMaxMemoryBytes, privacy: .public) \
+            replay_spill=\(self.replayBufferSpillBytes, privacy: .public) \
+            latency_ms=\(self.liveMonitorLatencyMs, format: .fixed(precision: 1), privacy: .public)
             """)
     }
 

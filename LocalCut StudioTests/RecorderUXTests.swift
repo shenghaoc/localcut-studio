@@ -578,6 +578,142 @@ struct CountdownStateTests {
     }
 }
 
+// MARK: - Replay buffer timeline insertion (Phase 46)
+
+@Suite("Replay buffer timeline insertion")
+@MainActor
+struct ReplayBufferTimelineInsertionTests {
+
+    @Test("Multi-source replay clips land on separate aligned tracks")
+    func multiSourceReplayClipsLandOnSeparateAlignedTracks() async throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReplayTimelineInsertion-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let duration = CMTime(seconds: 1, preferredTimescale: 600)
+        let offset = CMTime(seconds: 0.25, preferredTimescale: 600)
+        let screenURL = try await makeReplayVideoFixture(
+            in: directoryURL,
+            name: "screen.mov",
+            duration: duration)
+        let webcamURL = try await makeReplayVideoFixture(
+            in: directoryURL,
+            name: "webcam.mov",
+            duration: duration)
+
+        let model = EditorModel()
+        model.currentTime = 4
+
+        await model.insertReplayClips([
+            ReplayBufferSavedClip(
+                url: screenURL,
+                duration: duration,
+                timelineOffset: .zero,
+                sourceFileURL: screenURL,
+                mediaTypes: [.video]),
+            ReplayBufferSavedClip(
+                url: webcamURL,
+                duration: duration,
+                timelineOffset: offset,
+                sourceFileURL: webcamURL,
+                mediaTypes: [.video]),
+        ])
+
+        #expect(model.project.mediaItems.count == 2)
+        #expect(model.project.videoTracks.count >= 2)
+        let screenClip = try #require(model.project.videoTracks[0].clips.first)
+        let webcamClip = try #require(model.project.videoTracks[1].clips.first)
+        #expect(screenClip.mediaID != webcamClip.mediaID)
+        #expect(screenClip.timelineStart == CMTime(seconds: 4, preferredTimescale: 600))
+        #expect(webcamClip.timelineStart == CMTime(seconds: 4.25, preferredTimescale: 600))
+        #expect(model.statusMessage.contains("Inserted 2 replay clips"))
+        #expect(model.statusMessage.contains("at playhead"))
+        #expect(model.undoTitle.contains("Insert Replay Clips"))
+
+        model.undo()
+
+        #expect(model.project.mediaItems.isEmpty)
+        #expect(model.project.videoTracks.count == 1)
+        #expect(model.project.videoTracks[0].clips.isEmpty)
+    }
+
+    private func makeReplayVideoFixture(in directoryURL: URL,
+                                        name: String,
+                                        duration: CMTime,
+                                        fps: Int32 = 30) async throws -> URL {
+        let url = directoryURL.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: url)
+
+        let size = CGSize(width: 64, height: 64)
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(size.width),
+            AVVideoHeightKey: Int(size.height),
+        ])
+        input.expectsMediaDataInRealTime = false
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+                kCVPixelBufferWidthKey as String: Int(size.width),
+                kCVPixelBufferHeightKey as String: Int(size.height),
+            ])
+        writer.add(input)
+        try #require(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+
+        let frameCount = max(1, Int(duration.seconds * Double(fps)))
+        for frame in 0..<frameCount {
+            while !input.isReadyForMoreMediaData {
+                guard writer.status == .writing else {
+                    throw writer.error ?? NSError(domain: "ReplayBufferTimelineInsertionTests", code: -1)
+                }
+                await Task.yield()
+            }
+            let buffer = try makePixelBuffer(size: size, adaptor: adaptor)
+            let lockStatus = CVPixelBufferLockBaseAddress(buffer, [])
+            guard lockStatus == kCVReturnSuccess else {
+                throw NSError(domain: "ReplayBufferTimelineInsertionTests", code: Int(lockStatus))
+            }
+            defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+            guard let baseAddress = CVPixelBufferGetBaseAddress(buffer) else {
+                throw NSError(domain: "ReplayBufferTimelineInsertionTests", code: -2)
+            }
+            memset(baseAddress, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
+            guard adaptor.append(
+                buffer,
+                withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else {
+                throw writer.error ?? NSError(domain: "ReplayBufferTimelineInsertionTests", code: -3)
+            }
+        }
+
+        input.markAsFinished()
+        await writer.finishWriting()
+        try #require(writer.status == .completed)
+        return url
+    }
+
+    private func makePixelBuffer(size: CGSize,
+                                 adaptor: AVAssetWriterInputPixelBufferAdaptor) throws -> CVPixelBuffer {
+        var pixelBuffer: CVPixelBuffer?
+        if let pool = adaptor.pixelBufferPool {
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+        }
+        if pixelBuffer == nil {
+            CVPixelBufferCreate(
+                kCFAllocatorDefault,
+                Int(size.width),
+                Int(size.height),
+                kCVPixelFormatType_32ARGB,
+                nil,
+                &pixelBuffer)
+        }
+        return try #require(pixelBuffer)
+    }
+}
+
 // MARK: - Recording gap collapse (T1.3)
 
 @Suite("Recording gap collapse")

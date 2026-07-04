@@ -39,9 +39,12 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private let outputURL: URL
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
+    private let mediaType: AVMediaType
     private let sessionStartHostTimeUs: Int64
     private let manifest: CaptureManifestFileWriter
     private let onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)?
+    /// Called when a new sample boundary is available for the replay buffer.
+    private let onEncodedChunk: (@Sendable (EncodedChunk) -> Void)?
     private let lock = NSLock()
 
     /// Roughly two seconds of drops at 30 fps before we warn the user; a single
@@ -66,16 +69,19 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
          fragmentInterval: CMTime,
          sessionStartHostTimeUs: Int64,
          manifest: CaptureManifestFileWriter,
-         onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil) throws {
+         onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil,
+         onEncodedChunk: (@Sendable (EncodedChunk) -> Void)? = nil) throws {
         self.source = source
         self.outputURL = outputURL
         self.writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
         self.writer.movieFragmentInterval = fragmentInterval
+        self.mediaType = mediaType
         self.input = AVAssetWriterInput(mediaType: mediaType, outputSettings: outputSettings)
         self.input.expectsMediaDataInRealTime = true
         self.sessionStartHostTimeUs = sessionStartHostTimeUs
         self.manifest = manifest
         self.onSustainedBackpressure = onSustainedBackpressure
+        self.onEncodedChunk = onEncodedChunk
 
         guard writer.canAdd(input) else {
             throw CaptureEngineError.writerRejectedInput(source.displayName)
@@ -122,6 +128,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         if input.append(sampleBuffer) {
             sampleCount += 1
             lastPresentationTime = pts
+            emitReplayChunk(for: sampleBuffer, presentationTime: pts)
         } else {
             droppedSamples += 1
             recordBackpressure(reason: writer.error?.localizedDescription ?? "append failed")
@@ -205,5 +212,93 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         guard let firstPresentationTime else { return source.timelineStartUs }
         let firstUs = CaptureManifest.microseconds(from: firstPresentationTime)
         return max(0, firstUs - sessionStartHostTimeUs)
+    }
+
+    /// Emits a replay index chunk for the appended sample. The timestamp used
+    /// for save-span selection is session-relative; the source timestamp is the
+    /// time range AVAssetReader needs inside this writer's output file.
+    private func emitReplayChunk(for sampleBuffer: CMSampleBuffer,
+                                 presentationTime pts: CMTime) {
+        guard let onEncodedChunk else { return }
+        guard let firstPresentationTime else { return }
+
+        let duration = sampleDuration(for: sampleBuffer)
+        let sourcePTS = pts - firstPresentationTime
+        let timelinePTS = sessionRelativeTime(from: pts)
+        let decodeTime = KeyframeDetector.decodeTimeStamp(sampleBuffer)
+        let timelineDTS = decodeTime.isValid ? sessionRelativeTime(from: decodeTime) : timelinePTS
+        let type: EncodedChunkMediaType = mediaType == .audio ? .audio : .video
+        // Audio is always independently decodable. For video, raw capture
+        // frames lack sync-sample attachments so KeyframeDetector would
+        // treat every frame as a keyframe. Mark video as non-keyframe;
+        // the finalizer's alignedVideoStart finds the actual sync sample.
+        let isSyncSample = type == .audio
+        let byteSize = encodedByteEstimate(for: sampleBuffer, duration: duration)
+
+        let chunk = EncodedChunk(
+            presentationTimeStamp: timelinePTS,
+            decodeTimeStamp: timelineDTS,
+            sourceTimeStamp: sourcePTS,
+            duration: duration,
+            byteSize: byteSize,
+            isKeyframe: isSyncSample,
+            mediaType: type,
+            sourceID: source.id,
+            sourceFileURL: outputURL)
+
+        onEncodedChunk(chunk)
+    }
+
+    private func sampleDuration(for sampleBuffer: CMSampleBuffer) -> CMTime {
+        let duration = CMSampleBufferGetDuration(sampleBuffer)
+        if duration.isValid, duration.isNumeric, duration > .zero {
+            return duration
+        }
+        if mediaType == .video, let frameRate = source.frameRate, frameRate > 0 {
+            return CMTime(seconds: 1.0 / frameRate, preferredTimescale: 600)
+        }
+        if mediaType == .audio,
+           let sampleRate = source.sampleRate,
+           sampleRate > 0 {
+            let samples = max(1, CMSampleBufferGetNumSamples(sampleBuffer))
+            return CMTime(
+                seconds: Double(samples) / sampleRate,
+                preferredTimescale: 600)
+        }
+        return CMTime(value: 1, timescale: 600)
+    }
+
+    private func sessionRelativeTime(from time: CMTime) -> CMTime {
+        let timeUs = CaptureManifest.microseconds(from: time)
+        return CMTime(
+            value: max(0, timeUs - sessionStartHostTimeUs),
+            timescale: 1_000_000)
+    }
+
+    private func encodedByteEstimate(for sampleBuffer: CMSampleBuffer,
+                                     duration: CMTime) -> Int {
+        if mediaType == .video,
+           let frameRate = source.frameRate,
+           frameRate > 0,
+           let bitrate = videoBitrateFromInputSettings() {
+            return max(1, Int(Double(bitrate) / 8.0 / frameRate))
+        }
+        if mediaType == .audio,
+           duration.seconds.isFinite,
+           let bitrate = audioBitrateFromInputSettings() {
+            return max(1, Int(Double(bitrate) / 8.0 * max(0, duration.seconds)))
+        }
+        return max(1, KeyframeDetector.byteSize(sampleBuffer))
+    }
+
+    private func videoBitrateFromInputSettings() -> Int? {
+        guard let properties = input.outputSettings?[AVVideoCompressionPropertiesKey] as? [String: Any] else {
+            return nil
+        }
+        return properties[AVVideoAverageBitRateKey] as? Int
+    }
+
+    private func audioBitrateFromInputSettings() -> Int? {
+        input.outputSettings?[AVEncoderBitRateKey] as? Int
     }
 }

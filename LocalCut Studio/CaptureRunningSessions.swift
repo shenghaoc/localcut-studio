@@ -339,18 +339,24 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
     private let queue: DispatchQueue
     private let onAudioLevel: (@Sendable (Float) -> Void)?
     private let onVideoFrame: (@Sendable (CVPixelBuffer) -> Void)?
+    /// Voice cleanup settings for mic recording path. When non-nil, audio
+    /// buffers are processed through VoiceCleanupDSP before encoding.
+    private let voiceCleanupSettings: LiveVoiceCleanupSettingsStore?
+    private var processorState = VoiceCleanupProcessorState()
     private var lastAudioLevelEmission = CFAbsoluteTimeGetCurrent()
 
     init(deviceID: String,
          mediaType: AVMediaType,
          writer: ContinuousCaptureWriter,
          onAudioLevel: (@Sendable (Float) -> Void)? = nil,
-         onVideoFrame: (@Sendable (CVPixelBuffer) -> Void)? = nil) {
+         onVideoFrame: (@Sendable (CVPixelBuffer) -> Void)? = nil,
+         voiceCleanupSettings: LiveVoiceCleanupSettingsStore? = nil) {
         self.deviceID = deviceID
         self.mediaType = mediaType
         self.writer = writer
         self.onAudioLevel = onAudioLevel
         self.onVideoFrame = onVideoFrame
+        self.voiceCleanupSettings = voiceCleanupSettings
         self.queue = DispatchQueue(label: "com.localcutstudio.capture.av.\(deviceID)")
         super.init()
     }
@@ -437,11 +443,162 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
                 onAudioLevel(level)
             }
         }
-        writer.append(sampleBuffer)
+
+        // Apply voice cleanup DSP to mic audio before encoding. This ensures
+        // the recording path has the same inserts as the monitor path.
+        if mediaType == .audio, let settingsStore = voiceCleanupSettings {
+            let settings = settingsStore.read()
+            if Self.hasActiveInserts(settings) {
+                let processed = Self.processAudioCleanup(sampleBuffer, settings: settings, state: &processorState)
+                writer.append(processed ?? sampleBuffer)
+            } else {
+                writer.append(sampleBuffer)
+            }
+        } else {
+            writer.append(sampleBuffer)
+        }
+
         if mediaType == .video,
            let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
             onVideoFrame?(buffer)
         }
+    }
+
+    /// Returns true if any voice cleanup insert is active (not fully bypassed).
+    private static func hasActiveInserts(_ settings: VoiceCleanupSettings) -> Bool {
+        !settings.denoiser.bypass || !settings.gate.bypass
+            || !settings.compressor.bypass || !settings.limiter.bypass
+            || settings.loudness.enabled
+    }
+
+    /// Processes a CMSampleBuffer through VoiceCleanupDSP. Returns a new
+    /// CMSampleBuffer with processed samples, or nil if processing fails.
+    ///
+    /// Handles Int16, Int32, and Float32 input formats by converting to
+    /// Float32 for DSP processing. Preserves interleaved layout.
+    private static func processAudioCleanup(_ sampleBuffer: CMSampleBuffer,
+                                            settings: VoiceCleanupSettings,
+                                            state: inout VoiceCleanupProcessorState) -> CMSampleBuffer? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else { return nil }
+        let format = AVAudioFormat(cmAudioFormatDescription: formatDescription)
+        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frameCount > 0 else { return nil }
+
+        // Create a Float32 PCM buffer for processing.
+        guard let floatFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: format.sampleRate,
+            channels: format.channelCount,
+            interleaved: true) else { return nil }
+        guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: floatFormat, frameCapacity: frameCount) else {
+            return nil
+        }
+        pcmBuffer.frameLength = frameCount
+
+        // Extract samples from the source buffer, converting to Float32
+        // as needed. CMSampleBufferCopyPCMDataIntoAudioBufferList handles
+        // the conversion when the target format differs from the source.
+        let copyStatus = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer, at: 0, frameCount: Int32(frameCount),
+            into: pcmBuffer.mutableAudioBufferList)
+        guard copyStatus == noErr else { return nil }
+
+        // Extract interleaved float samples from channelData[0], which
+        // for an interleaved format is the single contiguous buffer
+        // containing all channels interleaved.
+        guard let channelData = pcmBuffer.floatChannelData else { return nil }
+        let channels = Int(format.channelCount)
+        let totalSamples = Int(frameCount) * channels
+        var interleaved = [Float](repeating: 0, count: totalSamples)
+        interleaved.withUnsafeMutableBufferPointer { ptr in
+            ptr.baseAddress?.update(from: channelData[0], count: totalSamples)
+        }
+
+        // Process through VoiceCleanupDSP.
+        let sampleRate = format.sampleRate
+        VoiceCleanupDSP.processInterleaved(
+            &interleaved, channels: channels, sampleRate: sampleRate,
+            settings: settings, state: &state)
+
+        // Write processed interleaved Float32 data back to channelData[0].
+        interleaved.withUnsafeBufferPointer { ptr in
+            channelData[0].update(from: ptr.baseAddress!, count: totalSamples)
+        }
+
+        // Create a format description for the output (interleaved Float32).
+        var outputFormatDesc: CMAudioFormatDescription?
+        let fmtStatus = CMAudioFormatDescriptionCreate(
+            allocator: kCFAllocatorDefault,
+            asbd: floatFormat.streamDescription,
+            layoutSize: 0,
+            layout: nil,
+            magicCookieSize: 0,
+            magicCookie: nil,
+            extensions: nil,
+            formatDescriptionOut: &outputFormatDesc)
+        guard fmtStatus == noErr, let outFmtDesc = outputFormatDesc else { return nil }
+
+        // Create new CMSampleBuffer with the Float32 format description.
+        var timing = CMSampleTimingInfo(
+            duration: CMSampleBufferGetDuration(sampleBuffer),
+            presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer),
+            decodeTimeStamp: CMSampleBufferGetDecodeTimeStamp(sampleBuffer))
+        var output: CMSampleBuffer?
+        let status = CMSampleBufferCreate(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: nil,
+            dataReady: true,
+            makeDataReadyCallback: nil,
+            refcon: nil,
+            formatDescription: outFmtDesc,
+            sampleCount: CMItemCount(frameCount),
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleSizeEntryCount: 0,
+            sampleSizeArray: nil,
+            sampleBufferOut: &output)
+        guard status == noErr, let createdBuffer = output else { return nil }
+
+        // Use the block buffer to carry the processed audio data.
+        let audioBuffers = UnsafeMutableAudioBufferListPointer(pcmBuffer.mutableAudioBufferList)
+        let dataLength = audioBuffers.reduce(0) { result, buffer in
+            result + Int(buffer.mDataByteSize)
+        }
+        guard dataLength > 0 else { return nil }
+        var blockBuffer: CMBlockBuffer?
+        let bbStatus = CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: dataLength,
+            blockAllocator: kCFAllocatorDefault,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: dataLength,
+            flags: 0,
+            blockBufferOut: &blockBuffer)
+        guard bbStatus == noErr, let blockBuffer else { return nil }
+
+        // Copy from the PCM buffer's AudioBufferList so the block payload
+        // matches the format description's declared layout.
+        var offset = 0
+        for audioBuffer in audioBuffers {
+            guard let data = audioBuffer.mData else { return nil }
+            let size = Int(audioBuffer.mDataByteSize)
+            let copyStatus = CMBlockBufferReplaceDataBytes(
+                with: data,
+                blockBuffer: blockBuffer,
+                offsetIntoDestination: offset,
+                dataLength: size)
+            guard copyStatus == noErr else { return nil }
+            offset += size
+        }
+        guard offset == dataLength else { return nil }
+
+        // Set the block buffer on the sample buffer.
+        let setBB = CMSampleBufferSetDataBuffer(createdBuffer, newValue: blockBuffer)
+        guard setBB == noErr else { return nil }
+
+        return createdBuffer
     }
 
     nonisolated static func audioPeakLevel(from sampleBuffer: CMSampleBuffer) -> Float? {

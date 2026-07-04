@@ -189,6 +189,27 @@ struct DiagnosticsTests {
         #expect(agent.encoderLedger == ["export", "programIso"])
     }
 
+    @Test("Replay diagnostics preserve the session-start monitor latency measurement")
+    func replayDiagnosticsPreserveMonitorLatency() {
+        let agent = DiagnosticsAgent()
+        agent.updateLiveMonitorLatency(21.3)
+
+        agent.updateReplayBufferDiagnostics(ReplayBufferDiagnostics(
+            chunkCount: 2,
+            bufferedDurationSeconds: 1.5,
+            maxDurationSeconds: 30,
+            residentMemoryBytes: 1_024,
+            maxMemoryBytes: 256 * 1024 * 1024,
+            spilledChunkCount: 0,
+            spillBytes: 0,
+            sourceCount: 1))
+
+        #expect(agent.liveMonitorLatencyMs == 21.3)
+
+        agent.updateReplayBufferDiagnostics(ReplayBufferDiagnostics(), latencyMs: 18.5)
+        #expect(agent.liveMonitorLatencyMs == 18.5)
+    }
+
     @Test("Decoder count published before start() survives the start reset (Codex P1)")
     func decoderCountSurvivesStart() {
         let bridge = DiagnosticsBridge()

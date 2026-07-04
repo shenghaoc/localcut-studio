@@ -219,6 +219,7 @@ extension EditorModel {
         floatingPanelController.show(model: self)
         let panelWindowID = floatingPanelController.windowID
         let excludedWindowIDs: Set<CGWindowID> = panelWindowID == 0 ? [] : [panelWindowID]
+        audioBus.updateLiveCleanupSettings(project.voiceCleanup)
         let request = CaptureStartRequest(
             target: target,
             includeSystemAudio: includeSystemAudio,
@@ -229,10 +230,35 @@ extension EditorModel {
             fragmentInterval: CMTime(seconds: 2, preferredTimescale: 600),
             capabilities: Capabilities.current,
             captureRegion: captureRegion,
-            excludedWindowIDs: excludedWindowIDs)
+            excludedWindowIDs: excludedWindowIDs,
+            voiceCleanupSettings: audioBus.voiceCleanupSettingsStore)
         lastRecordingRequest = request
         activePiPPreset = pipPreset
         lastRecordingPiPPreset = pipPreset
+
+        // Set up replay buffer if enabled.
+        let sessionUUID = UUID()
+        var replayManager: ReplayBufferManager?
+        if replayBufferEnabled {
+            let config = ReplayBufferConfig(
+                durationOption: replayBufferDuration)
+            let manager = ReplayBufferManager(
+                sessionUUID: sessionUUID,
+                config: config,
+                onClipsSaved: { [weak self] clips in
+                    Task { @MainActor in
+                        await self?.insertReplayClips(clips)
+                    }
+                })
+            do {
+                try await manager.enable()
+                replayManager = manager
+            } catch {
+                statusMessage = "Could not enable replay buffer: \(error.localizedDescription)"
+            }
+        }
+        replayBufferManager = replayManager
+
         do {
             try await captureCoordinator.start(request, encoderBudget: encoderBudget, onStreamStopped: { [weak self] error in
                 // The screen stream ended unexpectedly mid-recording; stop and
@@ -254,6 +280,10 @@ extension EditorModel {
                     guard let self, self.isRecording || self.isPaused else { return }
                     self.recordingMicLevel = level
                 }
+            }, onEncodedChunk: { [weak replayManager] chunk in
+                Task { @MainActor in
+                    replayManager?.appendChunk(chunk)
+                }
             })
             recordingStartedAt = Date()
             recordingPausedDuration = 0
@@ -268,6 +298,13 @@ extension EditorModel {
             recordingBackpressureCount = 0
             recordingIncludesMicrophone = microphoneDeviceID != nil
             recordingMicLevel = 0
+            if includeSystemAudio || microphoneDeviceID != nil {
+                let latency = audioBus.measureLiveMonitorLatency(settings: project.voiceCleanup)
+                recordingLiveMonitorLatencyMs = latency.totalMilliseconds
+            } else {
+                recordingLiveMonitorLatencyMs = 0
+            }
+            diagnostics.updateLiveMonitorLatency(recordingLiveMonitorLatencyMs)
             recordingDiskFreeBytes = nil
             recordingDiskWarning = nil
             startRecordingMonitor(rootURL: root)
@@ -280,7 +317,10 @@ extension EditorModel {
             if hideFloatingPanelWhileRecording {
                 floatingPanelController.hide()
             }
-            statusMessage = panelExclusionWarning ?? "Recording…"
+            let latencySuffix = recordingLiveMonitorLatencyMs > 0
+                ? String(format: " Monitor latency %.1f ms.", recordingLiveMonitorLatencyMs)
+                : ""
+            statusMessage = panelExclusionWarning ?? "Recording…\(latencySuffix)"
         } catch {
             floatingPanelController.close()
             isRecorderPresented = wasRecorderPresented
@@ -330,6 +370,13 @@ extension EditorModel {
                         }
                     }
                 }
+                // Update replay buffer diagnostics periodically.
+                if let replayManager = self.replayBufferManager {
+                    let diag = await replayManager.diagnostics()
+                    self.diagnostics.updateReplayBufferDiagnostics(
+                        diag,
+                        latencyMs: self.recordingLiveMonitorLatencyMs)
+                }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -360,6 +407,7 @@ extension EditorModel {
             do {
                 let result = try await self.captureCoordinator.stop()
                 self.resetRecordingRuntimeState()
+                self.cleanupReplayBuffer()
                 let manifestFinalizationError = result.manifestFinalizationError
                 _ = await self.landCaptureSession(result)
                 if let manifestFinalizationError {
@@ -385,6 +433,8 @@ extension EditorModel {
         recordingBackpressureCount = 0
         recordingIncludesMicrophone = false
         recordingMicLevel = 0
+        recordingLiveMonitorLatencyMs = 0
+        diagnostics.updateLiveMonitorLatency(0)
     }
 
     // MARK: - Phase 42: Countdown
@@ -978,5 +1028,46 @@ extension EditorModel {
             Task { await entry.item.loadThumbnail() }
         }
         return true
+    }
+
+    // MARK: - Replay buffer (Phase 46)
+
+    /// Saves the last N seconds from the replay buffer.
+    func saveReplayBuffer(seconds: Double? = nil) {
+        let saveSeconds = seconds ?? Double(replayBufferDuration.rawValue)
+        guard let manager = replayBufferManager else {
+            statusMessage = "Replay buffer is not active."
+            return
+        }
+        guard !replaySaveInProgress else {
+            statusMessage = "A replay save is already in progress."
+            return
+        }
+
+        replaySaveInProgress = true
+        replaySaveMessage = nil
+
+        Task {
+            await manager.saveLast(seconds: saveSeconds)
+            replaySaveInProgress = false
+            if let error = manager.lastSaveError {
+                statusMessage = error
+            } else if let duration = manager.lastSavedDuration {
+                let clipCount = manager.lastSavedClipCount ?? 1
+                replaySaveMessage = clipCount == 1
+                    ? String(format: "Saved %.1fs replay clip.", duration)
+                    : String(format: "Saved %d replay clips spanning %.1fs.", clipCount, duration)
+                statusMessage = replaySaveMessage!
+            }
+        }
+    }
+
+    /// Cleans up replay buffer resources on session end.
+    func cleanupReplayBuffer() {
+        guard let manager = replayBufferManager else { return }
+        Task {
+            await manager.cleanup()
+        }
+        replayBufferManager = nil
     }
 }

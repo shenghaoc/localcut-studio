@@ -28,6 +28,23 @@ struct DiagnosticsView: View {
             row("Decoders", value: "\(agent.decoderCount)")
             row("Encoders", value: "\(agent.encoderLeaseCount) / \(agent.encoderBudgetMax)")
                 .help(agent.encoderLedger.isEmpty ? "No active encoder leases." : agent.encoderLedger.joined(separator: ", "))
+
+            // MARK: - Replay buffer (Phase 46)
+            if agent.replayBufferChunkCount > 0 || agent.liveMonitorLatencyMs > 0 {
+                Divider()
+                Text("Replay Buffer").font(.headline)
+                if agent.replayBufferChunkCount > 0 {
+                    row("Chunks", value: "\(agent.replayBufferChunkCount)")
+                    row("Duration", value: String(format: "%.1fs", agent.replayBufferDurationSeconds))
+                    row("Sources", value: "\(agent.replayBufferSourceCount)")
+                    row("Resident", value: "\(byteString(agent.replayBufferResidentBytes)) / \(byteString(agent.replayBufferMaxMemoryBytes))")
+                    row("Spill", value: "\(byteString(agent.replayBufferSpillBytes)) (\(agent.replayBufferSpilledChunkCount))")
+                }
+                if agent.liveMonitorLatencyMs > 0 {
+                    row("Monitor latency", value: String(format: "%.1f ms", agent.liveMonitorLatencyMs))
+                }
+            }
+
             row("Last render", value: millis(agent.lastFrameTime))
             row("P95 render", value: millis(agent.p95RenderTime))
             row("Drops / s", value: "\(agent.frameDropsLastTick)")
@@ -69,6 +86,12 @@ struct DiagnosticsView: View {
     private func millis(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds > 0 else { return "—" }
         return String(format: "%.1f ms", seconds * 1000)
+    }
+
+    private func byteString(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.0f KB", Double(bytes) / 1024) }
+        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
     }
 
     // MARK: - Capabilities

@@ -102,6 +102,13 @@ final class AudioMasterBus {
     @ObservationIgnored private let liveQueuedFrames = LiveQueuedFrameCounter()
     @ObservationIgnored private let liveGainReductionStore = LiveGainReductionStore()
 
+    /// Exposes the voice cleanup settings store for the capture recording
+    /// path (Phase 46). The same store drives both the monitor and record
+    /// inserts so they stay in sync.
+    nonisolated var voiceCleanupSettingsStore: LiveVoiceCleanupSettingsStore {
+        liveCleanupSettingsStore
+    }
+
     /// Standard bus format: 48 kHz, stereo, interleaved-free Float32. Phase 36
     /// DSP normalises around this format so denoise / loudness see one
     /// canonical layout.
@@ -224,6 +231,29 @@ final class AudioMasterBus {
 
     func updateLiveCleanupSettings(_ settings: VoiceCleanupSettings) {
         liveCleanupSettingsStore.update(settings)
+    }
+
+    func measureLiveMonitorLatency(settings: VoiceCleanupSettings) -> LiveMonitorLatencyMeasurement {
+        Self.measureLiveMonitorLatency(
+            settings: settings,
+            queuedFrames: liveQueuedFrames.value)
+    }
+
+    nonisolated static func measureLiveMonitorLatency(
+        settings: VoiceCleanupSettings,
+        sampleRate: Double = 48_000,
+        inputLatencySeconds: Double = 0,
+        outputLatencySeconds: Double = 0,
+        queuedFrames: Int = 0,
+        processingBufferFrames: Int = LiveMonitorLatencyMeasurement.defaultProcessingBufferFrames
+    ) -> LiveMonitorLatencyMeasurement {
+        LiveMonitorLatencyMeasurement.measure(
+            settings: settings,
+            sampleRate: sampleRate,
+            inputLatencySeconds: inputLatencySeconds,
+            outputLatencySeconds: outputLatencySeconds,
+            queuedFrames: queuedFrames,
+            processingBufferFrames: processingBufferFrames)
     }
 
     func scheduleLiveComposition(_ composition: AVComposition,

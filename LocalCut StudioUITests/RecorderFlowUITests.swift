@@ -6,6 +6,7 @@ final class RecorderFlowUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    @MainActor
     func testRecorderPauseResumeStopAndCollapseFlow() {
         let app = XCUIApplication()
         app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "--localcut-ui-test-recorder-harness"]
@@ -40,6 +41,7 @@ final class RecorderFlowUITests: XCTestCase {
         XCTAssertTrue(element(in: app, identifiedBy: "uitest-status-gaps-collapsed").waitForExistence(timeout: 2))
     }
 
+    @MainActor
     private func element(in app: XCUIApplication, identifiedBy identifier: String) -> XCUIElement {
         app.descendants(matching: .any)[identifier]
     }

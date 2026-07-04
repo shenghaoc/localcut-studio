@@ -1,4 +1,5 @@
 import SwiftUI
+import LocalCutCore
 
 /// SwiftUI content displayed inside the floating recorder control panel.
 struct RecorderFloatingPanelContent: View {
@@ -75,6 +76,19 @@ struct RecorderFloatingPanelContent: View {
                 .disabled(model.isPausingRecording || model.isStoppingRecording)
                 .help("Pause recording")
                 .accessibilityLabel("Pause recording")
+            }
+
+            // Save replay (Phase 46).
+            if model.isRecording && model.replayBufferManager != nil {
+                Button {
+                    model.saveReplayBuffer()
+                } label: {
+                    Image(systemName: "gobackward")
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.replaySaveInProgress || !model.replayBufferEnabled)
+                .help("Save last \(model.replayBufferDuration.displayName)")
+                .accessibilityLabel("Save replay")
             }
 
             // Stop.
