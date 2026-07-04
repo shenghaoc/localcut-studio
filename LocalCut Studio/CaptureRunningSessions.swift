@@ -547,7 +547,7 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
         let status = CMSampleBufferCreate(
             allocator: kCFAllocatorDefault,
             dataBuffer: nil,
-            dataReady: false,
+            dataReady: true,
             makeDataReadyCallback: nil,
             refcon: nil,
             formatDescription: outFmtDesc,
