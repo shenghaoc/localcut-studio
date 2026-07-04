@@ -144,6 +144,7 @@ struct ScreencastInspectorView: View {
                 set: { var c = binding.wrappedValue; c.arrowStyle.strokeWidth = Float($0); binding.wrappedValue = c }),
                    in: 1...10, step: 1)
                 .accessibilityLabel("Stroke")
+                .accessibilityValue("\(Int(binding.wrappedValue.arrowStyle.strokeWidth))")
         }
     }
 
@@ -158,6 +159,7 @@ struct ScreencastInspectorView: View {
                 set: { var c = binding.wrappedValue; c.boxStyle.cornerRadius = Float($0); binding.wrappedValue = c }),
                    in: 0...30, step: 1)
                 .accessibilityLabel("Corner Radius")
+                .accessibilityValue("\(Int(binding.wrappedValue.boxStyle.cornerRadius))")
         }
     }
 
@@ -185,6 +187,7 @@ struct ScreencastInspectorView: View {
                 set: { var c = binding.wrappedValue; c.spotlightStyle.radius = Float($0); binding.wrappedValue = c }),
                    in: 0.02...0.5, step: 0.01)
                 .accessibilityLabel("Radius")
+                .accessibilityValue(String(format: "%.2f", binding.wrappedValue.spotlightStyle.radius))
         }
         HStack {
             Text("Dim")
@@ -194,6 +197,7 @@ struct ScreencastInspectorView: View {
                 set: { var c = binding.wrappedValue; c.spotlightStyle.dimOpacity = Float($0); binding.wrappedValue = c }),
                    in: 0...1, step: 0.05)
                 .accessibilityLabel("Dim")
+                .accessibilityValue(String(format: "%.0f%%", binding.wrappedValue.spotlightStyle.dimOpacity * 100))
         }
     }
 
@@ -208,6 +212,7 @@ struct ScreencastInspectorView: View {
                 set: { var c = binding.wrappedValue; c.blurRegionStyle.blurRadius = Float($0); binding.wrappedValue = c }),
                    in: 1...50, step: 1)
                 .accessibilityLabel("Blur")
+                .accessibilityValue("\(Int(binding.wrappedValue.blurRegionStyle.blurRadius))")
         }
     }
 
@@ -239,6 +244,7 @@ struct ScreencastInspectorView: View {
                     set: { binding.wrappedValue.scale = $0 }),
                        in: 0.1...4, step: 0.05)
                     .accessibilityLabel("Scale")
+                    .accessibilityValue(String(format: "%.2fx", binding.wrappedValue.scale))
                 Text(String(format: "%.2fx", binding.wrappedValue.scale))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -252,6 +258,7 @@ struct ScreencastInspectorView: View {
                     set: { binding.wrappedValue.rotation = $0 * .pi / 180 }),
                        in: -180...180, step: 1)
                     .accessibilityLabel("Rotation")
+                    .accessibilityValue("\(Int(Double(binding.wrappedValue.rotation) * 180 / Double.pi)) degrees")
                 Text("\(Int(Double(binding.wrappedValue.rotation) * 180 / Double.pi)) deg")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -345,6 +352,7 @@ struct ScreencastInspectorView: View {
                 set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(scale: Float($0))) }),
                    in: 0.1...4, step: 0.05)
                 .accessibilityLabel("Keyframe Scale")
+                .accessibilityValue(String(format: "%.2fx", model.selectedCalloutTransformAtPlayhead.decomposedScale))
         }
         HStack {
             Text("Keyframe Rotation")
@@ -354,6 +362,7 @@ struct ScreencastInspectorView: View {
                 set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(rotationDegrees: Float($0))) }),
                    in: -180...180, step: 1)
                 .accessibilityLabel("Keyframe Rotation")
+                .accessibilityValue("\(Int((Double(model.selectedCalloutTransformAtPlayhead.decomposedRotation) * 180 / Double.pi).rounded())) degrees")
         }
     }
 
@@ -399,6 +408,7 @@ struct ScreencastInspectorView: View {
                     set: { value in model.updatePaddedBackground { $0.insetMargin = Float(value) } }),
                        in: 0...240, step: 1)
                     .accessibilityLabel("Inset")
+                    .accessibilityValue("\(Int(model.project.paddedBackground?.insetMargin ?? preset.insetMargin))")
                 Text("\(Int(model.project.paddedBackground?.insetMargin ?? preset.insetMargin))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -412,6 +422,7 @@ struct ScreencastInspectorView: View {
                     set: { value in model.updatePaddedBackground { $0.cornerRadius = Float(value) } }),
                        in: 0...80, step: 1)
                     .accessibilityLabel("Corners")
+                    .accessibilityValue("\(Int(model.project.paddedBackground?.cornerRadius ?? preset.cornerRadius))")
                 Text("\(Int(model.project.paddedBackground?.cornerRadius ?? preset.cornerRadius))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -425,6 +436,7 @@ struct ScreencastInspectorView: View {
                     set: { value in model.updatePaddedBackground { $0.shadowOpacity = Float(value) } }),
                        in: 0...1, step: 0.05)
                     .accessibilityLabel("Shadow")
+                    .accessibilityValue(String(format: "%.0f%%", (model.project.paddedBackground?.shadowOpacity ?? preset.shadowOpacity) * 100))
             }
         }
     }

@@ -36,6 +36,7 @@ struct TutorialFinishingInspectorView: View {
                         Text("dBFS")
                     }
                     .accessibilityLabel("Open Threshold")
+                    .accessibilityValue("\(Int(silenceParams.openThresholdDB)) dBFS")
                     .frame(maxWidth: 160)
                     Text("\(Int(silenceParams.openThresholdDB)) dBFS")
                         .font(.caption.monospacedDigit())
@@ -48,6 +49,7 @@ struct TutorialFinishingInspectorView: View {
                         Text("dBFS")
                     }
                     .accessibilityLabel("Close Threshold")
+                    .accessibilityValue("\(Int(silenceParams.closeThresholdDB)) dBFS")
                     .frame(maxWidth: 160)
                     Text("\(Int(silenceParams.closeThresholdDB)) dBFS")
                         .font(.caption.monospacedDigit())
@@ -64,6 +66,7 @@ struct TutorialFinishingInspectorView: View {
                             Text("seconds")
                         }
                         .accessibilityLabel("Min Duration")
+                        .accessibilityValue(String(format: "%.1f seconds", silenceParams.minimumSilenceDuration.seconds))
                         .frame(maxWidth: 120)
                         Text(String(format: "%.1fs", silenceParams.minimumSilenceDuration.seconds))
                             .font(.caption.monospacedDigit())
@@ -81,6 +84,7 @@ struct TutorialFinishingInspectorView: View {
                             Text("seconds")
                         }
                         .accessibilityLabel("Padding")
+                        .accessibilityValue(String(format: "%.2f seconds", silenceParams.padding.seconds))
                         .frame(maxWidth: 120)
                         Text(String(format: "%.2fs", silenceParams.padding.seconds))
                             .font(.caption.monospacedDigit())
