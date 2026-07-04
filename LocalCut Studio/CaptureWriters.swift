@@ -228,7 +228,11 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         let decodeTime = KeyframeDetector.decodeTimeStamp(sampleBuffer)
         let timelineDTS = decodeTime.isValid ? sessionRelativeTime(from: decodeTime) : timelinePTS
         let type: EncodedChunkMediaType = mediaType == .audio ? .audio : .video
-        let isSyncSample = type == .audio || KeyframeDetector.isKeyframe(sampleBuffer)
+        // Audio is always independently decodable. For video, raw capture
+        // frames lack sync-sample attachments so KeyframeDetector would
+        // treat every frame as a keyframe. Mark video as non-keyframe;
+        // the finalizer's alignedVideoStart finds the actual sync sample.
+        let isSyncSample = type == .audio
         let byteSize = encodedByteEstimate(for: sampleBuffer, duration: duration)
 
         let chunk = EncodedChunk(

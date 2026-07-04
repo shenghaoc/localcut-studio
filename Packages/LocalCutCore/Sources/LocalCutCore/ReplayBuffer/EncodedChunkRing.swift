@@ -271,6 +271,14 @@ public actor EncodedChunkRing {
             }?.presentationTimeStamp
         }
 
+        // If still no keyframe found (e.g. video chunks from raw capture
+        // lack sync-sample info), fall back to the earliest chunk of the
+        // preferred type. The finalizer's alignedVideoStart will find the
+        // actual sync sample in the encoded output.
+        if startTime == nil {
+            startTime = chunks.first(where: { $0.mediaType == preferredMediaType })?.presentationTimeStamp
+        }
+
         guard let startTime else {
             return ([], 0)
         }
@@ -298,15 +306,16 @@ public actor EncodedChunkRing {
         let chunks = allChunks
 
         // Keep from the latest video keyframe at or before the cutoff so a
-        // full requested-duration save remains possible. Audio-only buffers can
-        // evict directly at the cutoff.
+        // full requested-duration save remains possible. Audio-only buffers
+        // can evict directly at the cutoff. When video chunks lack keyframe
+        // markers (raw capture input), also evict at the cutoff directly.
         var keepStart: CMTime?
         for chunk in chunks where chunk.mediaType == .video && chunk.isKeyframe {
             if chunk.presentationTimeStamp <= cutoffTime {
                 keepStart = chunk.presentationTimeStamp
             }
         }
-        if keepStart == nil, !chunks.contains(where: { $0.mediaType == .video }) {
+        if keepStart == nil {
             keepStart = cutoffTime
         }
         guard let keepStart else { return }
