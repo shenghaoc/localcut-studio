@@ -22,6 +22,65 @@ PACKAGE_DIR="$(dirname "$SCRIPT_DIR")"
 DOWNLOAD_DIR="${PACKAGE_DIR}/.build/webrtc-download"
 XCFRAMEWORK="${PACKAGE_DIR}/WebRTC.xcframework"
 
+copy_header_from_available_slice() {
+    local destination_headers="$1"
+    local header="$2"
+
+    if [ -f "${destination_headers}/${header}" ]; then
+        return
+    fi
+
+    local source_candidates=()
+    if [ -n "${IOS_HEADERS:-}" ]; then
+        source_candidates+=("${IOS_HEADERS}")
+    fi
+    source_candidates+=(
+        "${PACKAGE_DIR}/WebRTC.xcframework/ios-arm64/WebRTC.framework/Headers"
+        "${PACKAGE_DIR}/WebRTC.xcframework/ios-x86_64_arm64-simulator/WebRTC.framework/Headers"
+        "${PACKAGE_DIR}/WebRTC.xcframework/ios-x86_64_arm64-maccatalyst/WebRTC.framework/Versions/A/Headers"
+    )
+
+    local source_headers
+    for source_headers in "${source_candidates[@]}"; do
+        if [ -f "${source_headers}/${header}" ]; then
+            cp "${source_headers}/${header}" "${destination_headers}/${header}"
+            echo "    Copied: ${header}"
+            return
+        fi
+    done
+
+    echo "ERROR: ${header} is required but was not found in any bundled WebRTC slice."
+    exit 1
+}
+
+ensure_umbrella_import() {
+    local umbrella="$1"
+    local header="$2"
+    local anchor="$3"
+    local import_line="#import <WebRTC/${header}>"
+    local anchor_line="#import <WebRTC/${anchor}>"
+
+    if grep -qF "${import_line}" "${umbrella}"; then
+        return
+    fi
+
+    local tmp="${umbrella}.tmp"
+    awk -v import_line="${import_line}" -v anchor_line="${anchor_line}" '
+        $0 == anchor_line {
+            print
+            print import_line
+            next
+        }
+        { print }
+    ' "${umbrella}" > "${tmp}"
+
+    if ! grep -qF "${import_line}" "${tmp}"; then
+        printf '%s\n' "${import_line}" >> "${tmp}"
+    fi
+
+    mv "${tmp}" "${umbrella}"
+}
+
 patch_macos_headers() {
     local macos_headers="$1"
 
@@ -39,6 +98,9 @@ patch_macos_headers() {
     )
 
     local umbrella="${macos_headers}/WebRTC.h"
+    copy_header_from_available_slice "${macos_headers}" "RTCAudioDevice.h"
+    ensure_umbrella_import "${umbrella}" "RTCAudioDevice.h" "RTCMacros.h"
+
     for header in "${excluded_headers[@]}"; do
         local tmp="${umbrella}.tmp"
         grep -vF "#import <WebRTC/${header}>" "${umbrella}" > "${tmp}"
