@@ -9,6 +9,11 @@ struct LocalCutStudioApp: App {
     // at app scope so the menu commands and window can share it.
     @State private var model = EditorModel()
 
+    init() {
+        // Activate memory pressure monitoring at app launch.
+        MemoryPressureHandler.shared.activate()
+    }
+
 #if DEBUG
     private var runsRecorderUITestHarness: Bool {
         ProcessInfo.processInfo.arguments.contains("--localcut-ui-test-recorder-harness")

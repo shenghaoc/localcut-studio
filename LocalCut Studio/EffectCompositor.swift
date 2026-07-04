@@ -205,6 +205,17 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         }
     }
 
+    /// Removes all cached CIContext objects. Called on memory pressure.
+    /// Contexts will be lazily recreated on next use.
+    nonisolated static func purgeContextCache() {
+        contextCache.withLock { $0.removeAll() }
+    }
+
+    /// Removes all cached LUT lookups. Called on memory pressure.
+    nonisolated static func purgeLUTCache() {
+        LUTCache.shared.purge()
+    }
+
     /// Tags `buffer` with the colour primaries / transfer function / YCbCr
     /// matrix attachments matching `space`, so the export writer (which copies
     /// the destination buffer's attachments onto the encoded frame) writes a
@@ -1619,6 +1630,11 @@ private final class LUTCache: Sendable {
 
     nonisolated func setEntry(_ entry: LUTEntry, forBookmark bookmark: Data) {
         lock.withLock { $0[bookmark] = entry }
+    }
+
+    /// Removes all cached LUT entries. Called on memory pressure.
+    nonisolated func purge() {
+        lock.withLock { $0.removeAll() }
     }
 }
 
