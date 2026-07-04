@@ -21,7 +21,9 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
     private var cache: [Int: CIImage] = [:]
     private var cacheOrder: [Int] = []
     private let maxCachedFrames: Int
-    private static let maxCachedBytes = 256 * 1024 * 1024
+    /// Maximum bytes used to drive per-frame cache eviction. At 1080p
+    /// (8 MiB/frame) this holds ~8 frames; at 4K (33 MiB/frame) ~2.
+    private static let maxCachedBytes = 64 * 1024 * 1024
     private static let maxRasterDimension: CGFloat = 8_192
 
     @MainActor
@@ -172,6 +174,17 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
         }
 
         return image
+    }
+
+    nonisolated var cachedFrameCount: Int {
+        lock.withLock { cache.count }
+    }
+
+    nonisolated func purgeCachedFrames() {
+        lock.withLock {
+            cache.removeAll()
+            cacheOrder.removeAll()
+        }
     }
 
     private func touchCachedFrame(at index: Int) {

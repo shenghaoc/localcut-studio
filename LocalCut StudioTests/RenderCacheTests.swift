@@ -423,6 +423,36 @@ func cachePurgeEmpties() {
     #expect(cache.currentBytes == 0)
 }
 
+@Test("RenderCache: purgeMemory() clears RAM entries without deleting disk spill")
+func cachePurgeMemoryPreservesDiskSpill() throws {
+    let directory = try temporaryRenderCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let perEntry = RenderCache.estimatedBytes(width: 16, height: 16)
+    let cache = RenderCache(byteBudget: perEntry,
+                            diskByteBudget: 1_000_000,
+                            cacheDirectory: directory)
+    let size = CGSize(width: 16, height: 16)
+    let spilledKey = key(clipID: UUID(), renderSize: size)
+    let memoryKey = key(clipID: UUID(), renderSize: size)
+
+    cache.setImage(tinyImage(width: 16, height: 16), for: spilledKey)
+    cache.setImage(tinyImage(width: 16, height: 16), for: memoryKey)
+    #expect(cache.count == 1)
+    #expect(cache.diskCount == 1)
+    #expect(cache.currentDiskBytes > 0)
+
+    cache.purgeMemory()
+
+    #expect(cache.count == 0)
+    #expect(cache.currentBytes == 0)
+    #expect(cache.diskCount == 1)
+    #expect(cache.currentDiskBytes > 0)
+    let remaining = (try? FileManager.default.contentsOfDirectory(atPath: directory.path())) ?? []
+    #expect(!remaining.isEmpty)
+    #expect(cache.image(for: spilledKey) != nil)
+}
+
 // MARK: - R6: Storage location
 
 // MARK: - Editor integration (codex review P2 — slider path)

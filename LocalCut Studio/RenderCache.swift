@@ -110,16 +110,13 @@ extension Array where Element == Effect {
 /// lookup, evicted from the head on insert past the cap.
 final class RenderCache: Sendable {
 
-    /// Default in-memory budget in bytes (256 MiB). At 1080p (8 MiB/frame) the
-    /// cache holds ~32 frames before LRU starts evicting; at 4K (33 MiB/frame)
-    /// ~7. Tunable so the diagnostics panel (P25) can dial it down on
-    /// lower-RAM Macs.
-    nonisolated static let defaultByteBudget: Int = 256 * 1024 * 1024
+    /// Default in-memory budget in bytes (128 MiB). At 1080p (8 MiB/frame) the
+    /// cache holds ~16 frames before LRU starts evicting; at 4K (33 MiB/frame)
+    /// ~3.
+    nonisolated static let defaultByteBudget: Int = 128 * 1024 * 1024
 
-    /// Default disk-spill budget (1 GiB). The spill tier is process-local and
-    /// keyed with the same process-seeded effect hash as memory, so it improves
-    /// repeated in-session requests without promising cross-launch reuse.
-    nonisolated static let defaultDiskByteBudget: Int = 1024 * 1024 * 1024
+    /// Default disk-spill budget (512 MiB).
+    nonisolated static let defaultDiskByteBudget: Int = 512 * 1024 * 1024
 
     /// Shared singleton used by `EffectCompositor`. The compositor is created
     /// per render pass by AVFoundation, so the cache must outlive any single
@@ -521,7 +518,20 @@ final class RenderCache: Sendable {
         removeEntries { $0.renderWidth != w || $0.renderHeight != h }
     }
 
-    /// Empty the cache and reset `totalBytes` to zero.
+    /// Empty only the in-memory cache and reset `totalBytes` to zero, leaving
+    /// disk-spill metadata and files intact. Used during memory pressure, where
+    /// deleting cache files adds I/O without freeing RAM.
+    nonisolated func purgeMemory() {
+        lock.withLock { state in
+            state.entries.removeAll()
+            state.memoryNodes.removeAll()
+            state.memoryHead = nil
+            state.memoryTail = nil
+            state.totalBytes = 0
+        }
+    }
+
+    /// Empty the memory and disk caches, deleting all cache files.
     nonisolated func purge() {
         removeAllEntries()
     }

@@ -12,10 +12,20 @@ import LocalCutCore
 protocol OverlayFrameSource: AnyObject, Sendable {
     /// The natural size (pixels) of the overlay source.
     nonisolated var naturalSize: CGSize { get }
+    /// Number of decoded frames currently retained by the source cache.
+    nonisolated var cachedFrameCount: Int { get }
     /// Returns the frame for the given overlay-local time (relative to the
     /// overlay clip's start). Returns nil if the time is out of range and the
     /// end action is `.hide`.
     nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage?
+    /// Drops decoded frame caches while keeping the source usable for future
+    /// requests.
+    nonisolated func purgeCachedFrames()
+}
+
+extension OverlayFrameSource {
+    nonisolated var cachedFrameCount: Int { 0 }
+    nonisolated func purgeCachedFrames() {}
 }
 
 // MARK: - Factory
