@@ -42,6 +42,6 @@
 ## R7 — Verification
 
 - **R7.1** Unit tests for `WhipClient` (mocked `URLSession`), reconnect state machine (fake timers), `EncoderBudget` integration.
-- **R7.2** CI integration: publish to a MediaMTX container; assert ingest via the MediaMTX API; teardown sends DELETE.
+- **R7.2** CI integration: publish to MediaMTX under the CI harness; assert ingest via the MediaMTX API; teardown sends DELETE.
 - **R7.3** Bundle-exclusion test for the publish settings store.
 - **R7.4** `xcodebuild` (Debug, macOS) green; no test count regression.

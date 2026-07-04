@@ -7,8 +7,9 @@
 > sanitized for AppKit builds. The default build enables WebRTC with
 > `LOCALCUT_ENABLE_WEBRTC`; custom builds can remove that flag and the package
 > product for a reduced publish UI. Local `xcodebuild test` passes with the
-> MediaMTX suite disabled by default; the CI script enables the container-backed
-> MediaMTX suite and fails when no container runtime is available.
+> MediaMTX suite disabled by default; the CI script starts MediaMTX with
+> Docker/Podman when available or a pinned verified macOS release binary on
+> GitHub-hosted runners, then enables the required suite.
 
 ## Dependency + entitlements
 
@@ -47,6 +48,6 @@
 ## Verification
 
 - [x] **T7.1** Unit tests for client + reconnect + budget.
-- [x] **T7.2** CI integration test publishing to MediaMTX in a container.
+- [x] **T7.2** CI integration test publishing to MediaMTX under the CI harness.
 - [x] **T7.3** Bundle-exclusion test.
 - [x] **T7.4** `xcodebuild` (Debug, macOS) green.

@@ -6,12 +6,12 @@ import LocalCutCore
 /// MediaMTX WHIP integration test.
 ///
 /// Verifies that LocalCut can publish to a real WHIP ingest endpoint
-/// (MediaMTX running in a container), assert ingest, and tear down cleanly.
+/// (MediaMTX started by the integration script), assert ingest, and tear down cleanly.
 ///
-/// This test requires a container runtime (Docker/Podman) with MediaMTX running
-/// on localhost:8889. Normal local test runs leave the suite disabled; CI must
-/// run it through `run-mediamtx-whip-integration.sh`, which sets the opt-in
-/// environment variable after starting the container.
+/// This test requires MediaMTX running on localhost:8889. Normal local test
+/// runs leave the suite disabled; CI runs it through
+/// `run-mediamtx-whip-integration.sh`, which sets the opt-in environment
+/// variable after starting MediaMTX.
 @Suite(
     "MediaMTX WHIP integration",
     .serialized,
