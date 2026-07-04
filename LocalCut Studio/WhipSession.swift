@@ -1,0 +1,305 @@
+import Foundation
+import os
+import LocalCutCore
+
+#if canImport(WebRTC)
+import WebRTC
+#endif
+
+// MARK: - Publish state
+
+nonisolated enum PublishState: Sendable, Equatable {
+    case idle, connecting, live, reconnecting, failed(String), ended
+}
+
+// MARK: - Publish stats
+
+struct PublishStats: Sendable, Equatable {
+    var bytesSent: Int64 = 0
+    var framesSent: Int64 = 0
+    var bitrate: Double = 0
+    var rtt: TimeInterval = 0
+}
+
+// MARK: - Publish config
+
+struct PublishConfig: Sendable {
+    var videoCodec: String = "H264"
+    var videoBitrate: UInt = 2_500_000
+    var keyframeInterval: Double = 2.0
+    var audioStereo: Bool = true
+    var audioBitrate: UInt = 128_000
+}
+
+// MARK: - WhipSession actor
+
+actor WhipSession {
+    private(set) var state: PublishState = .idle {
+        didSet {
+            guard state != oldValue else { return }
+            stateContinuation?.yield(state)
+            if state == .ended { stateContinuation?.finish() }
+        }
+    }
+    private(set) var stats = PublishStats()
+
+    private var resourceUrl: URL?
+    private var etag: String?
+    private let client: any WhipClient
+    private let budget: EncoderBudget
+    private var config: PublishConfig
+    private let reconnectController: ReconnectController
+    private var authToken: String?
+    private var encoderLease: EncoderLease?
+    private var currentEndpointConfig: (endpoint: URL, authToken: String?)?
+    private var iceServerUrls: [String] = []
+
+    #if canImport(WebRTC)
+    private let factory = RTCPeerConnectionFactory()
+    private var peerConnection: RTCPeerConnection?
+    private var videoTransceiver: RTCRtpTransceiver?
+    private var audioTransceiver: RTCRtpTransceiver?
+    #endif
+
+    private var stateContinuation: AsyncStream<PublishState>.Continuation?
+    nonisolated(unsafe) private var _cachedStateStream: AsyncStream<PublishState>?
+    private var statsTask: Task<Void, Never>?
+
+    init(client: some WhipClient, budget: EncoderBudget, config: PublishConfig = PublishConfig(), reconnectController: ReconnectController = ReconnectController()) {
+        self.client = client
+        self.budget = budget
+        self.config = config
+        self.reconnectController = reconnectController
+    }
+
+    var stateStream: AsyncStream<PublishState> {
+        if let existing = _cachedStateStream { return existing }
+        let (stream, continuation) = AsyncStream<PublishState>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        stateContinuation = continuation
+        _cachedStateStream = stream
+        return stream
+    }
+
+    func start(endpointURL: URL, authToken: String? = nil, config: PublishConfig? = nil) async throws {
+        guard state == .idle || state == .ended || state == .failed("") else { return }
+        state = .connecting
+        self.authToken = authToken
+        if let config { self.config = config }
+
+        do {
+            encoderLease = try await budget.acquire(.whipPublish)
+        } catch let error as EncoderBudgetError {
+            state = .failed(error.localizedDescription)
+            throw error
+        }
+
+        reconnectController.reset()
+        do {
+            try await connect(endpointURL: endpointURL)
+        } catch {
+            releaseEncoderBudget()
+            throw error
+        }
+    }
+
+    func stop() async {
+        guard state != .ended else { return }
+        statsTask?.cancel()
+        statsTask = nil
+        if let url = resourceUrl {
+            await client.teardown(resourceUrl: url, authToken: authToken)
+        }
+        closeWebRTCResources()
+        releaseEncoderBudget()
+        resourceUrl = nil
+        etag = nil
+        state = .ended
+    }
+
+    func handleDisconnect() async {
+        guard state == .live || state == .reconnecting else { return }
+        statsTask?.cancel()
+        statsTask = nil
+        guard reconnectController.canAttemptReconnect else {
+            failAndCleanup("Reconnect attempts exhausted.")
+            return
+        }
+        state = .reconnecting
+        let backoff = reconnectController.backoffDuration
+        if backoff > 0 { try? await Task.sleep(for: .seconds(backoff)) }
+        guard !Task.isCancelled else { return }
+
+        if reconnectController.shouldTryIceRestart {
+            reconnectController.advanceAttempt()
+            await attemptIceRestart()
+        } else {
+            reconnectController.advanceAttempt()
+            await attemptFullReconnect()
+        }
+    }
+
+    // MARK: - Private
+
+    private func connect(endpointURL: URL) async throws {
+        currentEndpointConfig = (endpoint: endpointURL, authToken: authToken)
+        #if canImport(WebRTC)
+        try await configurePeerConnection()
+        let offer = try await createOffer()
+        let response = try await client.publish(endpoint: endpointURL, offerSdp: offer, authToken: authToken)
+        resourceUrl = response.resourceUrl
+        etag = response.etag
+        reconnectController.updateETag(response.etag)
+        iceServerUrls = response.iceServers
+        try await applyAnswerSdp(response.answerSdp)
+        #else
+        try await Task.sleep(for: .milliseconds(100))
+        #endif
+        state = .live
+        startStatsPolling()
+    }
+
+    private func attemptIceRestart() async {
+        guard let url = resourceUrl, let etag = etag else {
+            await attemptFullReconnect()
+            return
+        }
+        #if canImport(WebRTC)
+        do {
+            guard let pc = peerConnection else { await attemptFullReconnect(); return }
+            let offer = try await pc.offer(for: .init())
+            try await pc.setLocalDescription(offer)
+            let response = try await client.patchIceRestart(resourceUrl: url, offerSdp: offer.sdp, etag: etag, authToken: authToken)
+            self.etag = response.newEtag
+            reconnectController.updateETag(response.newEtag)
+            let answer = RTCSessionDescription(type: .answer, sdp: response.answerSdp)
+            try await pc.setRemoteDescription(answer)
+            state = .live
+            startStatsPolling()
+        } catch {
+            await attemptFullReconnect()
+        }
+        #else
+        state = .live
+        startStatsPolling()
+        #endif
+    }
+
+    private func attemptFullReconnect() async {
+        guard let config = currentEndpointConfig else {
+            failAndCleanup("Cannot reconnect: endpoint not configured.")
+            return
+        }
+        closeWebRTCResources()
+        if encoderLease == nil {
+            do { encoderLease = try await budget.acquire(.whipPublish) }
+            catch { failAndCleanup("Budget re-acquire failed."); return }
+        }
+        resourceUrl = nil
+        etag = nil
+        reconnectController.resetETag()
+        do { try await connect(endpointURL: config.endpoint) }
+        catch { failAndCleanup(error.localizedDescription) }
+    }
+
+    private func failAndCleanup(_ message: String) {
+        closeWebRTCResources()
+        releaseEncoderBudget()
+        resourceUrl = nil
+        etag = nil
+        currentEndpointConfig = nil
+        state = .failed(message)
+    }
+
+    private func releaseEncoderBudget() {
+        if let lease = encoderLease { lease.relinquish(); encoderLease = nil }
+    }
+
+    private func closeWebRTCResources() {
+        statsTask?.cancel()
+        statsTask = nil
+        #if canImport(WebRTC)
+        videoTransceiver = nil
+        audioTransceiver = nil
+        peerConnection?.close()
+        peerConnection = nil
+        #endif
+    }
+
+    #if canImport(WebRTC)
+    private func configurePeerConnection() throws {
+        let rtcConfig = RTCConfiguration()
+        rtcConfig.iceServers = iceServerUrls.map { RTCIceServer(urlStrings: [$0]) }
+        rtcConfig.sdpSemantics = .unifiedPlan
+        rtcConfig.continualGatheringPolicy = .gatherContinually
+        let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: ["DtlsSrtpKeyAgreement": "true"])
+        guard let pc = factory.peerConnection(with: rtcConfig, constraints: constraints, delegate: nil) else {
+            throw WhipError.transport(statusCode: 0, message: "Failed to create RTCPeerConnection.")
+        }
+        peerConnection = pc
+        videoTransceiver = pc.addTransceiver(of: .video)
+        videoTransceiver?.setDirection(.sendOnly, error: nil)
+        audioTransceiver = pc.addTransceiver(of: .audio)
+        audioTransceiver?.setDirection(.sendOnly, error: nil)
+    }
+
+    private func createOffer() async throws -> String {
+        guard let pc = peerConnection else { throw WhipError.transport(statusCode: 0, message: "No peer connection.") }
+        let constraints = RTCMediaConstraints(mandatoryConstraints: ["OfferToReceiveAudio": "false", "OfferToReceiveVideo": "false"], optionalConstraints: nil)
+        let offer = try await pc.offer(for: constraints)
+        try await pc.setLocalDescription(offer)
+        return offer.sdp
+    }
+
+    private func applyAnswerSdp(_ sdp: String) async throws {
+        guard let pc = peerConnection else { throw WhipError.transport(statusCode: 0, message: "No peer connection.") }
+        let answer = RTCSessionDescription(type: .answer, sdp: sdp)
+        try await pc.setRemoteDescription(answer)
+    }
+    #endif
+
+    private func startStatsPolling() {
+        statsTask?.cancel()
+        statsTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self else { return }
+                await self.collectStats()
+            }
+        }
+    }
+
+    private func collectStats() {
+        #if canImport(WebRTC)
+        guard let pc = peerConnection else { return }
+        Task { [weak self] in
+            let report = await pc.statistics()
+            self?.processStatsReport(report)
+        }
+        #endif
+    }
+
+    #if canImport(WebRTC)
+    private func processStatsReport(_ report: RTCStatisticsReport) {
+        var newStats = PublishStats()
+        for (_, stat) in report.statistics {
+            if stat.type == "outbound-rtp", stat.values["kind"] as? String == "video" {
+                newStats.bytesSent = stat.values["bytesSent"] as? Int64 ?? 0
+                newStats.framesSent = stat.values["framesSent"] as? Int64 ?? 0
+            }
+            if stat.type == "candidate-pair", let nominated = stat.values["nominated"] as? Bool, nominated {
+                newStats.rtt = stat.values["currentRoundTripTime"] as? TimeInterval ?? 0
+            }
+        }
+        let prevBytes = stats.bytesSent
+        if newStats.bytesSent > prevBytes { newStats.bitrate = Double(newStats.bytesSent - prevBytes) * 8.0 }
+        stats = newStats
+    }
+    #endif
+}
+
+// WhipError.transport case needed for WebRTC path
+extension WhipError {
+    static func transport(statusCode: Int, message: String) -> WhipError {
+        .httpStatus(statusCode, message.data(using: .utf8))
+    }
+}
