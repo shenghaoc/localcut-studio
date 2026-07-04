@@ -57,7 +57,16 @@ actor WhipSession {
     private var audioBridge: AudioPublishBridge?
 
     #if canImport(WebRTC)
-    private let factory = RTCPeerConnectionFactory()
+    private lazy var factory: RTCPeerConnectionFactory = {
+        if let audioDevice = audioBridge?.rtcAudioDevice {
+            return RTCPeerConnectionFactory(
+                encoderFactory: nil,
+                decoderFactory: nil,
+                audioDevice: audioDevice
+            )
+        }
+        return RTCPeerConnectionFactory()
+    }()
     private var peerConnection: RTCPeerConnection?
     private var peerConnectionDelegate: WhipPeerConnectionDelegate?
     private var videoTransceiver: RTCRtpTransceiver?
