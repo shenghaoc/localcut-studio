@@ -40,7 +40,7 @@ final class DiagnosticsAgent {
 
     /// Updates replay buffer diagnostics from an external snapshot.
     func updateReplayBufferDiagnostics(_ diag: ReplayBufferDiagnostics,
-                                       latencyMs: Double = 0) {
+                                       latencyMs: Double? = nil) {
         replayBufferChunkCount = diag.chunkCount
         replayBufferDurationSeconds = diag.bufferedDurationSeconds
         replayBufferSourceCount = diag.sourceCount
@@ -48,7 +48,14 @@ final class DiagnosticsAgent {
         replayBufferMaxMemoryBytes = diag.maxMemoryBytes
         replayBufferSpillBytes = diag.spillBytes
         replayBufferSpilledChunkCount = diag.spilledChunkCount
-        liveMonitorLatencyMs = latencyMs
+        if let latencyMs {
+            updateLiveMonitorLatency(latencyMs)
+        }
+    }
+
+    /// Updates the Phase 46 live monitor latency measurement.
+    func updateLiveMonitorLatency(_ latencyMs: Double) {
+        liveMonitorLatencyMs = latencyMs.isFinite ? max(0, latencyMs) : 0
     }
     /// Current hardware encoder leases held across editor workflows.
     private(set) var encoderLeaseCount: Int = 0

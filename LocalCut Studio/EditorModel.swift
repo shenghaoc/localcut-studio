@@ -176,6 +176,7 @@ final class EditorModel {
     var recordingBackpressureCount: Int = 0
     var recordingIncludesMicrophone = false
     var recordingMicLevel: Float = 0
+    var recordingLiveMonitorLatencyMs: Double = 0
     var recoveredCaptureSessions: [CaptureSessionResult] = []
     @ObservationIgnored nonisolated(unsafe) var recordingsFolderAccessURL: URL?
     @ObservationIgnored nonisolated(unsafe) var recordingMonitorTask: Task<Void, Never>?

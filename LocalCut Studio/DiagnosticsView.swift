@@ -30,14 +30,16 @@ struct DiagnosticsView: View {
                 .help(agent.encoderLedger.isEmpty ? "No active encoder leases." : agent.encoderLedger.joined(separator: ", "))
 
             // MARK: - Replay buffer (Phase 46)
-            if agent.replayBufferChunkCount > 0 {
+            if agent.replayBufferChunkCount > 0 || agent.liveMonitorLatencyMs > 0 {
                 Divider()
                 Text("Replay Buffer").font(.headline)
-                row("Chunks", value: "\(agent.replayBufferChunkCount)")
-                row("Duration", value: String(format: "%.1fs", agent.replayBufferDurationSeconds))
-                row("Sources", value: "\(agent.replayBufferSourceCount)")
-                row("Resident", value: "\(byteString(agent.replayBufferResidentBytes)) / \(byteString(agent.replayBufferMaxMemoryBytes))")
-                row("Spill", value: "\(byteString(agent.replayBufferSpillBytes)) (\(agent.replayBufferSpilledChunkCount))")
+                if agent.replayBufferChunkCount > 0 {
+                    row("Chunks", value: "\(agent.replayBufferChunkCount)")
+                    row("Duration", value: String(format: "%.1fs", agent.replayBufferDurationSeconds))
+                    row("Sources", value: "\(agent.replayBufferSourceCount)")
+                    row("Resident", value: "\(byteString(agent.replayBufferResidentBytes)) / \(byteString(agent.replayBufferMaxMemoryBytes))")
+                    row("Spill", value: "\(byteString(agent.replayBufferSpillBytes)) (\(agent.replayBufferSpilledChunkCount))")
+                }
                 if agent.liveMonitorLatencyMs > 0 {
                     row("Monitor latency", value: String(format: "%.1f ms", agent.liveMonitorLatencyMs))
                 }

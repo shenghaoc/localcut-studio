@@ -233,6 +233,29 @@ final class AudioMasterBus {
         liveCleanupSettingsStore.update(settings)
     }
 
+    func measureLiveMonitorLatency(settings: VoiceCleanupSettings) -> LiveMonitorLatencyMeasurement {
+        Self.measureLiveMonitorLatency(
+            settings: settings,
+            queuedFrames: liveQueuedFrames.value)
+    }
+
+    nonisolated static func measureLiveMonitorLatency(
+        settings: VoiceCleanupSettings,
+        sampleRate: Double = 48_000,
+        inputLatencySeconds: Double = 0,
+        outputLatencySeconds: Double = 0,
+        queuedFrames: Int = 0,
+        processingBufferFrames: Int = LiveMonitorLatencyMeasurement.defaultProcessingBufferFrames
+    ) -> LiveMonitorLatencyMeasurement {
+        LiveMonitorLatencyMeasurement.measure(
+            settings: settings,
+            sampleRate: sampleRate,
+            inputLatencySeconds: inputLatencySeconds,
+            outputLatencySeconds: outputLatencySeconds,
+            queuedFrames: queuedFrames,
+            processingBufferFrames: processingBufferFrames)
+    }
+
     func scheduleLiveComposition(_ composition: AVComposition,
                                  audioMix: AVAudioMix?,
                                  startTime: CMTime = .zero,

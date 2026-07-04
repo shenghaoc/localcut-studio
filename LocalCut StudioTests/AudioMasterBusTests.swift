@@ -956,6 +956,39 @@ func liveCleanupLatencyBudget() {
             "Average processing time \(averageMs) ms exceeds \(maxLatencyMs) ms budget")
 }
 
+@Test("VoiceCleanup: live monitor latency measurement includes the cleanup block")
+func liveMonitorLatencyMeasurementIncludesCleanupBlock() {
+    var settings = VoiceCleanupSettings()
+    settings.gate.bypass = false
+
+    let measurement = AudioMasterBus.measureLiveMonitorLatency(
+        settings: settings,
+        sampleRate: 48_000,
+        queuedFrames: 0,
+        processingBufferFrames: 1024)
+
+    #expect(abs(measurement.processingLatencySeconds - (1024.0 / 48_000.0)) < 0.000_001)
+    #expect(abs(measurement.totalMilliseconds - 21.333_333) < 0.01)
+    #expect(measurement.totalMilliseconds < 25)
+}
+
+@Test("VoiceCleanup: live monitor latency probe accepts injected hardware and queue latency")
+func liveMonitorLatencyMeasurementAcceptsInjectedLatency() {
+    var settings = VoiceCleanupSettings()
+    settings.limiter.bypass = false
+
+    let measurement = AudioMasterBus.measureLiveMonitorLatency(
+        settings: settings,
+        sampleRate: 48_000,
+        inputLatencySeconds: 0.003,
+        outputLatencySeconds: 0.004,
+        queuedFrames: 240,
+        processingBufferFrames: 1024)
+
+    let expected = 0.003 + (1024.0 / 48_000.0) + (240.0 / 48_000.0) + 0.004
+    #expect(abs(measurement.totalSeconds - expected) < 0.000_001)
+}
+
 @Test("VoiceCleanup: bypass ramp state advances monotonically without overshoot")
 func bypassRampStateAdvancesWithoutOvershoot() {
     var ramp = BypassRampState()

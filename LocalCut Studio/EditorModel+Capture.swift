@@ -219,6 +219,7 @@ extension EditorModel {
         floatingPanelController.show(model: self)
         let panelWindowID = floatingPanelController.windowID
         let excludedWindowIDs: Set<CGWindowID> = panelWindowID == 0 ? [] : [panelWindowID]
+        audioBus.updateLiveCleanupSettings(project.voiceCleanup)
         let request = CaptureStartRequest(
             target: target,
             includeSystemAudio: includeSystemAudio,
@@ -297,6 +298,13 @@ extension EditorModel {
             recordingBackpressureCount = 0
             recordingIncludesMicrophone = microphoneDeviceID != nil
             recordingMicLevel = 0
+            if includeSystemAudio || microphoneDeviceID != nil {
+                let latency = audioBus.measureLiveMonitorLatency(settings: project.voiceCleanup)
+                recordingLiveMonitorLatencyMs = latency.totalMilliseconds
+            } else {
+                recordingLiveMonitorLatencyMs = 0
+            }
+            diagnostics.updateLiveMonitorLatency(recordingLiveMonitorLatencyMs)
             recordingDiskFreeBytes = nil
             recordingDiskWarning = nil
             startRecordingMonitor(rootURL: root)
@@ -309,7 +317,10 @@ extension EditorModel {
             if hideFloatingPanelWhileRecording {
                 floatingPanelController.hide()
             }
-            statusMessage = panelExclusionWarning ?? "Recording…"
+            let latencySuffix = recordingLiveMonitorLatencyMs > 0
+                ? String(format: " Monitor latency %.1f ms.", recordingLiveMonitorLatencyMs)
+                : ""
+            statusMessage = panelExclusionWarning ?? "Recording…\(latencySuffix)"
         } catch {
             floatingPanelController.close()
             isRecorderPresented = wasRecorderPresented
@@ -362,7 +373,9 @@ extension EditorModel {
                 // Update replay buffer diagnostics periodically.
                 if let replayManager = self.replayBufferManager {
                     let diag = await replayManager.diagnostics()
-                    self.diagnostics.updateReplayBufferDiagnostics(diag)
+                    self.diagnostics.updateReplayBufferDiagnostics(
+                        diag,
+                        latencyMs: self.recordingLiveMonitorLatencyMs)
                 }
                 try? await Task.sleep(for: .seconds(1))
             }
@@ -420,6 +433,8 @@ extension EditorModel {
         recordingBackpressureCount = 0
         recordingIncludesMicrophone = false
         recordingMicLevel = 0
+        recordingLiveMonitorLatencyMs = 0
+        diagnostics.updateLiveMonitorLatency(0)
     }
 
     // MARK: - Phase 42: Countdown
