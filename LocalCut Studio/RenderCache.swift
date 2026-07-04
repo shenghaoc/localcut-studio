@@ -110,16 +110,15 @@ extension Array where Element == Effect {
 /// lookup, evicted from the head on insert past the cap.
 final class RenderCache: Sendable {
 
-    /// Default in-memory budget in bytes (256 MiB). At 1080p (8 MiB/frame) the
-    /// cache holds ~32 frames before LRU starts evicting; at 4K (33 MiB/frame)
-    /// ~7. Tunable so the diagnostics panel (P25) can dial it down on
-    /// lower-RAM Macs.
-    nonisolated static let defaultByteBudget: Int = 256 * 1024 * 1024
+    /// Default in-memory budget in bytes (128 MiB). At 1080p (8 MiB/frame) the
+    /// cache holds ~16 frames before LRU starts evicting; at 4K (33 MiB/frame)
+    /// ~3. Reduced from 256 MiB to limit memory pressure (bugfix: memory leak
+    /// investigation).
+    nonisolated static let defaultByteBudget: Int = 128 * 1024 * 1024
 
-    /// Default disk-spill budget (1 GiB). The spill tier is process-local and
-    /// keyed with the same process-seeded effect hash as memory, so it improves
-    /// repeated in-session requests without promising cross-launch reuse.
-    nonisolated static let defaultDiskByteBudget: Int = 1024 * 1024 * 1024
+    /// Default disk-spill budget (512 MiB). Reduced from 1 GiB to limit
+    /// disk cache growth (bugfix: memory leak investigation).
+    nonisolated static let defaultDiskByteBudget: Int = 512 * 1024 * 1024
 
     /// Shared singleton used by `EffectCompositor`. The compositor is created
     /// per render pass by AVFoundation, so the cache must outlive any single

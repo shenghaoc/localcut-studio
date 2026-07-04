@@ -20,7 +20,9 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
     private let lock = NSLock()
     private var cache: [Int: CIImage] = [:]
     private var cacheOrder: [Int] = []
-    private let maxCachedFrames = 8
+    /// Maximum cached frames. Reduced from 8 to 4 to limit memory pressure
+    /// on lower-RAM Macs (bugfix: memory leak investigation).
+    private let maxCachedFrames = 4
 
     private init(naturalSize: CGSize,
                  url: URL,
