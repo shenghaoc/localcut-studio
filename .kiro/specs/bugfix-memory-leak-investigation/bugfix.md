@@ -52,3 +52,7 @@ Users experience "Your system has run out of application memory" warnings during
 ### F9. No system memory pressure handling (MEDIUM)
 - No listener for `NSApplication.didReceiveMemoryWarning`
 - No coordinated cache eviction across singletons
+
+### F10. PaddedBackgroundRenderer: Singleton CGImage cache not pressure-aware (MEDIUM)
+- **File**: `LocalCut Studio/PaddedBackgroundRenderer.swift`
+- Cached padded-background `CGImage` entries are purged on document close but previously survived memory-pressure eviction.
