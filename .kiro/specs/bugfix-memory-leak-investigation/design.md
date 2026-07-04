@@ -30,7 +30,7 @@ Affected singletons:
 
 ### 3. Audit overlay source registry cleanup (F4)
 
-Review all exit paths from `PreviewRebuildCoordinator.rebuild()`, cover generation, and `RenderQueue` to ensure `EffectCompositor.releaseOverlaySources()` is called. Add a safety-net cleanup at the start of each preview rebuild for stale preview registries while preserving transient export/cover registries.
+Review all exit paths from `PreviewRebuildCoordinator.rebuild()`, cover generation, and `RenderQueue` to ensure `EffectCompositor.releaseOverlaySources()` is called. Add a safety-net cleanup after the winning preview item is installed so stale preview registries are released while active, in-flight, and transient export/cover registries are preserved.
 
 ### 4. CIContext cache eviction (F3)
 

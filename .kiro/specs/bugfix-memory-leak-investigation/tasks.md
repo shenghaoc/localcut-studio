@@ -22,7 +22,7 @@
 ## Overlay registry audit
 
 - [x] **T3.1** Audit all `registerOverlaySources` call sites; verify matching `releaseOverlaySources` on every exit path.
-- [x] **T3.2** Add safety-net cleanup for stale preview overlay registries at the start of each preview rebuild.
+- [x] **T3.2** Add safety-net cleanup for stale preview overlay registries after the winning preview item is installed, preserving active and in-flight preview registries.
 
 ## Verification
 

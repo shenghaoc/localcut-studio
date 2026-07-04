@@ -5,6 +5,7 @@ import LocalCutCore
 final class PreviewRebuildCoordinator {
     nonisolated(unsafe) private var pendingRebuildTask: Task<Void, Never>?
     nonisolated(unsafe) private var activeRebuildTask: Task<Void, Never>?
+    private var inFlightPreviewOverlaySourceRegistryIDs = Set<UUID>()
 
     nonisolated
     func cancelAll() {
@@ -35,10 +36,15 @@ final class PreviewRebuildCoordinator {
     @MainActor
     func rebuild(model: EditorModel) async {
         let resumeAt = model.currentTime
-        EffectCompositor.releaseInactivePreviewOverlaySources(keeping: model.activeOverlaySourceRegistryID)
         let overlaySourceRegistryID = await model.registerOverlaySources(purpose: .preview)
+        if let overlaySourceRegistryID {
+            inFlightPreviewOverlaySourceRegistryIDs.insert(overlaySourceRegistryID)
+        }
         var didInstallOverlaySourceRegistry = false
         defer {
+            if let overlaySourceRegistryID {
+                inFlightPreviewOverlaySourceRegistryIDs.remove(overlaySourceRegistryID)
+            }
             if !didInstallOverlaySourceRegistry {
                 EffectCompositor.releaseOverlaySources(for: overlaySourceRegistryID)
             }
@@ -89,6 +95,12 @@ final class PreviewRebuildCoordinator {
                 : built.audioMix
             model.replacePreviewItem(with: item, overlaySourceRegistryID: overlaySourceRegistryID)
             didInstallOverlaySourceRegistry = true
+            if let overlaySourceRegistryID {
+                inFlightPreviewOverlaySourceRegistryIDs.remove(overlaySourceRegistryID)
+            }
+            EffectCompositor.releaseInactivePreviewOverlaySources(
+                keeping: model.activeOverlaySourceRegistryID,
+                excluding: inFlightPreviewOverlaySourceRegistryIDs)
             model.totalDuration = built.duration
             DiagnosticsBridge.shared.setDecoderCount(
                 built.composition.tracks(withMediaType: .video).count)

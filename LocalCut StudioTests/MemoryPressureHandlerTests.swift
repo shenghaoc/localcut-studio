@@ -77,12 +77,15 @@ struct MemoryPressureHandlerTests {
         #expect(source.cachedFrameCount == 0)
     }
 
-    @Test("preview registry cleanup preserves the active preview and transient exports")
+    @Test("preview registry cleanup preserves active, in-flight, and transient registries")
     func previewRegistryCleanupPreservesActiveAndTransient() throws {
         let activeID = try #require(EffectCompositor.registerOverlaySources(
             [UUID(): PurgeableOverlaySource(cachedFrames: 1)],
             purpose: .preview))
         let stalePreviewID = try #require(EffectCompositor.registerOverlaySources(
+            [UUID(): PurgeableOverlaySource(cachedFrames: 1)],
+            purpose: .preview))
+        let inFlightPreviewID = try #require(EffectCompositor.registerOverlaySources(
             [UUID(): PurgeableOverlaySource(cachedFrames: 1)],
             purpose: .preview))
         let transientID = try #require(EffectCompositor.registerOverlaySources(
@@ -91,13 +94,17 @@ struct MemoryPressureHandlerTests {
         defer {
             EffectCompositor.releaseOverlaySources(for: activeID)
             EffectCompositor.releaseOverlaySources(for: stalePreviewID)
+            EffectCompositor.releaseOverlaySources(for: inFlightPreviewID)
             EffectCompositor.releaseOverlaySources(for: transientID)
         }
 
-        EffectCompositor.releaseInactivePreviewOverlaySources(keeping: activeID)
+        EffectCompositor.releaseInactivePreviewOverlaySources(
+            keeping: activeID,
+            excluding: [inFlightPreviewID])
 
         #expect(EffectCompositor.hasOverlaySourceRegistry(activeID))
         #expect(!EffectCompositor.hasOverlaySourceRegistry(stalePreviewID))
+        #expect(EffectCompositor.hasOverlaySourceRegistry(inFlightPreviewID))
         #expect(EffectCompositor.hasOverlaySourceRegistry(transientID))
     }
 }

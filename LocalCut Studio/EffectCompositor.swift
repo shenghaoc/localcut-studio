@@ -772,10 +772,15 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     /// Removes preview registries left behind by cancelled rebuilds while
     /// preserving the current preview item and any concurrent export/cover work.
-    nonisolated static func releaseInactivePreviewOverlaySources(keeping retainedRegistryID: UUID?) {
+    nonisolated static func releaseInactivePreviewOverlaySources(
+        keeping retainedRegistryID: UUID?,
+        excluding protectedRegistryIDs: Set<UUID> = []
+    ) {
         overlaySourceLock.withLock {
             overlaySourceRegistries = overlaySourceRegistries.filter { registryID, registry in
-                registry.purpose != .preview || registryID == retainedRegistryID
+                registry.purpose != .preview
+                    || registryID == retainedRegistryID
+                    || protectedRegistryIDs.contains(registryID)
             }
         }
     }
