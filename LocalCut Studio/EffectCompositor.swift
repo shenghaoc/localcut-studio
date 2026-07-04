@@ -756,9 +756,9 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     ) -> UUID? {
         guard !sources.isEmpty else { return nil }
         let registryID = UUID()
-        overlaySourceLock.lock()
-        overlaySourceRegistries[registryID] = OverlaySourceRegistry(purpose: purpose, sources: sources)
-        overlaySourceLock.unlock()
+        overlaySourceLock.withLock {
+            overlaySourceRegistries[registryID] = OverlaySourceRegistry(purpose: purpose, sources: sources)
+        }
         return registryID
     }
 
@@ -773,11 +773,11 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// Removes preview registries left behind by cancelled rebuilds while
     /// preserving the current preview item and any concurrent export/cover work.
     nonisolated static func releaseInactivePreviewOverlaySources(keeping retainedRegistryID: UUID?) {
-        overlaySourceLock.lock()
-        overlaySourceRegistries = overlaySourceRegistries.filter { registryID, registry in
-            registry.purpose != .preview || registryID == retainedRegistryID
+        overlaySourceLock.withLock {
+            overlaySourceRegistries = overlaySourceRegistries.filter { registryID, registry in
+                registry.purpose != .preview || registryID == retainedRegistryID
+            }
         }
-        overlaySourceLock.unlock()
     }
 
     nonisolated static func purgeOverlaySourceCaches() {

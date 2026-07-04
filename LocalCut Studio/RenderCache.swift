@@ -518,7 +518,20 @@ final class RenderCache: Sendable {
         removeEntries { $0.renderWidth != w || $0.renderHeight != h }
     }
 
-    /// Empty the cache and reset `totalBytes` to zero.
+    /// Empty only the in-memory cache and reset `totalBytes` to zero, leaving
+    /// disk-spill metadata and files intact. Used during memory pressure, where
+    /// deleting cache files adds I/O without freeing RAM.
+    nonisolated func purgeMemory() {
+        lock.withLock { state in
+            state.entries.removeAll()
+            state.memoryNodes.removeAll()
+            state.memoryHead = nil
+            state.memoryTail = nil
+            state.totalBytes = 0
+        }
+    }
+
+    /// Empty the memory and disk caches, deleting all cache files.
     nonisolated func purge() {
         removeAllEntries()
     }

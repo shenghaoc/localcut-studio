@@ -18,7 +18,7 @@ nonisolated final class MemoryPressureHandler: Sendable {
     /// Activates memory pressure monitoring. Safe to call multiple times;
     /// only the first call has any effect.
     func activate() {
-        let source = state.withLock { state -> DispatchSourceMemoryPressure? in
+        let source = state.withLock { state -> (any DispatchSourceMemoryPressure)? in
             guard state.source == nil else { return nil }
             let source = DispatchSource.makeMemoryPressureSource(
                 eventMask: [.warning, .critical],
@@ -47,8 +47,8 @@ nonisolated final class MemoryPressureHandler: Sendable {
     func purgeCachesForMemoryPressure() {
         logger.warning("Memory pressure detected - evicting caches")
 
-        // RenderCache: evict all in-memory and disk entries.
-        RenderCache.shared.purge()
+        // RenderCache: evict in-memory entries without doing disk I/O.
+        RenderCache.shared.purgeMemory()
 
         // EffectCompositor: evict CIContext cache.
         EffectCompositor.purgeContextCache()
@@ -66,6 +66,6 @@ nonisolated final class MemoryPressureHandler: Sendable {
     }
 
     private struct State {
-        var source: DispatchSourceMemoryPressure?
+        var source: (any DispatchSourceMemoryPressure)?
     }
 }
