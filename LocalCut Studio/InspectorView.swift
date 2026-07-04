@@ -34,9 +34,10 @@ struct InspectorView: View {
             } else if let media = model.selectedMedia {
                 mediaSection(media)
             } else {
-                Section {
+                ContentUnavailableView {
+                    Label("No Selection", systemImage: "cursorarrow")
+                } description: {
                     Text("Select a clip or media item.")
-                        .foregroundStyle(.secondary)
                 }
             }
 

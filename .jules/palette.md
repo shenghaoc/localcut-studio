@@ -34,3 +34,7 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 ## 2026-06-30 — Add Call to Action to Empty State in PreviewView
 **Learning:** The 'No Preview' empty state in PreviewView only instructed users what to do but lacked a direct button to accomplish it. However, the CTA lives inside `videoCanvas` which uses `.accessibilityElement(children: .ignore)`, so VoiceOver cannot discover the button.
 **Action:** Keep `videoCanvas` as the ignored, non-interactive preview surface and add the empty-state `ContentUnavailableView` as an overlay after that accessibility boundary. The 'Import Media…' CTA remains discoverable to VoiceOver while the parent "Preview" element still conveys the empty preview state. Scope `.foregroundStyle(.secondary)` to the title and description only — not the actions container — so the `.borderedProminent` button retains its default high-contrast label.
+## 2026-07-04 — Replace plain text empty states with ContentUnavailableView
+
+**Learning:** Using simple `Text` elements for empty states in inspector panels lacks affordance and feels like a dead end. Standard macOS UI uses `ContentUnavailableView` to present empty states clearly with semantic meaning and standardized layout.
+**Action:** Transition plain text empty states to `ContentUnavailableView`, and include a `Label` with an appropriate SF Symbol to provide visual hierarchy and better user guidance.
