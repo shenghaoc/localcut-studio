@@ -33,6 +33,7 @@ final class EditorModel {
     var whipSession: WhipSession?
     var publishVideoTap: VideoPublishTap?
     var publishAudioBridge: AudioPublishBridge?
+    var publishProgramFrameSinkID: UUID?
 
     /// Stored publish settings (endpoint, token, codec config).
     let publishSettings = PublishSettings()

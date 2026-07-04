@@ -78,17 +78,21 @@ actor WhipSession {
         if let existing = _cachedStateStream { return existing }
         let (stream, continuation) = AsyncStream<PublishState>.makeStream(bufferingPolicy: .bufferingNewest(1))
         stateContinuation = continuation
+        continuation.yield(state)
         _cachedStateStream = stream
         return stream
     }
 
     func start(endpointURL: URL, authToken: String? = nil, config: PublishConfig? = nil, videoTap: VideoPublishTap? = nil, audioBridge: AudioPublishBridge? = nil) async throws {
-        guard state == .idle || state == .ended || state == .failed("") else { return }
+        guard canStartFromCurrentState else { return }
         state = .connecting
         self.authToken = authToken
         if let config { self.config = config }
         self.videoTap = videoTap
         self.audioBridge = audioBridge
+        await audioBridge?.start(
+            sampleRate: 48_000,
+            channels: self.config.audioStereo ? 2 : 1)
 
         do {
             encoderLease = try await budget.acquire(.whipPublish)
@@ -103,11 +107,17 @@ actor WhipSession {
         } catch {
             // Tear down any partially-created server-side resource and
             // WebRTC resources before releasing the encoder lease.
-            if resourceUrl != nil {
-                await client.teardown(resourceUrl: resourceUrl!, authToken: authToken)
+            if let resourceUrl {
+                await client.teardown(resourceUrl: resourceUrl, authToken: authToken)
             }
+            videoTap?.close()
+            await audioBridge?.stop()
+            self.audioBridge = nil
             closeWebRTCResources()
             releaseEncoderBudget()
+            resourceUrl = nil
+            etag = nil
+            state = .failed(error.localizedDescription)
             throw error
         }
     }
@@ -121,6 +131,7 @@ actor WhipSession {
         }
         videoTap?.close()
         await audioBridge?.stop()
+        audioBridge = nil
         closeWebRTCResources()
         releaseEncoderBudget()
         resourceUrl = nil
@@ -133,7 +144,7 @@ actor WhipSession {
         statsTask?.cancel()
         statsTask = nil
         guard reconnectController.canAttemptReconnect else {
-            failAndCleanup("Reconnect attempts exhausted.")
+            await failAndCleanup("Reconnect attempts exhausted.")
             return
         }
         state = .reconnecting
@@ -162,6 +173,15 @@ actor WhipSession {
     }
 
     // MARK: - Private
+
+    private var canStartFromCurrentState: Bool {
+        switch state {
+        case .idle, .ended, .failed:
+            true
+        case .connecting, .live, .reconnecting:
+            false
+        }
+    }
 
     private func connect(endpointURL: URL) async throws {
         currentEndpointConfig = (endpoint: endpointURL, authToken: authToken)
@@ -215,7 +235,7 @@ actor WhipSession {
 
     private func attemptFullReconnect() async {
         guard let config = currentEndpointConfig else {
-            failAndCleanup("Cannot reconnect: endpoint not configured.")
+            await failAndCleanup("Cannot reconnect: endpoint not configured.")
             return
         }
         // DELETE the old server-side resource before opening a new session.
@@ -225,17 +245,19 @@ actor WhipSession {
         closeWebRTCResources()
         if encoderLease == nil {
             do { encoderLease = try await budget.acquire(.whipPublish) }
-            catch { failAndCleanup("Budget re-acquire failed."); return }
+            catch { await failAndCleanup("Budget re-acquire failed."); return }
         }
         resourceUrl = nil
         etag = nil
         reconnectController.resetETag()
         do { try await connect(endpointURL: config.endpoint) }
-        catch { failAndCleanup(error.localizedDescription) }
+        catch { await failAndCleanup(error.localizedDescription) }
     }
 
-    private func failAndCleanup(_ message: String) {
+    private func failAndCleanup(_ message: String) async {
         videoTap?.close()
+        await audioBridge?.stop()
+        audioBridge = nil
         closeWebRTCResources()
         releaseEncoderBudget()
         resourceUrl = nil
@@ -277,10 +299,22 @@ actor WhipSession {
             throw WhipError.transport(statusCode: 0, message: "Failed to create RTCPeerConnection.")
         }
         peerConnection = pc
-        videoTransceiver = pc.addTransceiver(of: .video)
-        videoTransceiver?.setDirection(.sendOnly, error: nil)
-        audioTransceiver = pc.addTransceiver(of: .audio)
-        audioTransceiver?.setDirection(.sendOnly, error: nil)
+        let sendOnly = RTCRtpTransceiverInit()
+        sendOnly.direction = .sendOnly
+        if let videoTap {
+            let videoTrack = factory.videoTrack(
+                with: videoTap.videoSource,
+                trackId: "localcut-program-video")
+            videoTransceiver = pc.addTransceiver(with: videoTrack, init: sendOnly)
+        } else {
+            videoTransceiver = pc.addTransceiver(of: .video)
+            videoTransceiver?.setDirection(.sendOnly, error: nil)
+        }
+        let audioSource = factory.audioSource(with: nil)
+        let audioTrack = factory.audioTrack(
+            with: audioSource,
+            trackId: "localcut-master-audio")
+        audioTransceiver = pc.addTransceiver(with: audioTrack, init: sendOnly)
 
         // Apply codec preferences from the publish config.
         if config.videoCodec == "H264" {
@@ -333,7 +367,7 @@ actor WhipSession {
         guard let pc = peerConnection else { return }
         Task { [weak self] in
             let report = await pc.statistics()
-            self?.processStatsReport(report)
+            await self?.processStatsReport(report)
         }
         #endif
     }

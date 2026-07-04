@@ -145,8 +145,8 @@ actor ProgramSession {
     /// The program compositor.
     private var compositor: ProgramCompositor?
 
-    /// Live program frame callback supplied by the caller.
-    private var onFrame: (@Sendable (CVPixelBuffer) -> Void)?
+    /// Live program frame sinks supplied by Program Mode and publish sessions.
+    private var frameSinks: [UUID: @Sendable (CVPixelBuffer) -> Void] = [:]
 
     /// Main-actor callback for capture failures that happen after start.
     private var onCaptureFailure: (@MainActor @Sendable (ProgramSessionResult?, String) -> Void)?
@@ -215,7 +215,10 @@ actor ProgramSession {
             isStarting = false
             throw ProgramSessionError.hotkeyConflict(conflicts)
         }
-        self.onFrame = onFrame
+        frameSinks.removeAll()
+        if let onFrame {
+            frameSinks[UUID()] = onFrame
+        }
         self.onCaptureFailure = onCaptureFailure
 
         do {
@@ -362,11 +365,23 @@ actor ProgramSession {
         let pixelBuffer = buffer.pixelBuffer
         guard let acceptedBuffer = taps[sourceID]?.feed(pixelBuffer) else { return }
         compositor?.updateSource(sourceID, buffer: acceptedBuffer)
-        // Only render the composited frame when the caller needs it.
+        // Only render the composited frame when a caller needs it.
         // Rendering is expensive (full-resolution CoreImage/Metal composite).
-        if onFrame != nil, let frame = compositor?.renderFrame() {
-            onFrame?(frame)
+        if !frameSinks.isEmpty, let frame = compositor?.renderFrame() {
+            for sink in frameSinks.values {
+                sink(frame)
+            }
         }
+    }
+
+    func addFrameSink(_ sink: @escaping @Sendable (CVPixelBuffer) -> Void) -> UUID {
+        let id = UUID()
+        frameSinks[id] = sink
+        return id
+    }
+
+    func removeFrameSink(id: UUID) {
+        frameSinks[id] = nil
     }
 
     // MARK: - Stop
@@ -458,7 +473,7 @@ actor ProgramSession {
         sessionID = nil
         currentSceneDoc = nil
         startScenes.removeAll()
-        onFrame = nil
+        frameSinks.removeAll()
         onCaptureFailure = nil
         manifestErrors.removeAll()
 
@@ -580,7 +595,7 @@ actor ProgramSession {
         sessionID = nil
         currentSceneDoc = nil
         startScenes.removeAll()
-        onFrame = nil
+        frameSinks.removeAll()
         onCaptureFailure = nil
         manifestErrors.removeAll()
     }

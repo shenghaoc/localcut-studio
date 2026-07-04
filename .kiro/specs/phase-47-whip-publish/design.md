@@ -15,9 +15,19 @@ The browser-editor's v1 leans entirely on the platform's `RTCPeerConnection`. Na
 - `EncoderBudget` actor (shared with Phase 45).
 - Sandbox entitlement `com.apple.security.network.client` — required for outgoing HTTP + WebRTC traffic from a sandboxed app. Added at the time this phase starts and only then (we follow the steering rule "do not add entitlements speculatively").
 
+## Current pre-merge status
+
+Pre-merge validation on 2026-07-04 found that `stasel/WebRTC` releases 149.0.0 and 148.0.0 resolve through SwiftPM but do not compile for the macOS app target: the macOS framework slice exposes only `WebRTC.h`, while that umbrella header imports missing public headers such as `RTCAudioSource.h`. The fallback `webrtc-sdk/webrtc` repository does not currently provide a SwiftPM binary package that can be dropped into this Xcode project. Until the default macOS build links a WebRTC package successfully, all `#if canImport(WebRTC)` media/session code remains uncompiled in CI and the publish panel must stay in the reduced "WebRTC framework not available" state.
+
+The WHIP HTTP client, settings storage, program-frame sink plumbing, and non-WebRTC safety tests are present, but the phase is not complete. The remaining blockers are:
+
+- Pick and pin a macOS WebRTC package that compiles in the default app scheme, or rewrite this phase around a different supported WebRTC API surface.
+- Replace the placeholder `LocalCutAudioDeviceModule.deliverCaptureFrame(_:)` with a real capture-side ADM bridge that feeds master-bus samples to WebRTC.
+- Add the MediaMTX publish integration test required by the verification tasks.
+
 ## Approach
 
-1. **WebRTC stack.** Apple's `WKWebView` WebRTC implementation can't bridge to AVFoundation, and the official **GoogleWebRTC CocoaPods** binary is iOS-only with no macOS slice — adding it via SPM would not link on the macOS target. We instead vendor a community-maintained macOS-capable WebRTC XCFramework via SPM — current candidates [`stasel/WebRTC`](https://github.com/stasel/WebRTC) (xcframework, macOS + iOS slices, milestone-tagged) or [`webrtc-sdk/webrtc`](https://github.com/webrtc-sdk/webrtc) (broader macOS support, custom build pipeline). The recommended primary is `stasel/WebRTC` for SPM simplicity. Both repackage upstream `webrtc.googlesource.com` sources without forking the API, so the public surface (`RTCPeerConnection`, `RTCVideoSource`, `AudioDeviceModule`, etc.) matches Google's documentation. **BSD-3-Clause** licence (upstream LICENSE; additional patent grants ride alongside). Size on disk: ~80 MB as an XCFramework. We justify this AGENTS.md-significant addition because:
+1. **WebRTC stack.** Apple's `WKWebView` WebRTC implementation can't bridge to AVFoundation, and the official **GoogleWebRTC CocoaPods** binary is iOS-only with no macOS slice — adding it via SPM would not link on the macOS target. We need a community-maintained macOS-capable WebRTC XCFramework via SPM, but the candidate must compile in the default app scheme before this task can be closed. `stasel/WebRTC` was the recommended primary for SPM simplicity, but the 149.0.0 and 148.0.0 macOS slices failed validation as noted above; `webrtc-sdk/webrtc` remains a research lead rather than a drop-in SwiftPM package. A replacement must repackage upstream `webrtc.googlesource.com` sources without forking the API, so the public surface (`RTCPeerConnection`, `RTCVideoSource`, `AudioDeviceModule`, etc.) matches Google's documentation. **BSD-3-Clause** licence (upstream LICENSE; additional patent grants ride alongside). Size on disk: expected ~80 MB as an XCFramework. We justify this AGENTS.md-significant addition because:
    - WHIP requires `RTCPeerConnection`; there is no Apple-native equivalent for SDP + ICE + DTLS-SRTP egress.
    - Apple's `WKWebView` WebRTC implementation cannot bridge to AVFoundation media pipelines.
    - All open-source alternatives (LiveKit-WebRTC, hand-rolled) wrap the same Google sources.

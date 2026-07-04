@@ -18,11 +18,14 @@ struct PublishPanel: View {
         .formStyle(.grouped)
         .frame(minWidth: 280)
         .onAppear {
-            publishState.refreshCapability(budget: model.encoderBudget)
+            publishState.refreshCapability(model: model)
             if !model.publishSettings.endpointURL.isEmpty {
                 publishState.endpointURL = model.publishSettings.endpointURL
                 publishState.endpointType = model.publishSettings.endpointType
             }
+        }
+        .onChange(of: model.programSession != nil) { _, _ in
+            publishState.refreshCapability(model: model)
         }
     }
 
@@ -231,12 +234,17 @@ struct PublishPanel: View {
 
     private var reducedTierSection: some View {
         Group {
-            if !publishState.isWebRTCAvailable || !publishState.isBudgetAvailable {
+            if !publishState.isWebRTCAvailable || !publishState.isBudgetAvailable || !publishState.isProgramOutputAvailable {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
                         if !publishState.isWebRTCAvailable {
                             Label("WebRTC framework is not available in this build.", systemImage: "xmark.circle.fill")
                                 .foregroundStyle(.red)
+                                .font(.caption)
+                        }
+                        if !publishState.isProgramOutputAvailable {
+                            Label("Start Program Mode to publish the live program output.", systemImage: "rectangle.on.rectangle.slash")
+                                .foregroundStyle(.orange)
                                 .font(.caption)
                         }
                         if !publishState.isBudgetAvailable {

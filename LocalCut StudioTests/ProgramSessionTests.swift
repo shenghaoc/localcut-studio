@@ -202,6 +202,31 @@ struct ProgramSessionTests {
         _ = try await session.stop()
     }
 
+    @Test("Dynamic frame sinks can be added and removed while running")
+    func dynamicFrameSinkCanBeRemoved() async throws {
+        let budget = EncoderBudget(maxConcurrent: 4)
+        let dir = try tempDir()
+        let session = ProgramSession(budget: budget, rootURL: dir)
+        let source = testSource()
+        let scene = testScene(sourceId: source.id)
+        let counter = FrameCounter()
+
+        try await session.start(
+            sources: [source],
+            scenes: [scene],
+            renderSize: CGSize(width: 64, height: 64))
+
+        let sinkID = await session.addFrameSink { _ in counter.increment() }
+        await session.feedFrame(sourceID: source.id, buffer: ProgramFrameBuffer(try makeTestBuffer()))
+        #expect(counter.value == 1)
+
+        await session.removeFrameSink(id: sinkID)
+        await session.feedFrame(sourceID: source.id, buffer: ProgramFrameBuffer(try makeTestBuffer()))
+        #expect(counter.value == 1)
+
+        _ = try await session.stop()
+    }
+
     @Test("Source list supports screen, camera, and mic inputs")
     func sourceListSupportsMultipleTypes() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)

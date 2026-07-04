@@ -1,6 +1,11 @@
 # Tasks: Phase 47 — WHIP Publish
 
-> Status: **Proposed**. Depends on Phase 41 + Phase 45 + `EncoderBudget`.
+> Status: **In progress — not merge-ready**. Depends on Phase 41 + Phase 45 + `EncoderBudget`.
+>
+> Pre-merge validation on 2026-07-04 left the phase blocked on the default
+> macOS WebRTC dependency, the real capture-side audio ADM bridge, and the
+> MediaMTX integration test. Do not mark this spec complete while T1.1, T4.2,
+> and T7.2 remain unchecked.
 
 ## Dependency + entitlements
 

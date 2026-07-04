@@ -32,21 +32,32 @@ final class PublishPanelState {
     var isStopping: Bool = false
     var isWebRTCAvailable: Bool = false
     var isBudgetAvailable: Bool = true
+    var isProgramOutputAvailable: Bool = false
 
     var canStart: Bool {
         !isStarting && !isStopping
-        && publishState == .idle
+        && canAttemptStartFromCurrentState
         && !endpointURL.isEmpty
         && URL(string: endpointURL) != nil
         && (!endpointRequiresToken || !bearerToken.isEmpty)
         && isWebRTCAvailable
         && isBudgetAvailable
+        && isProgramOutputAvailable
     }
 
     var endpointRequiresToken: Bool { endpointType.requiresToken }
+    private var canAttemptStartFromCurrentState: Bool {
+        switch publishState {
+        case .idle, .failed, .ended:
+            true
+        case .connecting, .live, .reconnecting:
+            false
+        }
+    }
 
     /// Task that observes the WhipSession state stream.
     private var stateObservationTask: Task<Void, Never>?
+    private var statsPollingTask: Task<Void, Never>?
 
     func startPublish(model: EditorModel) {
         guard canStart else { return }
@@ -81,6 +92,7 @@ final class PublishPanelState {
                 try await model.startWhipPublish(config: config)
                 // Observe session state changes instead of assuming Live.
                 observeSessionState(model: model)
+                startStatsPolling(model: model)
             } catch {
                 publishState = .failed
                 statusMessage = error.localizedDescription
@@ -119,7 +131,13 @@ final class PublishPanelState {
                     }
                 }
             }
-            // Also poll stats while live.
+        }
+    }
+
+    private func startStatsPolling(model: EditorModel) {
+        statsPollingTask?.cancel()
+        statsPollingTask = Task { [weak self, weak model] in
+            guard let self, let model else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, let session = model.whipSession else { break }
@@ -139,6 +157,7 @@ final class PublishPanelState {
     func stopPublish(model: EditorModel) {
         guard publishState == .live || publishState == .reconnecting || publishState == .connecting else { return }
         stateObservationTask?.cancel()
+        statsPollingTask?.cancel()
         isStopping = true
         publishState = .ended
         statusMessage = "Stopping..."
@@ -151,13 +170,14 @@ final class PublishPanelState {
         }
     }
 
-    func refreshCapability(budget: EncoderBudget) {
+    func refreshCapability(model: EditorModel) {
         #if canImport(WebRTC)
         isWebRTCAvailable = true
         #else
         isWebRTCAvailable = false
         #endif
-        Task { isBudgetAvailable = await budget.availableCount > 0 }
+        isProgramOutputAvailable = model.programSession != nil
+        Task { isBudgetAvailable = await model.encoderBudget.availableCount > 0 }
     }
 
     static func formattedBytes(_ bytes: Int64) -> String {

@@ -23,6 +23,7 @@ import LocalCutCore
 @MainActor
 @Observable
 final class AudioMasterBus {
+    typealias PublishSampleSink = @Sendable (_ samples: [Float], _ sampleRate: Double, _ channels: Int) -> Void
 
     /// The latest peak + RMS sample from whichever graph is rendering. Reads
     /// land on the main actor; writes happen on the audio thread, guarded by
@@ -87,6 +88,10 @@ final class AudioMasterBus {
     nonisolated private let offlineMeterActiveLock = OSAllocatedUnfairLock<Bool>(
         initialState: false)
 
+    @ObservationIgnored
+    nonisolated private let publishSampleSinkLock = OSAllocatedUnfairLock<PublishSampleSink?>(
+        initialState: nil)
+
     /// Player nodes attached to the offline graph and indexed by id. Phase 36 /
     /// 46 grow these for live capture; for this spec they exist so tests can
     /// schedule buffers and assert the meter publishes a non-silent snapshot.
@@ -118,6 +123,10 @@ final class AudioMasterBus {
 
     init() {}
 
+    nonisolated func setPublishSampleSink(_ sink: PublishSampleSink?) {
+        publishSampleSinkLock.withLock { $0 = sink }
+    }
+
     // MARK: - Live engine lifecycle
 
     /// Starts a live preview graph where processed buffers are scheduled into
@@ -141,7 +150,8 @@ final class AudioMasterBus {
             }
             try liveEngine.start()
             installMeterTap(on: liveEngine.mainMixerNode, format: deviceFormat,
-                            suspendsForOfflineMeter: true)
+                            suspendsForOfflineMeter: true,
+                            publishesSamples: true)
             liveTapInstalled = true
             isLiveRunning = true
             lastStartError = nil
@@ -223,7 +233,8 @@ final class AudioMasterBus {
             throw LiveMeterError.unavailableOutputFormat
         }
         installMeterTap(on: liveEngine.mainMixerNode, format: format,
-                        suspendsForOfflineMeter: true)
+                        suspendsForOfflineMeter: true,
+                        publishesSamples: true)
         liveTapInstalled = true
     }
 
@@ -451,7 +462,8 @@ final class AudioMasterBus {
     private func installOfflineTapIfNeeded(format: AVAudioFormat) {
         guard !offlineTapInstalled else { return }
         installMeterTap(on: offlineEngine.mainMixerNode, format: format,
-                        suspendsForOfflineMeter: false)
+                        suspendsForOfflineMeter: false,
+                        publishesSamples: false)
         offlineTapInstalled = true
     }
 
@@ -466,15 +478,23 @@ final class AudioMasterBus {
     /// audio thread without any MainActor mismatch.
     private func installMeterTap(on node: AVAudioMixerNode,
                                  format: AVAudioFormat,
-                                 suspendsForOfflineMeter: Bool) {
+                                 suspendsForOfflineMeter: Bool,
+                                 publishesSamples: Bool) {
         let lock = meterLock
         let offlineActive = offlineMeterActiveLock
-        node.installTap(onBus: 0, bufferSize: 1024, format: format) { [lock, offlineActive] buffer, _ in
+        let publishSinkLock = publishSampleSinkLock
+        node.installTap(onBus: 0, bufferSize: 1024, format: format) { [lock, offlineActive, publishSinkLock] buffer, _ in
             if suspendsForOfflineMeter && offlineActive.withLock({ $0 }) {
                 return
             }
             let snapshot = AudioMasterBus.computeMeter(buffer: buffer)
             lock.withLock { $0 = snapshot }
+            guard publishesSamples,
+                  let sink = publishSinkLock.withLock({ $0 }),
+                  let samples = AudioMasterBus.interleavedSamples(from: buffer) else {
+                return
+            }
+            sink(samples, buffer.format.sampleRate, Int(buffer.format.channelCount))
         }
     }
 
@@ -507,6 +527,22 @@ final class AudioMasterBus {
         return AudioMeterSnapshot(peakLeft: l.peak, peakRight: r.peak,
                                    rmsLeft: l.rms, rmsRight: r.rms,
                                    sampledAt: ContinuousClock.now)
+    }
+
+    nonisolated static func interleavedSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {
+        let frameCount = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        guard frameCount > 0, channelCount > 0,
+              let channelData = buffer.floatChannelData else {
+            return nil
+        }
+        var samples = [Float](repeating: 0, count: frameCount * channelCount)
+        for frame in 0..<frameCount {
+            for channel in 0..<channelCount {
+                samples[frame * channelCount + channel] = channelData[channel][frame]
+            }
+        }
+        return samples
     }
 
 }
