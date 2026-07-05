@@ -161,14 +161,30 @@ private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
         }
 
         // Handle transition: the transition lives on the *trailing* clip.
+        // Use the clamped overlap from TransitionLayout.cuts so the emitted
+        // in_offset/out_offset agree with preview/export timing.  A zero
+        // overlap means the clips are no longer adjacent (gap inserted above)
+        // and the transition should be dropped as an orphan.
         if let transitionDoc = ic.doc.transition, index > 0 {
-            let (transitionNode, transWarnings) = serializeTransition(
-                transitionDoc, timebase: timebase, trackName: track.name,
-                clipID: ic.doc.mediaID)
-            if let transitionNode {
-                children.append(.transition(transitionNode))
+            let authoredStart = ic.doc.timelineStart.cmTime
+            let clampedOverlap = transitionCuts.first(where: {
+                abs($0.time.seconds - authoredStart.seconds) < TransitionLayout.adjacencyTolerance
+            })?.overlap ?? .zero
+            if clampedOverlap > .zero {
+                let (transitionNode, transWarnings) = serializeTransition(
+                    transitionDoc, clampedOverlap: clampedOverlap,
+                    timebase: timebase, trackName: track.name,
+                    clipID: ic.doc.mediaID)
+                if let transitionNode {
+                    children.append(.transition(transitionNode))
+                }
+                warnings.append(contentsOf: transWarnings)
+            } else {
+                // Transition overlap was clamped to zero — clips are not
+                // adjacent or handles are too short.
+                warnings.append(orphanTransitionWarning(
+                    clipID: ic.doc.mediaID, trackName: track.name))
             }
-            warnings.append(contentsOf: transWarnings)
         } else if ic.doc.transition != nil, index == 0 {
             // Orphan transition on first clip.
             warnings.append(orphanTransitionWarning(
@@ -360,12 +376,12 @@ private func serializeClip(_ ic: InterchangeClip, kind: OtioTrackKind,
 
 // MARK: - Transition Serialization
 
-private func serializeTransition(_ doc: TransitionDoc, timebase: InterchangeTimebase,
+private func serializeTransition(_ doc: TransitionDoc, clampedOverlap: CMTime,
+                                 timebase: InterchangeTimebase,
                                  trackName: String, clipID: UUID)
     -> (OtioTransition?, [InterchangeWarning]) {
     var warnings: [InterchangeWarning] = []
-    let duration = doc.duration.cmTime
-    let snappedDuration = timebase.snapToFrames(duration)
+    let snappedDuration = timebase.snapToFrames(clampedOverlap)
 
     guard snappedDuration > .zero else {
         warnings.append(orphanTransitionWarning(clipID: clipID, trackName: trackName))
@@ -538,23 +554,24 @@ private func serializeEffects(_ effects: [Effect]) -> [[String: Any]] {
                 "type": "lut",
             ] as [String: Any]
         case .skinSmooth(let ss):
-            return [
+            var dict: [String: Any] = [
                 "type": "skinSmooth",
-                "strength": ss.strength.defaultValue,
+                "strength": serializeKeyframedFloat(ss.strength),
                 "maskWarmthBias": ss.maskWarmthBias,
                 "maskLuminanceGate": ss.maskLuminanceGate,
-            ] as [String: Any]
+            ]
+            return dict
         case .grain(let g):
             return [
                 "type": "grain",
-                "amount": g.amount.defaultValue,
+                "amount": serializeKeyframedFloat(g.amount),
                 "size": g.size,
                 "monochrome": g.monochrome,
             ] as [String: Any]
         case .halation(let h):
             return [
                 "type": "halation",
-                "strength": h.strength.defaultValue,
+                "strength": serializeKeyframedFloat(h.strength),
                 "threshold": h.threshold,
                 "radius": h.radius,
                 "redBoost": h.redBoost,
@@ -562,7 +579,7 @@ private func serializeEffects(_ effects: [Effect]) -> [[String: Any]] {
         case .vignette(let v):
             return [
                 "type": "vignette",
-                "amount": v.amount.defaultValue,
+                "amount": serializeKeyframedFloat(v.amount),
                 "radius": v.radius,
                 "softness": v.softness,
             ] as [String: Any]
@@ -600,7 +617,7 @@ private func serializeKeyframedTransform(_ keyframed: Keyframed<Transform2D>) ->
 
 // MARK: - Speed Curve Serialization
 
-private func serializeSpeedCurve(_ curve: Keyframed<Float>) -> [String: Any] {
+private func serializeKeyframedFloat(_ curve: Keyframed<Float>) -> [String: Any] {
     var dict: [String: Any] = [
         "defaultValue": curve.defaultValue,
     ]
@@ -622,6 +639,10 @@ private func serializeSpeedCurve(_ curve: Keyframed<Float>) -> [String: Any] {
         }
     }
     return dict
+}
+
+private func serializeSpeedCurve(_ curve: Keyframed<Float>) -> [String: Any] {
+    serializeKeyframedFloat(curve)
 }
 
 // MARK: - Helpers

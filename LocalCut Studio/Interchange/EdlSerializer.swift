@@ -44,8 +44,21 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
     let edlFPS = timebase.nominalFPS
     let isFractional = timebase.frameDurationTimescale > 1
 
+    // Compute transition ripple — shift clips earlier by the overlap so
+    // record timecodes agree with preview/export timing.
+    let transitionCuts = TransitionLayout.cuts(videoTracks: [
+        track.clips.map { $0.makeClip() },
+    ])
+    let effectiveClips = track.clips.map { clip -> ClipDoc in
+        var adjusted = clip
+        let authoredStart = clip.timelineStart.cmTime
+        let effectiveStart = authoredStart - TransitionLayout.shift(at: authoredStart, cuts: transitionCuts)
+        adjusted.timelineStart = CMTimeCode(effectiveStart)
+        return adjusted
+    }
+
     // Snap clips.
-    let snappedClips = snapTrackClips(track.clips, timebase: timebase)
+    let snappedClips = snapTrackClips(effectiveClips, timebase: timebase)
     let keptClipIndices = Set(snappedClips.map(\.sourceIndex))
     for index in track.clips.indices where !keptClipIndices.contains(index) {
         warnings.append(zeroFrameClipWarning(
@@ -58,13 +71,21 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
 
     var lines: [String] = []
 
-    // Header.
-    lines.append("TITLE: \(options.title)")
+    // Header — sanitize title to avoid injecting extra EDL lines.
+    let sanitizedTitle = sanitizeEdlString(options.title)
+    lines.append("TITLE: \(sanitizedTitle)")
     if isFractional {
         let fpsDouble = Double(timebase.rate) / Double(timebase.frameDurationTimescale)
         lines.append("* LOCALCUT: RATE \(String(format: "%.2f", fpsDouble)) ROUNDED TO \(edlFPS) NDF")
     }
     lines.append("")
+
+    if snappedClips.count > 999 {
+        warnings.append(InterchangeWarning(
+            .unsupportedFeature,
+            "EDL has \(snappedClips.count) events; CMX3600 standard allows 999. Some tools may reject events above 999.",
+            trackName: track.name))
+    }
 
     for (index, ic) in snappedClips.enumerated() {
         let eventNumber = String(format: "%03d", index + 1)
@@ -77,6 +98,12 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
             warnings.append(missingSourceWarning(
                 mediaID: ic.mediaID, trackName: track.name, clipName: nil))
         } else {
+            // Warn for unresolved media (empty bookmark, no bundle path).
+            if mediaRef!.bookmark.isEmpty, mediaRef!.bundleRelativePath == nil {
+                warnings.append(missingSourceWarning(
+                    mediaID: ic.mediaID, trackName: track.name,
+                    clipName: mediaRef!.displayName))
+            }
             reelName = makeReelName(
                 displayName: mediaRef!.displayName,
                 counts: &reelCounts,
@@ -97,11 +124,12 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
 
         let transitionField = "C" // Cut.
 
-        // Source in/out timecode — references actual source media range.
-        // For speed-ramped clips, ic.doc.duration is the source media duration;
-        // ic.sourceDuration is the snapped timeline duration.
+        // Source in/out timecode.  For speed-ramped clips, use the output
+        // duration so source and record ranges match — the standard CMX3600
+        // convention.  Foreign tools that ignore the speed metadata would
+        // otherwise see mismatched durations and reject the event.
         let sourceInFrames = timebase.frames(time: ic.sourceStart)
-        let sourceOutFrames = sourceInFrames + timebase.frames(time: ic.doc.duration.cmTime)
+        let sourceOutFrames = sourceInFrames + timebase.frames(time: ic.timelineDuration)
 
         // Record in/out timecode.
         let recordInFrames = recordStartFrames + timebase.frames(time: ic.timelineStart)
@@ -116,9 +144,9 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
         let eventLine = "\(eventNumber)  \(reelName.padding(toLength: 8, withPad: " ", startingAt: 0)) \(trackDesignator)     \(transitionField)     \(sourceInTC) \(sourceOutTC) \(recordInTC) \(recordOutTC)"
         lines.append(eventLine)
 
-        // Comment with clip name.
+        // Comment with clip name — sanitize to avoid injecting extra lines.
         if let name = mediaRef?.displayName {
-            lines.append("* FROM CLIP NAME: \(name)")
+            lines.append("* FROM CLIP NAME: \(sanitizeEdlString(name))")
         }
 
         // Speed curve comment.
@@ -151,11 +179,15 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
 private func makeReelName(displayName: String,
                           counts: inout [String: Int],
                           allocated: inout Set<String>) -> String {
-    // Strip to uppercase alphanumeric.
-    let cleaned = displayName.uppercased()
-        .filter { $0.isLetter || $0.isNumber }
-        .prefix(8)
-    let base = String(cleaned)
+    // Strip to ASCII uppercase alphanumeric — CMX3600 requires ASCII only.
+    // Use explicit ASCII ranges to exclude non-ASCII letters (É, CJK, etc.)
+    // that CharacterSet.uppercaseLetters would admit.
+    let asciiUpper = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    let asciiDigits = CharacterSet(charactersIn: "0123456789")
+    let asciiAlphanum = asciiUpper.union(asciiDigits)
+    let scalars = displayName.uppercased().unicodeScalars
+        .filter { asciiAlphanum.contains($0) }
+    let base = String(scalars.prefix(8))
 
     guard !base.isEmpty else {
         return makeReelName(displayName: "CLIP", counts: &counts, allocated: &allocated)
@@ -183,3 +215,13 @@ private func makeReelName(displayName: String,
 }
 
 // MARK: - Helpers
+
+/// Sanitizes a string for EDL header/comment fields by replacing control
+/// characters (newlines, tabs, etc.) with spaces and collapsing runs.
+private func sanitizeEdlString(_ input: String) -> String {
+    let replaced = String(input.unicodeScalars.map { scalar in
+        CharacterSet.whitespacesAndNewlines.contains(scalar) ? Character(" ") : Character(scalar)
+    })
+    return replaced.split(separator: " ", omittingEmptySubsequences: true)
+        .joined(separator: " ")
+}

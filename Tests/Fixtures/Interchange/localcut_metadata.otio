@@ -129,7 +129,9 @@
                     "type" : "colourGrade"
                   },
                   {
-                    "amount" : 0.30000001192092896,
+                    "amount" : {
+                      "defaultValue" : 0.30000001192092896
+                    },
                     "monochrome" : true,
                     "size" : 2,
                     "type" : "grain"

@@ -76,10 +76,11 @@ private func validateEventLine(_ line: String) -> [EdlValidationError] {
         return [.malformedLine(line)]
     }
 
-    // Event number: 3-digit integer.
+    // Event number: 3- or 4-digit integer (CMX3600 standard is 3 digits;
+    // some tools accept 4 for timelines with > 999 cuts).
     let eventStr = String(parts[0])
     if let eventNum = Int(eventStr) {
-        if eventNum < 1 || eventNum > 999 {
+        if eventNum < 1 || eventNum > 9999 || !(eventStr.count == 3 || eventStr.count == 4) {
             errors.append(.invalidEventNumber(eventStr))
         }
     } else {
