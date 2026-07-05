@@ -310,21 +310,26 @@ final class DocumentController {
                 let backgroundPlan = PaddedBackgroundBundleResolver.bundledAssetPlan(model: model)
                 overlayAccesses.append(contentsOf: backgroundPlan.accessedURLs)
                 let projectJSON = try encodedDocument(forBundle: true, model: model)
+                let makeOtioData = makeOtioDataGenerator(forBundle: true, model: model)
                 let index = try ProjectBundle.write(projectJSON: projectJSON,
                                                      to: url,
                                                      bundledMedia: bundledMedia + overlayPlan.assets + backgroundPlan.assets,
                                                      previousFingerprints: model.lastBundleFingerprints)
+                let otioOk = writeProjectOtio(makeOtioData(index), to: url)
                 model.lastBundleFingerprints = index
                 model.persistBeatCachesSynchronously(to: url)
+                model.statusMessage = otioOk
+                    ? "Saved \(url.lastPathComponent)."
+                    : "Saved \(url.lastPathComponent) — OTIO sidecar write failed."
             } else {
                 let document = makeDocumentForSave(forBundle: false, model: model)
                 let data = try document.encoded()
                 try data.write(to: url, options: .atomic)
                 adoptSingleFileOverlayBookmarks(from: document.overlays, model: model)
                 PaddedBackgroundBundleResolver.adoptSingleFileBookmark(from: document.paddedBackground, model: model)
+                model.statusMessage = "Saved \(url.lastPathComponent)."
             }
             adoptSaved(url: url, model: model)
-            model.statusMessage = "Saved \(url.lastPathComponent)."
             return true
         } catch {
             for (item, path) in originalPaths {
@@ -508,6 +513,7 @@ final class DocumentController {
                 model.project.coverFrame?.bundleRelativePath = nil
             }
             let projectJSON = try encodedDocument(forBundle: true, model: model)
+            let makeOtioData = makeOtioDataGenerator(forBundle: true, model: model)
             let bundleURLCopy = bundleURL
             let previous = model.lastBundleFingerprints
             let index = try await Task.detached {
@@ -516,6 +522,7 @@ final class DocumentController {
                                         previousFingerprints: previous,
                                         coverData: coverPreparation.data)
             }.value
+            let otioOk = writeProjectOtio(makeOtioData(index), to: bundleURL)
             model.lastBundleFingerprints = index
 
             replaceMediaItemsForBundle(at: bundleURL, model: model)
@@ -525,9 +532,12 @@ final class DocumentController {
 
             adoptSaved(url: bundleURL, model: model)
             await model.rebuild()
-            model.statusMessage = coverPreparation.warning.map {
-                "Converted to bundle — original .lcstudio left in place; \($0)"
-            } ?? "Converted to bundle — original .lcstudio left in place."
+            var notes: [String] = []
+            if let coverWarning = coverPreparation.warning { notes.append(coverWarning) }
+            if !otioOk { notes.append("OTIO sidecar write failed") }
+            model.statusMessage = notes.isEmpty
+                ? "Converted to bundle — original .lcstudio left in place."
+                : "Converted to bundle — original .lcstudio left in place; \(notes.joined(separator: "; "))"
         } catch {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
@@ -658,6 +668,7 @@ final class DocumentController {
                 model.project.coverFrame?.bundleRelativePath = nil
             }
             let projectJSON = try encodedDocument(forBundle: true, model: model)
+            let makeOtioData = makeOtioDataGenerator(forBundle: true, model: model)
             let previous = model.lastBundleFingerprints
             let bundleURLCopy = bundleURL
             let index = try await Task.detached {
@@ -666,6 +677,7 @@ final class DocumentController {
                                         previousFingerprints: previous,
                                         coverData: coverPreparation.data)
             }.value
+            let otioOk = writeProjectOtio(makeOtioData(index), to: bundleURL)
             model.lastBundleFingerprints = index
 
             replaceMediaItemsForBundle(at: bundleURL, model: model)
@@ -674,9 +686,12 @@ final class DocumentController {
             didTransferAccess = scoped
 
             adoptSaved(url: bundleURL, cleanIfRevision: savedRevision, model: model)
-            model.statusMessage = coverPreparation.warning.map {
-                "Saved \(bundleURL.lastPathComponent); \($0)"
-            } ?? "Saved \(bundleURL.lastPathComponent)."
+            var notes: [String] = []
+            if let coverWarning = coverPreparation.warning { notes.append(coverWarning) }
+            if !otioOk { notes.append("OTIO sidecar write failed") }
+            model.statusMessage = notes.isEmpty
+                ? "Saved \(bundleURL.lastPathComponent)."
+                : "Saved \(bundleURL.lastPathComponent); \(notes.joined(separator: "; "))"
         } catch {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
@@ -690,6 +705,84 @@ final class DocumentController {
 
     private func encodedDocument(forBundle: Bool, model: EditorModel) throws -> Data {
         try makeDocumentForSave(forBundle: forBundle, model: model).encoded()
+    }
+
+    /// Builds an OTIO generator from a main-actor document snapshot.
+    /// Bundle saves call it after copying media so the fresh SHA-256 index can
+    /// be embedded in `ExternalReference.metadata.localcut.fingerprint`.
+    private func makeOtioDataGenerator(forBundle: Bool,
+                                       model: EditorModel) -> @MainActor (FingerprintIndex) -> Data? {
+        let document = makeDocumentForSave(forBundle: forBundle, model: model)
+        let mediaPaths: [UUID: (name: String, bundleRelativePath: String?, urlPath: String)] = Dictionary(
+            model.project.mediaItems.map {
+                ($0.id, (name: $0.url.lastPathComponent,
+                         bundleRelativePath: $0.bundleRelativePath,
+                         urlPath: $0.url.path))
+            },
+            uniquingKeysWith: { first, _ in first })
+        return { fingerprints in
+            let options = OtioSerializationOptions(
+                bundleMode: forBundle,
+                resolveTargetUrl: { mediaID in
+                    if let info = mediaPaths[mediaID] {
+                        if forBundle, let relative = info.bundleRelativePath {
+                            return relative
+                        }
+                        // For unbundled media in bundle mode, use the original
+                        // file path so foreign tools can relink. In standalone
+                        // mode the display filename suffices.
+                        return forBundle ? info.urlPath : info.name
+                    } else {
+                        return mediaID.uuidString
+                    }
+                },
+                resolveFingerprint: { mediaID in
+                    guard forBundle,
+                          let relative = mediaPaths[mediaID]?.bundleRelativePath else {
+                        return nil
+                    }
+                    return fingerprints.entries[relative]
+                },
+                isMediaResolved: { mediaID in
+                    mediaPaths[mediaID] != nil
+                })
+            let (json, warnings) = serializeTimelineToOtio(document, options: options)
+            guard !warnings.contains(where: { $0.kind == .serializationFailure }) else {
+                return nil
+            }
+            #if DEBUG
+            guard validateOtioDocument(json).isEmpty else { return nil }
+            #endif
+            return json.data(using: .utf8)
+        }
+    }
+
+    /// Writes the OTIO sidecar to the bundle. Returns `true` on success,
+    /// `false` if serialization produced no data or the write/cleanup failed
+    /// (non-fatal; bundle export still succeeds). When `data` is `nil`,
+    /// removes any stale sidecar.
+    /// - Visibility: `internal` so tests can verify cleanup behavior.
+    @discardableResult
+    func writeProjectOtio(_ data: Data?, to bundleURL: URL) -> Bool {
+        let otioURL = bundleURL.appendingPathComponent(ProjectBundleLayout.projectOTIO)
+        guard let data else {
+            // Serialization failed or produced no data — remove stale sidecar.
+            guard FileManager.default.fileExists(atPath: otioURL.path) else { return false }
+            do {
+                try FileManager.default.removeItem(at: otioURL)
+            } catch {
+                // A stale sidecar may persist. Log but don't block the save.
+                return false
+            }
+            return false
+        }
+        do {
+            try data.write(to: otioURL, options: .atomic)
+            return true
+        } catch {
+            try? FileManager.default.removeItem(at: otioURL)
+            return false
+        }
     }
 
     private func bundleRelativePath(for item: MediaItem, model: EditorModel) -> String? {

@@ -1,0 +1,108 @@
+{
+  "global_start_time" : {
+    "OTIO_SCHEMA" : "RationalTime.1",
+    "rate" : 24,
+    "value" : 0
+  },
+  "name" : "Basic Fixture",
+  "OTIO_SCHEMA" : "Timeline.1",
+  "tracks" : {
+    "children" : [
+      {
+        "children" : [
+          {
+            "active_media_reference_key" : "DEFAULT_MEDIA",
+            "media_references" : {
+              "DEFAULT_MEDIA" : {
+                "available_range" : {
+                  "duration" : {
+                    "OTIO_SCHEMA" : "RationalTime.1",
+                    "rate" : 24,
+                    "value" : 240
+                  },
+                  "OTIO_SCHEMA" : "TimeRange.1",
+                  "start_time" : {
+                    "OTIO_SCHEMA" : "RationalTime.1",
+                    "rate" : 24,
+                    "value" : 0
+                  }
+                },
+                "metadata" : {
+                  "localcut" : {
+                    "fingerprint" : "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+                  }
+                },
+                "name" : "TestMedia.mov",
+                "OTIO_SCHEMA" : "ExternalReference.1",
+                "target_url" : "assets\/test.mov"
+              }
+            },
+            "name" : "TestMedia.mov",
+            "OTIO_SCHEMA" : "Clip.2",
+            "source_range" : {
+              "duration" : {
+                "OTIO_SCHEMA" : "RationalTime.1",
+                "rate" : 24,
+                "value" : 48
+              },
+              "OTIO_SCHEMA" : "TimeRange.1",
+              "start_time" : {
+                "OTIO_SCHEMA" : "RationalTime.1",
+                "rate" : 24,
+                "value" : 0
+              }
+            }
+          },
+          {
+            "active_media_reference_key" : "DEFAULT_MEDIA",
+            "media_references" : {
+              "DEFAULT_MEDIA" : {
+                "available_range" : {
+                  "duration" : {
+                    "OTIO_SCHEMA" : "RationalTime.1",
+                    "rate" : 24,
+                    "value" : 240
+                  },
+                  "OTIO_SCHEMA" : "TimeRange.1",
+                  "start_time" : {
+                    "OTIO_SCHEMA" : "RationalTime.1",
+                    "rate" : 24,
+                    "value" : 0
+                  }
+                },
+                "metadata" : {
+                  "localcut" : {
+                    "fingerprint" : "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+                  }
+                },
+                "name" : "TestMedia.mov",
+                "OTIO_SCHEMA" : "ExternalReference.1",
+                "target_url" : "assets\/test.mov"
+              }
+            },
+            "name" : "TestMedia.mov",
+            "OTIO_SCHEMA" : "Clip.2",
+            "source_range" : {
+              "duration" : {
+                "OTIO_SCHEMA" : "RationalTime.1",
+                "rate" : 24,
+                "value" : 24
+              },
+              "OTIO_SCHEMA" : "TimeRange.1",
+              "start_time" : {
+                "OTIO_SCHEMA" : "RationalTime.1",
+                "rate" : 24,
+                "value" : 0
+              }
+            }
+          }
+        ],
+        "kind" : "Video",
+        "name" : "V1",
+        "OTIO_SCHEMA" : "Track.1"
+      }
+    ],
+    "name" : "tracks",
+    "OTIO_SCHEMA" : "Stack.1"
+  }
+}

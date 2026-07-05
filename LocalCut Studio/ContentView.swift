@@ -155,6 +155,11 @@ struct DocumentCommands: Commands {
             Button("Export…") { model.requestExport() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(model.totalDuration <= 0)
+            Divider()
+            Button("Export Timeline (.otio)…") { model.requestExportOtio() }
+                .disabled(model.totalDuration <= 0)
+            Button("Export EDL (.edl)…") { model.requestExportEdl() }
+                .disabled(model.totalDuration <= 0)
         }
         CommandGroup(replacing: .undoRedo) {
             Button(model.undoTitle) { model.undo() }

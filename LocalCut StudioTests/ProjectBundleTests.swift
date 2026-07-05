@@ -155,6 +155,76 @@ struct ProjectBundleTests {
         #expect(!names.contains { $0.contains(".staged-") })
     }
 
+    @Test("Bundle project.otio uses fresh asset fingerprints")
+    func bundleProjectOtioUsesFreshAssetFingerprints() throws {
+        let tmp = try makeTempDirectory("otio-fingerprint")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Sample.lcbundle")
+        let mediaID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let source = try writeAsset([0x10, 0x20, 0x30], name: "TestMedia.mov", in: tmp)
+        let model = EditorModel()
+        model.project.name = "Sample"
+        let item = MediaItem(url: source, id: mediaID)
+        item.name = "TestMedia.mov"
+        item.duration = time(1)
+        item.naturalSize = CGSize(width: 1920, height: 1080)
+        item.hasVideo = true
+        item.hasAudio = false
+        item.wantsBundling = true
+        model.project.mediaItems = [item]
+        let track = Track(name: "V1", kind: .video)
+        track.clips = [
+            Clip(mediaID: mediaID,
+                 sourceStart: .zero,
+                 duration: time(1),
+                 timelineStart: .zero),
+        ]
+        model.project.videoTracks = [track]
+
+        #expect(model.writeSynchronously(to: bundleURL))
+
+        let contents = try ProjectBundle.read(url: bundleURL)
+        let relative = try #require(contents.document.media.first?.bundleRelativePath)
+        let digest = try #require(contents.fingerprints.entries[relative])
+        let otioURL = bundleURL.appendingPathComponent(ProjectBundleLayout.projectOTIO)
+        let otio = try String(contentsOf: otioURL, encoding: .utf8)
+        let escapedRelative = relative.replacingOccurrences(of: "/", with: "\\/")
+
+        #expect(otio.contains("\"target_url\" : \"\(relative)\"") ||
+                otio.contains("\"target_url\" : \"\(escapedRelative)\""))
+        #expect(otio.contains("\"fingerprint\" : \"\(digest)\""))
+        #expect(validateOtioDocument(otio).isEmpty)
+    }
+
+    @Test("Bundle save removes stale project.otio when OTIO data is nil")
+    func bundleSaveRemovesStaleOtio() throws {
+        let tmp = try makeTempDirectory("stale-otio")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Stale.lcbundle")
+        let mediaID = UUID()
+        let document = sampleDocument(mediaID: mediaID,
+                                      bundleRelativePath: "assets/\(mediaID.uuidString).mov",
+                                      captionTrackID: UUID())
+
+        // First save creates project.otio.
+        try ProjectBundle.write(
+            projectJSON: document.encoded(),
+            to: bundleURL,
+            bundledMedia: [],
+            previousFingerprints: FingerprintIndex())
+        let otioURL = bundleURL.appendingPathComponent(ProjectBundleLayout.projectOTIO)
+        // Simulate a stale sidecar by writing a dummy file.
+        try "stale".write(to: otioURL, atomically: true, encoding: .utf8)
+        #expect(FileManager.default.fileExists(atPath: otioURL.path))
+
+        // Verify DocumentController removes the stale sidecar when called
+        // with nil data (as it does when serialization fails).
+        let controller = DocumentController()
+        let result = controller.writeProjectOtio(nil, to: bundleURL)
+        #expect(!result) // Returns false on nil data.
+        #expect(!FileManager.default.fileExists(atPath: otioURL.path))
+    }
+
     @Test("Bundle cover save removes stale cover file for previous format")
     func bundleCoverSaveRemovesStalePreviousFormat() throws {
         let tmp = try makeTempDirectory("stale-cover")

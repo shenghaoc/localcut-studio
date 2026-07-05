@@ -85,6 +85,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | tee xcodebuild.log
 
+      - name: Validate OTIO goldens
+        run: ./Scripts/validate-otio-goldens.sh
+
       - name: MediaMTX WHIP integration
         run: LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh
 

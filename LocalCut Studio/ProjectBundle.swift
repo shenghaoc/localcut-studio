@@ -125,6 +125,8 @@ nonisolated enum ProjectBundleLayout {
     static let fileExtension = "lcbundle"
     /// Document JSON at the bundle root.
     static let projectJSON = "project.json"
+    /// OpenTimelineIO interchange file at the bundle root.
+    static let projectOTIO = "project.otio"
     /// Fingerprint index at the bundle root.
     static let fingerprintsJSON = "fingerprints.json"
     /// Directory containing bundled media copies.
