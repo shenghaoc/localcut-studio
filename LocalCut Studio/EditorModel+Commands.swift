@@ -125,7 +125,7 @@ extension EditorModel {
             return
         }
         do {
-            try json.write(to: url, atomically: true, encoding: .utf8)
+            try writeInterchangeString(json, to: url)
             if warnings.isEmpty {
                 statusMessage = "Exported \(url.lastPathComponent)."
             } else {
@@ -183,7 +183,7 @@ extension EditorModel {
             videoTrackIndex: trackIndex)
         let (edl, warnings) = serializeTimelineToEdl(document, options: options)
         do {
-            try edl.write(to: url, atomically: true, encoding: .utf8)
+            try writeInterchangeString(edl, to: url)
             if warnings.isEmpty {
                 statusMessage = "Exported \(url.lastPathComponent)."
             } else {
@@ -384,6 +384,16 @@ extension EditorModel {
         guard closeSaveInProgress else { return false }
         statusMessage = "Finish saving before closing…"
         return true
+    }
+
+    private func writeInterchangeString(_ contents: String, to url: URL) throws {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        try contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
     /// Document lifecycle commands (New/Open) must not run mid-recording: the

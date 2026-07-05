@@ -127,14 +127,8 @@ private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
     var warnings: [InterchangeWarning] = []
     var children: [OtioTrackChild] = []
 
-    let effectiveClips = track.clips.map { clip -> ClipDoc in
-        var adjusted = clip
-        let authoredStart = clip.timelineStart.cmTime
-        let effectiveStart = authoredStart - TransitionLayout.shift(at: authoredStart, cuts: transitionCuts)
-        adjusted.timelineStart = CMTimeCode(effectiveStart)
-        return adjusted
-    }
-    let snappedClips = snapTrackClips(effectiveClips, timebase: timebase)
+    let effectiveClips = transitionAdjustedClipInputs(for: track.clips, cuts: transitionCuts)
+    let snappedClips = snapTrackClipInputs(effectiveClips, timebase: timebase)
     let keptClipIndices = Set(snappedClips.map(\.sourceIndex))
     for index in track.clips.indices where !keptClipIndices.contains(index) {
         warnings.append(zeroFrameClipWarning(
@@ -147,6 +141,7 @@ private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
 
     for (index, ic) in snappedClips.enumerated() {
         let gapDuration = ic.timelineStart - cursor
+        let overlapDuration = cursor - ic.timelineStart
 
         // Insert gap if there's space before this clip.
         if gapDuration > microGap {
@@ -165,8 +160,22 @@ private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
         // in_offset/out_offset agree with preview/export timing.  A zero
         // overlap means the clips are no longer adjacent (gap inserted above)
         // and the transition should be dropped as an orphan.
-        if let transitionDoc = ic.doc.transition, index > 0 {
-            let authoredStart = ic.doc.timelineStart.cmTime
+        let authoredClip = track.clips[ic.sourceIndex]
+        if overlapDuration > microGap, index > 0 {
+            let transitionDoc = ic.doc.transition
+                ?? TransitionDoc(type: "crossDissolve",
+                                 duration: CMTimeCode(overlapDuration))
+            let clampedOverlap = timebase.snapToFrames(overlapDuration)
+            let (transitionNode, transWarnings) = serializeTransition(
+                transitionDoc, clampedOverlap: clampedOverlap,
+                timebase: timebase, trackName: track.name,
+                clipID: authoredClip.mediaID)
+            if let transitionNode {
+                children.append(.transition(transitionNode))
+            }
+            warnings.append(contentsOf: transWarnings)
+        } else if let transitionDoc = ic.doc.transition, index > 0 {
+            let authoredStart = authoredClip.timelineStart.cmTime
             let clampedOverlap = transitionCuts.first(where: {
                 abs($0.time.seconds - authoredStart.seconds) < TransitionLayout.adjacencyTolerance
             })?.overlap ?? .zero
@@ -174,7 +183,7 @@ private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
                 let (transitionNode, transWarnings) = serializeTransition(
                     transitionDoc, clampedOverlap: clampedOverlap,
                     timebase: timebase, trackName: track.name,
-                    clipID: ic.doc.mediaID)
+                    clipID: authoredClip.mediaID)
                 if let transitionNode {
                     children.append(.transition(transitionNode))
                 }
@@ -183,12 +192,12 @@ private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
                 // Transition overlap was clamped to zero — clips are not
                 // adjacent or handles are too short.
                 warnings.append(orphanTransitionWarning(
-                    clipID: ic.doc.mediaID, trackName: track.name))
+                    clipID: authoredClip.mediaID, trackName: track.name))
             }
         } else if ic.doc.transition != nil, index == 0 {
             // Orphan transition on first clip.
             warnings.append(orphanTransitionWarning(
-                clipID: ic.doc.mediaID, trackName: track.name))
+                clipID: authoredClip.mediaID, trackName: track.name))
         }
 
         // Build clip node.
@@ -214,6 +223,35 @@ private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
         metadata: trackMeta.isEmpty ? nil : trackMeta)
 
     return (trackNode, warnings)
+}
+
+private func transitionAdjustedClipInputs(for clips: [ClipDoc],
+                                          cuts: [TransitionLayout.Cut])
+    -> [InterchangeClipInput] {
+    guard !clips.isEmpty else { return [] }
+    guard !cuts.isEmpty else {
+        return clips.enumerated().map {
+            InterchangeClipInput(doc: $0.element, sourceIndex: $0.offset)
+        }
+    }
+
+    return clips.enumerated().flatMap { sourceIndex, doc -> [InterchangeClipInput] in
+        let clip = doc.makeClip()
+        let overlap = cuts.first(where: {
+            abs($0.time.seconds - clip.timelineStart.seconds) < TransitionLayout.adjacencyTolerance
+        })?.overlap ?? .zero
+        let pieces = TransitionLayout.pieces(for: clip, overlap: overlap, cuts: cuts)
+        return pieces.map { piece in
+            var pieceDoc = doc
+            pieceDoc.timelineStart = CMTimeCode(piece.effectiveStart)
+            pieceDoc.sourceStart = CMTimeCode(piece.sourceRange.start)
+            pieceDoc.duration = CMTimeCode(piece.sourceRange.duration)
+            if piece.index != 0 {
+                pieceDoc.transition = nil
+            }
+            return InterchangeClipInput(doc: pieceDoc, sourceIndex: sourceIndex)
+        }
+    }
 }
 
 // MARK: - Clip Serialization
@@ -503,9 +541,12 @@ private func serializeLayoutTrack(_ track: LayoutTrackDoc) -> [String: Any] {
             "startScale": clip.timelineStart.timescale,
             "durationValue": clip.duration.value,
             "durationScale": clip.duration.timescale,
+            "transformKeyframes": serializeKeyframedTransform(clip.transformKeyframes),
+            "sceneID": clip.sceneSnapshot.id.uuidString,
             "sceneName": clip.sceneSnapshot.name,
             "layers": clip.sceneSnapshot.layers.map { layer -> [String: Any] in
                 var layerDict: [String: Any] = [
+                    "id": layer.id.uuidString,
                     "visible": layer.visible,
                     "zIndex": layer.zIndex,
                     "opacity": layer.opacity,
@@ -526,6 +567,9 @@ private func serializeLayoutTrack(_ track: LayoutTrackDoc) -> [String: Any] {
                 return layerDict
             },
         ]
+        if let hotkey = clip.sceneSnapshot.hotkey {
+            clipDict["sceneHotkey"] = hotkey
+        }
         return clipDict
     }
     return dict
@@ -554,7 +598,7 @@ private func serializeEffects(_ effects: [Effect]) -> [[String: Any]] {
                 "type": "lut",
             ] as [String: Any]
         case .skinSmooth(let ss):
-            var dict: [String: Any] = [
+            let dict: [String: Any] = [
                 "type": "skinSmooth",
                 "strength": serializeKeyframedFloat(ss.strength),
                 "maskWarmthBias": ss.maskWarmthBias,

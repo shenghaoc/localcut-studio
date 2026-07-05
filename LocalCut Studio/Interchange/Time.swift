@@ -121,15 +121,27 @@ private func timebase(for fps: Double) -> InterchangeTimebase {
 /// remain adjacent after snapping: the shared boundary is snapped once and
 /// both clips reference the same frame boundary.
 func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase) -> [InterchangeClip] {
+    snapTrackClipInputs(clips.enumerated().map {
+        InterchangeClipInput(doc: $0.element, sourceIndex: $0.offset)
+    }, timebase: timebase)
+}
+
+struct InterchangeClipInput: Sendable {
+    let doc: ClipDoc
+    let sourceIndex: Int
+}
+
+func snapTrackClipInputs(_ clips: [InterchangeClipInput],
+                         timebase: InterchangeTimebase) -> [InterchangeClip] {
     guard !clips.isEmpty else { return [] }
 
     // Sort by timeline position.
-    let sorted = clips.enumerated().sorted { $0.element.timelineStart.cmTime < $1.element.timelineStart.cmTime }
+    let sorted = clips.sorted { $0.doc.timelineStart.cmTime < $1.doc.timelineStart.cmTime }
     var result: [InterchangeClip] = []
     var previousRawEnd: CMTime?
 
     for (index, item) in sorted.enumerated() {
-        let clip = item.element
+        let clip = item.doc
         let rawStart = clip.timelineStart.cmTime
         let rawSourceDuration = clip.duration.cmTime
         let rawOutputDuration = outputDuration(for: clip)
@@ -166,7 +178,7 @@ func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase) -> [Inter
 
         result.append(InterchangeClip(
             doc: clip,
-            sourceIndex: item.offset,
+            sourceIndex: item.sourceIndex,
             timelineStart: snappedStart,
             timelineDuration: snappedDuration,
             sourceStart: sourceStart,

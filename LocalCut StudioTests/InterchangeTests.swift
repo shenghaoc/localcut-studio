@@ -675,6 +675,103 @@ struct OtioSerializerTests {
         #expect(markerStart["value"] as? Int == 12)
     }
 
+    @Test("Clips spanning transition cuts split with overlap transition")
+    func clipsSpanningTransitionCutsSplitWithOverlapTransition() throws {
+        let mediaID = UUID()
+        let videoTrack = TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24),
+            testClipDoc(mediaID: mediaID, timelineStart: CMTime(value: 24, timescale: 24),
+                        durationFrames: 24, rate: 24,
+                        transition: TransitionDoc(type: "crossDissolve",
+                                                  duration: CMTimeCode(CMTime(value: 12, timescale: 24)))),
+        ])
+        let audioTrack = TrackDoc(name: "A1", kind: "audio", isMuted: false, clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 48, rate: 24),
+        ])
+        let doc = ProjectDocument(
+            name: "Split",
+            renderWidth: 1920, renderHeight: 1080, frameRate: 24,
+            media: [testMediaRef(id: mediaID)],
+            videoTracks: [videoTrack],
+            audioTracks: [audioTrack])
+
+        let (json, warnings) = serializeTimelineToOtio(doc)
+
+        let tracks = try otioTracks(json)
+        let audio = try #require(tracks.first { $0["kind"] as? String == "Audio" })
+        let children = try #require(audio["children"] as? [[String: Any]])
+        let schemas = children.compactMap { $0["OTIO_SCHEMA"] as? String }
+        let transition = try #require(children.dropFirst().first { $0["OTIO_SCHEMA"] as? String == "Transition.1" })
+        let inOffset = try #require(transition["in_offset"] as? [String: Any])
+        let secondClip = try #require(children.last)
+        let secondRange = try #require(secondClip["source_range"] as? [String: Any])
+        let secondStart = try #require(secondRange["start_time"] as? [String: Any])
+
+        #expect(warnings.isEmpty)
+        #expect(schemas == ["Clip.2", "Transition.1", "Clip.2"])
+        #expect(inOffset["value"] as? Int == 6)
+        #expect(secondStart["value"] as? Int == 24)
+    }
+
+    @Test("Layout metadata preserves identities and transform keyframes")
+    func layoutMetadataPreservesIdentitiesAndTransformKeyframes() throws {
+        let sceneID = UUID(uuidString: "E0000000-0000-0000-0000-000000000001")!
+        let layerID = UUID(uuidString: "E0000000-0000-0000-0000-000000000002")!
+        let sourceID = UUID(uuidString: "E0000000-0000-0000-0000-000000000003")!
+        let clipID = UUID(uuidString: "E0000000-0000-0000-0000-000000000004")!
+        let keyframeID = UUID(uuidString: "E0000000-0000-0000-0000-000000000005")!
+        let scene = SceneDefinition(
+            id: sceneID,
+            name: "PiP",
+            hotkey: "1",
+            layers: [
+                SceneLayer(
+                    id: layerID,
+                    sourceRef: .captureSource(sourceID),
+                    transform: Transform2D(translateX: 0.2, translateY: -0.1, scale: 0.4, rotation: 0),
+                    visible: true,
+                    zIndex: 2,
+                    opacity: 0.75),
+            ])
+        let transformKeyframes = Keyframed<Transform2D>(
+            keyframes: [
+                Keyframe(
+                    id: keyframeID,
+                    time: CMTime(value: 12, timescale: 24),
+                    value: Transform2D(translateX: 0.4, translateY: 0.1, scale: 0.8, rotation: 0)),
+            ],
+            defaultValue: .identity)
+        let layoutClip = LayoutClip(
+            id: clipID,
+            timelineStart: CMTimeCode(.zero),
+            duration: CMTimeCode(CMTime(value: 24, timescale: 24)),
+            sceneSnapshot: scene,
+            transformKeyframes: transformKeyframes)
+        let doc = ProjectDocument(
+            name: "Layout",
+            renderWidth: 1920, renderHeight: 1080, frameRate: 24,
+            media: [],
+            videoTracks: [],
+            audioTracks: [],
+            layoutTracks: [LayoutTrackDoc(id: UUID(), name: "Program", clips: [layoutClip])])
+
+        let (json, warnings) = serializeTimelineToOtio(doc)
+        let root = try parseOTIO(json)
+        let metadata = try #require(root["metadata"] as? [String: Any])
+        let localcut = try #require(metadata["localcut"] as? [String: Any])
+        let layoutTracks = try #require(localcut["layoutTracks"] as? [[String: Any]])
+        let clips = try #require(layoutTracks.first?["clips"] as? [[String: Any]])
+        let clip = try #require(clips.first)
+        let layers = try #require(clip["layers"] as? [[String: Any]])
+        let keyframes = try #require(clip["transformKeyframes"] as? [String: Any])
+
+        #expect(warnings.isEmpty)
+        #expect(clip["sceneID"] as? String == sceneID.uuidString)
+        #expect(clip["sceneHotkey"] as? String == "1")
+        #expect(layers.first?["id"] as? String == layerID.uuidString)
+        #expect((keyframes["keyframes"] as? [[String: Any]])?.first?["id"] as? String == keyframeID.uuidString)
+    }
+
     @Test("LocalCut metadata preserves transform, speed handles, and caption styles")
     func localcutMetadataPreservesAnimatedFields() {
         let mediaID = UUID()
