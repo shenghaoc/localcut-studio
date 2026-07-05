@@ -194,6 +194,31 @@ struct InterchangeTimeTests {
         #expect(snapped.isEmpty) // Dropped.
     }
 
+    @Test("Dropping zero-frame clip preserves subsequent gap")
+    func droppingZeroFrameClipPreservesGap() {
+        let doc = makeTestDoc(frameRate: 24)
+        let tb = interchangeTimebase(for: doc)
+        // Clip A: 1s at 0s.
+        let clipA = testClipDoc(timelineStart: .zero, durationFrames: 24, rate: 24)
+        // Clip B: sub-frame — will be dropped.
+        let clipB = ClipDoc(
+            mediaID: UUID(),
+            sourceStart: CMTimeCode(CMTime.zero),
+            duration: CMTimeCode(CMTime(value: 1, timescale: 1000)),
+            timelineStart: CMTimeCode(CMTime(value: 24, timescale: 24)),
+            opacity: 1, effects: [], transition: nil)
+        // Clip C: 1s at 5s (large gap after clip A).
+        let clipC = testClipDoc(timelineStart: CMTime(value: 120, timescale: 24),
+                                durationFrames: 24, rate: 24)
+
+        let snapped = snapTrackClips([clipA, clipB, clipC], timebase: tb)
+
+        #expect(snapped.count == 2) // B dropped.
+        #expect(snapped[0].timelineStart == .zero)
+        // Clip C must keep its ~5s position, not collapse to 1s.
+        #expect(snapped[1].timelineStart == CMTime(value: 120, timescale: 24))
+    }
+
     @Test("Speed curves are resolved per clip when media is reused")
     func reusedMediaSpeedCurvesStayClipLocal() {
         let mediaID = UUID()

@@ -154,9 +154,10 @@ func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase) -> [Inter
         let snappedEnd = timebase.snapToFrames(rawEnd)
         let snappedDuration = snappedEnd - snappedStart
 
-        // Check for zero-frame clip.
+        // Check for zero-frame clip.  Do NOT update previousRawEnd here —
+        // the dropped clip's raw boundary must not influence gap calculations
+        // for subsequent clips.
         if snappedDuration <= .zero {
-            previousRawEnd = rawEnd
             continue // Dropped; warning emitted by caller.
         }
 

@@ -217,10 +217,11 @@ struct ProjectBundleTests {
         try "stale".write(to: otioURL, atomically: true, encoding: .utf8)
         #expect(FileManager.default.fileExists(atPath: otioURL.path))
 
-        // Second save without OTIO data (simulating serialization failure).
-        // The DocumentController calls writeProjectOtio(nil) which removes the file.
-        // Verify the stale file would be cleaned up.
-        try? FileManager.default.removeItem(at: otioURL)
+        // Verify DocumentController removes the stale sidecar when called
+        // with nil data (as it does when serialization fails).
+        let controller = DocumentController()
+        let result = controller.writeProjectOtio(nil, to: bundleURL)
+        #expect(!result) // Returns false on nil data.
         #expect(!FileManager.default.fileExists(atPath: otioURL.path))
     }
 

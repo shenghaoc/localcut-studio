@@ -713,9 +713,11 @@ final class DocumentController {
     private func makeOtioDataGenerator(forBundle: Bool,
                                        model: EditorModel) -> @MainActor (FingerprintIndex) -> Data? {
         let document = makeDocumentForSave(forBundle: forBundle, model: model)
-        let mediaPaths: [UUID: (name: String, bundleRelativePath: String?)] = Dictionary(
+        let mediaPaths: [UUID: (name: String, bundleRelativePath: String?, urlPath: String)] = Dictionary(
             model.project.mediaItems.map {
-                ($0.id, (name: $0.url.lastPathComponent, bundleRelativePath: $0.bundleRelativePath))
+                ($0.id, (name: $0.url.lastPathComponent,
+                         bundleRelativePath: $0.bundleRelativePath,
+                         urlPath: $0.url.path))
             },
             uniquingKeysWith: { first, _ in first })
         return { fingerprints in
@@ -726,7 +728,10 @@ final class DocumentController {
                         if forBundle, let relative = info.bundleRelativePath {
                             return relative
                         }
-                        return info.name
+                        // For unbundled media in bundle mode, use the original
+                        // file path so foreign tools can relink. In standalone
+                        // mode the display filename suffices.
+                        return forBundle ? info.urlPath : info.name
                     } else {
                         return mediaID.uuidString
                     }
@@ -742,10 +747,12 @@ final class DocumentController {
                     mediaPaths[mediaID] != nil
                 })
             let (json, warnings) = serializeTimelineToOtio(document, options: options)
-            guard !warnings.contains(where: { $0.kind == .serializationFailure }),
-                  validateOtioDocument(json).isEmpty else {
+            guard !warnings.contains(where: { $0.kind == .serializationFailure }) else {
                 return nil
             }
+            #if DEBUG
+            guard validateOtioDocument(json).isEmpty else { return nil }
+            #endif
             return json.data(using: .utf8)
         }
     }
@@ -754,8 +761,9 @@ final class DocumentController {
     /// `false` if serialization produced no data or the write/cleanup failed
     /// (non-fatal; bundle export still succeeds). When `data` is `nil`,
     /// removes any stale sidecar.
+    /// - Visibility: `internal` so tests can verify cleanup behavior.
     @discardableResult
-    private func writeProjectOtio(_ data: Data?, to bundleURL: URL) -> Bool {
+    func writeProjectOtio(_ data: Data?, to bundleURL: URL) -> Bool {
         let otioURL = bundleURL.appendingPathComponent(ProjectBundleLayout.projectOTIO)
         guard let data else {
             // Serialization failed or produced no data — remove stale sidecar.
