@@ -111,8 +111,7 @@ private func timebase(for fps: Double) -> InterchangeTimebase {
 /// Adjacent clips (where `clip[i].timelineEnd ≈ clip[i+1].timelineStart`)
 /// remain adjacent after snapping: the shared boundary is snapped once and
 /// both clips reference the same frame boundary.
-func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase,
-                    speedCurveResolver: ((UUID) -> Keyframed<Float>?)? = nil) -> [InterchangeClip] {
+func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase) -> [InterchangeClip] {
     guard !clips.isEmpty else { return [] }
 
     // Sort by timeline position.
@@ -152,8 +151,7 @@ func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase,
 
         // Compute output duration for speed-ramped clips.
         let outputDuration: CMTime
-        if let resolver = speedCurveResolver,
-           let speedCurve = resolver(clip.mediaID),
+        if let speedCurve = clip.speedCurve,
            TimeRemapping.hasNonIdentitySpeed(speedCurve) {
             outputDuration = TimeRemapping.outputDuration(
                 sourceDuration: clip.duration.cmTime,

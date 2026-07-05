@@ -44,11 +44,7 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
     let isFractional = timebase.frameDurationTimescale > 1
 
     // Snap clips.
-    let speedResolver: (UUID) -> Keyframed<Float>? = { mediaID in
-        track.clips.first(where: { $0.mediaID == mediaID })?.speedCurve
-    }
-    let snappedClips = snapTrackClips(track.clips, timebase: timebase,
-                                      speedCurveResolver: speedResolver)
+    let snappedClips = snapTrackClips(track.clips, timebase: timebase)
 
     // Reel name dedup.
     var reelCounts: [String: Int] = [:]
@@ -62,9 +58,6 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
         lines.append("* LOCALCUT: RATE \(String(format: "%.2f", fpsDouble)) ROUNDED TO \(edlFPS) NDF")
     }
     lines.append("")
-
-    // Events.
-    var recordCursor = recordStartFrames
 
     for (index, ic) in snappedClips.enumerated() {
         let eventNumber = String(format: "%03d", index + 1)
@@ -101,8 +94,8 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
         let sourceOutFrames = sourceInFrames + timebase.frames(time: ic.doc.duration.cmTime)
 
         // Record in/out timecode.
-        let recordInFrames = recordCursor
-        let recordOutFrames = recordCursor + timebase.frames(time: ic.timelineDuration)
+        let recordInFrames = recordStartFrames + timebase.frames(time: ic.timelineStart)
+        let recordOutFrames = recordInFrames + timebase.frames(time: ic.timelineDuration)
 
         let sourceInTC = formatTimecode(frames: sourceInFrames, timebase: timebase)
         let sourceOutTC = formatTimecode(frames: sourceOutFrames, timebase: timebase)
@@ -133,7 +126,6 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
 
         lines.append("")
 
-        recordCursor = recordOutFrames
     }
 
     return (lines.joined(separator: "\n"), warnings)

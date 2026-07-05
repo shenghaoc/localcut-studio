@@ -183,6 +183,25 @@ struct InterchangeTimeTests {
         #expect(snapped.isEmpty) // Dropped.
     }
 
+    @Test("Speed curves are resolved per clip when media is reused")
+    func reusedMediaSpeedCurvesStayClipLocal() {
+        let mediaID = UUID()
+        let tb = interchangeTimebase(for: makeTestDoc(frameRate: 24))
+        let fastCurve = Keyframed<Float>(defaultValue: 2)
+        let normal = testClipDoc(mediaID: mediaID, timelineStart: .zero,
+                                 durationFrames: 24, rate: 24)
+        let fast = testClipDoc(mediaID: mediaID,
+                               timelineStart: CMTime(value: 24, timescale: 24),
+                               durationFrames: 24, rate: 24,
+                               speedCurve: fastCurve)
+
+        let snapped = snapTrackClips([normal, fast], timebase: tb)
+
+        #expect(snapped.count == 2)
+        #expect(snapped[0].outputDuration == CMTime(value: 24, timescale: 24))
+        #expect(snapped[1].outputDuration == CMTime(value: 12, timescale: 24))
+    }
+
     @Test("Timecode formatting starts at 00:00:00:00")
     func timecodeFormatting() {
         let doc = makeTestDoc(frameRate: 24)
@@ -577,6 +596,21 @@ struct EdlSerializerTests {
         // 1000:00:00:00 (the bug that occurs when rate is used instead of nominalFPS).
         #expect(edl.contains("01:00:00:00"))
         #expect(!edl.contains("1000:00:00:00"))
+    }
+
+    @Test("EDL record timecode preserves timeline gaps")
+    func edlRecordTimecodePreservesTimelineGaps() {
+        let mediaID = UUID()
+        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24),
+            testClipDoc(mediaID: mediaID,
+                        timelineStart: CMTime(value: 48, timescale: 24),
+                        durationFrames: 24, rate: 24),
+        ])
+
+        let (edl, _) = serializeTimelineToEdl(doc)
+
+        #expect(edl.contains("00:00:00:00 00:00:01:00 01:00:02:00 01:00:03:00"))
     }
 }
 
