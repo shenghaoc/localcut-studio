@@ -90,6 +90,103 @@ extension EditorModel {
         }
     }
 
+    /// File ▸ Export Timeline (.otio) — serializes the project to OpenTimelineIO
+    /// interchange format and writes to the user-selected location.
+    func requestExportOtio() {
+        guard totalDuration > 0 else { return }
+        let panel = NSSavePanel()
+        let otioType = UTType(filenameExtension: "otio") ?? .json
+        panel.allowedContentTypes = [otioType]
+        panel.nameFieldStringValue = "\(project.name).otio"
+        panel.canCreateDirectories = true
+        panel.begin { @MainActor [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            self.exportOtio(to: url)
+        }
+    }
+
+    private func exportOtio(to url: URL) {
+        let document = documentController.makeDocumentForSave(forBundle: false, model: self)
+        // Snapshot media names before the Sendable closure.
+        let mediaNames: [UUID: String] = Dictionary(
+            uniqueKeysWithValues: project.mediaItems.map { ($0.id, $0.name) })
+        let options = OtioSerializationOptions(
+            bundleMode: false,
+            resolveTargetUrl: { mediaID in
+                mediaNames[mediaID] ?? mediaID.uuidString
+            })
+        let (json, warnings) = serializeTimelineToOtio(document, options: options)
+        do {
+            try json.write(to: url, atomically: true, encoding: .utf8)
+            if warnings.isEmpty {
+                statusMessage = "Exported \(url.lastPathComponent)."
+            } else {
+                let warningText = warnings.prefix(3).map(\.description).joined(separator: "; ")
+                statusMessage = "Exported \(url.lastPathComponent) — \(warningText)"
+            }
+        } catch {
+            statusMessage = "OTIO export failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// File ▸ Export EDL (.edl) — serializes the selected video track to CMX3600
+    /// EDL format. If multiple video tracks exist, presents a track picker.
+    func requestExportEdl() {
+        guard totalDuration > 0 else { return }
+        guard !project.videoTracks.isEmpty else {
+            statusMessage = "No video tracks to export."
+            return
+        }
+
+        // If multiple video tracks, show a picker.
+        if project.videoTracks.count > 1 {
+            let alert = NSAlert()
+            alert.messageText = "Choose Video Track for EDL Export"
+            alert.informativeText = "CMX3600 EDL exports a single video track."
+            for (index, track) in project.videoTracks.enumerated() {
+                alert.addButton(withTitle: "\(track.name) (V\(index + 1))")
+            }
+            alert.addButton(withTitle: "Cancel")
+            let response = alert.runModal()
+            let trackIndex = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+            guard trackIndex >= 0, trackIndex < project.videoTracks.count else { return }
+            exportEdl(trackIndex: trackIndex)
+        } else {
+            exportEdl(trackIndex: 0)
+        }
+    }
+
+    private func exportEdl(trackIndex: Int) {
+        let panel = NSSavePanel()
+        let edlType = UTType(filenameExtension: "edl") ?? .plainText
+        panel.allowedContentTypes = [edlType]
+        panel.nameFieldStringValue = "\(project.name).edl"
+        panel.canCreateDirectories = true
+        panel.begin { @MainActor [weak self] response in
+            guard response == .OK, let url = panel.url, let self else { return }
+            self.exportEdl(to: url, trackIndex: trackIndex)
+        }
+    }
+
+    private func exportEdl(to url: URL, trackIndex: Int) {
+        let document = documentController.makeDocumentForSave(forBundle: false, model: self)
+        let options = EdlSerializationOptions(
+            title: project.name,
+            videoTrackIndex: trackIndex)
+        let (edl, warnings) = serializeTimelineToEdl(document, options: options)
+        do {
+            try edl.write(to: url, atomically: true, encoding: .utf8)
+            if warnings.isEmpty {
+                statusMessage = "Exported \(url.lastPathComponent)."
+            } else {
+                let warningText = warnings.prefix(3).map(\.description).joined(separator: "; ")
+                statusMessage = "Exported \(url.lastPathComponent) — \(warningText)"
+            }
+        } catch {
+            statusMessage = "EDL export failed: \(error.localizedDescription)"
+        }
+    }
+
     private func resolveChapterMarkersBeforeExport() -> Bool {
         guard hasChapterMarkers else { return true }
         let issues = chapterValidationIssues
