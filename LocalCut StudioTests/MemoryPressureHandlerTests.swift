@@ -6,7 +6,7 @@ import CoreMedia
 import LocalCutCore
 @testable import LocalCut_Studio
 
-private final class PurgeableOverlaySource: OverlayFrameSource, @unchecked Sendable {
+private nonisolated final class PurgeableOverlaySource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize = CGSize(width: 8, height: 8)
     private let lock = NSLock()
     private var retainedFrames: Int
