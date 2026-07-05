@@ -113,8 +113,10 @@ extension EditorModel {
         let cancellationHandle = PanelCancellationHandle(panel)
         let response = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                panel.begin { response in
-                    continuation.resume(returning: response)
+                MainActor.assumeIsolated {
+                    panel.begin { response in
+                        continuation.resume(returning: response)
+                    }
                 }
             }
         } onCancel: {
@@ -147,8 +149,10 @@ extension EditorModel {
         let cancellationHandle = PanelCancellationHandle(panel)
         let response = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                panel.begin { response in
-                    continuation.resume(returning: response)
+                MainActor.assumeIsolated {
+                    panel.begin { response in
+                        continuation.resume(returning: response)
+                    }
                 }
             }
         } onCancel: {

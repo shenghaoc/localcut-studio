@@ -10,6 +10,7 @@ struct LocalCutStudioApp: App {
     // at app scope so the menu commands and window can share it.
     @State private var model: EditorModel
 
+    @MainActor
     init() {
         let model = EditorModel()
         let appIntentRouter = LocalCutAppIntentRouter(model: model)

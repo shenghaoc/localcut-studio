@@ -3,6 +3,11 @@ import Testing
 @testable import LocalCut_Studio
 
 @MainActor
+private final class AppIntentEventTracker {
+    var events: [String] = []
+}
+
+@MainActor
 struct AppIntentsTests {
     @Test func allShortcutActionsHaveShortcuts() {
         #expect(LocalCutAppIntentRouter.Action.allCases.count == LocalCutAppShortcuts.appShortcuts.count)
@@ -50,11 +55,11 @@ struct AppIntentsTests {
 
     @Test func actionChainSerializesConcurrentActions() async throws {
         let model = EditorModel()
-        var events: [String] = []
+        let tracker = AppIntentEventTracker()
         let router = LocalCutAppIntentRouter(model: model) { action, _ in
-            events.append("start-\(action.rawValue)")
+            tracker.events.append("start-\(action.rawValue)")
             try await Task.sleep(for: .milliseconds(10))
-            events.append("end-\(action.rawValue)")
+            tracker.events.append("end-\(action.rawValue)")
         }
 
         let first = Task { try await router.perform(.newProject) }
@@ -63,7 +68,7 @@ struct AppIntentsTests {
         try await first.value
         try await second.value
 
-        #expect(events == [
+        #expect(tracker.events == [
             "start-newProject",
             "end-newProject",
             "start-importMedia",
