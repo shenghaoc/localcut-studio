@@ -19,11 +19,8 @@ struct BeatToolsInspectorView: View {
                     LabeledContent("Confidence", value: "\(Int(analysis.confidence * 100))%")
                 }
             } else {
-                ContentUnavailableView {
-                    Label("No Audio Selected", systemImage: "waveform")
-                } description: {
-                    Text("Select an audio source or clip to analyse beats.")
-                }
+                Text("Select an audio source or clip.")
+                    .foregroundStyle(.secondary)
             }
 
             Button {
