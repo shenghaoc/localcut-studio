@@ -1,0 +1,50 @@
+# LocalCut Studio User Guide
+
+## WHIP publish
+
+Open Program Mode before publishing. LocalCut streams the live program output:
+the composited program video and the master-bus audio after live inserts.
+
+In the Publish panel:
+
+1. Choose the endpoint type.
+2. Enter the WHIP endpoint URL.
+3. Enter a stream key when the endpoint requires one.
+4. Choose codec, video bitrate, audio bitrate, and best-effort keyframe interval.
+5. Click Start publishing.
+
+The status row shows connecting, live, reconnecting, failed, or ended state.
+Stats show sent bytes, frames, bitrate, and round-trip time when WebRTC reports
+them. Stop publishing sends WHIP DELETE to tear down the server-side resource.
+
+The codec picker only exposes codecs supported by the current endpoint and local
+encode probe. H.264 is the default for all endpoints; AV1 stays hidden until the
+host and selected endpoint can both support it. WebRTC's macOS sender API does
+not expose deterministic GOP control, so the keyframe interval is labelled
+best-effort.
+
+RTMP-only platforms are not sent to directly. Use a WHIP-to-RTMP gateway such as
+MediaMTX when the destination does not offer WHIP ingest.
+
+## Stream keys
+
+Stream keys are session-only by default. LocalCut keeps the typed key in memory
+so the publish session can start, but project documents and project bundles do
+not include it.
+
+When "Remember on this device" is enabled, LocalCut stores the key in the macOS
+Keychain under the publish endpoint. Turning the option off removes the saved
+key for that endpoint.
+
+## WebRTC dependency
+
+WHIP requires WebRTC peer connection support. macOS does not provide a native
+framework that can push LocalCut's AVFoundation program feed into WebRTC, so the
+app uses the pinned `stasel/WebRTC` 140.0.0 XCFramework through
+`Packages/LocalCutWebRTC`.
+
+- Source: `stasel/WebRTC` release 140.0.0 (M140).
+- License: BSD-3-Clause.
+- Size: about 40 MB as the downloaded zip and about 87 MB extracted.
+- Build gate: guarded by `LOCALCUT_ENABLE_WEBRTC`, so custom builds can remove
+  the dependency and compile the reduced publish UI state.

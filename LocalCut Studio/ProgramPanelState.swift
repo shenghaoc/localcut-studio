@@ -119,23 +119,26 @@ final class ProgramPanelState {
                     renderSize: renderSize,
                     onCaptureFailure: { [weak self, weak model] result, message in
                         guard let self, let model else { return }
-                        self.isRunning = false
-                        self.isStarting = false
-                        self.isStopping = false
-                        self.ownsCurrentSession = false
-                        self.currentSceneId = nil
-                        model.programSession = nil
-                        if let result {
-                            ProgramLanding.land(result: result, model: model)
-                            if result.writerWarnings.isEmpty {
-                                self.statusMessage = "\(message) Program session stopped and landed."
+                        Task { @MainActor in
+                            await model.stopWhipPublish()
+                            self.isRunning = false
+                            self.isStarting = false
+                            self.isStopping = false
+                            self.ownsCurrentSession = false
+                            self.currentSceneId = nil
+                            model.programSession = nil
+                            if let result {
+                                ProgramLanding.land(result: result, model: model)
+                                if result.writerWarnings.isEmpty {
+                                    self.statusMessage = "\(message) Program session stopped and landed."
+                                } else {
+                                    self.statusMessage = "\(message) Landed with warnings: \(result.writerWarnings.joined(separator: "; "))"
+                                }
                             } else {
-                                self.statusMessage = "\(message) Landed with warnings: \(result.writerWarnings.joined(separator: "; "))"
+                                self.statusMessage = message
                             }
-                        } else {
-                            self.statusMessage = message
+                            Task { await self.publishEncoderBudget(model.encoderBudget) }
                         }
-                        Task { await self.publishEncoderBudget(model.encoderBudget) }
                     })
                 await publishEncoderBudget(model.encoderBudget)
                 isRunning = true
@@ -164,6 +167,7 @@ final class ProgramPanelState {
                 currentSceneId = nil
             }
             do {
+                await model.stopWhipPublish()
                 let result = try await session.stop()
                 await publishEncoderBudget(model.encoderBudget)
                 ProgramLanding.land(result: result, model: model)
@@ -187,6 +191,7 @@ final class ProgramPanelState {
         ownsCurrentSession = false
         Task {
             do {
+                await model.stopWhipPublish()
                 let result = try await session.stop()
                 ProgramLanding.land(result: result, model: model)
             } catch {

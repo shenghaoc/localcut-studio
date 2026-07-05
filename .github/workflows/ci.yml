@@ -63,6 +63,9 @@ jobs:
           swift --version
           sw_vers
 
+      - name: Download WebRTC XCFramework
+        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
+
       - name: Validate Xcode project
         run: |
           xcodebuild -list -project "$PROJECT"
@@ -81,6 +84,9 @@ jobs:
             -resultBundlePath "$RESULT_BUNDLE" \
             CODE_SIGNING_ALLOWED=NO \
             | tee xcodebuild.log
+
+      - name: MediaMTX WHIP integration
+        run: LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh
 
       - name: Upload failure diagnostics
         if: failure()

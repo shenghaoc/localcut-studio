@@ -1,0 +1,21 @@
+# MediaMTX configuration for LocalCut WHIP integration testing.
+# Minimal config: WHIP ingest on port 8889, no auth, local only.
+
+logLevel: info
+logDestinations: [stdout]
+
+api: yes
+apiAddress: :9997
+
+rtsp: no
+rtmp: no
+hls: no
+srt: no
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcEncryption: no
+webrtcAllowOrigins: ["*"]
+
+paths:
+  all_others:

@@ -109,6 +109,8 @@ struct EditorSideRailView: View {
                 toolForm { MarkersInspectorView(model: model) }
             case .program:
                 ProgramPanel(model: model)
+            case .publish:
+                PublishPanel(model: model)
             }
         }
     }
@@ -155,6 +157,7 @@ enum ToolPanel: String, CaseIterable, Identifiable {
     case renders
     case markers
     case program
+    case publish
 
     var id: String { rawValue }
 
@@ -169,6 +172,7 @@ enum ToolPanel: String, CaseIterable, Identifiable {
         case .renders: String(localized: "Renders")
         case .markers: String(localized: "Markers")
         case .program: String(localized: "Program")
+        case .publish: String(localized: "Publish")
         }
     }
 }

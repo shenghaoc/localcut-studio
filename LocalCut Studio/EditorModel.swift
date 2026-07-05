@@ -28,6 +28,16 @@ final class EditorModel {
     /// instances to enforce the one-session invariant.
     var programSession: ProgramSession?
 
+    /// The active WHIP publish session, if any. At most one publish session
+    /// may be active at a time.
+    var whipSession: WhipSession?
+    var publishVideoTap: VideoPublishTap?
+    var publishAudioBridge: AudioPublishBridge?
+    var publishProgramFrameSinkID: UUID?
+
+    /// Stored publish settings (endpoint, token, codec config).
+    let publishSettings = PublishSettings()
+
     // Selection
     var selectedClipID: Clip.ID?
     var selectedMediaID: MediaItem.ID?
