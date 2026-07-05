@@ -762,11 +762,16 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         return registryID
     }
 
-    /// Releases a single preview/export source map.
+    /// Releases a single preview/export source map, purging cached frames first.
     nonisolated static func releaseOverlaySources(for registryID: UUID?) {
         guard let registryID else { return }
-        _ = overlaySourceLock.withLock {
-            overlaySourceRegistries.removeValue(forKey: registryID)
+        let sources = overlaySourceLock.withLock {
+            overlaySourceRegistries.removeValue(forKey: registryID)?.sources.values
+        }
+        if let sources {
+            for source in sources {
+                source.purgeCachedFrames()
+            }
         }
     }
 
@@ -776,12 +781,22 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         keeping retainedRegistryID: UUID?,
         excluding protectedRegistryIDs: Set<UUID> = []
     ) {
-        overlaySourceLock.withLock {
+        // Snapshot evicted sources under the lock, then purge outside it.
+        let evictedSources = overlaySourceLock.withLock { () -> [any OverlayFrameSource] in
+            var evicted: [any OverlayFrameSource] = []
             overlaySourceRegistries = overlaySourceRegistries.filter { registryID, registry in
-                registry.purpose != .preview
+                let keep = registry.purpose != .preview
                     || registryID == retainedRegistryID
                     || protectedRegistryIDs.contains(registryID)
+                if !keep {
+                    evicted.append(contentsOf: registry.sources.values)
+                }
+                return keep
             }
+            return evicted
+        }
+        for source in evictedSources {
+            source.purgeCachedFrames()
         }
     }
 
@@ -791,7 +806,8 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // a concurrent rebuild replaces a registry. Each source protects its
         // own cache with an internal lock, so concurrent purge calls are safe.
         let sources = overlaySourceLock.withLock {
-            overlaySourceRegistries.values.flatMap { $0.sources.values }
+            overlaySourceRegistries.values
+                .flatMap { $0.sources.values }
         }
         for source in sources {
             source.purgeCachedFrames()

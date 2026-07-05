@@ -475,6 +475,15 @@ final class RenderCache: Sendable {
     private nonisolated func removeAllEntries() {
         let diskFiles = lock.withLock { state -> [URL] in
             let urls = state.diskEntries.values.map(\.url)
+            // Break retain cycles in both doubly-linked lists before clearing.
+            for node in state.memoryNodes.values {
+                node.previous = nil
+                node.next = nil
+            }
+            for node in state.diskNodes.values {
+                node.previous = nil
+                node.next = nil
+            }
             state.entries.removeAll()
             state.memoryNodes.removeAll()
             state.memoryHead = nil
@@ -523,6 +532,11 @@ final class RenderCache: Sendable {
     /// deleting cache files adds I/O without freeing RAM.
     nonisolated func purgeMemory() {
         lock.withLock { state in
+            // Break retain cycles in the doubly-linked list before clearing.
+            for node in state.memoryNodes.values {
+                node.previous = nil
+                node.next = nil
+            }
             state.entries.removeAll()
             state.memoryNodes.removeAll()
             state.memoryHead = nil

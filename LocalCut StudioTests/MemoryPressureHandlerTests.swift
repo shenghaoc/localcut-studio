@@ -56,11 +56,16 @@ struct MemoryPressureHandlerTests {
         _ = EffectCompositor.context(for: .sRGB)
 
         let source = PurgeableOverlaySource(cachedFrames: 3)
+        let transientSource = PurgeableOverlaySource(cachedFrames: 2)
         let registryID = try #require(EffectCompositor.registerOverlaySources(
             [UUID(): source],
             purpose: .preview))
+        let transientRegistryID = try #require(EffectCompositor.registerOverlaySources(
+            [UUID(): transientSource],
+            purpose: .transient))
         defer {
             EffectCompositor.releaseOverlaySources(for: registryID)
+            EffectCompositor.releaseOverlaySources(for: transientRegistryID)
             RenderCache.shared.purge()
             EffectCompositor.purgeContextCache()
         }
@@ -68,6 +73,7 @@ struct MemoryPressureHandlerTests {
         #expect(RenderCache.shared.count > 0)
         #expect(EffectCompositor.contextCacheCount > 0)
         #expect(source.cachedFrameCount == 3)
+        #expect(transientSource.cachedFrameCount == 2)
 
         MemoryPressureHandler.shared.purgeCachesForMemoryPressure()
 
@@ -75,6 +81,7 @@ struct MemoryPressureHandlerTests {
         #expect(RenderCache.shared.currentBytes == 0)
         #expect(EffectCompositor.contextCacheCount == 0)
         #expect(source.cachedFrameCount == 0)
+        #expect(transientSource.cachedFrameCount == 0)
     }
 
     @Test("preview registry cleanup preserves active, in-flight, and transient registries")
