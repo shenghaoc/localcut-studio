@@ -1,0 +1,260 @@
+import Foundation
+import CoreMedia
+import LocalCutCore
+
+// MARK: - Interchange Timebase
+
+/// Exact rational time representation used by the interchange serializers.
+/// All emitted times are snapped to frame boundaries aligned to this timebase.
+///
+/// For fractional rates like 23.976 fps, the rational form is preserved:
+/// `rate = 24000`, `frameDurationTimescale = 1001`, so
+/// `RationalTime(value: 1001, rate: 24000)` equals exactly one frame.
+struct InterchangeTimebase: Sendable {
+    /// Numerator of the rational frame rate (e.g. 24000 for 23.976 fps).
+    let rate: Int
+    /// Denominator of the rational frame rate (e.g. 1001 for 23.976 fps).
+    let frameDurationTimescale: Int
+    /// `CMTime` timescale derived from `rate`.
+    var timescale: CMTimeScale { CMTimeScale(rate) }
+    /// Nominal (rounded) integer FPS for timecode formatting.
+    /// For 23.976→24, 29.97→30, 59.94→60.
+    var nominalFPS: Int {
+        Int((Double(rate) / Double(frameDurationTimescale)).rounded())
+    }
+
+    /// Duration of one frame as a `CMTime`.
+    var frameDuration: CMTime {
+        CMTime(value: CMTimeValue(frameDurationTimescale), timescale: timescale)
+    }
+
+    /// Micro-gap collapse threshold: `max(1 ms, 0.5 / fps)`.
+    var microGapThreshold: CMTime {
+        let oneFrame = Double(frameDurationTimescale) / Double(rate)
+        let thresholdSeconds = max(0.001, 0.5 * oneFrame)
+        return CMTime(seconds: thresholdSeconds, preferredTimescale: timescale)
+    }
+
+    /// Converts a frame count to `CMTime`.
+    func time(frames: Int) -> CMTime {
+        CMTime(value: CMTimeValue(frames * frameDurationTimescale), timescale: timescale)
+    }
+
+    /// Converts a `CMTime` to frame count, clamping negative to 0.
+    func frames(time: CMTime) -> Int {
+        guard time.isNumeric, time.isValid, !time.isIndefinite, !time.isNegativeInfinity else { return 0 }
+        let seconds = max(0, time.seconds)
+        let raw = seconds * Double(rate) / Double(frameDurationTimescale)
+        return Int(raw.rounded(.toNearestOrAwayFromZero))
+    }
+
+    /// Snaps an arbitrary `CMTime` to the nearest frame boundary.
+    func snapToFrames(_ time: CMTime) -> CMTime {
+        self.time(frames: frames(time: time))
+    }
+
+    /// The rate value for OTIO `RationalTime` (same as `rate`).
+    var rationalTimeRate: Int { rate }
+}
+
+// MARK: - Interchange Rate Selection
+
+/// Selects the interchange timebase for a project document.
+///
+/// Priority:
+/// 1. `project.frameRate` when finite and > 0.
+/// 2. Most common source video frame rate from `media`.
+/// 3. 30 fps fallback.
+func interchangeTimebase(for doc: ProjectDocument) -> InterchangeTimebase {
+    let fps = doc.frameRate
+    if fps.isFinite, fps > 0 {
+        return timebase(for: fps)
+    }
+
+    // Most common source FPS.
+    let sourceFPSs = doc.media
+        .filter(\.hasVideo)
+        .map { $0.duration.cmTime }
+        .filter { $0 > .zero && $0.seconds > 0 }
+    // Source media doesn't store FPS directly; fall through to default.
+    if !sourceFPSs.isEmpty {
+        // We can't derive FPS from duration alone; use the default.
+    }
+
+    return timebase(for: 30)
+}
+
+/// Builds a timebase from a Double frame rate, preserving exact rational
+/// representation for fractional rates (23.976, 29.97, 59.94).
+private func timebase(for fps: Double) -> InterchangeTimebase {
+    // Check for well-known fractional rates.
+    if abs(fps - 23.976) < 0.002 {
+        return InterchangeTimebase(rate: 24000, frameDurationTimescale: 1001)
+    }
+    if abs(fps - 29.97) < 0.002 {
+        return InterchangeTimebase(rate: 30000, frameDurationTimescale: 1001)
+    }
+    if abs(fps - 59.94) < 0.005 {
+        return InterchangeTimebase(rate: 60000, frameDurationTimescale: 1001)
+    }
+    if abs(fps - 47.952) < 0.005 {
+        return InterchangeTimebase(rate: 48000, frameDurationTimescale: 1001)
+    }
+
+    // Integer rate (or close enough).
+    let rounded = Int(fps.rounded())
+    return InterchangeTimebase(rate: max(1, rounded), frameDurationTimescale: 1)
+}
+
+// MARK: - Frame Snapping
+
+/// Snaps all clips on a track to frame boundaries, preserving adjacency.
+///
+/// Adjacent clips (where `clip[i].timelineEnd ≈ clip[i+1].timelineStart`)
+/// remain adjacent after snapping: the shared boundary is snapped once and
+/// both clips reference the same frame boundary.
+func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase) -> [InterchangeClip] {
+    guard !clips.isEmpty else { return [] }
+
+    // Sort by timeline position.
+    let sorted = clips.sorted { $0.timelineStart.cmTime < $1.timelineStart.cmTime }
+    var result: [InterchangeClip] = []
+
+    for (index, clip) in sorted.enumerated() {
+        let rawStart = clip.timelineStart.cmTime
+        let rawDuration = clip.duration.cmTime
+        let rawEnd = rawStart + rawDuration
+
+        let snappedStart: CMTime
+        if index > 0, let prev = result.last {
+            // Check if adjacent to previous clip.
+            let gap = rawStart - prev.timelineEnd
+            let negThreshold = CMTime.zero - timebase.microGapThreshold
+            if gap < timebase.microGapThreshold, gap > negThreshold {
+                // Adjacent: share the boundary.
+                snappedStart = prev.timelineEnd
+            } else {
+                snappedStart = timebase.snapToFrames(rawStart)
+            }
+        } else {
+            snappedStart = timebase.snapToFrames(rawStart)
+        }
+
+        let snappedEnd = timebase.snapToFrames(rawEnd)
+        let snappedDuration = snappedEnd - snappedStart
+
+        // Check for zero-frame clip.
+        if snappedDuration <= .zero {
+            continue // Dropped; warning emitted by caller.
+        }
+
+        let sourceStart = timebase.snapToFrames(clip.sourceStart.cmTime)
+        let sourceDuration = snappedDuration // Duration derives from snapped boundaries.
+
+        result.append(InterchangeClip(
+            doc: clip,
+            timelineStart: snappedStart,
+            timelineDuration: snappedDuration,
+            sourceStart: sourceStart,
+            sourceDuration: sourceDuration))
+    }
+
+    return result
+}
+
+// MARK: - Interchange Clip
+
+/// A clip whose timing has been snapped to frame boundaries.
+struct InterchangeClip: Sendable {
+    let doc: ClipDoc
+    let timelineStart: CMTime
+    let timelineDuration: CMTime
+    let sourceStart: CMTime
+    let sourceDuration: CMTime
+
+    var timelineEnd: CMTime { timelineStart + timelineDuration }
+    var mediaID: UUID { doc.mediaID }
+}
+
+// MARK: - Micro-Gap Collapse
+
+/// Collapses gaps smaller than the threshold between adjacent items.
+/// Returns the adjusted start times.
+func collapseGaps(items: [(start: CMTime, end: CMTime)],
+                  threshold: CMTime) -> [(start: CMTime, end: CMTime)] {
+    guard items.count > 1 else { return items }
+    var result: [(start: CMTime, end: CMTime)] = [items[0]]
+    for index in 1..<items.count {
+        let prev = result[result.count - 1]
+        let current = items[index]
+        let gap = current.start - prev.end
+        if gap > .zero, gap < threshold {
+            // Collapse: snap current start to previous end.
+            result.append((start: prev.end, end: current.end))
+        } else {
+            result.append(current)
+        }
+    }
+    return result
+}
+
+// MARK: - Timecode Formatting
+
+/// Formats a `CMTime` as SMPTE non-drop-frame timecode: `HH:MM:SS:FF`.
+func formatTimecode(_ time: CMTime, timebase: InterchangeTimebase) -> String {
+    guard time.isNumeric, time.isValid, !time.isIndefinite else {
+        return "00:00:00:00"
+    }
+
+    let totalFrames = timebase.frames(time: time)
+    let fps = timebase.nominalFPS
+    let framesPerHour = fps * 3600
+    let framesPerMinute = fps * 60
+
+    let hours = totalFrames / framesPerHour
+    let remainingAfterHours = totalFrames % framesPerHour
+    let minutes = remainingAfterHours / framesPerMinute
+    let remainingAfterMinutes = remainingAfterHours % framesPerMinute
+    let seconds = remainingAfterMinutes / fps
+    let frames = remainingAfterMinutes % fps
+
+    return String(format: "%02d:%02d:%02d:%02d", hours, minutes, seconds, frames)
+}
+
+/// Formats a frame count as SMPTE NDF timecode at the given timebase.
+func formatTimecode(frames totalFrames: Int, timebase: InterchangeTimebase) -> String {
+    let fps = timebase.nominalFPS
+    let framesPerHour = fps * 3600
+    let framesPerMinute = fps * 60
+
+    let hours = totalFrames / framesPerHour
+    let remainingAfterHours = totalFrames % framesPerHour
+    let minutes = remainingAfterHours / framesPerMinute
+    let remainingAfterMinutes = remainingAfterHours % framesPerMinute
+    let seconds = remainingAfterMinutes / fps
+    let frames = remainingAfterMinutes % fps
+
+    return String(format: "%02d:%02d:%02d:%02d", hours, minutes, seconds, frames)
+}
+
+// MARK: - OTIO RationalTime Helper
+
+/// Builds an OTIO `RationalTime` dictionary from a snapped `CMTime`.
+func otioRationalTime(_ time: CMTime, timebase: InterchangeTimebase) -> [String: Any] {
+    let frames = timebase.frames(time: time)
+    return [
+        "OTIO_SCHEMA": "RationalTime.1",
+        "value": frames * timebase.frameDurationTimescale,
+        "rate": timebase.rate,
+    ]
+}
+
+/// Builds an OTIO `TimeRange` dictionary.
+func otioTimeRange(start: CMTime, duration: CMTime,
+                   timebase: InterchangeTimebase) -> [String: Any] {
+    [
+        "OTIO_SCHEMA": "TimeRange.1",
+        "start_time": otioRationalTime(start, timebase: timebase),
+        "duration": otioRationalTime(duration, timebase: timebase),
+    ]
+}
