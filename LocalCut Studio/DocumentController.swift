@@ -310,10 +310,12 @@ final class DocumentController {
                 let backgroundPlan = PaddedBackgroundBundleResolver.bundledAssetPlan(model: model)
                 overlayAccesses.append(contentsOf: backgroundPlan.accessedURLs)
                 let projectJSON = try encodedDocument(forBundle: true, model: model)
+                let otioData = generateOtioData(forBundle: true, model: model)
                 let index = try ProjectBundle.write(projectJSON: projectJSON,
                                                      to: url,
                                                      bundledMedia: bundledMedia + overlayPlan.assets + backgroundPlan.assets,
-                                                     previousFingerprints: model.lastBundleFingerprints)
+                                                     previousFingerprints: model.lastBundleFingerprints,
+                                                     otioData: otioData)
                 model.lastBundleFingerprints = index
                 model.persistBeatCachesSynchronously(to: url)
             } else {
@@ -508,13 +510,15 @@ final class DocumentController {
                 model.project.coverFrame?.bundleRelativePath = nil
             }
             let projectJSON = try encodedDocument(forBundle: true, model: model)
+            let otioData = generateOtioData(forBundle: true, model: model)
             let bundleURLCopy = bundleURL
             let previous = model.lastBundleFingerprints
             let index = try await Task.detached {
                 try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
                                         bundledMedia: bundledMedia + overlayPlan.assets + backgroundPlan.assets,
                                         previousFingerprints: previous,
-                                        coverData: coverPreparation.data)
+                                        coverData: coverPreparation.data,
+                                        otioData: otioData)
             }.value
             model.lastBundleFingerprints = index
 
@@ -658,13 +662,15 @@ final class DocumentController {
                 model.project.coverFrame?.bundleRelativePath = nil
             }
             let projectJSON = try encodedDocument(forBundle: true, model: model)
+            let otioData = generateOtioData(forBundle: true, model: model)
             let previous = model.lastBundleFingerprints
             let bundleURLCopy = bundleURL
             let index = try await Task.detached {
                 try ProjectBundle.write(projectJSON: projectJSON, to: bundleURLCopy,
                                         bundledMedia: bundledMedia + overlayPlan.assets + backgroundPlan.assets,
                                         previousFingerprints: previous,
-                                        coverData: coverPreparation.data)
+                                        coverData: coverPreparation.data,
+                                        otioData: otioData)
             }.value
             model.lastBundleFingerprints = index
 
@@ -690,6 +696,31 @@ final class DocumentController {
 
     private func encodedDocument(forBundle: Bool, model: EditorModel) throws -> Data {
         try makeDocumentForSave(forBundle: forBundle, model: model).encoded()
+    }
+
+    /// Generates OTIO interchange data from the current project.
+    /// Returns `nil` if serialization fails (non-fatal for bundle export).
+    private func generateOtioData(forBundle: Bool, model: EditorModel) -> Data? {
+        let document = makeDocumentForSave(forBundle: forBundle, model: model)
+        // Snapshot media info before the Sendable closure.
+        let mediaPaths: [UUID: (name: String, bundleRelativePath: String?)] = Dictionary(
+            uniqueKeysWithValues: model.project.mediaItems.map {
+                ($0.id, (name: $0.name, bundleRelativePath: $0.bundleRelativePath))
+            })
+        let options = OtioSerializationOptions(
+            bundleMode: forBundle,
+            resolveTargetUrl: { mediaID in
+                if forBundle {
+                    if let info = mediaPaths[mediaID], let relative = info.bundleRelativePath {
+                        return relative
+                    }
+                    return "assets/\(mediaID.uuidString)"
+                } else {
+                    return mediaPaths[mediaID]?.name ?? mediaID.uuidString
+                }
+            })
+        let (json, _) = serializeTimelineToOtio(document, options: options)
+        return json.data(using: .utf8)
     }
 
     private func bundleRelativePath(for item: MediaItem, model: EditorModel) -> String? {
