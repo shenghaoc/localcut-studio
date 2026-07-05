@@ -16,17 +16,10 @@ struct RecorderFloatingPanelContent: View {
                 .accessibilityHidden(true)
 
             // Elapsed time.
-            Text(formatElapsed(model.recordingElapsedSeconds))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(formatElapsed(model.recordingElapsedSeconds))")
+            PanelRecordingElapsedView(model: model)
             sourceIndicator
             if model.recordingIncludesMicrophone {
-                MicLevelMeter(level: model.recordingMicLevel)
-                    .frame(width: 36, height: 8)
-                    .help("Microphone level")
-                    .accessibilityLabel("Microphone level")
-                    .accessibilityValue("\(Int(model.recordingMicLevel * 100)) percent")
+                PanelMicLevelMeterView(model: model)
             }
 
             Spacer()
@@ -151,11 +144,36 @@ struct RecorderFloatingPanelContent: View {
             "app"
         }
     }
+}
+
+/// Extracted view to isolate high-frequency observation of `model.recordingElapsedSeconds`.
+private struct PanelRecordingElapsedView: View {
+    let model: EditorModel
+
+    var body: some View {
+        Text(formatElapsed(model.recordingElapsedSeconds))
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(formatElapsed(model.recordingElapsedSeconds))")
+    }
 
     private func formatElapsed(_ seconds: Double) -> String {
         let m = (Int(seconds) % 3600) / 60
         let s = Int(seconds) % 60
         return String(format: "%02d:%02d", m, s)
+    }
+}
+
+/// Extracted view to isolate high-frequency observation of `model.recordingMicLevel`.
+private struct PanelMicLevelMeterView: View {
+    let model: EditorModel
+
+    var body: some View {
+        MicLevelMeter(level: model.recordingMicLevel)
+            .frame(width: 36, height: 8)
+            .help("Microphone level")
+            .accessibilityLabel("Microphone level")
+            .accessibilityValue("\(Int(model.recordingMicLevel * 100)) percent")
     }
 }
 

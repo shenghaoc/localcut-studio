@@ -412,10 +412,7 @@ struct EditorView: View {
                     .foregroundStyle(model.isPaused ? .orange : .red)
                     .font(.caption)
                     .accessibilityHidden(true)
-                Text(formatElapsed(model.recordingElapsedSeconds))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(model.isPaused ? .orange : .red)
-                    .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(formatElapsed(model.recordingElapsedSeconds))")
+                RecordingElapsedView(model: model)
                 Text("\(model.recordingSourceCount) source\(model.recordingSourceCount == 1 ? "" : "s")")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -482,16 +479,6 @@ struct EditorView: View {
             return .yellow
         }
         return .secondary
-    }
-
-    private func formatElapsed(_ seconds: Double) -> String {
-        let h = Int(seconds) / 3600
-        let m = (Int(seconds) % 3600) / 60
-        let s = Int(seconds) % 60
-        if h > 0 {
-            return String(format: "%d:%02d:%02d", h, m, s)
-        }
-        return String(format: "%02d:%02d", m, s)
     }
 
     private var relinkBanner: some View {
@@ -692,6 +679,29 @@ struct WindowConfigurator: NSViewRepresentable {
         }
     }
 }
+
+/// Extracted view to isolate high-frequency observation of `model.recordingElapsedSeconds`.
+private struct RecordingElapsedView: View {
+    let model: EditorModel
+
+    var body: some View {
+        Text(formatElapsed(model.recordingElapsedSeconds))
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(model.isPaused ? .orange : .red)
+            .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(formatElapsed(model.recordingElapsedSeconds))")
+    }
+
+    private func formatElapsed(_ seconds: Double) -> String {
+        let h = Int(seconds) / 3600
+        let m = (Int(seconds) % 3600) / 60
+        let s = Int(seconds) % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%02d:%02d", m, s)
+    }
+}
+
 #Preview("Editor") {
     EditorView(model: EditorModel())
         .frame(width: 1180, height: 760)
