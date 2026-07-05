@@ -111,7 +111,8 @@ private func timebase(for fps: Double) -> InterchangeTimebase {
 /// Adjacent clips (where `clip[i].timelineEnd ≈ clip[i+1].timelineStart`)
 /// remain adjacent after snapping: the shared boundary is snapped once and
 /// both clips reference the same frame boundary.
-func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase) -> [InterchangeClip] {
+func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase,
+                    speedCurveResolver: ((UUID) -> Keyframed<Float>?)? = nil) -> [InterchangeClip] {
     guard !clips.isEmpty else { return [] }
 
     // Sort by timeline position.
@@ -149,12 +150,25 @@ func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase) -> [Inter
         let sourceStart = timebase.snapToFrames(clip.sourceStart.cmTime)
         let sourceDuration = snappedDuration // Duration derives from snapped boundaries.
 
+        // Compute output duration for speed-ramped clips.
+        let outputDuration: CMTime
+        if let resolver = speedCurveResolver,
+           let speedCurve = resolver(clip.mediaID),
+           TimeRemapping.hasNonIdentitySpeed(speedCurve) {
+            outputDuration = TimeRemapping.outputDuration(
+                sourceDuration: clip.duration.cmTime,
+                speedCurve: speedCurve)
+        } else {
+            outputDuration = snappedDuration
+        }
+
         result.append(InterchangeClip(
             doc: clip,
             timelineStart: snappedStart,
             timelineDuration: snappedDuration,
             sourceStart: sourceStart,
-            sourceDuration: sourceDuration))
+            sourceDuration: sourceDuration,
+            outputDuration: outputDuration))
     }
 
     return result
@@ -169,8 +183,11 @@ struct InterchangeClip: Sendable {
     let timelineDuration: CMTime
     let sourceStart: CMTime
     let sourceDuration: CMTime
+    /// Output duration on the timeline (accounts for speed curves).
+    /// Equal to `timelineDuration` for clips without speed ramps.
+    let outputDuration: CMTime
 
-    var timelineEnd: CMTime { timelineStart + timelineDuration }
+    var timelineEnd: CMTime { timelineStart + outputDuration }
     var mediaID: UUID { doc.mediaID }
 }
 

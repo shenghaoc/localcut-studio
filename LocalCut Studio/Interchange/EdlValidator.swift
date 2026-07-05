@@ -124,8 +124,10 @@ private func validateEventLine(_ line: String) -> [EdlValidationError] {
 private func isValidTimecode(_ tc: String) -> Bool {
     let components = tc.split(separator: ":")
     guard components.count == 4 else { return false }
-    for comp in components {
-        guard let _ = Int(comp), comp.count == 2 else { return false }
-    }
-    return true
+    guard let h = Int(components[0]), h >= 0, h <= 99,
+          let m = Int(components[1]), m >= 0, m <= 59,
+          let s = Int(components[2]), s >= 0, s <= 59,
+          let f = Int(components[3]), f >= 0, f <= 99 else { return false }
+    // All components must be exactly 2 digits.
+    return components.allSatisfy { $0.count == 2 }
 }

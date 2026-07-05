@@ -116,6 +116,10 @@ extension EditorModel {
                 mediaNames[mediaID] ?? mediaID.uuidString
             })
         let (json, warnings) = serializeTimelineToOtio(document, options: options)
+        if warnings.contains(where: { $0.kind == .serializationFailure }) {
+            statusMessage = "OTIO export failed: serialization error."
+            return
+        }
         do {
             try json.write(to: url, atomically: true, encoding: .utf8)
             if warnings.isEmpty {

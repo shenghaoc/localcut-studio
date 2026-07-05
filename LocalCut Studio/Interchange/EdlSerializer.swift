@@ -44,7 +44,11 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
     let isFractional = timebase.frameDurationTimescale > 1
 
     // Snap clips.
-    let snappedClips = snapTrackClips(track.clips, timebase: timebase)
+    let speedResolver: (UUID) -> Keyframed<Float>? = { mediaID in
+        track.clips.first(where: { $0.mediaID == mediaID })?.speedCurve
+    }
+    let snappedClips = snapTrackClips(track.clips, timebase: timebase,
+                                      speedCurveResolver: speedResolver)
 
     // Reel name dedup.
     var reelCounts: [String: Int] = [:]
@@ -90,9 +94,11 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
 
         let transitionField = "C" // Cut.
 
-        // Source in/out timecode.
+        // Source in/out timecode — references actual source media range.
+        // For speed-ramped clips, ic.doc.duration is the source media duration;
+        // ic.sourceDuration is the snapped timeline duration.
         let sourceInFrames = timebase.frames(time: ic.sourceStart)
-        let sourceOutFrames = sourceInFrames + timebase.frames(time: ic.sourceDuration)
+        let sourceOutFrames = sourceInFrames + timebase.frames(time: ic.doc.duration.cmTime)
 
         // Record in/out timecode.
         let recordInFrames = recordCursor
@@ -118,7 +124,10 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
             if !isSpeedCurveUniform(speedCurve) {
                 warnings.append(nonUniformSpeedWarning(
                     clipID: ic.doc.mediaID, trackName: track.name))
-                lines.append("* LOCALCUT: SPEED RAMP (NON-UNIFORM) — SOURCE_RANGE ADJUSTED TO AVERAGE")
+                lines.append("* LOCALCUT: SPEED RAMP (NON-UNIFORM) — METADATA LOST IN EDL")
+            } else {
+                let speed = TimeRemapping.clampedSpeed(speedCurve.defaultValue)
+                lines.append("* LOCALCUT: SPEED \(String(format: "%.2f", speed))x — METADATA LOST IN EDL")
             }
         }
 

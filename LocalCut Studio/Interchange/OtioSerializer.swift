@@ -113,7 +113,11 @@ private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
     var warnings: [InterchangeWarning] = []
     var children: [OtioTrackChild] = []
 
-    let snappedClips = snapTrackClips(track.clips, timebase: timebase)
+    let speedResolver: (UUID) -> Keyframed<Float>? = { mediaID in
+        track.clips.first(where: { $0.mediaID == mediaID })?.speedCurve
+    }
+    let snappedClips = snapTrackClips(track.clips, timebase: timebase,
+                                      speedCurveResolver: speedResolver)
     let droppedCount = track.clips.count - snappedClips.count
     if droppedCount > 0 {
         // Zero-frame clips were dropped.
