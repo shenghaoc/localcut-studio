@@ -5,9 +5,10 @@ nonisolated enum WhipError: Error, Sendable, LocalizedError {
     case rejectedOffer
     case auth
     case notFound
-    case retryable(Error)
+    case retryable(any Error & Sendable)
     case invalidResponse
     case httpStatus(Int, Data?)
+    case invalidState(String)
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +18,7 @@ nonisolated enum WhipError: Error, Sendable, LocalizedError {
         case .retryable: "The server is temporarily unavailable."
         case .invalidResponse: "The server returned an unexpected response."
         case .httpStatus(let code, _): "Unexpected HTTP status \(code)."
+        case .invalidState(let message): message
         }
     }
 }

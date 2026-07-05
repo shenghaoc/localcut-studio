@@ -32,7 +32,7 @@ nonisolated struct PublishProfile: Hashable, Sendable {
         self.videoBitrate = max(100_000, min(videoBitrate, 50_000_000))
         self.audioBitrate = max(16_000, min(audioBitrate, 512_000))
         self.keyframeInterval = max(1, min(keyframeInterval, 10))
-        self.maxKeyframeInterval = max(keyframeInterval, min(maxKeyframeInterval, 10))
+        self.maxKeyframeInterval = max(self.keyframeInterval, min(maxKeyframeInterval, 10))
     }
 }
 

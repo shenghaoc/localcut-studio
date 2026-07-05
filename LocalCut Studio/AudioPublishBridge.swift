@@ -194,9 +194,13 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     private let channels: Int
     private let frameDurationSeconds: Double
 
+    private let stateLock = NSLock()
     private var delegate: RTCAudioDeviceDelegate?
     private var isRecordingActive = false
     private var isPlayoutActive = false
+
+    // Monotonic sample counter for AudioTimeStamp
+    private var sampleTime: Double = 0
 
     // Diagnostics
     private let deliveredCount = OSAllocatedUnfairLock(initialState: 0)
@@ -219,21 +223,21 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     var outputNumberOfChannels: Int { channels }
     var outputLatency: TimeInterval { 0 }
 
-    var isInitialized: Bool { delegate != nil }
+    var isInitialized: Bool { stateLock.withLock { delegate != nil } }
     var isPlayoutInitialized: Bool { true }
-    var isPlaying: Bool { isPlayoutActive }
+    var isPlaying: Bool { stateLock.withLock { isPlayoutActive } }
     var isRecordingInitialized: Bool { true }
-    var isRecording: Bool { isRecordingActive }
+    var isRecording: Bool { stateLock.withLock { isRecordingActive } }
 
     // MARK: - Lifecycle
 
     func initialize(with delegate: RTCAudioDeviceDelegate) -> Bool {
-        self.delegate = delegate
+        stateLock.withLock { self.delegate = delegate }
         return true
     }
 
     func terminateDevice() -> Bool {
-        delegate = nil
+        stateLock.withLock { delegate = nil }
         return true
     }
 
@@ -242,12 +246,12 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     func initializePlayout() -> Bool { true }
 
     func startPlayout() -> Bool {
-        isPlayoutActive = true
+        stateLock.withLock { isPlayoutActive = true }
         return true
     }
 
     func stopPlayout() -> Bool {
-        isPlayoutActive = false
+        stateLock.withLock { isPlayoutActive = false }
         return true
     }
 
@@ -256,12 +260,12 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     func initializeRecording() -> Bool { true }
 
     func startRecording() -> Bool {
-        isRecordingActive = true
+        stateLock.withLock { isRecordingActive = true }
         return true
     }
 
     func stopRecording() -> Bool {
-        isRecordingActive = false
+        stateLock.withLock { isRecordingActive = false }
         return true
     }
 
@@ -271,10 +275,18 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     /// Converts float samples to Int16 and calls the delegate's
     /// `deliverRecordedData` block.
     func deliverSamples(_ samples: [Float]) {
-        guard isRecordingActive, let delegate else { return }
-
         let frameCount = samples.count / channels
         guard frameCount > 0 else { return }
+
+        stateLock.lock()
+        let active = isRecordingActive
+        let delegate = self.delegate
+        let currentSampleTime = sampleTime
+        if active, delegate != nil {
+            sampleTime += Double(frameCount)
+        }
+        stateLock.unlock()
+        guard active, let delegate else { return }
 
         // Convert float [-1.0, 1.0] to Int16
         var int16Samples = [Int16](repeating: 0, count: samples.count)
@@ -285,7 +297,7 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
 
         var actionFlags = AudioUnitRenderActionFlags()
         var timestamp = AudioTimeStamp(
-            mSampleTime: 0,
+            mSampleTime: currentSampleTime,
             mHostTime: 0,
             mRateScalar: 0,
             mWordClockTime: 0,
@@ -296,6 +308,8 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
 
         // Call the delegate's deliverRecordedData block
         let deliverBlock = delegate.deliverRecordedData
+        let renderContext: UnsafeMutableRawPointer? = nil
+        let renderBlock: RTCAudioDeviceRenderRecordedDataBlock? = nil
         int16Samples.withUnsafeMutableBytes { rawBuffer in
             let audioBuffer = AudioBuffer(
                 mNumberChannels: UInt32(channels),
@@ -303,7 +317,7 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
                 mData: rawBuffer.baseAddress
             )
             var bufferList = AudioBufferList(mNumberBuffers: 1, mBuffers: audioBuffer)
-            _ = deliverBlock(&actionFlags, &timestamp, 0, UInt32(frameCount), &bufferList, nil, nil)
+            _ = deliverBlock(&actionFlags, &timestamp, 0, UInt32(frameCount), &bufferList, renderContext, renderBlock)
         }
 
         deliveredCount.withLock { $0 += 1 }

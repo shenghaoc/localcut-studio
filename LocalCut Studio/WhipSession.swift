@@ -87,7 +87,9 @@ actor WhipSession {
     }
 
     func start(endpointURL: URL, authToken: String? = nil, config: PublishConfig? = nil, videoTap: VideoPublishTap? = nil, audioBridge: AudioPublishBridge? = nil) async throws {
-        guard canStartFromCurrentState else { return }
+        guard canStartFromCurrentState else {
+            throw WhipError.invalidState("Cannot start: session is already \(state).")
+        }
         state = .connecting
         self.authToken = authToken
         if let config { self.config = config }
@@ -99,7 +101,9 @@ actor WhipSession {
 
         do {
             encoderLease = try await budget.acquire(.whipPublish)
-        } catch let error as EncoderBudgetError {
+        } catch {
+            await audioBridge?.stop()
+            self.audioBridge = nil
             state = .failed(error.localizedDescription)
             throw error
         }
@@ -186,6 +190,7 @@ actor WhipSession {
         guard state == .reconnecting else { return }
         reconnectGeneration += 1
         isReconnectInFlight = false
+        reconnectController.reset()
         state = .live
         startStatsPolling()
     }
