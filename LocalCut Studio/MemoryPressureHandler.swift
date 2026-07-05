@@ -44,6 +44,8 @@ nonisolated final class MemoryPressureHandler: Sendable {
         purgeCachesForMemoryPressure()
     }
 
+    /// Performs synchronous cache eviction across all singletons. This method
+    /// acquires locks on multiple caches — do not call from the main actor.
     func purgeCachesForMemoryPressure() {
         logger.warning("Memory pressure detected - evicting caches")
 
