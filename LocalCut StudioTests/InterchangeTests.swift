@@ -146,6 +146,13 @@ struct InterchangeTimeTests {
         #expect(collapsed[1].start == collapsed[0].end)
     }
 
+    @Test("Micro-gap threshold preserves half-frame precision")
+    func microGapThresholdPreservesHalfFramePrecision() {
+        let doc = makeTestDoc(frameRate: 24)
+        let tb = interchangeTimebase(for: doc)
+        #expect(tb.microGapThreshold == CMTime(value: 1, timescale: 48))
+    }
+
     @Test("Real gap above threshold remains")
     func realGapRemains() {
         let doc = makeTestDoc(frameRate: 24)

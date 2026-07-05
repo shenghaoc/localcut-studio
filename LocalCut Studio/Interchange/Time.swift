@@ -38,9 +38,10 @@ struct InterchangeTimebase: Sendable {
 
     /// Micro-gap collapse threshold: `max(1 ms, 0.5 / fps)`.
     var microGapThreshold: CMTime {
-        let oneFrame = Double(frameDurationTimescale) / Double(rate)
-        let thresholdSeconds = max(0.001, 0.5 * oneFrame)
-        return CMTime(seconds: thresholdSeconds, preferredTimescale: timescale)
+        let oneMillisecond = CMTime(value: 1, timescale: 1_000)
+        let halfFrame = CMTime(value: CMTimeValue(frameDurationTimescale),
+                               timescale: CMTimeScale(rate * 2))
+        return halfFrame > oneMillisecond ? halfFrame : oneMillisecond
     }
 
     /// Converts a frame count to `CMTime`.
