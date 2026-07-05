@@ -1,0 +1,102 @@
+{
+  "global_start_time" : {
+    "OTIO_SCHEMA" : "RationalTime.1",
+    "rate" : 24,
+    "value" : 0
+  },
+  "metadata" : {
+    "localcut" : {
+      "captionTracks" : [
+        {
+          "id" : "C0000000-0000-0000-0000-000000000001",
+          "isMuted" : false,
+          "lines" : [
+            {
+              "durationScale" : 24,
+              "durationValue" : 48,
+              "id" : "C0000000-0000-0000-0000-000000000002",
+              "startScale" : 1,
+              "startValue" : 0,
+              "text" : "Hello world"
+            }
+          ],
+          "name" : "Subtitles"
+        }
+      ]
+    }
+  },
+  "name" : "Metadata Fixture",
+  "OTIO_SCHEMA" : "Timeline.1",
+  "tracks" : {
+    "children" : [
+      {
+        "children" : [
+          {
+            "active_media_reference_key" : "DEFAULT_MEDIA",
+            "media_references" : {
+              "DEFAULT_MEDIA" : {
+                "available_range" : {
+                  "duration" : {
+                    "OTIO_SCHEMA" : "RationalTime.1",
+                    "rate" : 24,
+                    "value" : 240
+                  },
+                  "OTIO_SCHEMA" : "TimeRange.1",
+                  "start_time" : {
+                    "OTIO_SCHEMA" : "RationalTime.1",
+                    "rate" : 24,
+                    "value" : 0
+                  }
+                },
+                "name" : "EffectClip.mov",
+                "OTIO_SCHEMA" : "ExternalReference.1",
+                "target_url" : "A0000000-0000-0000-0000-000000000007"
+              }
+            },
+            "metadata" : {
+              "localcut" : {
+                "effects" : [
+                  {
+                    "contrast" : 1.2000000476837158,
+                    "exposure" : 0.5,
+                    "saturation" : 0.89999997615814209,
+                    "temperatureOffset" : 100,
+                    "tintOffset" : -20,
+                    "type" : "colourGrade"
+                  },
+                  {
+                    "amount" : 0.30000001192092896,
+                    "monochrome" : true,
+                    "size" : 2,
+                    "type" : "grain"
+                  }
+                ],
+                "opacity" : 0.80000001192092896
+              }
+            },
+            "name" : "EffectClip.mov",
+            "OTIO_SCHEMA" : "Clip.2",
+            "source_range" : {
+              "duration" : {
+                "OTIO_SCHEMA" : "RationalTime.1",
+                "rate" : 24,
+                "value" : 48
+              },
+              "OTIO_SCHEMA" : "TimeRange.1",
+              "start_time" : {
+                "OTIO_SCHEMA" : "RationalTime.1",
+                "rate" : 24,
+                "value" : 0
+              }
+            }
+          }
+        ],
+        "kind" : "Video",
+        "name" : "V1",
+        "OTIO_SCHEMA" : "Track.1"
+      }
+    ],
+    "name" : "tracks",
+    "OTIO_SCHEMA" : "Stack.1"
+  }
+}

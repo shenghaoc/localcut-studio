@@ -4,7 +4,7 @@
     "rate" : 24,
     "value" : 0
   },
-  "name" : "Basic Fixture",
+  "name" : "Transitions Fixture",
   "OTIO_SCHEMA" : "Timeline.1",
   "tracks" : {
     "children" : [
@@ -27,17 +27,12 @@
                     "value" : 0
                   }
                 },
-                "metadata" : {
-                  "localcut" : {
-                    "fingerprint" : "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
-                  }
-                },
-                "name" : "TestMedia.mov",
+                "name" : "ClipA.mov",
                 "OTIO_SCHEMA" : "ExternalReference.1",
-                "target_url" : "assets\/test.mov"
+                "target_url" : "A0000000-0000-0000-0000-000000000003"
               }
             },
-            "name" : "TestMedia.mov",
+            "name" : "ClipA.mov",
             "OTIO_SCHEMA" : "Clip.2",
             "source_range" : {
               "duration" : {
@@ -52,6 +47,21 @@
                 "value" : 0
               }
             }
+          },
+          {
+            "in_offset" : {
+              "OTIO_SCHEMA" : "RationalTime.1",
+              "rate" : 24,
+              "value" : 6
+            },
+            "name" : "crossDissolve",
+            "OTIO_SCHEMA" : "Transition.1",
+            "out_offset" : {
+              "OTIO_SCHEMA" : "RationalTime.1",
+              "rate" : 24,
+              "value" : 6
+            },
+            "transition_type" : "SMPTE_Dissolve"
           },
           {
             "active_media_reference_key" : "DEFAULT_MEDIA",
@@ -70,23 +80,18 @@
                     "value" : 0
                   }
                 },
-                "metadata" : {
-                  "localcut" : {
-                    "fingerprint" : "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
-                  }
-                },
-                "name" : "TestMedia.mov",
+                "name" : "ClipB.mov",
                 "OTIO_SCHEMA" : "ExternalReference.1",
-                "target_url" : "assets\/test.mov"
+                "target_url" : "A0000000-0000-0000-0000-000000000004"
               }
             },
-            "name" : "TestMedia.mov",
+            "name" : "ClipB.mov",
             "OTIO_SCHEMA" : "Clip.2",
             "source_range" : {
               "duration" : {
                 "OTIO_SCHEMA" : "RationalTime.1",
                 "rate" : 24,
-                "value" : 24
+                "value" : 48
               },
               "OTIO_SCHEMA" : "TimeRange.1",
               "start_time" : {

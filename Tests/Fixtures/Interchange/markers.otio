@@ -1,0 +1,98 @@
+{
+  "global_start_time" : {
+    "OTIO_SCHEMA" : "RationalTime.1",
+    "rate" : 24,
+    "value" : 0
+  },
+  "name" : "Markers Fixture",
+  "OTIO_SCHEMA" : "Timeline.1",
+  "tracks" : {
+    "children" : [
+      {
+        "children" : [
+          {
+            "active_media_reference_key" : "DEFAULT_MEDIA",
+            "media_references" : {
+              "DEFAULT_MEDIA" : {
+                "available_range" : {
+                  "duration" : {
+                    "OTIO_SCHEMA" : "RationalTime.1",
+                    "rate" : 24,
+                    "value" : 240
+                  },
+                  "OTIO_SCHEMA" : "TimeRange.1",
+                  "start_time" : {
+                    "OTIO_SCHEMA" : "RationalTime.1",
+                    "rate" : 24,
+                    "value" : 0
+                  }
+                },
+                "name" : "MarkerClip.mov",
+                "OTIO_SCHEMA" : "ExternalReference.1",
+                "target_url" : "A0000000-0000-0000-0000-000000000005"
+              }
+            },
+            "name" : "MarkerClip.mov",
+            "OTIO_SCHEMA" : "Clip.2",
+            "source_range" : {
+              "duration" : {
+                "OTIO_SCHEMA" : "RationalTime.1",
+                "rate" : 24,
+                "value" : 96
+              },
+              "OTIO_SCHEMA" : "TimeRange.1",
+              "start_time" : {
+                "OTIO_SCHEMA" : "RationalTime.1",
+                "rate" : 24,
+                "value" : 0
+              }
+            }
+          }
+        ],
+        "kind" : "Video",
+        "name" : "V1",
+        "OTIO_SCHEMA" : "Track.1"
+      }
+    ],
+    "markers" : [
+      {
+        "color" : "PURPLE",
+        "marked_range" : {
+          "duration" : {
+            "OTIO_SCHEMA" : "RationalTime.1",
+            "rate" : 24,
+            "value" : 0
+          },
+          "OTIO_SCHEMA" : "TimeRange.1",
+          "start_time" : {
+            "OTIO_SCHEMA" : "RationalTime.1",
+            "rate" : 24,
+            "value" : 0
+          }
+        },
+        "name" : "Start",
+        "OTIO_SCHEMA" : "Marker.2"
+      },
+      {
+        "color" : "PURPLE",
+        "marked_range" : {
+          "duration" : {
+            "OTIO_SCHEMA" : "RationalTime.1",
+            "rate" : 24,
+            "value" : 0
+          },
+          "OTIO_SCHEMA" : "TimeRange.1",
+          "start_time" : {
+            "OTIO_SCHEMA" : "RationalTime.1",
+            "rate" : 24,
+            "value" : 48
+          }
+        },
+        "name" : "Middle",
+        "OTIO_SCHEMA" : "Marker.2"
+      }
+    ],
+    "name" : "tracks",
+    "OTIO_SCHEMA" : "Stack.1"
+  }
+}
