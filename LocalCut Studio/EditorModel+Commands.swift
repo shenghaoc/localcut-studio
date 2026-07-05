@@ -5,6 +5,9 @@ import LocalCutCore
 
 /// Captures AppKit panels behind a Sendable handle so cancellation can hop
 /// back to the main actor without sending the panel across actors directly.
+/// `@unchecked Sendable` is required because `NSSavePanel` is `@MainActor`-
+/// isolated and not `Sendable`; the handle is only ever created and consumed
+/// on `@MainActor`, so the runtime invariant holds.
 @MainActor
 private final class PanelCancellationHandle: @unchecked Sendable {
     private let panel: NSSavePanel
@@ -107,7 +110,10 @@ extension EditorModel {
                 cancellationHandle.cancel()
             }
         }
-        guard response == .OK, !panel.urls.isEmpty else { return false }
+        guard response == .OK, !panel.urls.isEmpty else {
+            statusMessage = String(localized: "Import cancelled.")
+            return false
+        }
         await importMedia(urls: panel.urls, wantsBundling: copyImportsIntoBundle)
         return true
     }
@@ -138,7 +144,10 @@ extension EditorModel {
                 cancellationHandle.cancel()
             }
         }
-        guard response == .OK, let url = panel.url else { return false }
+        guard response == .OK, let url = panel.url else {
+            statusMessage = String(localized: "Export cancelled.")
+            return false
+        }
         await export(to: url)
         return true
     }

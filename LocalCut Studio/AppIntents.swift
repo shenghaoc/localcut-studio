@@ -17,6 +17,7 @@ final class LocalCutAppIntentRouter {
     enum RouterError: LocalizedError, Equatable {
         case emptyTimeline
         case actionCancelled
+        case panelCancelled
 
         var errorDescription: String? {
             switch self {
@@ -24,6 +25,8 @@ final class LocalCutAppIntentRouter {
                 String(localized: "Add media to the timeline before exporting.")
             case .actionCancelled:
                 String(localized: "The action was cancelled.")
+            case .panelCancelled:
+                String(localized: "The panel was dismissed.")
             }
         }
     }
@@ -55,17 +58,37 @@ final class LocalCutAppIntentRouter {
         switch action {
         case .newProject:
             let succeeded = await model.performNewProjectCommand()
-            if !succeeded { throw RouterError.actionCancelled }
+            if !succeeded {
+                // command sets statusMessage for recording-blocked; save-cancelled has no message
+                if model.statusMessage.isEmpty {
+                    model.statusMessage = String(localized: "Action cancelled.")
+                }
+                throw RouterError.actionCancelled
+            }
         case .importMedia:
             let succeeded = await model.performImportMediaCommand()
-            if !succeeded { throw RouterError.actionCancelled }
+            if !succeeded {
+                // command sets "Import cancelled." for panel dismiss, or recording-blocked message
+                if model.statusMessage.isEmpty {
+                    model.statusMessage = String(localized: "Action cancelled.")
+                }
+                throw RouterError.panelCancelled
+            }
         case .exportProject:
+            // check totalDuration before calling command to throw the correct error type
             guard model.totalDuration > 0 else {
                 model.statusMessage = RouterError.emptyTimeline.errorDescription ?? ""
                 throw RouterError.emptyTimeline
             }
             let succeeded = await model.performExportProjectCommand()
-            if !succeeded { throw RouterError.actionCancelled }
+            if !succeeded {
+                // command sets statusMessage for chapter-blocked, recording-blocked,
+                // or panel dismiss
+                if model.statusMessage.isEmpty {
+                    model.statusMessage = String(localized: "Action cancelled.")
+                }
+                throw RouterError.panelCancelled
+            }
         case .showDiagnostics:
             model.isDiagnosticsVisible = true
             model.statusMessage = String(localized: "Diagnostics opened from Shortcuts.")
