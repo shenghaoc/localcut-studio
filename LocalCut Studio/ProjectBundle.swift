@@ -323,8 +323,7 @@ nonisolated enum ProjectBundle {
                        to bundleURL: URL,
                        bundledMedia: [BundledMedia],
                        previousFingerprints: FingerprintIndex,
-                       coverData: CoverBundleData? = nil,
-                       otioData: Data? = nil) throws -> FingerprintIndex {
+                       coverData: CoverBundleData? = nil) throws -> FingerprintIndex {
         // Path-safety pass first, so a hostile `project.json` can't make us
         // touch anything outside `assets/` before we even open a file handle.
         for media in bundledMedia where !ProjectBundleLayout.isSafeAssetRelativePath(media.bundleRelativePath) {
@@ -430,15 +429,13 @@ nonisolated enum ProjectBundle {
             // The caller (DocumentController) applies this back to the model.
         }
 
-        try writeMetadata(projectJSON: projectJSON, fingerprints: index, to: bundleURL,
-                          otioData: otioData)
+        try writeMetadata(projectJSON: projectJSON, fingerprints: index, to: bundleURL)
         return index
     }
 
     private static func writeMetadata(projectJSON: Data,
                                       fingerprints: FingerprintIndex,
-                                      to bundleURL: URL,
-                                      otioData: Data? = nil) throws {
+                                      to bundleURL: URL) throws {
         let fm = FileManager.default
         let token = UUID().uuidString
         let stagedFingerprints = bundleURL
@@ -457,13 +454,6 @@ nonisolated enum ProjectBundle {
                                 to: bundleURL.appendingPathComponent(ProjectBundleLayout.fingerprintsJSON))
         try promoteMetadataFile(stagedProject,
                                 to: bundleURL.appendingPathComponent(ProjectBundleLayout.projectJSON))
-
-        // Write OTIO interchange file if provided. Written after project.json;
-        // failure is non-fatal (project.json is authoritative).
-        if let otioData {
-            let otioURL = bundleURL.appendingPathComponent(ProjectBundleLayout.projectOTIO)
-            try? otioData.write(to: otioURL, options: .atomic)
-        }
     }
 
     private static func promoteMetadataFile(_ staged: URL, to destination: URL) throws {
