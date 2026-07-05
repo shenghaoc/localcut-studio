@@ -3,6 +3,21 @@ import AppKit
 import UniformTypeIdentifiers
 import LocalCutCore
 
+/// Captures AppKit panels behind a Sendable handle so cancellation can hop
+/// back to the main actor without sending the panel across actors directly.
+@MainActor
+private final class PanelCancellationHandle: @unchecked Sendable {
+    private let panel: NSSavePanel
+
+    init(_ panel: NSSavePanel) {
+        self.panel = panel
+    }
+
+    func cancel() {
+        panel.cancel(nil)
+    }
+}
+
 /// AppKit panel/prompt glue for the document menu commands and the close flow.
 /// Kept apart from the pure persistence logic so the model's save/open/undo code
 /// stays free of panel presentation.
@@ -80,6 +95,7 @@ extension EditorModel {
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
+        let cancellationHandle = PanelCancellationHandle(panel)
         let response = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 panel.begin { response in
@@ -88,7 +104,7 @@ extension EditorModel {
             }
         } onCancel: {
             Task { @MainActor in
-                panel.cancel(nil)
+                cancellationHandle.cancel()
             }
         }
         guard response == .OK, !panel.urls.isEmpty else { return false }
@@ -110,6 +126,7 @@ extension EditorModel {
         }
         panel.nameFieldStringValue = "\(project.name).\(preset.defaultFilenameExtension)"
         panel.canCreateDirectories = true
+        let cancellationHandle = PanelCancellationHandle(panel)
         let response = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 panel.begin { response in
@@ -118,7 +135,7 @@ extension EditorModel {
             }
         } onCancel: {
             Task { @MainActor in
-                panel.cancel(nil)
+                cancellationHandle.cancel()
             }
         }
         guard response == .OK, let url = panel.url else { return false }

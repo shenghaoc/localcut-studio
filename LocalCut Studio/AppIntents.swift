@@ -29,7 +29,7 @@ final class LocalCutAppIntentRouter {
     }
 
     private let model: EditorModel
-    private var actionChain: Task<Void, Never>?
+    private var actionChain: Task<Void, Error>?
 
     init(model: EditorModel) {
         self.model = model
@@ -39,13 +39,11 @@ final class LocalCutAppIntentRouter {
         let predecessor = actionChain
         let model = self.model
         let actionTask = Task { @MainActor in
-            await predecessor?.value
+            _ = await predecessor?.result
             try Task.checkCancellation()
             try await Self.perform(action, on: model)
         }
-        actionChain = Task {
-            _ = await actionTask.result
-        }
+        actionChain = actionTask
         try await withTaskCancellationHandler {
             try await actionTask.value
         } onCancel: {
