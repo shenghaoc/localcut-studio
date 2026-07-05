@@ -67,7 +67,9 @@ The `.otio` file contains:
 - All video and audio tracks with clips and gaps.
 - Transitions (cross-dissolve → `SMPTE_Dissolve`, others → `Custom_Transition`).
 - Timeline markers.
-- Media file references with SHA-256 fingerprints.
+- Media file references. When you save a `.lcbundle`, the automatic
+  `project.otio` in the bundle also includes SHA-256 fingerprints for bundled
+  assets.
 
 LocalCut-specific features (effects, keyframes, caption styling, speed curves)
 are preserved under `metadata.localcut` — foreign tools ignore this metadata.

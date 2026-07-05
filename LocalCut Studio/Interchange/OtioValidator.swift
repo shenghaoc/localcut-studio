@@ -158,16 +158,16 @@ private func validateClip(_ node: [String: Any], path: String) -> [OtioValidatio
     } else {
         errors.append(.missingRequiredField("source_range", schema: "\(path)/Clip.2"))
     }
-    // Clip.2 must have media_references map and active_key.
+    // Clip.2 must have media_references map and active_media_reference_key.
     if node["media_references"] == nil {
         errors.append(.missingRequiredField("media_references", schema: "\(path)/Clip.2"))
     }
-    if node["active_key"] == nil {
-        errors.append(.missingRequiredField("active_key", schema: "\(path)/Clip.2"))
-    } else if let activeKey = node["active_key"] as? String,
+    if node["active_media_reference_key"] == nil {
+        errors.append(.missingRequiredField("active_media_reference_key", schema: "\(path)/Clip.2"))
+    } else if let activeKey = node["active_media_reference_key"] as? String,
               let refs = node["media_references"] as? [String: Any],
               refs[activeKey] == nil {
-        errors.append(.invalidClipMediaReference("active_key '\(activeKey)' not found in media_references."))
+        errors.append(.invalidClipMediaReference("active_media_reference_key '\(activeKey)' not found in media_references."))
     }
     return errors
 }

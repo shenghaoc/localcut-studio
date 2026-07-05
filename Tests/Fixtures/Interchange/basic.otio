@@ -1,0 +1,75 @@
+{
+  "OTIO_SCHEMA": "Timeline.1",
+  "global_start_time": {
+    "OTIO_SCHEMA": "RationalTime.1",
+    "rate": 24,
+    "value": 0
+  },
+  "metadata": {
+    "localcut": {
+      "fixture": "basic"
+    }
+  },
+  "name": "Basic Fixture",
+  "tracks": {
+    "OTIO_SCHEMA": "Stack.1",
+    "children": [
+      {
+        "OTIO_SCHEMA": "Track.1",
+        "children": [
+          {
+            "OTIO_SCHEMA": "Clip.2",
+            "active_media_reference_key": "DEFAULT_MEDIA",
+            "media_references": {
+              "DEFAULT_MEDIA": {
+                "OTIO_SCHEMA": "ExternalReference.1",
+                "available_range": {
+                  "OTIO_SCHEMA": "TimeRange.1",
+                  "duration": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 24,
+                    "value": 48
+                  },
+                  "start_time": {
+                    "OTIO_SCHEMA": "RationalTime.1",
+                    "rate": 24,
+                    "value": 0
+                  }
+                },
+                "metadata": {
+                  "localcut": {
+                    "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
+                  }
+                },
+                "name": "TestMedia.mov",
+                "target_url": "assets/test.mov"
+              }
+            },
+            "metadata": {
+              "localcut": {
+                "opacity": 1
+              }
+            },
+            "name": "TestMedia.mov",
+            "source_range": {
+              "OTIO_SCHEMA": "TimeRange.1",
+              "duration": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 24,
+                "value": 48
+              },
+              "start_time": {
+                "OTIO_SCHEMA": "RationalTime.1",
+                "rate": 24,
+                "value": 0
+              }
+            }
+          }
+        ],
+        "kind": "Video",
+        "name": "V1"
+      }
+    ],
+    "name": "tracks"
+  }
+}

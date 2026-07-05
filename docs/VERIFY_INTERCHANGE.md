@@ -67,7 +67,7 @@ The following elements are standard OTIO and should be understood by any OTIO-co
 These LocalCut-specific features are preserved as opaque metadata:
 
 - Effects chain (colour grade, skin smooth, grain, halation, vignette)
-- LUT references (key + fileName only, no texture data)
+- LUT references (no texture data or security-scoped bookmark bytes)
 - Transform keyframes (affine components)
 - Volume envelopes and fades
 - Speed curves (full curve + average-adjusted source range)
@@ -75,7 +75,7 @@ These LocalCut-specific features are preserved as opaque metadata:
 - Layout tracks (Program Mode)
 - Clip geometry (position offset, scale, mask)
 - Clip opacity
-- Media file fingerprints (SHA-256 on `ExternalReference.metadata.localcut.fingerprint`)
+- Media file fingerprints for bundle-generated `project.otio` files (SHA-256 on `ExternalReference.metadata.localcut.fingerprint`)
 - Track mute state
 
 ## `otioconvert` Path for AAF / FCPXML

@@ -219,7 +219,7 @@ struct OtioClip: OtioNode {
             "name": name,
             "source_range": sourceRange.toDictionary(),
             "media_references": mediaReferences.mapValues { $0.toDictionary() },
-            "active_key": activeKey,
+            "active_media_reference_key": activeKey,
         ]
         if let metadata, !metadata.isEmpty {
             dict["metadata"] = metadata

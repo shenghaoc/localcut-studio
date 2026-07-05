@@ -22,15 +22,21 @@ OTIO_VERSION="0.17.0"
 
 # Check if fixtures directory exists.
 if [ ! -d "$FIXTURES_DIR" ]; then
-    echo "No fixtures directory at $FIXTURES_DIR — skipping."
-    exit 0
+    echo "ERROR: no fixtures directory at $FIXTURES_DIR."
+    exit 1
 fi
 
 # Find .otio files.
 OTIO_FILES=$(find "$FIXTURES_DIR" -name "*.otio" -type f 2>/dev/null)
 if [ -z "$OTIO_FILES" ]; then
-    echo "No .otio golden files found — skipping."
-    exit 0
+    echo "ERROR: no .otio golden files found."
+    exit 1
+fi
+
+EDL_FILES=$(find "$FIXTURES_DIR" -name "*.edl" -type f 2>/dev/null)
+if [ -z "$EDL_FILES" ]; then
+    echo "ERROR: no .edl golden files found."
+    exit 1
 fi
 
 # Check if Python is available.
@@ -48,7 +54,7 @@ fi
 
 # Validate each golden file.
 ERRORS=0
-for otio_file in $OTIO_FILES; do
+while IFS= read -r -d '' otio_file; do
     filename=$(basename "$otio_file")
     if python3 -c "
 import sys
@@ -64,7 +70,7 @@ except Exception as e:
     else
         ERRORS=$((ERRORS + 1))
     fi
-done
+done < <(find "$FIXTURES_DIR" -name "*.otio" -type f -print0)
 
 if [ $ERRORS -gt 0 ]; then
     echo "FAILED: $ERRORS golden file(s) failed validation."

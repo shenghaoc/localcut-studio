@@ -235,7 +235,7 @@ struct OtioNodeTests {
         let dict = clip.toDictionary()
         #expect(dict["OTIO_SCHEMA"] as? String == "Clip.2")
         #expect(dict["media_references"] != nil)
-        #expect(dict["active_key"] as? String == "DEFAULT_MEDIA")
+        #expect(dict["active_media_reference_key"] as? String == "DEFAULT_MEDIA")
     }
 
     @Test("LocalCut metadata nested under metadata.localcut")
@@ -321,7 +321,7 @@ struct OtioValidatorTests {
                 "duration": {"OTIO_SCHEMA": "RationalTime.1", "value": 24, "rate": 24}
             },
             "media_references": {},
-            "active_key": "MISSING"
+            "active_media_reference_key": "MISSING"
         }
         """
         let errors = validateOtioDocument(json)
@@ -360,6 +360,7 @@ struct OtioSerializerTests {
         let doc = makeTestDoc(frameRate: 24)
         let (json, warnings) = serializeTimelineToOtio(doc)
         #expect(!json.isEmpty)
+        #expect(warnings.isEmpty)
         // Validate structure.
         let errors = validateOtioDocument(json)
         #expect(errors.isEmpty, "Validation errors: \(errors)")
@@ -447,6 +448,35 @@ struct OtioSerializerTests {
         #expect(json.contains("colourGrade"))
     }
 
+    @Test("LUT metadata omits unstable bookmark hashes")
+    func lutMetadataOmitsBookmarkHash() {
+        let mediaID = UUID()
+        var clip = testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24)
+        clip.effects = [.lut(bookmark: Data([0x01, 0x02, 0x03]))]
+        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [clip])
+        let (json, _) = serializeTimelineToOtio(doc)
+
+        #expect(json.contains("\"type\" : \"lut\""))
+        #expect(!json.contains("bookmarkHash"))
+    }
+
+    @Test("External references carry resolved fingerprints")
+    func externalReferenceFingerprintMetadata() {
+        let mediaID = UUID()
+        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24),
+        ])
+        let (json, _) = serializeTimelineToOtio(
+            doc,
+            options: OtioSerializationOptions(
+                resolveTargetUrl: { _ in "assets/test.mov" },
+                resolveFingerprint: { _ in "abc123" }))
+
+        #expect(json.contains("\"metadata\""))
+        #expect(json.contains("\"fingerprint\" : \"abc123\""))
+        #expect(validateOtioDocument(json).isEmpty)
+    }
+
     @Test("Caption tracks under timeline localcut metadata")
     func captionTracksInMetadata() {
         var doc = makeTestDoc(frameRate: 24)
@@ -487,7 +517,7 @@ struct EdlSerializerTests {
     @Test("Reel name normalization")
     func reelNameNormalization() {
         let mediaID = UUID()
-        var doc = makeTestDoc(frameRate: 24, media: [
+        let doc = makeTestDoc(frameRate: 24, media: [
             testMediaRef(id: mediaID, displayName: "My Long Media File Name"),
         ], clips: [
             testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24),
@@ -735,17 +765,21 @@ private func makeTestDoc(frameRate: Double,
         ])
 }
 
-private func testMediaRef(id: UUID = UUID(), displayName: String = "TestMedia.mov") -> MediaRef {
+private func testMediaRef(id: UUID = UUID(),
+                          displayName: String = "TestMedia.mov",
+                          bookmark: Data = Data([0x01]),
+                          bundleRelativePath: String? = nil) -> MediaRef {
     MediaRef(
         id: id,
         displayName: displayName,
-        bookmark: Data(),
+        bookmark: bookmark,
         duration: CMTimeCode(CMTime(value: 240, timescale: 24)),
         naturalWidth: 1920,
         naturalHeight: 1080,
         preferredTransform: TransformCode(.identity),
         hasVideo: true,
-        hasAudio: true)
+        hasAudio: true,
+        bundleRelativePath: bundleRelativePath)
 }
 
 private func testClipDoc(mediaID: UUID = UUID(),

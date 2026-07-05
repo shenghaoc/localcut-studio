@@ -155,6 +155,47 @@ struct ProjectBundleTests {
         #expect(!names.contains { $0.contains(".staged-") })
     }
 
+    @Test("Bundle project.otio uses fresh asset fingerprints")
+    func bundleProjectOtioUsesFreshAssetFingerprints() throws {
+        let tmp = try makeTempDirectory("otio-fingerprint")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bundleURL = tmp.appendingPathComponent("Sample.lcbundle")
+        let mediaID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let source = try writeAsset([0x10, 0x20, 0x30], name: "TestMedia.mov", in: tmp)
+        let model = EditorModel()
+        model.project.name = "Sample"
+        let item = MediaItem(url: source, id: mediaID)
+        item.name = "TestMedia.mov"
+        item.duration = time(1)
+        item.naturalSize = CGSize(width: 1920, height: 1080)
+        item.hasVideo = true
+        item.hasAudio = false
+        item.wantsBundling = true
+        model.project.mediaItems = [item]
+        let track = Track(name: "V1", kind: .video)
+        track.clips = [
+            Clip(mediaID: mediaID,
+                 sourceStart: .zero,
+                 duration: time(1),
+                 timelineStart: .zero),
+        ]
+        model.project.videoTracks = [track]
+
+        #expect(model.writeSynchronously(to: bundleURL))
+
+        let contents = try ProjectBundle.read(url: bundleURL)
+        let relative = try #require(contents.document.media.first?.bundleRelativePath)
+        let digest = try #require(contents.fingerprints.entries[relative])
+        let otioURL = bundleURL.appendingPathComponent(ProjectBundleLayout.projectOTIO)
+        let otio = try String(contentsOf: otioURL, encoding: .utf8)
+        let escapedRelative = relative.replacingOccurrences(of: "/", with: "\\/")
+
+        #expect(otio.contains("\"target_url\" : \"\(relative)\"") ||
+                otio.contains("\"target_url\" : \"\(escapedRelative)\""))
+        #expect(otio.contains("\"fingerprint\" : \"\(digest)\""))
+        #expect(validateOtioDocument(otio).isEmpty)
+    }
+
     @Test("Bundle cover save removes stale cover file for previous format")
     func bundleCoverSaveRemovesStalePreviousFormat() throws {
         let tmp = try makeTempDirectory("stale-cover")

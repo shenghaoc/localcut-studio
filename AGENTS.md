@@ -48,6 +48,8 @@ Each spec has `design.md`, `requirements.md`, and `tasks.md` (bugfix specs use `
 
 **Project & infra** — [Project persistence](.kiro/specs/feature-project-persistence/tasks.md) · [Project bundles](.kiro/specs/feature-project-bundles/tasks.md) · [Render cache](.kiro/specs/feature-render-cache/tasks.md) · [Export presets + render queue](.kiro/specs/feature-export-queue/tasks.md) · [Timeline markers](.kiro/specs/feature-markers/tasks.md) · [Capability tiers](.kiro/specs/feature-capability-tiers/tasks.md) · [LocalCutCore package](.kiro/specs/feature-localcutcore-package/tasks.md) · [Diagnostics panel](.kiro/specs/feature-diagnostics/tasks.md)
 
+**Interchange** — [OpenTimelineIO export (Phase 48)](.kiro/specs/phase-48-otio-interchange/tasks.md) (pure-Swift `.otio` serializer + CMX3600 EDL, bundle `project.otio`, committed reference fixtures)
+
 **UI & shell** — [Design-system integration polish](.kiro/specs/feature-design-system-integration/tasks.md) (shared `EditorPanelHeader`, draggable playhead head, inspector posters; dark chrome + brand accent, collapsible inspector rail, HIG menu-bar / Reduce-Motion conformance, Liquid Glass on floating transport/HUD, split-view divider autosave + keyboard-focusable timeline)
 
 **Bugfix specs** — [v0.1.0 consolidation](.kiro/specs/bugfix-v0.1.0-consolidation/tasks.md) · [build warnings & Swift 6 modernization](.kiro/specs/bugfix-build-warnings-and-modernization/tasks.md) · [CMTimeCode timescale guard](.kiro/specs/bugfix-cmtimecode-timescale/tasks.md) · [FingerprintIndex JSON determinism](.kiro/specs/bugfix-fingerprint-index-determinism/tasks.md) · [implemented-spec polish](.kiro/specs/bugfix-implemented-spec-polish/tasks.md) · [preview placeholder after rebuild](.kiro/specs/bugfix-preview-placeholder-after-rebuild/tasks.md) · [memory leak cache budgets](.kiro/specs/bugfix-memory-leak-investigation/tasks.md)
@@ -68,7 +70,6 @@ In ship order. **Phase 36 is next.**
 | v0.1.12 | [Phase 45 — Program mode](.kiro/specs/phase-45-program-mode/tasks.md) | Live switchable scenes through the Metal compositor; ISO tracks + replayable layout track. |
 | v0.1.13 | [Phase 46 — Replay buffer + live audio chain](.kiro/specs/phase-46-replay-buffer/tasks.md) | Keyframe-aligned ring buffer "save last N seconds"; live monitor inserts. |
 | v0.1.14 | [Phase 47 — WHIP publish](.kiro/specs/phase-47-whip-publish/tasks.md) | Standards-compliant WHIP (RFC 9725) client streaming the program feed to a user endpoint. |
-| v0.2.0 | [Phase 48 — OpenTimelineIO export](.kiro/specs/phase-48-otio-interchange/tasks.md) | Pure-Swift `.otio` serialiser (+ CMX3600 EDL) — final non-ML phase. |
 
 ### Proposed (blocked on macOS 27 leaving beta — ML tier)
 

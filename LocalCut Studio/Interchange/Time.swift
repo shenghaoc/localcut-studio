@@ -63,22 +63,11 @@ struct InterchangeTimebase: Sendable {
 ///
 /// Priority:
 /// 1. `project.frameRate` when finite and > 0.
-/// 2. Most common source video frame rate from `media`.
-/// 3. 30 fps fallback.
+/// 2. 30 fps fallback. `MediaRef` does not currently persist source FPS.
 func interchangeTimebase(for doc: ProjectDocument) -> InterchangeTimebase {
     let fps = doc.frameRate
     if fps.isFinite, fps > 0 {
         return timebase(for: fps)
-    }
-
-    // Most common source FPS.
-    let sourceFPSs = doc.media
-        .filter(\.hasVideo)
-        .map { $0.duration.cmTime }
-        .filter { $0 > .zero && $0.seconds > 0 }
-    // Source media doesn't store FPS directly; fall through to default.
-    if !sourceFPSs.isEmpty {
-        // We can't derive FPS from duration alone; use the default.
     }
 
     return timebase(for: 30)

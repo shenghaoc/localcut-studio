@@ -11,14 +11,18 @@ struct OtioSerializationOptions: Sendable {
     var bundleMode: Bool
     /// Closure to resolve a media source ID to a target URL string.
     var resolveTargetUrl: @Sendable (UUID) -> String
+    /// Closure to resolve a media source ID to a stable content fingerprint.
+    var resolveFingerprint: @Sendable (UUID) -> String?
     /// Include LocalCut-specific metadata under `metadata.localcut`.
     var includeLocalCutMetadata: Bool
 
     init(bundleMode: Bool = false,
          resolveTargetUrl: @Sendable @escaping (UUID) -> String = { $0.uuidString },
+         resolveFingerprint: @Sendable @escaping (UUID) -> String? = { _ in nil },
          includeLocalCutMetadata: Bool = true) {
         self.bundleMode = bundleMode
         self.resolveTargetUrl = resolveTargetUrl
+        self.resolveFingerprint = resolveFingerprint
         self.includeLocalCutMetadata = includeLocalCutMetadata
     }
 }
@@ -206,12 +210,10 @@ private func serializeClip(_ ic: InterchangeClip, kind: OtioTrackKind,
             availableRange = nil
         }
 
-        let fingerprint: String? = nil // Filled below if bundle mode.
-
         let extRef = OtioExternalReference(
             targetURL: targetUrl,
             name: ref.displayName,
-            fingerprint: fingerprint,
+            fingerprint: options.includeLocalCutMetadata ? options.resolveFingerprint(ic.mediaID) : nil,
             availableRange: availableRange)
         mediaReference = .external(extRef)
         warnings.append(contentsOf: checkMissingMedia(ref, trackName: trackName, clipName: ref.displayName))
@@ -335,33 +337,16 @@ private func serializeClip(_ ic: InterchangeClip, kind: OtioTrackKind,
             localcut["opacity"] = ic.doc.opacity
         }
 
-        // Fingerprint on external reference.
-        if let ref = mediaRef, let extRef = extractExternalReference(from: mediaReference) {
-            // We need to re-create with fingerprint.
-            // Handled by re-building the media reference below.
-        }
-
         if !localcut.isEmpty {
             clipMeta["localcut"] = localcut
         }
-    }
-
-    // Re-create external reference with fingerprint if needed.
-    let finalMediaReference: OtioMediaReference
-    if case .external(var extRef) = mediaReference, options.includeLocalCutMetadata {
-        // Add fingerprint from FingerprintIndex if in bundle mode.
-        // In standalone mode, we can't know the fingerprint without the file.
-        // The bundle integration layer handles this by passing fingerprints.
-        finalMediaReference = mediaReference
-    } else {
-        finalMediaReference = mediaReference
     }
 
     let clipName = mediaRef?.displayName ?? "Clip-\(ic.mediaID.uuidString.prefix(8))"
     let clipNode = OtioClip(
         name: clipName,
         sourceRange: sourceRange,
-        mediaReferences: [activeKey: finalMediaReference],
+        mediaReferences: [activeKey: mediaReference],
         activeKey: activeKey,
         metadata: clipMeta.isEmpty ? nil : clipMeta)
 
@@ -532,11 +517,13 @@ private func serializeEffects(_ effects: [Effect]) -> [[String: Any]] {
                 "temperatureOffset": grade.temperatureOffset,
                 "tintOffset": grade.tintOffset,
             ] as [String: Any]
-        case .lut(let bookmark):
-            // LUT: key + fileName only. Bookmark is opaque data.
+        case .lut:
+            // The persisted clip model only carries the security-scoped
+            // bookmark. Do not serialize bookmark bytes or Swift hash values;
+            // both are unstable/private. A future LUT sidecar model can add a
+            // durable key + file name here.
             return [
                 "type": "lut",
-                "bookmarkHash": bookmark.hashValue,
             ] as [String: Any]
         case .skinSmooth(let ss):
             return [
@@ -625,11 +612,6 @@ private func checkMissingMedia(_ ref: MediaRef, trackName: String,
         return [missingSourceWarning(mediaID: ref.id, trackName: trackName, clipName: clipName)]
     }
     return []
-}
-
-private func extractExternalReference(from ref: OtioMediaReference) -> OtioExternalReference? {
-    if case .external(let ext) = ref { return ext }
-    return nil
 }
 
 private func mapToOtioColor(_ colour: RGBAColour) -> String {
