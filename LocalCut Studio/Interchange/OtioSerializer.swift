@@ -593,16 +593,6 @@ private func serializeSpeedCurve(_ curve: Keyframed<Float>) -> [String: Any] {
     return dict
 }
 
-private func isSpeedCurveUniform(_ curve: Keyframed<Float>) -> Bool {
-    let speed = TimeRemapping.clampedSpeed(curve.defaultValue)
-    guard abs(speed - TimeRemapping.identitySpeed) < 0.0001 else { return false }
-    return curve.keyframes.allSatisfy { kf in
-        abs(TimeRemapping.clampedSpeed(kf.value) - speed) < 0.0001
-            && (kf.incomingHandle == nil || abs(TimeRemapping.clampedSpeed(kf.incomingHandle!.y) - speed) < 0.0001)
-            && (kf.outgoingHandle == nil || abs(TimeRemapping.clampedSpeed(kf.outgoingHandle!.y) - speed) < 0.0001)
-    }
-}
-
 // MARK: - Helpers
 
 private func checkMissingMedia(_ ref: MediaRef, trackName: String,

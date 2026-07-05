@@ -558,6 +558,19 @@ struct EdlSerializerTests {
         let (edl2, _) = serializeTimelineToEdl(doc)
         #expect(edl1 == edl2)
     }
+
+    @Test("Fractional rate EDL record TC starts at 01:00:00:00")
+    func fractionalRecordTCStarts() {
+        let mediaID = UUID()
+        let doc = makeTestDoc(frameRate: 29.97, media: [testMediaRef(id: mediaID)], clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 30, rate: 30),
+        ])
+        let (edl, _) = serializeTimelineToEdl(doc)
+        // The first event's record-in timecode must be 01:00:00:00, not
+        // 1000:00:00:00 (the bug that occurs when rate is used instead of nominalFPS).
+        #expect(edl.contains("01:00:00:00"))
+        #expect(!edl.contains("1000:00:00:00"))
+    }
 }
 
 // MARK: - EDL Validator Tests
@@ -848,9 +861,23 @@ struct GoldenFixtureTests {
 
     // MARK: - Byte-equality tests
 
+    private struct FixtureNotFoundError: Error, CustomStringConvertible {
+        let name: String
+        var description: String { "Fixture '\(name)' not found — fixture directory unreachable (sandboxed?)" }
+    }
+
+    /// Returns the fixture content or throws when the fixture directory is
+    /// unreachable (sandboxed test runner). Tests that call this will fail
+    /// visibly rather than silently passing.
+    private func requireFixture(_ name: String) throws -> String {
+        if let content = readFixture(name) { return content }
+        Issue.record("Fixture '\(name)' not found — fixture directory unreachable (sandboxed?)")
+        throw FixtureNotFoundError(name: name)
+    }
+
     @Test("basic.otio byte-equal + valid")
     func basicOtio() throws {
-        guard let golden = readFixture("basic.otio") else { return } // sandboxed
+        let golden = try requireFixture("basic.otio")
         let (json, warnings) = freshOtio("basic.otio")
         #expect(warnings.isEmpty)
         #expect(json == golden, "basic.otio output differs from committed fixture")
@@ -859,7 +886,7 @@ struct GoldenFixtureTests {
 
     @Test("basic.edl byte-equal + valid")
     func basicEdl() throws {
-        guard let golden = readFixture("basic.edl") else { return }
+        let golden = try requireFixture("basic.edl")
         let (edl, warnings) = freshEdl("basic.edl")
         #expect(warnings.isEmpty)
         #expect(edl == golden, "basic.edl output differs from committed fixture")
@@ -868,7 +895,7 @@ struct GoldenFixtureTests {
 
     @Test("fractional.otio byte-equal + valid")
     func fractionalOtio() throws {
-        guard let golden = readFixture("fractional.otio") else { return }
+        let golden = try requireFixture("fractional.otio")
         let (json, warnings) = freshOtio("fractional.otio")
         #expect(warnings.isEmpty)
         #expect(json == golden, "fractional.otio output differs from committed fixture")
@@ -877,7 +904,7 @@ struct GoldenFixtureTests {
 
     @Test("fractional.edl byte-equal + valid")
     func fractionalEdl() throws {
-        guard let golden = readFixture("fractional.edl") else { return }
+        let golden = try requireFixture("fractional.edl")
         let (edl, warnings) = freshEdl("fractional.edl")
         #expect(warnings.isEmpty)
         #expect(edl == golden, "fractional.edl output differs from committed fixture")
@@ -887,7 +914,7 @@ struct GoldenFixtureTests {
 
     @Test("transitions.otio byte-equal + valid")
     func transitionsOtio() throws {
-        guard let golden = readFixture("transitions.otio") else { return }
+        let golden = try requireFixture("transitions.otio")
         let (json, warnings) = freshOtio("transitions.otio")
         #expect(warnings.isEmpty)
         #expect(json == golden, "transitions.otio output differs from committed fixture")
@@ -897,7 +924,7 @@ struct GoldenFixtureTests {
 
     @Test("missing_media.otio byte-equal + valid")
     func missingMediaOtio() throws {
-        guard let golden = readFixture("missing_media.otio") else { return }
+        let golden = try requireFixture("missing_media.otio")
         let (json, warnings) = freshOtio("missing_media.otio")
         #expect(!warnings.isEmpty) // Should have missing-source warnings
         #expect(json == golden, "missing_media.otio output differs from committed fixture")
@@ -907,7 +934,7 @@ struct GoldenFixtureTests {
 
     @Test("markers.otio byte-equal + valid")
     func markersOtio() throws {
-        guard let golden = readFixture("markers.otio") else { return }
+        let golden = try requireFixture("markers.otio")
         let (json, warnings) = freshOtio("markers.otio")
         #expect(warnings.isEmpty)
         #expect(json == golden, "markers.otio output differs from committed fixture")
@@ -919,7 +946,7 @@ struct GoldenFixtureTests {
 
     @Test("speed_ramp.otio byte-equal + valid")
     func speedRampOtio() throws {
-        guard let golden = readFixture("speed_ramp.otio") else { return }
+        let golden = try requireFixture("speed_ramp.otio")
         let (json, warnings) = freshOtio("speed_ramp.otio")
         #expect(!warnings.isEmpty) // Non-uniform speed curve warning
         #expect(json == golden, "speed_ramp.otio output differs from committed fixture")
@@ -929,7 +956,7 @@ struct GoldenFixtureTests {
 
     @Test("localcut_metadata.otio byte-equal + valid")
     func localcutMetadataOtio() throws {
-        guard let golden = readFixture("localcut_metadata.otio") else { return }
+        let golden = try requireFixture("localcut_metadata.otio")
         let (json, warnings) = freshOtio("localcut_metadata.otio")
         #expect(warnings.isEmpty)
         #expect(json == golden, "localcut_metadata.otio output differs from committed fixture")

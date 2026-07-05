@@ -36,7 +36,8 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
     let mediaLookup = Dictionary(uniqueKeysWithValues: doc.media.map { ($0.id, $0) })
 
     // Record timecode starts at 01:00:00:00.
-    let recordStartFrames = timebase.rate * 3600 // 1 hour in frames.
+    // Use nominalFPS (not rate) because formatTimecode divides by nominalFPS.
+    let recordStartFrames = timebase.nominalFPS * 3600 // 1 hour in nominal frames.
 
     // Frame rate for EDL is rounded integer, non-drop-frame.
     let edlFPS = timebase.nominalFPS
@@ -163,11 +164,3 @@ private func makeReelName(displayName: String, existing: inout [String: Int]) ->
 }
 
 // MARK: - Helpers
-
-private func isSpeedCurveUniform(_ curve: Keyframed<Float>) -> Bool {
-    let speed = TimeRemapping.clampedSpeed(curve.defaultValue)
-    guard abs(speed - TimeRemapping.identitySpeed) < 0.0001 else { return false }
-    return curve.keyframes.allSatisfy { kf in
-        abs(TimeRemapping.clampedSpeed(kf.value) - speed) < 0.0001
-    }
-}

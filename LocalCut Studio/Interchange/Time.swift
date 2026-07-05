@@ -15,6 +15,14 @@ struct InterchangeTimebase: Sendable {
     let rate: Int
     /// Denominator of the rational frame rate (e.g. 1001 for 23.976 fps).
     let frameDurationTimescale: Int
+
+    init(rate: Int, frameDurationTimescale: Int) {
+        precondition(rate > 0 && frameDurationTimescale > 0,
+                     "InterchangeTimebase: rate and frameDurationTimescale must be positive")
+        self.rate = rate
+        self.frameDurationTimescale = frameDurationTimescale
+    }
+
     /// `CMTime` timescale derived from `rate`.
     var timescale: CMTimeScale { CMTimeScale(rate) }
     /// Nominal (rounded) integer FPS for timecode formatting.
@@ -246,4 +254,19 @@ func otioTimeRange(start: CMTime, duration: CMTime,
         "start_time": otioRationalTime(start, timebase: timebase),
         "duration": otioRationalTime(duration, timebase: timebase),
     ]
+}
+
+// MARK: - Speed Curve Helpers
+
+/// Checks whether a speed curve is effectively uniform at identity speed,
+/// including Bezier handle values. Used by both OTIO and EDL serializers
+/// to decide whether to emit a non-uniform speed warning.
+func isSpeedCurveUniform(_ curve: Keyframed<Float>) -> Bool {
+    let speed = TimeRemapping.clampedSpeed(curve.defaultValue)
+    guard abs(speed - TimeRemapping.identitySpeed) < 0.0001 else { return false }
+    return curve.keyframes.allSatisfy { kf in
+        abs(TimeRemapping.clampedSpeed(kf.value) - speed) < 0.0001
+            && (kf.incomingHandle == nil || abs(TimeRemapping.clampedSpeed(kf.incomingHandle!.y) - speed) < 0.0001)
+            && (kf.outgoingHandle == nil || abs(TimeRemapping.clampedSpeed(kf.outgoingHandle!.y) - speed) < 0.0001)
+    }
 }

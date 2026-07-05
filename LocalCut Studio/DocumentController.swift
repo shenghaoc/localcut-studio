@@ -315,18 +315,21 @@ final class DocumentController {
                                                      to: url,
                                                      bundledMedia: bundledMedia + overlayPlan.assets + backgroundPlan.assets,
                                                      previousFingerprints: model.lastBundleFingerprints)
-                writeProjectOtio(makeOtioData(index), to: url)
+                let otioOk = writeProjectOtio(makeOtioData(index), to: url)
                 model.lastBundleFingerprints = index
                 model.persistBeatCachesSynchronously(to: url)
+                model.statusMessage = otioOk
+                    ? "Saved \(url.lastPathComponent)."
+                    : "Saved \(url.lastPathComponent) — OTIO sidecar write failed."
             } else {
                 let document = makeDocumentForSave(forBundle: false, model: model)
                 let data = try document.encoded()
                 try data.write(to: url, options: .atomic)
                 adoptSingleFileOverlayBookmarks(from: document.overlays, model: model)
                 PaddedBackgroundBundleResolver.adoptSingleFileBookmark(from: document.paddedBackground, model: model)
+                model.statusMessage = "Saved \(url.lastPathComponent)."
             }
             adoptSaved(url: url, model: model)
-            model.statusMessage = "Saved \(url.lastPathComponent)."
             return true
         } catch {
             for (item, path) in originalPaths {
@@ -519,7 +522,7 @@ final class DocumentController {
                                         previousFingerprints: previous,
                                         coverData: coverPreparation.data)
             }.value
-            writeProjectOtio(makeOtioData(index), to: bundleURL)
+            let otioOk = writeProjectOtio(makeOtioData(index), to: bundleURL)
             model.lastBundleFingerprints = index
 
             replaceMediaItemsForBundle(at: bundleURL, model: model)
@@ -529,9 +532,12 @@ final class DocumentController {
 
             adoptSaved(url: bundleURL, model: model)
             await model.rebuild()
-            model.statusMessage = coverPreparation.warning.map {
-                "Converted to bundle — original .lcstudio left in place; \($0)"
-            } ?? "Converted to bundle — original .lcstudio left in place."
+            var notes: [String] = []
+            if let coverWarning = coverPreparation.warning { notes.append(coverWarning) }
+            if !otioOk { notes.append("OTIO sidecar write failed") }
+            model.statusMessage = notes.isEmpty
+                ? "Converted to bundle — original .lcstudio left in place."
+                : "Converted to bundle — original .lcstudio left in place; \(notes.joined(separator: "; "))"
         } catch {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
@@ -671,7 +677,7 @@ final class DocumentController {
                                         previousFingerprints: previous,
                                         coverData: coverPreparation.data)
             }.value
-            writeProjectOtio(makeOtioData(index), to: bundleURL)
+            let otioOk = writeProjectOtio(makeOtioData(index), to: bundleURL)
             model.lastBundleFingerprints = index
 
             replaceMediaItemsForBundle(at: bundleURL, model: model)
@@ -680,9 +686,12 @@ final class DocumentController {
             didTransferAccess = scoped
 
             adoptSaved(url: bundleURL, cleanIfRevision: savedRevision, model: model)
-            model.statusMessage = coverPreparation.warning.map {
-                "Saved \(bundleURL.lastPathComponent); \($0)"
-            } ?? "Saved \(bundleURL.lastPathComponent)."
+            var notes: [String] = []
+            if let coverWarning = coverPreparation.warning { notes.append(coverWarning) }
+            if !otioOk { notes.append("OTIO sidecar write failed") }
+            model.statusMessage = notes.isEmpty
+                ? "Saved \(bundleURL.lastPathComponent)."
+                : "Saved \(bundleURL.lastPathComponent); \(notes.joined(separator: "; "))"
         } catch {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
@@ -737,16 +746,29 @@ final class DocumentController {
         }
     }
 
-    private func writeProjectOtio(_ data: Data?, to bundleURL: URL) {
+    /// Writes the OTIO sidecar to the bundle. Returns `true` on success,
+    /// `false` if the write or cleanup failed (non-fatal; bundle export
+    /// still succeeds). When `data` is `nil`, removes any stale sidecar.
+    @discardableResult
+    private func writeProjectOtio(_ data: Data?, to bundleURL: URL) -> Bool {
         let otioURL = bundleURL.appendingPathComponent(ProjectBundleLayout.projectOTIO)
         guard let data else {
-            try? FileManager.default.removeItem(at: otioURL)
-            return
+            // Serialization failed or produced no data — remove stale sidecar.
+            do {
+                try FileManager.default.removeItem(at: otioURL)
+            } catch {
+                // File-not-found is fine; anything else means a stale sidecar
+                // may persist. Log but don't block the save.
+                return (error as NSError).code == NSFileNoSuchFileError
+            }
+            return true
         }
         do {
             try data.write(to: otioURL, options: .atomic)
+            return true
         } catch {
             try? FileManager.default.removeItem(at: otioURL)
+            return false
         }
     }
 
