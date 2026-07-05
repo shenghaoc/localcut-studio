@@ -762,4 +762,3 @@ private func testClipDoc(mediaID: UUID = UUID(),
         effects: [],
         transition: transition)
 }
-

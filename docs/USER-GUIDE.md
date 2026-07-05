@@ -48,3 +48,72 @@ app uses the pinned `stasel/WebRTC` 140.0.0 XCFramework through
 - Size: about 40 MB as the downloaded zip and about 87 MB extracted.
 - Build gate: guarded by `LOCALCUT_ENABLE_WEBRTC`, so custom builds can remove
   the dependency and compile the reduced publish UI state.
+
+## Exporting OTIO and EDL
+
+LocalCut Studio can export your timeline in two interchange formats for use in
+other editing tools.
+
+### Export Timeline (.otio)
+
+OpenTimelineIO (OTIO) is an open-source timeline interchange format supported by
+Kdenlive, DaVinci Resolve, and other NLEs.
+
+1. Open your project.
+2. File ▸ Export Timeline (.otio)… (or use the menu bar).
+3. Choose a save location and click Save.
+
+The `.otio` file contains:
+- All video and audio tracks with clips and gaps.
+- Transitions (cross-dissolve → `SMPTE_Dissolve`, others → `Custom_Transition`).
+- Timeline markers.
+- Media file references with SHA-256 fingerprints.
+
+LocalCut-specific features (effects, keyframes, caption styling, speed curves)
+are preserved under `metadata.localcut` — foreign tools ignore this metadata.
+
+### Export EDL (.edl)
+
+CMX3600 EDL is a widely-supported cuts-only interchange format.
+
+1. Open your project.
+2. File ▸ Export EDL (.edl)….
+3. If your project has multiple video tracks, choose which track to export.
+4. Choose a save location and click Save.
+
+The EDL exports a single video track with:
+- Record timecode starting at `01:00:00:00`.
+- Uppercase alphanumeric reel names (max 8 characters).
+- Straight cuts only — transitions are degraded to cuts with a warning.
+
+For fractional frame rates (23.976, 29.97), a comment line notes the rate.
+
+### Converting to AAF or FCPXML
+
+LocalCut Studio does not export AAF or FCPXML directly. Use the reference
+`otioconvert` tool from the OpenTimelineIO project:
+
+```bash
+pip install opentimelineio
+otioconvert your_project.otio output.aaf
+otioconvert your_project.otio output.fcpxml
+```
+
+### Warnings
+
+Both exporters may produce warnings for:
+- Clips that collapse to zero frames after frame-boundary snapping.
+- Transitions without an adjacent clip pair.
+- Missing source media references.
+- Non-uniform speed curves (the average ratio is used for the emitted duration).
+
+Warnings appear in the status bar after export.
+
+### What External Tools May Ignore
+
+- Effects, transforms, keyframes, LUTs, and fades.
+- Caption tracks and styling.
+- Volume envelopes.
+- Speed curves (only the average-adjusted duration is emitted).
+- Layout tracks (Program Mode).
+- Media bytes (the `.otio` references files, it does not embed them).
