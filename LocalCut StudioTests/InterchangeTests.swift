@@ -658,141 +658,286 @@ struct InterchangeWarningTests {
 
 // MARK: - Golden Fixture Tests
 
+/// Locates the committed `Tests/Fixtures/Interchange/` directory by walking up
+/// from this source file's path. Returns `nil` when running in a sandbox that
+/// relocates sources (e.g. CI SwiftPM builds).
+private func fixtureDir() -> String? {
+    var url = URL(fileURLWithPath: #filePath)
+    for _ in 0..<10 {
+        url = url.deletingLastPathComponent()
+        let candidate = url.appendingPathComponent("Tests/Fixtures/Interchange").path
+        if FileManager.default.fileExists(atPath: candidate) { return candidate }
+    }
+    return nil
+}
+
+/// Reads a committed fixture file. Returns `nil` when the fixture directory is
+/// unreachable (sandboxed test runner) so the test can skip gracefully.
+private func readFixture(_ name: String) -> String? {
+    guard let dir = fixtureDir() else { return nil }
+    let path = (dir as NSString).appendingPathComponent(name)
+    return try? String(contentsOfFile: path, encoding: .utf8)
+}
+
 @Suite("Golden fixtures")
 struct GoldenFixtureTests {
 
-    @Test("Basic OTIO golden structural check")
-    func basicOtioGolden() {
-        let mediaID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [
-            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 48, rate: 24),
-            testClipDoc(mediaID: mediaID, timelineStart: CMTime(value: 48, timescale: 24),
-                        durationFrames: 24, rate: 24),
-        ])
-        let (json, warnings) = serializeTimelineToOtio(doc)
+    // MARK: - Helpers
+
+    /// Builds the same `ProjectDocument` the FixtureGenerator uses for a given
+    /// fixture name, then returns fresh serializer output.
+    private func freshOtio(_ fixture: String) -> (json: String, warnings: [InterchangeWarning]) {
+        switch fixture {
+        case "basic.otio":
+            let mediaID = UUID(uuidString: "A0000000-0000-0000-0000-000000000001")!
+            let doc = ProjectDocument(
+                name: "Basic Fixture",
+                renderWidth: 1920, renderHeight: 1080, frameRate: 24,
+                media: [testMediaRef(id: mediaID, displayName: "TestMedia.mov")],
+                videoTracks: [TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+                    testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 48, rate: 24),
+                    testClipDoc(mediaID: mediaID, timelineStart: CMTime(value: 48, timescale: 24),
+                                durationFrames: 24, rate: 24),
+                ])],
+                audioTracks: [])
+            let opts = OtioSerializationOptions(
+                bundleMode: true,
+                resolveTargetUrl: { _ in "assets/test.mov" },
+                resolveFingerprint: { _ in "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890" })
+            return serializeTimelineToOtio(doc, options: opts)
+        case "fractional.otio":
+            let mediaID = UUID(uuidString: "A0000000-0000-0000-0000-000000000002")!
+            let doc = ProjectDocument(
+                name: "Fractional Fixture",
+                renderWidth: 1920, renderHeight: 1080, frameRate: 29.97,
+                media: [testMediaRef(id: mediaID, displayName: "Clip2997.mov")],
+                videoTracks: [TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+                    testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 60, rate: 30),
+                ])],
+                audioTracks: [])
+            return serializeTimelineToOtio(doc)
+        case "transitions.otio":
+            let mediaA = UUID(uuidString: "A0000000-0000-0000-0000-000000000003")!
+            let mediaB = UUID(uuidString: "A0000000-0000-0000-0000-000000000004")!
+            let doc = ProjectDocument(
+                name: "Transitions Fixture",
+                renderWidth: 1920, renderHeight: 1080, frameRate: 24,
+                media: [
+                    testMediaRef(id: mediaA, displayName: "ClipA.mov"),
+                    testMediaRef(id: mediaB, displayName: "ClipB.mov"),
+                ],
+                videoTracks: [TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+                    testClipDoc(mediaID: mediaA, timelineStart: .zero, durationFrames: 48, rate: 24),
+                    testClipDoc(mediaID: mediaB,
+                                timelineStart: CMTime(value: 48, timescale: 24),
+                                durationFrames: 48, rate: 24,
+                                transition: TransitionDoc(type: "crossDissolve",
+                                                          duration: CMTimeCode(CMTime(value: 12, timescale: 24)))),
+                ])],
+                audioTracks: [])
+            return serializeTimelineToOtio(doc)
+        case "missing_media.otio":
+            let missingID = UUID(uuidString: "A0000000-0000-0000-0000-00000000DEAD")!
+            let doc = ProjectDocument(
+                name: "Missing Media Fixture",
+                renderWidth: 1920, renderHeight: 1080, frameRate: 24,
+                media: [],
+                videoTracks: [TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+                    testClipDoc(mediaID: missingID, timelineStart: .zero, durationFrames: 24, rate: 24),
+                ])],
+                audioTracks: [])
+            return serializeTimelineToOtio(doc)
+        case "markers.otio":
+            let mediaID = UUID(uuidString: "A0000000-0000-0000-0000-000000000005")!
+            let doc = ProjectDocument(
+                name: "Markers Fixture",
+                renderWidth: 1920, renderHeight: 1080, frameRate: 24,
+                media: [testMediaRef(id: mediaID, displayName: "MarkerClip.mov")],
+                videoTracks: [TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+                    testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 96, rate: 24),
+                ])],
+                audioTracks: [],
+                markers: [
+                    TimelineMarker(id: UUID(uuidString: "B0000000-0000-0000-0000-000000000001")!,
+                                   time: CMTime(value: 0, timescale: 24), name: "Start"),
+                    TimelineMarker(id: UUID(uuidString: "B0000000-0000-0000-0000-000000000002")!,
+                                   time: CMTime(value: 48, timescale: 24), name: "Middle"),
+                ])
+            return serializeTimelineToOtio(doc)
+        case "speed_ramp.otio":
+            let mediaID = UUID(uuidString: "A0000000-0000-0000-0000-000000000006")!
+            let speedCurve = Keyframed<Float>(
+                keyframes: [
+                    Keyframe(time: CMTime.zero, value: 1.0),
+                    Keyframe(time: CMTime(value: 24, timescale: 24), value: 2.0),
+                    Keyframe(time: CMTime(value: 48, timescale: 24), value: 1.0),
+                ],
+                defaultValue: 1.0)
+            let doc = ProjectDocument(
+                name: "Speed Ramp Fixture",
+                renderWidth: 1920, renderHeight: 1080, frameRate: 24,
+                media: [testMediaRef(id: mediaID, displayName: "SpeedClip.mov")],
+                videoTracks: [TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+                    testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 48, rate: 24,
+                                speedCurve: speedCurve),
+                ])],
+                audioTracks: [])
+            return serializeTimelineToOtio(doc)
+        case "localcut_metadata.otio":
+            let mediaID = UUID(uuidString: "A0000000-0000-0000-0000-000000000007")!
+            let doc = ProjectDocument(
+                name: "Metadata Fixture",
+                renderWidth: 1920, renderHeight: 1080, frameRate: 24,
+                media: [testMediaRef(id: mediaID, displayName: "EffectClip.mov")],
+                videoTracks: [TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+                    testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 48, rate: 24,
+                                effects: [
+                                    .colourGrade(ColourGrade(exposure: 0.5, contrast: 1.2, saturation: 0.9,
+                                                             temperatureOffset: 100, tintOffset: -20)),
+                                    .grain(GrainEffect(amount: Keyframed<Float>(defaultValue: 0.3),
+                                                       size: 2.0, monochrome: true, seed: 42)),
+                                ],
+                                opacity: 0.8),
+                ])],
+                audioTracks: [],
+                captionTracks: [CaptionTrackDoc(
+                    id: UUID(uuidString: "C0000000-0000-0000-0000-000000000001")!,
+                    name: "Subtitles", isMuted: false,
+                    defaultStyle: CaptionStyle(),
+                    lines: [CaptionLine(
+                        id: UUID(uuidString: "C0000000-0000-0000-0000-000000000002")!,
+                        range: CMTimeRange(start: CMTime.zero,
+                                           duration: CMTime(value: 48, timescale: 24)),
+                        text: "Hello world")])])
+            return serializeTimelineToOtio(doc)
+        default:
+            fatalError("Unknown fixture: \(fixture)")
+        }
+    }
+
+    private func freshEdl(_ fixture: String) -> (edl: String, warnings: [InterchangeWarning]) {
+        switch fixture {
+        case "basic.edl":
+            let mediaID = UUID(uuidString: "A0000000-0000-0000-0000-000000000001")!
+            let doc = ProjectDocument(
+                name: "Basic Fixture",
+                renderWidth: 1920, renderHeight: 1080, frameRate: 24,
+                media: [testMediaRef(id: mediaID, displayName: "TestMedia.mov")],
+                videoTracks: [TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+                    testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 48, rate: 24),
+                    testClipDoc(mediaID: mediaID, timelineStart: CMTime(value: 48, timescale: 24),
+                                durationFrames: 24, rate: 24),
+                ])],
+                audioTracks: [])
+            return serializeTimelineToEdl(doc)
+        case "fractional.edl":
+            let mediaID = UUID(uuidString: "A0000000-0000-0000-0000-000000000002")!
+            let doc = ProjectDocument(
+                name: "Fractional Fixture",
+                renderWidth: 1920, renderHeight: 1080, frameRate: 29.97,
+                media: [testMediaRef(id: mediaID, displayName: "Clip2997.mov")],
+                videoTracks: [TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+                    testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 60, rate: 30),
+                ])],
+                audioTracks: [])
+            return serializeTimelineToEdl(doc)
+        default:
+            fatalError("Unknown EDL fixture: \(fixture)")
+        }
+    }
+
+    // MARK: - Byte-equality tests
+
+    @Test("basic.otio byte-equal + valid")
+    func basicOtio() throws {
+        guard let golden = readFixture("basic.otio") else { return } // sandboxed
+        let (json, warnings) = freshOtio("basic.otio")
         #expect(warnings.isEmpty)
-        // Validate structure.
-        let errors = validateOtioDocument(json)
-        #expect(errors.isEmpty, "Validation errors: \(errors)")
-        // Validate key content.
-        #expect(json.contains("Timeline.1"))
-        #expect(json.contains("Stack.1"))
-        #expect(json.contains("Track.1"))
-        #expect(json.contains("Clip.2"))
-        #expect(json.contains("ExternalReference.1"))
-        #expect(json.contains("00000000-0000-0000-0000-000000000001"))
-        #expect(json.contains("TestMedia.mov"))
-        #expect(json.contains("Video"))
-        // Deterministic: repeated calls produce identical output.
-        let (json2, _) = serializeTimelineToOtio(doc)
-        #expect(json == json2)
+        #expect(json == golden, "basic.otio output differs from committed fixture")
+        #expect(validateOtioDocument(json).isEmpty)
     }
 
-    @Test("Basic EDL golden structural check")
-    func basicEdlGolden() {
-        let mediaID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [
-            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 48, rate: 24),
-            testClipDoc(mediaID: mediaID, timelineStart: CMTime(value: 48, timescale: 24),
-                        durationFrames: 24, rate: 24),
-        ])
-        let (edl, warnings) = serializeTimelineToEdl(doc)
+    @Test("basic.edl byte-equal + valid")
+    func basicEdl() throws {
+        guard let golden = readFixture("basic.edl") else { return }
+        let (edl, warnings) = freshEdl("basic.edl")
         #expect(warnings.isEmpty)
-        // Validate structure.
-        let errors = validateEdl(edl)
-        #expect(errors.isEmpty, "EDL validation errors: \(errors)")
-        // Validate key content.
-        #expect(edl.contains("TITLE: Test Project"))
-        #expect(edl.contains("01:00:00:00"))
-        #expect(edl.contains("TESTMOV"))
-        #expect(edl.contains("V     C"))
-        // Deterministic.
-        let (edl2, _) = serializeTimelineToEdl(doc)
-        #expect(edl == edl2)
+        #expect(edl == golden, "basic.edl output differs from committed fixture")
+        #expect(validateEdl(edl).isEmpty)
     }
 
-    @Test("Structural validator passes generated OTIO")
-    func validatorPassesGoldens() {
-        let mediaID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [
-            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 48, rate: 24),
-        ])
-        let (json, _) = serializeTimelineToOtio(doc)
-        let errors = validateOtioDocument(json)
-        #expect(errors.isEmpty, "OTIO validation errors: \(errors)")
+    @Test("fractional.otio byte-equal + valid")
+    func fractionalOtio() throws {
+        guard let golden = readFixture("fractional.otio") else { return }
+        let (json, warnings) = freshOtio("fractional.otio")
+        #expect(warnings.isEmpty)
+        #expect(json == golden, "fractional.otio output differs from committed fixture")
+        #expect(validateOtioDocument(json).isEmpty)
     }
 
-    @Test("EDL validator passes generated EDL")
-    func edlValidatorPassesGoldens() {
-        let mediaID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [
-            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 48, rate: 24),
-        ])
-        let (edl, _) = serializeTimelineToEdl(doc)
-        let errors = validateEdl(edl)
-        #expect(errors.isEmpty, "EDL validation errors: \(errors)")
+    @Test("fractional.edl byte-equal + valid")
+    func fractionalEdl() throws {
+        guard let golden = readFixture("fractional.edl") else { return }
+        let (edl, warnings) = freshEdl("fractional.edl")
+        #expect(warnings.isEmpty)
+        #expect(edl == golden, "fractional.edl output differs from committed fixture")
+        #expect(validateEdl(edl).isEmpty)
+        #expect(edl.contains("LOCALCUT: RATE"))
+    }
+
+    @Test("transitions.otio byte-equal + valid")
+    func transitionsOtio() throws {
+        guard let golden = readFixture("transitions.otio") else { return }
+        let (json, warnings) = freshOtio("transitions.otio")
+        #expect(warnings.isEmpty)
+        #expect(json == golden, "transitions.otio output differs from committed fixture")
+        #expect(validateOtioDocument(json).isEmpty)
+        #expect(json.contains("SMPTE_Dissolve"))
+    }
+
+    @Test("missing_media.otio byte-equal + valid")
+    func missingMediaOtio() throws {
+        guard let golden = readFixture("missing_media.otio") else { return }
+        let (json, warnings) = freshOtio("missing_media.otio")
+        #expect(!warnings.isEmpty) // Should have missing-source warnings
+        #expect(json == golden, "missing_media.otio output differs from committed fixture")
+        #expect(validateOtioDocument(json).isEmpty)
+        #expect(json.contains("MissingReference.1"))
+    }
+
+    @Test("markers.otio byte-equal + valid")
+    func markersOtio() throws {
+        guard let golden = readFixture("markers.otio") else { return }
+        let (json, warnings) = freshOtio("markers.otio")
+        #expect(warnings.isEmpty)
+        #expect(json == golden, "markers.otio output differs from committed fixture")
+        #expect(validateOtioDocument(json).isEmpty)
+        #expect(json.contains("Marker.2"))
+        #expect(json.contains("Start"))
+        #expect(json.contains("Middle"))
+    }
+
+    @Test("speed_ramp.otio byte-equal + valid")
+    func speedRampOtio() throws {
+        guard let golden = readFixture("speed_ramp.otio") else { return }
+        let (json, warnings) = freshOtio("speed_ramp.otio")
+        #expect(!warnings.isEmpty) // Non-uniform speed curve warning
+        #expect(json == golden, "speed_ramp.otio output differs from committed fixture")
+        #expect(validateOtioDocument(json).isEmpty)
+        #expect(json.contains("speedCurve"))
+    }
+
+    @Test("localcut_metadata.otio byte-equal + valid")
+    func localcutMetadataOtio() throws {
+        guard let golden = readFixture("localcut_metadata.otio") else { return }
+        let (json, warnings) = freshOtio("localcut_metadata.otio")
+        #expect(warnings.isEmpty)
+        #expect(json == golden, "localcut_metadata.otio output differs from committed fixture")
+        #expect(validateOtioDocument(json).isEmpty)
+        #expect(json.contains("colourGrade"))
+        #expect(json.contains("captionTracks"))
+        #expect(json.contains("Hello world"))
     }
 }
 
-// MARK: - Test Helpers
-
-private func makeTestDoc(frameRate: Double,
-                         media: [MediaRef] = [],
-                         videoClips: Int = 0,
-                         audioClips: Int = 0,
-                         clips: [ClipDoc]? = nil) -> ProjectDocument {
-    let videoTrackClips = clips ?? (0..<videoClips).map { i in
-        testClipDoc(mediaID: media.first?.id ?? UUID(),
-                    timelineStart: CMTime(value: Int64(i * 24), timescale: 24),
-                    durationFrames: 24, rate: 24)
-    }
-    let audioTrackClips = (0..<audioClips).map { i in
-        testClipDoc(mediaID: media.first?.id ?? UUID(),
-                    timelineStart: CMTime(value: Int64(i * 24), timescale: 24),
-                    durationFrames: 24, rate: 24)
-    }
-    return ProjectDocument(
-        name: "Test Project",
-        renderWidth: 1920,
-        renderHeight: 1080,
-        frameRate: frameRate,
-        media: media,
-        videoTracks: videoTrackClips.isEmpty ? [] : [
-            TrackDoc(name: "V1", kind: "video", isMuted: false, clips: videoTrackClips),
-        ],
-        audioTracks: audioTrackClips.isEmpty ? [] : [
-            TrackDoc(name: "A1", kind: "audio", isMuted: false, clips: audioTrackClips),
-        ])
-}
-
-private func testMediaRef(id: UUID = UUID(),
-                          displayName: String = "TestMedia.mov",
-                          bookmark: Data = Data([0x01]),
-                          bundleRelativePath: String? = nil) -> MediaRef {
-    MediaRef(
-        id: id,
-        displayName: displayName,
-        bookmark: bookmark,
-        duration: CMTimeCode(CMTime(value: 240, timescale: 24)),
-        naturalWidth: 1920,
-        naturalHeight: 1080,
-        preferredTransform: TransformCode(.identity),
-        hasVideo: true,
-        hasAudio: true,
-        bundleRelativePath: bundleRelativePath)
-}
-
-private func testClipDoc(mediaID: UUID = UUID(),
-                         timelineStart: CMTime,
-                         durationFrames: Int,
-                         rate: Int,
-                         transition: TransitionDoc? = nil) -> ClipDoc {
-    ClipDoc(
-        mediaID: mediaID,
-        sourceStart: CMTimeCode(CMTime.zero),
-        duration: CMTimeCode(CMTime(value: Int64(durationFrames), timescale: Int32(rate))),
-        timelineStart: CMTimeCode(timelineStart),
-        opacity: 1,
-        effects: [],
-        transition: transition)
-}
+// Test helpers are in InterchangeTestHelpers.swift (internal access).
