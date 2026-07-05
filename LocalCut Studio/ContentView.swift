@@ -12,8 +12,9 @@ struct LocalCutStudioApp: App {
 
     init() {
         let model = EditorModel()
+        let appIntentRouter = LocalCutAppIntentRouter(model: model)
         self._model = State(initialValue: model)
-        LocalCutAppIntentRouter.connect(model: model)
+        AppDependencyManager.shared.add(dependency: appIntentRouter)
         LocalCutAppShortcuts.updateAppShortcutParameters()
         // Activate memory pressure monitoring at app launch.
         MemoryPressureHandler.shared.activate()

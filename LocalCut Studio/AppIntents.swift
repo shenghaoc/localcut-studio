@@ -6,7 +6,7 @@ import Foundation
 /// or Spotlight; the actions stay thin and reuse the same model commands as the
 /// menu bar so document prompts, panels, and validation remain consistent.
 @MainActor
-enum LocalCutAppIntentRouter {
+final class LocalCutAppIntentRouter {
     enum Action: String, CaseIterable, Sendable {
         case newProject
         case importMedia
@@ -15,14 +15,11 @@ enum LocalCutAppIntentRouter {
     }
 
     enum RouterError: LocalizedError, Equatable {
-        case modelUnavailable
         case emptyTimeline
         case actionCancelled
 
         var errorDescription: String? {
             switch self {
-            case .modelUnavailable:
-                String(localized: "The editor is not ready. Please ensure LocalCut Studio is open.")
             case .emptyTimeline:
                 String(localized: "Add media to the timeline before exporting.")
             case .actionCancelled:
@@ -31,28 +28,20 @@ enum LocalCutAppIntentRouter {
         }
     }
 
-    private static weak var model: EditorModel?
-    private static var actionChain: Task<Void, Never>?
+    private let model: EditorModel
+    private var actionChain: Task<Void, Never>?
 
-    static func connect(model: EditorModel) {
+    init(model: EditorModel) {
         self.model = model
     }
 
-    static func resetForTesting() {
-        model = nil
-        actionChain = nil
-    }
-
-    static func perform(_ action: Action) async throws {
-        guard let model else {
-            throw RouterError.modelUnavailable
-        }
-
+    func perform(_ action: Action) async throws {
         let predecessor = actionChain
+        let model = self.model
         let actionTask = Task { @MainActor in
             await predecessor?.value
             try Task.checkCancellation()
-            try await perform(action, on: model)
+            try await Self.perform(action, on: model)
         }
         actionChain = Task {
             _ = await actionTask.result
@@ -89,11 +78,13 @@ enum LocalCutAppIntentRouter {
 struct NewLocalCutProjectIntent: AppIntent {
     static let title: LocalizedStringResource = "New LocalCut Project"
     static let description = IntentDescription("Create a new LocalCut Studio project, prompting to save the current project if needed.")
-    static let openAppWhenRun = true
+    static var supportedModes: IntentModes { .foreground(.immediate) }
+
+    @Dependency private var router: LocalCutAppIntentRouter
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        try await LocalCutAppIntentRouter.perform(.newProject)
+        try await router.perform(.newProject)
         return .result()
     }
 }
@@ -101,11 +92,13 @@ struct NewLocalCutProjectIntent: AppIntent {
 struct ImportMediaIntent: AppIntent {
     static let title: LocalizedStringResource = "Import Media in LocalCut"
     static let description = IntentDescription("Open LocalCut Studio and show the media import picker.")
-    static let openAppWhenRun = true
+    static var supportedModes: IntentModes { .foreground(.immediate) }
+
+    @Dependency private var router: LocalCutAppIntentRouter
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        try await LocalCutAppIntentRouter.perform(.importMedia)
+        try await router.perform(.importMedia)
         return .result()
     }
 }
@@ -113,11 +106,13 @@ struct ImportMediaIntent: AppIntent {
 struct ExportLocalCutProjectIntent: AppIntent {
     static let title: LocalizedStringResource = "Export LocalCut Project"
     static let description = IntentDescription("Open LocalCut Studio and show the export destination picker for the current timeline.")
-    static let openAppWhenRun = true
+    static var supportedModes: IntentModes { .foreground(.immediate) }
+
+    @Dependency private var router: LocalCutAppIntentRouter
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        try await LocalCutAppIntentRouter.perform(.exportProject)
+        try await router.perform(.exportProject)
         return .result()
     }
 }
@@ -125,11 +120,13 @@ struct ExportLocalCutProjectIntent: AppIntent {
 struct ShowLocalCutDiagnosticsIntent: AppIntent {
     static let title: LocalizedStringResource = "Show LocalCut Diagnostics"
     static let description = IntentDescription("Open LocalCut Studio's diagnostics panel.")
-    static let openAppWhenRun = true
+    static var supportedModes: IntentModes { .foreground(.immediate) }
+
+    @Dependency private var router: LocalCutAppIntentRouter
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        try await LocalCutAppIntentRouter.perform(.showDiagnostics)
+        try await router.perform(.showDiagnostics)
         return .result()
     }
 }
