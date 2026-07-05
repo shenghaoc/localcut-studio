@@ -54,6 +54,10 @@ struct AppIntentsTests {
 
         // Fire two diagnostics actions concurrently; the chain should serialize
         // them so both complete without data races or dropped actions.
+        // Note: showDiagnostics is idempotent so this test verifies both
+        // complete without error but cannot distinguish serialized from
+        // concurrent execution. The TSan build catches data races if the
+        // serialization is removed.
         async let first: Void = router.perform(.showDiagnostics)
         async let second: Void = router.perform(.showDiagnostics)
         try await first

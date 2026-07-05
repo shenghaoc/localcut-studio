@@ -121,7 +121,7 @@ extension EditorModel {
     @discardableResult
     func performExportProjectCommand() async -> Bool {
         guard totalDuration > 0 else {
-            statusMessage = "Add media to the timeline before exporting."
+            statusMessage = String(localized: "Add media to the timeline before exporting.")
             return false
         }
         guard resolveChapterMarkersBeforeExport() else { return false }

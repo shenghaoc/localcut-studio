@@ -55,12 +55,16 @@ final class LocalCutAppIntentRouter {
     }
 
     private static func perform(_ action: Action, on model: EditorModel) async throws {
+        // Snapshot statusMessage before the command so we can detect whether the
+        // command set a new message (recording-blocked, chapter-blocked, panel-cancelled)
+        // vs. leaving a stale message from a previous action.
+        let previousStatus = model.statusMessage
+
         switch action {
         case .newProject:
             let succeeded = await model.performNewProjectCommand()
             if !succeeded {
-                // command sets statusMessage for recording-blocked; save-cancelled has no message
-                if model.statusMessage.isEmpty {
+                if model.statusMessage == previousStatus {
                     model.statusMessage = String(localized: "Action cancelled.")
                 }
                 throw RouterError.actionCancelled
@@ -68,8 +72,7 @@ final class LocalCutAppIntentRouter {
         case .importMedia:
             let succeeded = await model.performImportMediaCommand()
             if !succeeded {
-                // command sets "Import cancelled." for panel dismiss, or recording-blocked message
-                if model.statusMessage.isEmpty {
+                if model.statusMessage == previousStatus {
                     model.statusMessage = String(localized: "Action cancelled.")
                 }
                 throw RouterError.panelCancelled
@@ -82,12 +85,11 @@ final class LocalCutAppIntentRouter {
             }
             let succeeded = await model.performExportProjectCommand()
             if !succeeded {
-                // command sets statusMessage for chapter-blocked, recording-blocked,
-                // or panel dismiss
-                if model.statusMessage.isEmpty {
+                // chapter-blocked is not a panel dismissal so use actionCancelled
+                if model.statusMessage == previousStatus {
                     model.statusMessage = String(localized: "Action cancelled.")
                 }
-                throw RouterError.panelCancelled
+                throw RouterError.actionCancelled
             }
         case .showDiagnostics:
             model.isDiagnosticsVisible = true
