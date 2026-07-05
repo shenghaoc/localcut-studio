@@ -1,6 +1,6 @@
 # Tasks: Phase 47 — WHIP Publish
 
-> Status: **Implemented — pre-merge verification in progress**. Depends on Phase 41 + Phase 45 + `EncoderBudget`.
+> Status: **Implemented**. Depends on Phase 41 + Phase 45 + `EncoderBudget`.
 >
 > Pre-merge validation on 2026-07-05 uses `stasel/WebRTC` 140.0.0 (M140),
 > linked through `Packages/LocalCutWebRTC`, with the macOS header wrapper

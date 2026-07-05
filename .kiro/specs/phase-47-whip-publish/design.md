@@ -1,6 +1,6 @@
 # Design: Phase 47 — WHIP Publish
 
-> Status: **Proposed**. Target tag: **v0.1.14**.
+> Status: **Implemented**. Target tag: **v0.1.14**.
 
 ## Goal
 
