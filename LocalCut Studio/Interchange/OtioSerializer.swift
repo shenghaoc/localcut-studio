@@ -13,16 +13,20 @@ struct OtioSerializationOptions: Sendable {
     var resolveTargetUrl: @Sendable (UUID) -> String
     /// Closure to resolve a media source ID to a stable content fingerprint.
     var resolveFingerprint: @Sendable (UUID) -> String?
+    /// True when the media ID is backed by a currently resolved source.
+    var isMediaResolved: @Sendable (UUID) -> Bool
     /// Include LocalCut-specific metadata under `metadata.localcut`.
     var includeLocalCutMetadata: Bool
 
     init(bundleMode: Bool = false,
          resolveTargetUrl: @Sendable @escaping (UUID) -> String = { $0.uuidString },
          resolveFingerprint: @Sendable @escaping (UUID) -> String? = { _ in nil },
+         isMediaResolved: @Sendable @escaping (UUID) -> Bool = { _ in true },
          includeLocalCutMetadata: Bool = true) {
         self.bundleMode = bundleMode
         self.resolveTargetUrl = resolveTargetUrl
         self.resolveFingerprint = resolveFingerprint
+        self.isMediaResolved = isMediaResolved
         self.includeLocalCutMetadata = includeLocalCutMetadata
     }
 }
@@ -37,7 +41,11 @@ func serializeTimelineToOtio(_ doc: ProjectDocument,
     let timebase = interchangeTimebase(for: doc)
 
     // Build media lookup for fingerprint and display name.
-    let mediaLookup = Dictionary(uniqueKeysWithValues: doc.media.map { ($0.id, $0) })
+    let mediaLookup = Dictionary(doc.media.map { ($0.id, $0) },
+                                 uniquingKeysWith: { first, _ in first })
+    let transitionCuts = TransitionLayout.cuts(videoTracks: doc.videoTracks.map { track in
+        track.clips.map { $0.makeClip() }
+    })
 
     // Serialize tracks.
     var stackChildren: [OtioStackChild] = []
@@ -45,7 +53,7 @@ func serializeTimelineToOtio(_ doc: ProjectDocument,
     for track in doc.videoTracks {
         let (trackNode, trackWarnings) = serializeTrack(
             track, kind: .video, timebase: timebase, mediaLookup: mediaLookup,
-            options: options)
+            transitionCuts: transitionCuts, options: options)
         stackChildren.append(.track(trackNode))
         warnings.append(contentsOf: trackWarnings)
     }
@@ -53,14 +61,14 @@ func serializeTimelineToOtio(_ doc: ProjectDocument,
     for track in doc.audioTracks {
         let (trackNode, trackWarnings) = serializeTrack(
             track, kind: .audio, timebase: timebase, mediaLookup: mediaLookup,
-            options: options)
+            transitionCuts: transitionCuts, options: options)
         stackChildren.append(.track(trackNode))
         warnings.append(contentsOf: trackWarnings)
     }
 
     // Serialize markers on the stack.
     let markers = doc.markers.map { marker in
-        serializeMarker(marker, timebase: timebase)
+        serializeMarker(marker, timebase: timebase, transitionCuts: transitionCuts)
     }
 
     // Build timeline metadata with caption tracks and layout tracks.
@@ -92,6 +100,11 @@ func serializeTimelineToOtio(_ doc: ProjectDocument,
 
     // Encode to deterministic JSON.
     let dict = timeline.toDictionary()
+    guard JSONSerialization.isValidJSONObject(dict) else {
+        warnings.append(serializationFailureWarning(
+            detail: "OTIO document contains values JSONSerialization cannot encode."))
+        return ("{}", warnings)
+    }
     let jsonData: Data
     do {
         jsonData = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys, .prettyPrinted, .fragmentsAllowed])
@@ -108,23 +121,24 @@ func serializeTimelineToOtio(_ doc: ProjectDocument,
 private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
                             timebase: InterchangeTimebase,
                             mediaLookup: [UUID: MediaRef],
+                            transitionCuts: [TransitionLayout.Cut],
                             options: OtioSerializationOptions)
     -> (OtioTrack, [InterchangeWarning]) {
     var warnings: [InterchangeWarning] = []
     var children: [OtioTrackChild] = []
 
-    let snappedClips = snapTrackClips(track.clips, timebase: timebase)
-    let droppedCount = track.clips.count - snappedClips.count
-    if droppedCount > 0 {
-        // Zero-frame clips were dropped.
-        for clip in track.clips {
-            let snapped = timebase.snapToFrames(clip.timelineStart.cmTime)
-            let snappedEnd = timebase.snapToFrames(clip.timelineStart.cmTime + clip.duration.cmTime)
-            if snappedEnd <= snapped {
-                warnings.append(zeroFrameClipWarning(
-                    mediaID: clip.mediaID, trackName: track.name))
-            }
-        }
+    let effectiveClips = track.clips.map { clip -> ClipDoc in
+        var adjusted = clip
+        let authoredStart = clip.timelineStart.cmTime
+        let effectiveStart = authoredStart - TransitionLayout.shift(at: authoredStart, cuts: transitionCuts)
+        adjusted.timelineStart = CMTimeCode(effectiveStart)
+        return adjusted
+    }
+    let snappedClips = snapTrackClips(effectiveClips, timebase: timebase)
+    let keptClipIndices = Set(snappedClips.map(\.sourceIndex))
+    for index in track.clips.indices where !keptClipIndices.contains(index) {
+        warnings.append(zeroFrameClipWarning(
+            mediaID: track.clips[index].mediaID, trackName: track.name))
     }
 
     // Build children with gaps between clips.
@@ -140,7 +154,7 @@ private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
                 sourceRange: OtioTimeRange(
                     startTime: OtioRationalTime(value: 0, rate: timebase.rate),
                     duration: OtioRationalTime(
-                        value: timebase.frames(time: gapDuration) * timebase.frameDurationTimescale,
+                        value: timebase.rationalValue(frames: timebase.frames(time: gapDuration)),
                         rate: timebase.rate)),
                 name: nil)
             children.append(.gap(gap))
@@ -151,7 +165,9 @@ private func serializeTrack(_ track: TrackDoc, kind: OtioTrackKind,
             let (transitionNode, transWarnings) = serializeTransition(
                 transitionDoc, timebase: timebase, trackName: track.name,
                 clipID: ic.doc.mediaID)
-            children.append(.transition(transitionNode))
+            if let transitionNode {
+                children.append(.transition(transitionNode))
+            }
             warnings.append(contentsOf: transWarnings)
         } else if ic.doc.transition != nil, index == 0 {
             // Orphan transition on first clip.
@@ -197,14 +213,14 @@ private func serializeClip(_ ic: InterchangeClip, kind: OtioTrackKind,
 
     // Determine media reference.
     let mediaReference: OtioMediaReference
-    if let ref = mediaRef {
+    if let ref = mediaRef, options.isMediaResolved(ic.mediaID) {
         let targetUrl = options.resolveTargetUrl(ic.mediaID)
         let availableRange: OtioTimeRange?
         if ref.duration.cmTime > .zero {
             availableRange = OtioTimeRange(
                 startTime: OtioRationalTime(value: 0, rate: timebase.rate),
                 duration: OtioRationalTime(
-                    value: timebase.frames(time: ref.duration.cmTime) * timebase.frameDurationTimescale,
+                    value: timebase.rationalValue(frames: timebase.frames(time: ref.duration.cmTime)),
                     rate: timebase.rate))
         } else {
             availableRange = nil
@@ -219,9 +235,10 @@ private func serializeClip(_ ic: InterchangeClip, kind: OtioTrackKind,
         warnings.append(contentsOf: checkMissingMedia(ref, trackName: trackName, clipName: ref.displayName))
     } else {
         // Missing source.
-        mediaReference = .missing(OtioMissingReference(name: "Missing-\(ic.mediaID.uuidString.prefix(8))"))
+        let missingName = mediaRef?.displayName ?? "Missing-\(ic.mediaID.uuidString.prefix(8))"
+        mediaReference = .missing(OtioMissingReference(name: missingName))
         warnings.append(missingSourceWarning(
-            mediaID: ic.mediaID, trackName: trackName, clipName: nil))
+            mediaID: ic.mediaID, trackName: trackName, clipName: mediaRef?.displayName))
     }
 
     // Active key for Clip.2.
@@ -233,22 +250,10 @@ private func serializeClip(_ ic: InterchangeClip, kind: OtioTrackKind,
 
     if let speedCurve = ic.doc.speedCurve,
        TimeRemapping.hasNonIdentitySpeed(speedCurve) {
-        // Compute average speed ratio.
-        let plan = TimeRemapping.segmentPlan(
-            sourceDuration: ic.doc.duration.cmTime,
-            speedCurve: speedCurve)
-        if !plan.isEmpty {
-            let totalOutput = plan.reduce(CMTime.zero) { $0 + $1.outputDuration }
-            let totalSource = ic.doc.duration.cmTime
-            if totalOutput > .zero, totalSource > .zero {
-                let averageRatio = totalSource.seconds / totalOutput.seconds
-                // Adjust source range to reflect average speed.
-                adjustedSourceDuration = CMTime(
-                    seconds: ic.sourceDuration.seconds * averageRatio,
-                    preferredTimescale: timebase.timescale)
-                adjustedSourceDuration = timebase.snapToFrames(adjustedSourceDuration)
-            }
-        }
+        // A foreign tool that ignores metadata.localcut plays source_range at
+        // normal speed, so use the retimed timeline duration as the portable
+        // approximation of this clip's output length.
+        adjustedSourceDuration = ic.timelineDuration
 
         // Check if non-uniform.
         let isUniform = isSpeedCurveUniform(speedCurve)
@@ -265,10 +270,10 @@ private func serializeClip(_ ic: InterchangeClip, kind: OtioTrackKind,
     // Build source range with adjusted duration.
     let sourceRange = OtioTimeRange(
         startTime: OtioRationalTime(
-            value: timebase.frames(time: ic.sourceStart) * timebase.frameDurationTimescale,
+            value: timebase.rationalValue(frames: timebase.frames(time: ic.sourceStart)),
             rate: timebase.rate),
         duration: OtioRationalTime(
-            value: timebase.frames(time: adjustedSourceDuration) * timebase.frameDurationTimescale,
+            value: timebase.rationalValue(frames: timebase.frames(time: adjustedSourceDuration)),
             rate: timebase.rate))
 
     // Build clip metadata.
@@ -357,20 +362,14 @@ private func serializeClip(_ ic: InterchangeClip, kind: OtioTrackKind,
 
 private func serializeTransition(_ doc: TransitionDoc, timebase: InterchangeTimebase,
                                  trackName: String, clipID: UUID)
-    -> (OtioTransition, [InterchangeWarning]) {
+    -> (OtioTransition?, [InterchangeWarning]) {
     var warnings: [InterchangeWarning] = []
     let duration = doc.duration.cmTime
     let snappedDuration = timebase.snapToFrames(duration)
 
     guard snappedDuration > .zero else {
         warnings.append(orphanTransitionWarning(clipID: clipID, trackName: trackName))
-        // Return a dummy; caller should handle.
-        return (OtioTransition(
-            name: "Transition",
-            transitionType: "SMPTE_Dissolve",
-            inOffset: OtioRationalTime(value: 0, rate: timebase.rate),
-            outOffset: OtioRationalTime(value: 0, rate: timebase.rate)),
-            warnings)
+        return (nil, warnings)
     }
 
     let transitionType: String
@@ -392,10 +391,10 @@ private func serializeTransition(_ doc: TransitionDoc, timebase: InterchangeTime
         name: doc.type,
         transitionType: transitionType,
         inOffset: OtioRationalTime(
-            value: inOffsetFrames * timebase.frameDurationTimescale,
+            value: timebase.rationalValue(frames: inOffsetFrames),
             rate: timebase.rate),
         outOffset: OtioRationalTime(
-            value: outOffsetFrames * timebase.frameDurationTimescale,
+            value: timebase.rationalValue(frames: outOffsetFrames),
             rate: timebase.rate))
 
     return (transition, warnings)
@@ -404,11 +403,13 @@ private func serializeTransition(_ doc: TransitionDoc, timebase: InterchangeTime
 // MARK: - Marker Serialization
 
 private func serializeMarker(_ marker: TimelineMarker,
-                             timebase: InterchangeTimebase) -> OtioMarker {
-    let snappedTime = timebase.snapToFrames(marker.time)
+                             timebase: InterchangeTimebase,
+                             transitionCuts: [TransitionLayout.Cut]) -> OtioMarker {
+    let effectiveTime = marker.time - TransitionLayout.shift(at: marker.time, cuts: transitionCuts)
+    let snappedTime = timebase.snapToFrames(effectiveTime)
     let markedRange = OtioTimeRange(
         startTime: OtioRationalTime(
-            value: timebase.frames(time: snappedTime) * timebase.frameDurationTimescale,
+            value: timebase.rationalValue(frames: timebase.frames(time: snappedTime)),
             rate: timebase.rate),
         duration: OtioRationalTime(value: 0, rate: timebase.rate))
 
@@ -434,6 +435,9 @@ private func serializeCaptionTrack(_ track: CaptionTrackDoc) -> [String: Any] {
         "name": track.name,
         "isMuted": track.isMuted,
     ]
+    if let defaultStyle = encodedJSONObject(track.defaultStyle) {
+        dict["defaultStyle"] = defaultStyle
+    }
     // Serialize lines.
     dict["lines"] = track.lines.map { line -> [String: Any] in
         var lineDict: [String: Any] = [
@@ -454,6 +458,14 @@ private func serializeCaptionTrack(_ track: CaptionTrackDoc) -> [String: Any] {
                     "durationScale": w.range.duration.timescale,
                 ] as [String: Any]
             }
+        }
+        if let style = line.style,
+           let styleObject = encodedJSONObject(style) {
+            lineDict["style"] = styleObject
+        }
+        if let styleKeyframes = line.styleKeyframes,
+           let keyframesObject = encodedJSONObject(styleKeyframes) {
+            lineDict["styleKeyframes"] = keyframesObject
         }
         return lineDict
     }
@@ -564,13 +576,24 @@ private func serializeKeyframedTransform(_ keyframed: Keyframed<Transform2D>) ->
     // Keyframed<Transform2D> — store the affine components as opaque metadata.
     let t = keyframed.defaultValue
     var dict: [String: Any] = [
-        "defaultValue": [
-            "a": t.a, "b": t.b, "c": t.c, "d": t.d,
-            "tx": t.tx, "ty": t.ty,
-        ] as [String: Any],
+        "defaultValue": serializeTransform(t),
     ]
     if !keyframed.keyframes.isEmpty {
-        dict["keyframeCount"] = keyframed.keyframes.count
+        dict["keyframes"] = keyframed.keyframes.map { keyframe in
+            var keyframeDict: [String: Any] = [
+                "id": keyframe.id.uuidString,
+                "timeValue": keyframe.time.value,
+                "timeScale": keyframe.time.timescale,
+                "value": serializeTransform(keyframe.value),
+            ]
+            if let incomingHandle = serializeKeyframeHandle(keyframe.incomingHandle) {
+                keyframeDict["incomingHandle"] = incomingHandle
+            }
+            if let outgoingHandle = serializeKeyframeHandle(keyframe.outgoingHandle) {
+                keyframeDict["outgoingHandle"] = outgoingHandle
+            }
+            return keyframeDict
+        }
     }
     return dict
 }
@@ -583,17 +606,51 @@ private func serializeSpeedCurve(_ curve: Keyframed<Float>) -> [String: Any] {
     ]
     if !curve.keyframes.isEmpty {
         dict["keyframes"] = curve.keyframes.map { kf in
-            [
+            var keyframeDict: [String: Any] = [
+                "id": kf.id.uuidString,
                 "timeValue": kf.time.value,
                 "timeScale": kf.time.timescale,
                 "value": kf.value,
-            ] as [String: Any]
+            ]
+            if let incomingHandle = serializeKeyframeHandle(kf.incomingHandle) {
+                keyframeDict["incomingHandle"] = incomingHandle
+            }
+            if let outgoingHandle = serializeKeyframeHandle(kf.outgoingHandle) {
+                keyframeDict["outgoingHandle"] = outgoingHandle
+            }
+            return keyframeDict
         }
     }
     return dict
 }
 
 // MARK: - Helpers
+
+private func serializeTransform(_ transform: Transform2D) -> [String: Any] {
+    [
+        "a": transform.a,
+        "b": transform.b,
+        "c": transform.c,
+        "d": transform.d,
+        "tx": transform.tx,
+        "ty": transform.ty,
+    ] as [String: Any]
+}
+
+private func serializeKeyframeHandle(_ handle: KeyframeHandle?) -> [String: Any]? {
+    guard let handle else { return nil }
+    return [
+        "x": handle.x,
+        "y": handle.y,
+    ]
+}
+
+private func encodedJSONObject<T: Encodable>(_ value: T) -> Any? {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    guard let data = try? encoder.encode(value) else { return nil }
+    return try? JSONSerialization.jsonObject(with: data)
+}
 
 private func checkMissingMedia(_ ref: MediaRef, trackName: String,
                                 clipName: String?) -> [InterchangeWarning] {

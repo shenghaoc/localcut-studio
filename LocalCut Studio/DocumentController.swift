@@ -714,20 +714,21 @@ final class DocumentController {
                                        model: EditorModel) -> @MainActor (FingerprintIndex) -> Data? {
         let document = makeDocumentForSave(forBundle: forBundle, model: model)
         let mediaPaths: [UUID: (name: String, bundleRelativePath: String?)] = Dictionary(
-            uniqueKeysWithValues: model.project.mediaItems.map {
-                ($0.id, (name: $0.name, bundleRelativePath: $0.bundleRelativePath))
-            })
+            model.project.mediaItems.map {
+                ($0.id, (name: $0.url.lastPathComponent, bundleRelativePath: $0.bundleRelativePath))
+            },
+            uniquingKeysWith: { first, _ in first })
         return { fingerprints in
             let options = OtioSerializationOptions(
                 bundleMode: forBundle,
                 resolveTargetUrl: { mediaID in
-                    if forBundle {
-                        if let info = mediaPaths[mediaID], let relative = info.bundleRelativePath {
+                    if let info = mediaPaths[mediaID] {
+                        if forBundle, let relative = info.bundleRelativePath {
                             return relative
                         }
-                        return "assets/\(mediaID.uuidString)"
+                        return info.name
                     } else {
-                        return mediaPaths[mediaID]?.name ?? mediaID.uuidString
+                        return mediaID.uuidString
                     }
                 },
                 resolveFingerprint: { mediaID in
@@ -736,6 +737,9 @@ final class DocumentController {
                         return nil
                     }
                     return fingerprints.entries[relative]
+                },
+                isMediaResolved: { mediaID in
+                    mediaPaths[mediaID] != nil
                 })
             let (json, warnings) = serializeTimelineToOtio(document, options: options)
             guard !warnings.contains(where: { $0.kind == .serializationFailure }),
@@ -747,21 +751,22 @@ final class DocumentController {
     }
 
     /// Writes the OTIO sidecar to the bundle. Returns `true` on success,
-    /// `false` if the write or cleanup failed (non-fatal; bundle export
-    /// still succeeds). When `data` is `nil`, removes any stale sidecar.
+    /// `false` if serialization produced no data or the write/cleanup failed
+    /// (non-fatal; bundle export still succeeds). When `data` is `nil`,
+    /// removes any stale sidecar.
     @discardableResult
     private func writeProjectOtio(_ data: Data?, to bundleURL: URL) -> Bool {
         let otioURL = bundleURL.appendingPathComponent(ProjectBundleLayout.projectOTIO)
         guard let data else {
             // Serialization failed or produced no data — remove stale sidecar.
+            guard FileManager.default.fileExists(atPath: otioURL.path) else { return false }
             do {
                 try FileManager.default.removeItem(at: otioURL)
             } catch {
-                // File-not-found is fine; anything else means a stale sidecar
-                // may persist. Log but don't block the save.
-                return (error as NSError).code == NSFileNoSuchFileError
+                // A stale sidecar may persist. Log but don't block the save.
+                return false
             }
-            return true
+            return false
         }
         do {
             try data.write(to: otioURL, options: .atomic)

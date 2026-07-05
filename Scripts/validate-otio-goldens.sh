@@ -6,7 +6,7 @@
 #
 # Requirements:
 #   - Python 3.8+
-#   - pip install opentimelineio==0.17.0
+#   - the script creates a local venv when opentimelineio is not already installed
 #
 # This script is used in CI to validate that golden .otio files parse correctly
 # with the reference OpenTimelineIO library. It is NOT required for normal app builds.
@@ -40,23 +40,31 @@ if [ -z "$EDL_FILES" ]; then
 fi
 
 # Check if Python is available.
-if ! command -v python3 &>/dev/null; then
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+if ! command -v "$PYTHON_BIN" &>/dev/null; then
     echo "WARNING: python3 not found — skipping OTIO validation."
-    echo "To run locally: pip3 install opentimelineio==$OTIO_VERSION"
     exit 0
 fi
 
-# Install opentimelineio if not present.
-if ! python3 -c "import opentimelineio" 2>/dev/null; then
+# Install opentimelineio in an isolated environment if not present. CI images can
+# use an externally managed Python where system-wide pip installs are rejected.
+if ! "$PYTHON_BIN" -c "import opentimelineio" 2>/dev/null; then
     echo "Installing opentimelineio==$OTIO_VERSION..."
-    pip3 install "opentimelineio==$OTIO_VERSION" --quiet
+    VENV_DIR="${OTIO_VALIDATOR_VENV:-${TMPDIR:-/tmp}/localcut-otio-validator-$OTIO_VERSION}"
+    if [ ! -x "$VENV_DIR/bin/python" ]; then
+        "$PYTHON_BIN" -m venv "$VENV_DIR"
+    fi
+    "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
+    "$VENV_DIR/bin/python" -m pip install "opentimelineio==$OTIO_VERSION" --quiet
+    PYTHON_BIN="$VENV_DIR/bin/python"
 fi
 
 # Validate each golden file.
 ERRORS=0
 while IFS= read -r -d '' otio_file; do
     filename=$(basename "$otio_file")
-    if python3 -c "
+    if "$PYTHON_BIN" -c "
 import sys
 import opentimelineio as otio
 try:

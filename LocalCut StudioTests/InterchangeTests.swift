@@ -4,6 +4,17 @@ import CoreMedia
 @testable import LocalCutCore
 @testable import LocalCut_Studio
 
+private func parseOTIO(_ json: String) throws -> [String: Any] {
+    let object = try JSONSerialization.jsonObject(with: Data(json.utf8))
+    return try #require(object as? [String: Any])
+}
+
+private func otioTracks(_ json: String) throws -> [[String: Any]] {
+    let root = try parseOTIO(json)
+    let stack = try #require(root["tracks"] as? [String: Any])
+    return try #require(stack["children"] as? [[String: Any]])
+}
+
 // MARK: - Time Model Tests
 
 @Suite("Interchange time model")
@@ -200,6 +211,17 @@ struct InterchangeTimeTests {
         #expect(snapped.count == 2)
         #expect(snapped[0].outputDuration == CMTime(value: 24, timescale: 24))
         #expect(snapped[1].outputDuration == CMTime(value: 12, timescale: 24))
+        #expect(snapped[1].timelineDuration == CMTime(value: 12, timescale: 24))
+        #expect(snapped[1].timelineEnd == CMTime(value: 36, timescale: 24))
+        #expect(snapped[1].sourceDuration == CMTime(value: 24, timescale: 24))
+    }
+
+    @Test("Frame conversion clamps extreme values")
+    func frameConversionClampsExtremeValues() {
+        let tb = InterchangeTimebase(rate: 24, frameDurationTimescale: 1)
+
+        #expect(tb.frames(time: CMTime(seconds: Double.infinity, preferredTimescale: 600)) == 0)
+        #expect(tb.frames(time: CMTime(seconds: Double(Int.max), preferredTimescale: 600)) == Int.max)
     }
 
     @Test("Timecode formatting starts at 00:00:00:00")
@@ -512,6 +534,179 @@ struct OtioSerializerTests {
         let (json, _) = serializeTimelineToOtio(doc)
         #expect(json.contains("captionTracks"))
     }
+
+    @Test("Speed-ramped source range uses retimed output duration")
+    func speedRampedSourceRangeUsesOutputDuration() throws {
+        let mediaID = UUID()
+        let speedCurve = Keyframed<Float>(defaultValue: 2)
+        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24,
+                        speedCurve: speedCurve),
+        ])
+
+        let (json, warnings) = serializeTimelineToOtio(doc)
+
+        let track = try #require(try otioTracks(json).first)
+        let children = try #require(track["children"] as? [[String: Any]])
+        let clip = try #require(children.first)
+        let sourceRange = try #require(clip["source_range"] as? [String: Any])
+        let duration = try #require(sourceRange["duration"] as? [String: Any])
+        #expect(warnings.isEmpty)
+        #expect(duration["value"] as? Int == 12)
+    }
+
+    @Test("Unresolved media refs emit MissingReference with display name")
+    func unresolvedMediaRefsEmitMissingReference() {
+        let mediaID = UUID()
+        let doc = makeTestDoc(frameRate: 24, media: [
+            testMediaRef(id: mediaID, displayName: "OfflineSource.mov", bookmark: Data()),
+        ], clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24),
+        ])
+
+        let (json, warnings) = serializeTimelineToOtio(
+            doc,
+            options: OtioSerializationOptions(
+                resolveTargetUrl: { _ in "assets/offline.mov" },
+                isMediaResolved: { _ in false }))
+
+        #expect(json.contains("MissingReference.1"))
+        #expect(json.contains("OfflineSource.mov"))
+        #expect(!json.contains("ExternalReference.1"))
+        #expect(warnings.contains { $0.kind == .missingSource })
+    }
+
+    @Test("Duplicate media IDs do not crash OTIO serialization")
+    func duplicateMediaIDsDoNotCrashOtioSerialization() {
+        let mediaID = UUID()
+        let doc = makeTestDoc(frameRate: 24, media: [
+            testMediaRef(id: mediaID, displayName: "First.mov"),
+            testMediaRef(id: mediaID, displayName: "Second.mov"),
+        ], clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24),
+        ])
+
+        let (json, warnings) = serializeTimelineToOtio(doc)
+
+        #expect(!json.isEmpty)
+        #expect(warnings.isEmpty)
+    }
+
+    @Test("Zero-frame transitions are dropped from OTIO")
+    func zeroFrameTransitionsAreDropped() {
+        let mediaID = UUID()
+        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24),
+            testClipDoc(mediaID: mediaID, timelineStart: CMTime(value: 24, timescale: 24),
+                        durationFrames: 24, rate: 24,
+                        transition: TransitionDoc(type: "crossDissolve",
+                                                  duration: CMTimeCode(CMTime(value: 1, timescale: 1_000)))),
+        ])
+
+        let (json, warnings) = serializeTimelineToOtio(doc)
+
+        #expect(!json.contains("Transition.1"))
+        #expect(warnings.contains { $0.kind == .orphanTransition })
+    }
+
+    @Test("Transition ripple shifts audio gaps and markers")
+    func transitionRippleShiftsAudioGapsAndMarkers() throws {
+        let mediaID = UUID()
+        let videoTrack = TrackDoc(name: "V1", kind: "video", isMuted: false, clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24),
+            testClipDoc(mediaID: mediaID, timelineStart: CMTime(value: 24, timescale: 24),
+                        durationFrames: 24, rate: 24,
+                        transition: TransitionDoc(type: "crossDissolve",
+                                                  duration: CMTimeCode(CMTime(value: 12, timescale: 24)))),
+        ])
+        let audioTrack = TrackDoc(name: "A1", kind: "audio", isMuted: false, clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: CMTime(value: 24, timescale: 24),
+                        durationFrames: 24, rate: 24),
+        ])
+        let doc = ProjectDocument(
+            name: "Ripple",
+            renderWidth: 1920, renderHeight: 1080, frameRate: 24,
+            media: [testMediaRef(id: mediaID)],
+            videoTracks: [videoTrack],
+            audioTracks: [audioTrack],
+            markers: [TimelineMarker(time: CMTime(value: 24, timescale: 24), name: "Cut")])
+
+        let (json, warnings) = serializeTimelineToOtio(doc)
+
+        let tracks = try otioTracks(json)
+        let audio = try #require(tracks.first { $0["kind"] as? String == "Audio" })
+        let audioChildren = try #require(audio["children"] as? [[String: Any]])
+        let gap = try #require(audioChildren.first)
+        let gapRange = try #require(gap["source_range"] as? [String: Any])
+        let gapDuration = try #require(gapRange["duration"] as? [String: Any])
+        let root = try parseOTIO(json)
+        let stack = try #require(root["tracks"] as? [String: Any])
+        let markers = try #require(stack["markers"] as? [[String: Any]])
+        let markerRange = try #require(markers.first?["marked_range"] as? [String: Any])
+        let markerStart = try #require(markerRange["start_time"] as? [String: Any])
+
+        #expect(warnings.isEmpty)
+        #expect(gapDuration["value"] as? Int == 12)
+        #expect(markerStart["value"] as? Int == 12)
+    }
+
+    @Test("LocalCut metadata preserves transform, speed handles, and caption styles")
+    func localcutMetadataPreservesAnimatedFields() {
+        let mediaID = UUID()
+        let handleIn = KeyframeHandle(x: 0.25, y: 0.8)
+        let handleOut = KeyframeHandle(x: 0.75, y: 1.8)
+        var clip = testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 48, rate: 24,
+                               speedCurve: Keyframed<Float>(
+                                keyframes: [
+                                    Keyframe(time: .zero, value: 1, outgoingHandle: handleOut),
+                                    Keyframe(time: CMTime(value: 24, timescale: 24), value: 2,
+                                             incomingHandle: handleIn),
+                                ],
+                                defaultValue: 1))
+        clip.transformKeyframes = Keyframed<Transform2D>(
+            keyframes: [
+                Keyframe(time: CMTime(value: 12, timescale: 24),
+                         value: Transform2D(translateX: 0.2, translateY: -0.1, scale: 1.4, rotation: 0.1),
+                         incomingHandle: handleIn,
+                         outgoingHandle: handleOut),
+            ],
+            defaultValue: .identity)
+
+        var lineStyle = CaptionStyle()
+        lineStyle.fontSize = 88
+        lineStyle.enterAnimation = .pop
+        var styleKeyframes = CaptionStyleKeyframes(baseStyle: lineStyle)
+        styleKeyframes.addOrUpdateKeyframes(
+            at: CMTime(value: 12, timescale: 24),
+            values: CaptionStyleKeyframeValues(
+                fill: RGBAColour(red: 0.2, green: 0.8, blue: 0.4),
+                scale: 1.3,
+                offsetX: 12,
+                offsetY: -4,
+                opacity: 0.7,
+                letterSpacing: 3))
+        let captions = CaptionTrackDoc(
+            id: UUID(), name: "Styled", isMuted: false,
+            defaultStyle: lineStyle,
+            lines: [CaptionLine(
+                range: CMTimeRange(start: .zero, duration: CMTime(value: 24, timescale: 24)),
+                text: "Styled",
+                style: lineStyle,
+                styleKeyframes: styleKeyframes)])
+        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)],
+                              clips: [clip], captionTracks: [captions])
+
+        let (json, warnings) = serializeTimelineToOtio(doc)
+
+        #expect(warnings.contains { $0.kind == .nonUniformSpeedCurve })
+        #expect(json.contains("\"transformKeyframes\""))
+        #expect(json.contains("\"speedCurve\""))
+        #expect(json.contains("\"incomingHandle\""))
+        #expect(json.contains("\"outgoingHandle\""))
+        #expect(json.contains("\"defaultStyle\""))
+        #expect(json.contains("\"style\""))
+        #expect(json.contains("\"styleKeyframes\""))
+    }
 }
 
 // MARK: - EDL Serializer Tests
@@ -611,6 +806,72 @@ struct EdlSerializerTests {
         let (edl, _) = serializeTimelineToEdl(doc)
 
         #expect(edl.contains("00:00:00:00 00:00:01:00 01:00:02:00 01:00:03:00"))
+    }
+
+    @Test("Negative EDL track index fails without crashing")
+    func negativeEdlTrackIndexFailsWithoutCrashing() {
+        let mediaID = UUID()
+        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24),
+        ])
+
+        let (edl, warnings) = serializeTimelineToEdl(
+            doc,
+            options: EdlSerializationOptions(videoTrackIndex: -1))
+
+        #expect(edl.isEmpty)
+        #expect(warnings.contains { $0.kind == .serializationFailure })
+    }
+
+    @Test("EDL warns for zero-frame clips")
+    func edlWarnsForZeroFrameClips() {
+        let mediaID = UUID()
+        let doc = makeTestDoc(frameRate: 24, media: [testMediaRef(id: mediaID)], clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 1, rate: 1_000),
+        ])
+
+        let (_, warnings) = serializeTimelineToEdl(doc)
+
+        #expect(warnings.contains { $0.kind == .zeroFrameClip })
+    }
+
+    @Test("EDL warns for missing media")
+    func edlWarnsForMissingMedia() {
+        let mediaID = UUID()
+        let doc = makeTestDoc(frameRate: 24, clips: [
+            testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 24, rate: 24),
+        ])
+
+        let (edl, warnings) = serializeTimelineToEdl(doc)
+
+        #expect(edl.contains("AX"))
+        #expect(warnings.contains { $0.kind == .missingSource })
+    }
+
+    @Test("EDL reel names stay globally unique")
+    func edlReelNamesStayGloballyUnique() {
+        let mediaA = UUID()
+        let mediaB = UUID()
+        let doc = makeTestDoc(frameRate: 24, media: [
+            testMediaRef(id: mediaA, displayName: "ABCDEFG1.mov"),
+            testMediaRef(id: mediaB, displayName: "ABCDEFGH.mov"),
+        ], clips: [
+            testClipDoc(mediaID: mediaA, timelineStart: .zero, durationFrames: 24, rate: 24),
+            testClipDoc(mediaID: mediaB, timelineStart: CMTime(value: 24, timescale: 24),
+                        durationFrames: 24, rate: 24),
+            testClipDoc(mediaID: mediaB, timelineStart: CMTime(value: 48, timescale: 24),
+                        durationFrames: 24, rate: 24),
+        ])
+
+        let (edl, warnings) = serializeTimelineToEdl(doc)
+        let reelNames = edl.split(separator: "\n")
+            .filter { $0.first?.isNumber == true }
+            .compactMap { $0.split(separator: " ").dropFirst().first.map(String.init) }
+
+        #expect(warnings.isEmpty)
+        #expect(reelNames.count == 3)
+        #expect(Set(reelNames).count == 3)
+        #expect(reelNames.allSatisfy { $0.count <= 8 })
     }
 }
 
@@ -822,9 +1083,12 @@ struct GoldenFixtureTests {
             let mediaID = UUID(uuidString: "A0000000-0000-0000-0000-000000000006")!
             let speedCurve = Keyframed<Float>(
                 keyframes: [
-                    Keyframe(time: CMTime.zero, value: 1.0),
-                    Keyframe(time: CMTime(value: 24, timescale: 24), value: 2.0),
-                    Keyframe(time: CMTime(value: 48, timescale: 24), value: 1.0),
+                    Keyframe(id: UUID(uuidString: "D0000000-0000-0000-0000-000000000001")!,
+                             time: CMTime.zero, value: 1.0),
+                    Keyframe(id: UUID(uuidString: "D0000000-0000-0000-0000-000000000002")!,
+                             time: CMTime(value: 24, timescale: 24), value: 2.0),
+                    Keyframe(id: UUID(uuidString: "D0000000-0000-0000-0000-000000000003")!,
+                             time: CMTime(value: 48, timescale: 24), value: 1.0),
                 ],
                 defaultValue: 1.0)
             let doc = ProjectDocument(

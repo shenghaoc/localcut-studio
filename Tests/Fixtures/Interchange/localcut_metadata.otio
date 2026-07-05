@@ -8,6 +8,70 @@
     "localcut" : {
       "captionTracks" : [
         {
+          "defaultStyle" : {
+            "anchor" : "bottom",
+            "enterAnimation" : "none",
+            "enterDuration" : 0.25,
+            "exitAnimation" : "none",
+            "exitDuration" : 0.25,
+            "fill" : {
+              "alpha" : 1,
+              "blue" : 1,
+              "green" : 1,
+              "red" : 1
+            },
+            "fontName" : "Helvetica-Bold",
+            "fontSize" : 72,
+            "glow" : {
+              "colour" : {
+                "alpha" : 0,
+                "blue" : 0,
+                "green" : 0,
+                "red" : 0
+              },
+              "radius" : 0
+            },
+            "letterSpacing" : 0,
+            "pill" : {
+              "colour" : {
+                "alpha" : 0,
+                "blue" : 0,
+                "green" : 0,
+                "red" : 0
+              },
+              "cornerRadius" : 12,
+              "paddingX" : 16,
+              "paddingY" : 8
+            },
+            "shadow" : {
+              "blur" : 4,
+              "colour" : {
+                "alpha" : 0.5,
+                "blue" : 0,
+                "green" : 0,
+                "red" : 0
+              },
+              "offsetX" : 0,
+              "offsetY" : -2
+            },
+            "slideDirection" : "fromBottom",
+            "stroke" : {
+              "colour" : {
+                "alpha" : 1,
+                "blue" : 0,
+                "green" : 0,
+                "red" : 0
+              },
+              "width" : 0
+            },
+            "verticalInset" : 96,
+            "wordHighlightFill" : {
+              "alpha" : 1,
+              "blue" : 0.20000000000000001,
+              "green" : 0.84999999999999998,
+              "red" : 1
+            }
+          },
           "id" : "C0000000-0000-0000-0000-000000000001",
           "isMuted" : false,
           "lines" : [

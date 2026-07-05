@@ -109,11 +109,15 @@ extension EditorModel {
         let document = documentController.makeDocumentForSave(forBundle: false, model: self)
         // Snapshot media names before the Sendable closure.
         let mediaNames: [UUID: String] = Dictionary(
-            uniqueKeysWithValues: project.mediaItems.map { ($0.id, $0.name) })
+            project.mediaItems.map { ($0.id, $0.url.lastPathComponent) },
+            uniquingKeysWith: { first, _ in first })
         let options = OtioSerializationOptions(
             bundleMode: false,
             resolveTargetUrl: { mediaID in
                 mediaNames[mediaID] ?? mediaID.uuidString
+            },
+            isMediaResolved: { mediaID in
+                mediaNames[mediaID] != nil
             })
         let (json, warnings) = serializeTimelineToOtio(document, options: options)
         if warnings.contains(where: { $0.kind == .serializationFailure }) {

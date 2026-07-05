@@ -46,7 +46,7 @@ struct InterchangeTimebase: Sendable {
 
     /// Converts a frame count to `CMTime`.
     func time(frames: Int) -> CMTime {
-        CMTime(value: CMTimeValue(frames * frameDurationTimescale), timescale: timescale)
+        CMTime(value: CMTimeValue(clamping: rationalValue(frames: frames)), timescale: timescale)
     }
 
     /// Converts a `CMTime` to frame count, clamping negative to 0.
@@ -54,6 +54,8 @@ struct InterchangeTimebase: Sendable {
         guard time.isNumeric, time.isValid, !time.isIndefinite, !time.isNegativeInfinity else { return 0 }
         let seconds = max(0, time.seconds)
         let raw = seconds * Double(rate) / Double(frameDurationTimescale)
+        guard raw.isFinite else { return 0 }
+        if raw >= Double(Int.max) { return Int.max }
         return Int(raw.rounded(.toNearestOrAwayFromZero))
     }
 
@@ -64,6 +66,13 @@ struct InterchangeTimebase: Sendable {
 
     /// The rate value for OTIO `RationalTime` (same as `rate`).
     var rationalTimeRate: Int { rate }
+
+    /// OTIO RationalTime value for a frame count at this timebase.
+    func rationalValue(frames: Int) -> Int {
+        let (value, overflow) = frames.multipliedReportingOverflow(by: frameDurationTimescale)
+        guard !overflow else { return frames < 0 ? Int.min : Int.max }
+        return value
+    }
 }
 
 // MARK: - Interchange Rate Selection
@@ -115,20 +124,24 @@ func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase) -> [Inter
     guard !clips.isEmpty else { return [] }
 
     // Sort by timeline position.
-    let sorted = clips.sorted { $0.timelineStart.cmTime < $1.timelineStart.cmTime }
+    let sorted = clips.enumerated().sorted { $0.element.timelineStart.cmTime < $1.element.timelineStart.cmTime }
     var result: [InterchangeClip] = []
+    var previousRawEnd: CMTime?
 
-    for (index, clip) in sorted.enumerated() {
+    for (index, item) in sorted.enumerated() {
+        let clip = item.element
         let rawStart = clip.timelineStart.cmTime
-        let rawDuration = clip.duration.cmTime
-        let rawEnd = rawStart + rawDuration
+        let rawSourceDuration = clip.duration.cmTime
+        let rawOutputDuration = outputDuration(for: clip)
+        let rawEnd = rawStart + rawOutputDuration
 
         let snappedStart: CMTime
         if index > 0, let prev = result.last {
-            // Check if adjacent to previous clip.
-            let gap = rawStart - prev.timelineEnd
+            // Check adjacency against raw clip boundaries, then share the
+            // snapped boundary to avoid rounding a micro-gap into a frame gap.
+            let rawGap = rawStart - (previousRawEnd ?? prev.timelineEnd)
             let negThreshold = CMTime.zero - timebase.microGapThreshold
-            if gap < timebase.microGapThreshold, gap > negThreshold {
+            if rawGap < timebase.microGapThreshold, rawGap > negThreshold {
                 // Adjacent: share the boundary.
                 snappedStart = prev.timelineEnd
             } else {
@@ -143,33 +156,35 @@ func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase) -> [Inter
 
         // Check for zero-frame clip.
         if snappedDuration <= .zero {
+            previousRawEnd = rawEnd
             continue // Dropped; warning emitted by caller.
         }
 
         let sourceStart = timebase.snapToFrames(clip.sourceStart.cmTime)
-        let sourceDuration = snappedDuration // Duration derives from snapped boundaries.
-
-        // Compute output duration for speed-ramped clips.
-        let outputDuration: CMTime
-        if let speedCurve = clip.speedCurve,
-           TimeRemapping.hasNonIdentitySpeed(speedCurve) {
-            outputDuration = TimeRemapping.outputDuration(
-                sourceDuration: clip.duration.cmTime,
-                speedCurve: speedCurve)
-        } else {
-            outputDuration = snappedDuration
-        }
+        let sourceDuration = timebase.snapToFrames(rawSourceDuration)
 
         result.append(InterchangeClip(
             doc: clip,
+            sourceIndex: item.offset,
             timelineStart: snappedStart,
             timelineDuration: snappedDuration,
             sourceStart: sourceStart,
             sourceDuration: sourceDuration,
-            outputDuration: outputDuration))
+            outputDuration: snappedDuration))
+        previousRawEnd = rawEnd
     }
 
     return result
+}
+
+private func outputDuration(for clip: ClipDoc) -> CMTime {
+    guard let speedCurve = clip.speedCurve,
+          TimeRemapping.hasNonIdentitySpeed(speedCurve) else {
+        return clip.duration.cmTime
+    }
+    return TimeRemapping.outputDuration(
+        sourceDuration: clip.duration.cmTime,
+        speedCurve: speedCurve)
 }
 
 // MARK: - Interchange Clip
@@ -177,6 +192,7 @@ func snapTrackClips(_ clips: [ClipDoc], timebase: InterchangeTimebase) -> [Inter
 /// A clip whose timing has been snapped to frame boundaries.
 struct InterchangeClip: Sendable {
     let doc: ClipDoc
+    let sourceIndex: Int
     let timelineStart: CMTime
     let timelineDuration: CMTime
     let sourceStart: CMTime
@@ -257,7 +273,7 @@ func otioRationalTime(_ time: CMTime, timebase: InterchangeTimebase) -> [String:
     let frames = timebase.frames(time: time)
     return [
         "OTIO_SCHEMA": "RationalTime.1",
-        "value": frames * timebase.frameDurationTimescale,
+        "value": timebase.rationalValue(frames: frames),
         "rate": timebase.rate,
     ]
 }
@@ -274,12 +290,11 @@ func otioTimeRange(start: CMTime, duration: CMTime,
 
 // MARK: - Speed Curve Helpers
 
-/// Checks whether a speed curve is effectively uniform at identity speed,
-/// including Bezier handle values. Used by both OTIO and EDL serializers
-/// to decide whether to emit a non-uniform speed warning.
+/// Checks whether a speed curve is effectively uniform, including Bezier handle
+/// values. Used by both OTIO and EDL serializers to decide whether to emit a
+/// non-uniform speed warning.
 func isSpeedCurveUniform(_ curve: Keyframed<Float>) -> Bool {
     let speed = TimeRemapping.clampedSpeed(curve.defaultValue)
-    guard abs(speed - TimeRemapping.identitySpeed) < 0.0001 else { return false }
     return curve.keyframes.allSatisfy { kf in
         abs(TimeRemapping.clampedSpeed(kf.value) - speed) < 0.0001
             && (kf.incomingHandle == nil || abs(TimeRemapping.clampedSpeed(kf.incomingHandle!.y) - speed) < 0.0001)

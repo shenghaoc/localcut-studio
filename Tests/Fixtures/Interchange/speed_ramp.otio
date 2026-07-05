@@ -38,16 +38,19 @@
                   "defaultValue" : 1,
                   "keyframes" : [
                     {
+                      "id" : "D0000000-0000-0000-0000-000000000001",
                       "timeScale" : 1,
                       "timeValue" : 0,
                       "value" : 1
                     },
                     {
+                      "id" : "D0000000-0000-0000-0000-000000000002",
                       "timeScale" : 24,
                       "timeValue" : 24,
                       "value" : 2
                     },
                     {
+                      "id" : "D0000000-0000-0000-0000-000000000003",
                       "timeScale" : 24,
                       "timeValue" : 48,
                       "value" : 1
@@ -62,7 +65,7 @@
               "duration" : {
                 "OTIO_SCHEMA" : "RationalTime.1",
                 "rate" : 24,
-                "value" : 69
+                "value" : 33
               },
               "OTIO_SCHEMA" : "TimeRange.1",
               "start_time" : {

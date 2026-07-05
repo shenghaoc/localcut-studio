@@ -163,9 +163,12 @@ struct FixtureGenerator {
         let mediaID = UUID(uuidString: "A0000000-0000-0000-0000-000000000006")!
         let speedCurve = Keyframed<Float>(
             keyframes: [
-                Keyframe(time: CMTime.zero, value: 1.0),
-                Keyframe(time: CMTime(value: 24, timescale: 24), value: 2.0),
-                Keyframe(time: CMTime(value: 48, timescale: 24), value: 1.0),
+                Keyframe(id: UUID(uuidString: "D0000000-0000-0000-0000-000000000001")!,
+                         time: CMTime.zero, value: 1.0),
+                Keyframe(id: UUID(uuidString: "D0000000-0000-0000-0000-000000000002")!,
+                         time: CMTime(value: 24, timescale: 24), value: 2.0),
+                Keyframe(id: UUID(uuidString: "D0000000-0000-0000-0000-000000000003")!,
+                         time: CMTime(value: 48, timescale: 24), value: 1.0),
             ],
             defaultValue: 1.0)
         let doc = ProjectDocument(

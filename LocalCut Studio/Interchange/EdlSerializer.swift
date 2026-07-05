@@ -27,13 +27,14 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
     let timebase = interchangeTimebase(for: doc)
 
     // Select the video track.
-    guard options.videoTrackIndex < doc.videoTracks.count else {
+    guard options.videoTrackIndex >= 0, options.videoTrackIndex < doc.videoTracks.count else {
         return ("", [serializationFailureWarning(detail: "No video track at index \(options.videoTrackIndex).")])
     }
     let track = doc.videoTracks[options.videoTrackIndex]
 
     // Build media lookup.
-    let mediaLookup = Dictionary(uniqueKeysWithValues: doc.media.map { ($0.id, $0) })
+    let mediaLookup = Dictionary(doc.media.map { ($0.id, $0) },
+                                 uniquingKeysWith: { first, _ in first })
 
     // Record timecode starts at 01:00:00:00.
     // Use nominalFPS (not rate) because formatTimecode divides by nominalFPS.
@@ -45,9 +46,15 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
 
     // Snap clips.
     let snappedClips = snapTrackClips(track.clips, timebase: timebase)
+    let keptClipIndices = Set(snappedClips.map(\.sourceIndex))
+    for index in track.clips.indices where !keptClipIndices.contains(index) {
+        warnings.append(zeroFrameClipWarning(
+            mediaID: track.clips[index].mediaID, trackName: track.name))
+    }
 
     // Reel name dedup.
     var reelCounts: [String: Int] = [:]
+    var allocatedReels = Set<String>()
 
     var lines: [String] = []
 
@@ -67,10 +74,13 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
         let mediaRef = mediaLookup[ic.mediaID]
         if mediaRef == nil {
             reelName = "AX"
+            warnings.append(missingSourceWarning(
+                mediaID: ic.mediaID, trackName: track.name, clipName: nil))
         } else {
             reelName = makeReelName(
                 displayName: mediaRef!.displayName,
-                existing: &reelCounts)
+                counts: &reelCounts,
+                allocated: &allocatedReels)
         }
 
         // Track designator: always "V" for video.
@@ -138,7 +148,9 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
 /// - Uppercase alphanumeric only.
 /// - Max 8 characters.
 /// - Deterministic dedup suffix if collision.
-private func makeReelName(displayName: String, existing: inout [String: Int]) -> String {
+private func makeReelName(displayName: String,
+                          counts: inout [String: Int],
+                          allocated: inout Set<String>) -> String {
     // Strip to uppercase alphanumeric.
     let cleaned = displayName.uppercased()
         .filter { $0.isLetter || $0.isNumber }
@@ -146,21 +158,27 @@ private func makeReelName(displayName: String, existing: inout [String: Int]) ->
     let base = String(cleaned)
 
     guard !base.isEmpty else {
-        return makeReelName(displayName: "CLIP", existing: &existing)
+        return makeReelName(displayName: "CLIP", counts: &counts, allocated: &allocated)
     }
 
-    let count = existing[base, default: 0]
-    existing[base] = count + 1
+    if !allocated.contains(base) {
+        allocated.insert(base)
+        counts[base] = 1
+        return base
+    }
 
-    if count == 0 {
-        // First use; no suffix needed if <= 8 chars.
-        return base.count <= 8 ? base : String(base.prefix(8))
-    } else {
-        // Need dedup suffix.
-        let suffix = String(count)
-        let maxBaseLen = 8 - suffix.count
-        let truncated = String(base.prefix(max(1, maxBaseLen)))
-        return truncated + suffix
+    var count = counts[base, default: 1]
+    while true {
+        let rawSuffix = String(count)
+        let suffix = rawSuffix.count >= 8 ? String(rawSuffix.suffix(7)) : rawSuffix
+        let maxBaseLen = max(1, 8 - suffix.count)
+        let candidate = String(base.prefix(maxBaseLen)) + suffix
+        count += 1
+        counts[base] = count
+        if !allocated.contains(candidate) {
+            allocated.insert(candidate)
+            return candidate
+        }
     }
 }
 
