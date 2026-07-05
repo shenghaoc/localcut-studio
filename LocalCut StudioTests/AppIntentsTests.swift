@@ -50,19 +50,24 @@ struct AppIntentsTests {
 
     @Test func actionChainSerializesConcurrentActions() async throws {
         let model = EditorModel()
-        let router = LocalCutAppIntentRouter(model: model)
+        var events: [String] = []
+        let router = LocalCutAppIntentRouter(model: model) { action, _ in
+            events.append("start-\(action.rawValue)")
+            try await Task.sleep(for: .milliseconds(10))
+            events.append("end-\(action.rawValue)")
+        }
 
-        // Fire two diagnostics actions concurrently; the chain should serialize
-        // them so both complete without data races or dropped actions.
-        // Note: showDiagnostics is idempotent so this test verifies both
-        // complete without error but cannot distinguish serialized from
-        // concurrent execution. The TSan build catches data races if the
-        // serialization is removed.
-        async let first: Void = router.perform(.showDiagnostics)
-        async let second: Void = router.perform(.showDiagnostics)
-        try await first
-        try await second
+        let first = Task { try await router.perform(.newProject) }
+        await Task.yield()
+        let second = Task { try await router.perform(.importMedia) }
+        try await first.value
+        try await second.value
 
-        #expect(model.isDiagnosticsVisible)
+        #expect(events == [
+            "start-newProject",
+            "end-newProject",
+            "start-importMedia",
+            "end-importMedia"
+        ])
     }
 }

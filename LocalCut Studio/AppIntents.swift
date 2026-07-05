@@ -32,19 +32,25 @@ final class LocalCutAppIntentRouter {
     }
 
     private let model: EditorModel
+    private let routeAction: @MainActor @Sendable (Action, EditorModel) async throws -> Void
     private var actionChain: Task<Void, Error>?
 
-    init(model: EditorModel) {
+    init(
+        model: EditorModel,
+        routeAction: @escaping @MainActor @Sendable (Action, EditorModel) async throws -> Void = LocalCutAppIntentRouter.route
+    ) {
         self.model = model
+        self.routeAction = routeAction
     }
 
     func perform(_ action: Action) async throws {
         let predecessor = actionChain
         let model = self.model
+        let routeAction = self.routeAction
         let actionTask = Task { @MainActor in
             _ = await predecessor?.result
             try Task.checkCancellation()
-            try await Self.perform(action, on: model)
+            try await routeAction(action, model)
         }
         actionChain = actionTask
         try await withTaskCancellationHandler {
@@ -54,46 +60,33 @@ final class LocalCutAppIntentRouter {
         }
     }
 
-    private static func perform(_ action: Action, on model: EditorModel) async throws {
-        // Snapshot statusMessage before the command so we can detect whether the
-        // command set a new message (recording-blocked, chapter-blocked, panel-cancelled)
-        // vs. leaving a stale message from a previous action.
-        let previousStatus = model.statusMessage
-
+    private static func route(_ action: Action, on model: EditorModel) async throws {
         switch action {
         case .newProject:
-            let succeeded = await model.performNewProjectCommand()
-            if !succeeded {
-                if model.statusMessage == previousStatus {
-                    model.statusMessage = String(localized: "Action cancelled.")
-                }
-                throw RouterError.actionCancelled
-            }
+            try throwIfNeeded(await model.performNewProjectCommand())
         case .importMedia:
-            let succeeded = await model.performImportMediaCommand()
-            if !succeeded {
-                if model.statusMessage == previousStatus {
-                    model.statusMessage = String(localized: "Action cancelled.")
-                }
-                throw RouterError.panelCancelled
-            }
+            try throwIfNeeded(await model.performImportMediaCommand())
         case .exportProject:
             // check totalDuration before calling command to throw the correct error type
             guard model.totalDuration > 0 else {
                 model.statusMessage = RouterError.emptyTimeline.errorDescription ?? ""
                 throw RouterError.emptyTimeline
             }
-            let succeeded = await model.performExportProjectCommand()
-            if !succeeded {
-                // chapter-blocked is not a panel dismissal so use actionCancelled
-                if model.statusMessage == previousStatus {
-                    model.statusMessage = String(localized: "Action cancelled.")
-                }
-                throw RouterError.actionCancelled
-            }
+            try throwIfNeeded(await model.performExportProjectCommand())
         case .showDiagnostics:
             model.isDiagnosticsVisible = true
             model.statusMessage = String(localized: "Diagnostics opened from Shortcuts.")
+        }
+    }
+
+    private static func throwIfNeeded(_ outcome: EditorCommandOutcome) throws {
+        switch outcome {
+        case .completed:
+            return
+        case .actionCancelled:
+            throw RouterError.actionCancelled
+        case .panelCancelled:
+            throw RouterError.panelCancelled
         }
     }
 }

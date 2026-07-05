@@ -3,6 +3,12 @@ import AppKit
 import UniformTypeIdentifiers
 import LocalCutCore
 
+enum EditorCommandOutcome: Equatable, Sendable {
+    case completed
+    case actionCancelled
+    case panelCancelled
+}
+
 /// Captures AppKit panels behind a Sendable handle so cancellation can hop
 /// back to the main actor without sending the panel across actors directly.
 /// `@unchecked Sendable` is required because `NSSavePanel` is `@MainActor`-
@@ -83,15 +89,21 @@ extension EditorModel {
     }
 
     @discardableResult
-    func performNewProjectCommand() async -> Bool {
-        guard !blockDocumentCommandWhileRecording() else { return false }
-        guard await confirmSaveIfNeeded() else { return false }
+    func performNewProjectCommand() async -> EditorCommandOutcome {
+        guard !blockDocumentCommandWhileRecording() else { return .actionCancelled }
+        let previousStatus = statusMessage
+        guard await confirmSaveIfNeeded() else {
+            if statusMessage == previousStatus {
+                statusMessage = String(localized: "Action cancelled.")
+            }
+            return .actionCancelled
+        }
         newDocument()
-        return true
+        return .completed
     }
 
     @discardableResult
-    func performImportMediaCommand() async -> Bool {
+    func performImportMediaCommand() async -> EditorCommandOutcome {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.movie, .video, .audiovisualContent,
                                      .audio, .mpeg4Movie, .quickTimeMovie]
@@ -112,19 +124,19 @@ extension EditorModel {
         }
         guard response == .OK, !panel.urls.isEmpty else {
             statusMessage = String(localized: "Import cancelled.")
-            return false
+            return .panelCancelled
         }
         await importMedia(urls: panel.urls, wantsBundling: copyImportsIntoBundle)
-        return true
+        return .completed
     }
 
     @discardableResult
-    func performExportProjectCommand() async -> Bool {
+    func performExportProjectCommand() async -> EditorCommandOutcome {
         guard totalDuration > 0 else {
             statusMessage = String(localized: "Add media to the timeline before exporting.")
-            return false
+            return .actionCancelled
         }
-        guard resolveChapterMarkersBeforeExport() else { return false }
+        guard resolveChapterMarkersBeforeExport() else { return .actionCancelled }
         let preset = BuiltInExportPresets.defaultPreset
         let panel = NSSavePanel()
         if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
@@ -146,10 +158,10 @@ extension EditorModel {
         }
         guard response == .OK, let url = panel.url else {
             statusMessage = String(localized: "Export cancelled.")
-            return false
+            return .panelCancelled
         }
         await export(to: url)
-        return true
+        return .completed
     }
 
     /// File ▸ Export Timeline (.otio) — serializes the project to OpenTimelineIO
