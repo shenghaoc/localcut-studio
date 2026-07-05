@@ -87,6 +87,7 @@ The EDL exports a single video track with:
 - Record timecode starting at `01:00:00:00`.
 - Uppercase alphanumeric reel names (max 8 characters).
 - Straight cuts only — transitions are degraded to cuts with a warning.
+- Up to 999 events per list; larger tracks must be split before export.
 
 For fractional frame rates (23.976, 29.97), a comment line notes the rate.
 

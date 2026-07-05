@@ -182,6 +182,10 @@ extension EditorModel {
             title: project.name,
             videoTrackIndex: trackIndex)
         let (edl, warnings) = serializeTimelineToEdl(document, options: options)
+        if warnings.contains(where: { $0.kind == .serializationFailure }) {
+            statusMessage = "EDL export failed: serialization error."
+            return
+        }
         do {
             try writeInterchangeString(edl, to: url)
             if warnings.isEmpty {

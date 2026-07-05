@@ -18,6 +18,7 @@
 
 - [x] **T3.1** `Interchange/EdlSerializer.swift` — CMX3600 emitter sharing `Time.swift`.
 - [x] **T3.2** CMX3600 line-grammar validator (test-only).
+- [x] **T3.3** Refuse >999-event EDL exports with a serialization failure before writing a non-CMX3600-valid file.
 
 ## Bundle integration
 

@@ -81,10 +81,9 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
     lines.append("")
 
     if snappedClips.count > 999 {
-        warnings.append(InterchangeWarning(
-            .unsupportedFeature,
-            "EDL has \(snappedClips.count) events; CMX3600 standard allows 999. Some tools may reject events above 999.",
-            trackName: track.name))
+        warnings.append(serializationFailureWarning(
+            detail: "EDL has \(snappedClips.count) events; CMX3600 supports at most 999 events per list."))
+        return ("", warnings)
     }
 
     for (index, ic) in snappedClips.enumerated() {

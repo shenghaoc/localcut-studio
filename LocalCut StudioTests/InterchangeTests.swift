@@ -970,6 +970,27 @@ struct EdlSerializerTests {
         #expect(warnings.contains { $0.kind == .missingSource })
     }
 
+    @Test("EDL rejects more than 999 events")
+    func edlRejectsMoreThan999Events() {
+        let mediaID = UUID()
+        let clips = (0..<1_000).map { index in
+            testClipDoc(
+                mediaID: mediaID,
+                timelineStart: CMTime(value: Int64(index * 24), timescale: 24),
+                durationFrames: 24,
+                rate: 24)
+        }
+        let doc = makeTestDoc(
+            frameRate: 24,
+            media: [testMediaRef(id: mediaID)],
+            clips: clips)
+
+        let (edl, warnings) = serializeTimelineToEdl(doc)
+
+        #expect(edl.isEmpty)
+        #expect(warnings.contains { $0.kind == .serializationFailure })
+    }
+
     @Test("EDL reel names stay globally unique")
     func edlReelNamesStayGloballyUnique() {
         let mediaA = UUID()

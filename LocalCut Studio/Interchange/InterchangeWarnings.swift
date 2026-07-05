@@ -97,5 +97,5 @@ func unsupportedFeatureWarning(feature: String, trackName: String?) -> Interchan
 func serializationFailureWarning(detail: String) -> InterchangeWarning {
     InterchangeWarning(
         .serializationFailure,
-        "OTIO serialization failed: \(detail)")
+        "Interchange serialization failed: \(detail)")
 }

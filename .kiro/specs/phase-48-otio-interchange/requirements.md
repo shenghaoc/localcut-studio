@@ -34,6 +34,7 @@
 - **R5.3** Fractional rate adds a `* LOCALCUT: RATE` comment.
 - **R5.4** Transitions on the exported track become straight cuts with a warning per omission.
 - **R5.5** EDL passes a CMX3600 line-grammar validator in CI.
+- **R5.6** Timelines with more than 999 emitted EDL events fail serialization with a user-visible error instead of writing a non-CMX3600-valid file.
 
 ## R6 — Bundle integration
 
