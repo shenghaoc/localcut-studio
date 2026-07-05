@@ -44,7 +44,7 @@
 ## R7 — Verification
 
 - **R7.1** Unit tests for time math, schema validity, mapping correctness, EDL grammar.
-- **R7.2** Committed `.otio` + `.edl` fixture examples live in `Tests/Fixtures/Interchange/`.
+- **R7.2** Committed `.otio` + `.edl` fixtures live in `Tests/Fixtures/Interchange/`: `basic.otio`, `basic.edl`, `fractional.otio`, `fractional.edl`, `transitions.otio`, `missing_media.otio`, `markers.otio`, `speed_ramp.otio`, `localcut_metadata.otio`. Tests byte-compare fresh serializer output against every committed fixture.
 - **R7.3** CI step installs Python `opentimelineio` and parses each committed `.otio` fixture with the reference library.
 - **R7.4** Documented manual verification checklist for Kdenlive 25.04+ and DaVinci Resolve.
 - **R7.5** `xcodebuild` (Debug, macOS) green; no test count regression.

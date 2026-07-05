@@ -34,9 +34,9 @@ The browser-editor's implementation is hand-rolled TypeScript with no runtime de
    | Phase 35 speed curve / time remap | `Clip.metadata.localcut.speedCurve` (full curve) + the source range adjusted to honour the AVERAGE ramp ratio so foreign tools that ignore our namespace still get an output-duration-correct clip; emit a warning per non-uniform curve so the user knows the variation won't round-trip into apps that don't read `metadata.localcut` |
    | caption tracks + styling | `Timeline.metadata.localcut.captionTracks` | OTIO has no portable caption schema |
    | media fingerprint | `ExternalReference.metadata.localcut.fingerprint` | content identity for future re-linking |
-4. **Determinism.** The serialiser is a pure function of `ProjectDoc` (plus an options record). It generates no IDs or timestamps and emits sorted, pretty-printed JSON. Unit tests assert byte-identical output across repeated calls; committed fixture examples are reference-validated in CI.
+4. **Determinism.** The serialiser is a pure function of `ProjectDoc` (plus an options record). It generates no IDs or timestamps and emits sorted, pretty-printed JSON. Unit tests assert byte-identical output across repeated calls; committed fixture examples are reference-validated in CI. Nine committed fixtures cover basic, fractional frame rate, transitions, missing media, markers, speed-ramp metadata, and LocalCut metadata scenarios.
 5. **CMX3600 EDL.** Single video track per list (CMX3600 is structurally single-track). Record TC starts at `01:00:00:00`. Frame rate is `round(rate)` non-drop; fractional rates add a `* LOCALCUT: RATE 29.97 ROUNDED TO 30 NDF` comment. Reel names are uppercase-alphanumeric from the file-name stem (max 8 chars including dedup suffix); titles use reel `AX`. Transitions on the exported track become straight cuts at the cut point with a warning per omission.
-6. **Bundle integration.** The bundle save path writes `project.otio` to the bundle root after `project.json` and media copy/fingerprinting. The serialiser takes `resolveTargetUrl(sourceId): String` and `resolveFingerprint(sourceId): String?` closures; bundle export supplies `assets/…` paths and fresh SHA-256 fingerprints from the bundle index; standalone export supplies original file names and does not synchronously hash large source media. Serialisation failure is non-fatal; bundle export still succeeds without `project.otio`.
+6. **Bundle integration.** The bundle save path writes `project.otio` to the bundle root after `project.json` and media copy/fingerprinting. The serialiser takes `resolveTargetUrl(sourceId): String` and `resolveFingerprint(sourceId): String?` closures; bundle export supplies `assets/…` paths and fresh SHA-256 fingerprints from the bundle index; standalone export supplies original file names and does not synchronously hash large source media. Serialisation or sidecar-write failure is non-fatal; bundle export still succeeds and stale `project.otio` sidecars are removed instead of left behind. The OTIO write is handled by `DocumentController.writeProjectOtio(_:to:)` which removes the file on nil data or write failure.
 7. **Worker boundary.** Generation is synchronous string building over the in-memory model (KB-scale output); it may run inline with save/export actions and does not require a background worker.
 
 ## Trade-offs
@@ -49,6 +49,10 @@ The browser-editor's implementation is hand-rolled TypeScript with no runtime de
 
 - OTIO schemas evolve; we pin to current Kdenlive 25.04+ and DaVinci Resolve behaviour and document the verification checklist for both.
 - LocalCut features whose metadata foreign tools cannot interpret travel as opaque metadata; round-trip parity depends on a future Phase 48b import path.
+
+## UI test coverage
+
+The `.otio` and `.edl` export actions use `NSSavePanel` and `NSAlert` (for the EDL track picker) directly in `EditorModel+Commands.swift`. Testing the full UI flow would require either refactoring to inject panel/alert presentation or brittle AppKit UI automation. The core serialization logic is covered by the serializer and golden fixture tests. Focused controller tests are not practical without AppKit UI automation changes.
 
 ## Non-goals
 

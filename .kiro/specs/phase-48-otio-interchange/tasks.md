@@ -32,7 +32,7 @@
 
 ## CI / docs
 
-- [x] **T6.1** Committed `.otio` + `.edl` fixture examples under `Tests/Fixtures/Interchange/`.
+- [x] **T6.1** Committed `.otio` + `.edl` fixtures under `Tests/Fixtures/Interchange/`: `basic.otio`, `basic.edl`, `fractional.otio`, `fractional.edl`, `transitions.otio`, `missing_media.otio`, `markers.otio`, `speed_ramp.otio`, `localcut_metadata.otio`. Byte-equality tests compare fresh serializer output against every committed fixture.
 - [x] **T6.2** Python `opentimelineio` reference-validation CI step for committed `.otio` fixtures.
 - [x] **T6.3** `docs/VERIFY_INTERCHANGE.md` — manual checklist for Kdenlive + Resolve + EDL tools.
 - [x] **T6.4** `docs/USER-GUIDE.md` — interchange section + `otioconvert` path for AAF / FCPXML.
