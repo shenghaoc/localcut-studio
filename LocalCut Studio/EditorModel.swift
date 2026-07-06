@@ -305,8 +305,9 @@ final class EditorModel {
     /// current document is a bundle. Tracked separately from `accessedURLs`
     /// for the reason in that property's doc. Stopped on session teardown.
     ///
-    /// **Isolation invariant:** Mutated on `@MainActor`; read in `deinit`
-    /// (nonisolated) for resource cleanup. Idempotent stop is safe.
+    /// **Isolation invariant:** Mutated on `@MainActor`. `nonisolated(unsafe)`
+    /// allows the security-scoped grant to be stopped from nonisolated contexts
+    /// during document close.
     @ObservationIgnored nonisolated(unsafe) var bundleAccessURL: URL?
 
     /// Bumped on every session swap (New/Open). Async import/relink capture it

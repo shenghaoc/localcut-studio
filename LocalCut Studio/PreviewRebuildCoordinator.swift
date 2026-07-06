@@ -7,13 +7,13 @@ final class PreviewRebuildCoordinator {
     ///
     /// **Isolation invariant:** Set/cancelled on `@MainActor` in
     /// `rebuildDebounced`; also cancelled from the nonisolated `cancelAll()`.
-    /// Task cancellation is idempotent, so the benign race is safe.
+    /// `cancelAll()` is called from teardown paths that are serialized with
+    /// rebuild scheduling by the document lifecycle; the unsynchronized
+    /// `Task?` pointer access is safe under that caller confinement.
     nonisolated(unsafe) private var pendingRebuildTask: Task<Void, Never>?
     /// Active in-flight rebuild task.
     ///
-    /// **Isolation invariant:** Set/cancelled on `@MainActor` in
-    /// `scheduleRebuild`; also cancelled from the nonisolated `cancelAll()`.
-    /// Task cancellation is idempotent, so the benign race is safe.
+    /// **Isolation invariant:** Same as `pendingRebuildTask`.
     nonisolated(unsafe) private var activeRebuildTask: Task<Void, Never>?
     private var inFlightPreviewOverlaySourceRegistryIDs = Set<UUID>()
 
