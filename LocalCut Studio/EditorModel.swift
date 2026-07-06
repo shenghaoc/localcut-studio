@@ -200,13 +200,9 @@ final class EditorModel {
     /// task cancellation is idempotent.
     @ObservationIgnored nonisolated(unsafe) var recordingMonitorTask: Task<Void, Never>?
     /// Accumulated wall-clock time spent paused, subtracted from elapsed display.
-    ///
-    /// **Isolation invariant:** All access on `@MainActor` during recording.
-    @ObservationIgnored nonisolated(unsafe) var recordingPausedDuration: TimeInterval = 0
+    @ObservationIgnored var recordingPausedDuration: TimeInterval = 0
     /// Wall-clock time when the current pause started, or nil if not paused.
-    ///
-    /// **Isolation invariant:** All access on `@MainActor` during recording.
-    @ObservationIgnored nonisolated(unsafe) var pauseStartedAt: Date?
+    @ObservationIgnored var pauseStartedAt: Date?
 
     // Phase 42 — Recorder UX
     var isCountdownActive = false
@@ -216,10 +212,7 @@ final class EditorModel {
     var hasLastRecordingTake = false
     /// Stored request for retake: replaces the most recent chunk-set in the same
     /// timeline slot.
-    ///
-    /// **Isolation invariant:** Set once on `@MainActor` during recording start;
-    /// read later on `@MainActor` for retake.
-    @ObservationIgnored nonisolated(unsafe) var lastRecordingRequest: CaptureStartRequest?
+    @ObservationIgnored var lastRecordingRequest: CaptureStartRequest?
     /// Tracks the timeline slots occupied by the most recent recording landing,
     /// so retake can replace them without touching unrelated tracks.
     @ObservationIgnored var lastRecordingSlots: [RecordingSlot] = []

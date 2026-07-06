@@ -102,7 +102,8 @@ final class DiagnosticsAgent {
     /// 1 Hz sampling timer.
     ///
     /// **Isolation invariant:** Created/invalidated on `@MainActor` in
-    /// `start`/`stop`. `Timer.invalidate()` is thread-safe.
+    /// `start`/`stop`. Also invalidated in nonisolated `deinit` for safe
+    /// teardown. `Timer.invalidate()` is thread-safe.
     @ObservationIgnored nonisolated(unsafe) private var timer: Timer?
     /// Injected so tests can avoid shared diagnostic state.
     @ObservationIgnored private let bridge: DiagnosticsBridge

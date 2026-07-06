@@ -10,11 +10,15 @@ final class ReconnectController: @unchecked Sendable {
     ///
     /// **Isolation invariant:** Set once before any concurrent access (typically
     /// in test setup). Read from any thread via `nonisolated` methods.
+    /// Concurrent mutation after construction is not safe; this property is
+    /// effectively `let` after setup.
     nonisolated(unsafe) var clock: @Sendable () -> TimeInterval = { Date.timeIntervalSinceReferenceDate }
     /// Sleep function for backoff delays. Test seam for deterministic timing.
     ///
     /// **Isolation invariant:** Set once before any concurrent access (typically
     /// in test setup). Read from any thread via `nonisolated` methods.
+    /// Concurrent mutation after construction is not safe; this property is
+    /// effectively `let` after setup.
     nonisolated(unsafe) var sleep: @Sendable (TimeInterval) async throws -> Void = { duration in
         try await Task.sleep(for: .seconds(duration))
     }

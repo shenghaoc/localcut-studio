@@ -118,10 +118,11 @@ final class ScreencastEventLogWriter {
         }
     }
 
-    /// Remove the monitor as a safety net. `NSEvent.removeMonitor` must run on
-    /// the main thread but `deinit` can be called from any executor, so dispatch
-    /// the removal. The monitor handler captures `self` weakly, so any events
-    /// arriving between deallocation and the async removal are harmless.
+    /// Remove the monitor as a safety net. `NSEvent.removeMonitor` is
+    /// thread-safe, but dispatching to main is a defensive measure since
+    /// `deinit` can be called from any executor. The monitor handler captures
+    /// `self` weakly, so any events arriving between deallocation and the
+    /// async removal are harmless.
     deinit {
         let local = localMonitor
         let global = globalMonitor
