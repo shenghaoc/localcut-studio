@@ -1276,8 +1276,10 @@ final class RenderQueue {
 
     /// Writes the current queue to disk atomically. Called on every state
     /// transition; the encode happens on the MainActor (where `jobs` lives)
-    /// but the actual file write is hopped to a background queue so a slow
-    /// disk can't stall the UI (Gemini review).
+    /// but the actual file write is hopped to a detached task so a slow
+    /// disk can't stall the UI (Gemini review). Uses `Task.detached`
+    /// rather than GCD to match `load()` — no `self` is captured (only
+    /// Sendable value types), so there is no retain-cycle risk.
     private func persist() {
         guard persistsToDisk, !refusingPersist, let url = Self.queueFileURL() else { return }
         let doc = RenderQueueDoc(jobs: jobs)
@@ -1291,7 +1293,7 @@ final class RenderQueue {
             return
         }
         let log = logger
-        DispatchQueue.global(qos: .utility).async {
+        Task.detached(priority: .utility) {
             do {
                 try encoded.write(to: url, options: .atomic)
             } catch {
