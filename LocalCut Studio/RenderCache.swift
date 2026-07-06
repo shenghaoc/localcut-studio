@@ -150,6 +150,8 @@ final class RenderCache: Sendable {
         let byteCost: Int
     }
 
+    /// `@unchecked Sendable`: linked-list `previous`/`next` pointers are only
+    /// mutated under the parent cache's lock.
     nonisolated private final class MemoryNode: @unchecked Sendable {
         let key: RenderCacheKey
         var previous: MemoryNode?
@@ -160,6 +162,8 @@ final class RenderCache: Sendable {
         }
     }
 
+    /// `@unchecked Sendable`: linked-list `previous`/`next` pointers are only
+    /// mutated under the parent cache's lock.
     nonisolated private final class DiskNode: @unchecked Sendable {
         let key: RenderCacheKey
         var previous: DiskNode?

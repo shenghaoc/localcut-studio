@@ -9,6 +9,8 @@ import LocalCutCore
 /// compositor. `LottieAnimationView` is AppKit-backed, so rasterisation happens
 /// on the main actor, but frames are cached in a bounded window instead of
 /// pre-rendering the full animation into memory.
+/// `@unchecked Sendable`: frame cache (`cache`, `cacheOrder`) is protected by
+/// `lock`; immutable metadata is set once in `init`.
 nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize: CGSize
 

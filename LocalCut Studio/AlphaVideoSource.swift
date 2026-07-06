@@ -11,6 +11,8 @@ import LocalCutCore
 ///
 /// Uses the modern `AVAssetImageGenerator.image(at:)` async API for
 /// frame-accurate random access without deprecation warnings.
+/// `@unchecked Sendable`: frame cache (`cache`, `cacheOrder`) is protected by
+/// `lock`; `AVAssetImageGenerator` is a non-`Sendable` framework object.
 nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize: CGSize
     private let url: URL

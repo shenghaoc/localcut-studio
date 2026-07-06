@@ -164,6 +164,7 @@ nonisolated enum RenderQueueError: Error, LocalizedError {
 /// serial dispatch queue but the compiler doesn't model that, so the
 /// `@Sendable` closure can't capture a mutable `var`; this class wraps the
 /// state in an unfair lock instead.
+/// `@unchecked Sendable`: single `Bool` flag behind `OSAllocatedUnfairLock`.
 private nonisolated final class ResumeBox: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock<Bool>(initialState: false)
 
@@ -181,6 +182,8 @@ private nonisolated final class ResumeBox: @unchecked Sendable {
 /// `ResumeBox`, `state` is touched exclusively inside the pump's request block,
 /// which AVFoundation invokes serially on `pumpQueue`, and the box never escapes
 /// that closure. `@unchecked Sendable` documents that confinement.
+/// `@unchecked Sendable`: `state` is touched exclusively inside the serial
+/// `pumpQueue` callback; the box never escapes that closure.
 private nonisolated final class VoiceCleanupStateBox: @unchecked Sendable {
     var state = VoiceCleanupProcessorState()
 }

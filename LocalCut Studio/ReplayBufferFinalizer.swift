@@ -209,6 +209,8 @@ enum ReplayBufferFinalizer {
         let timelineOffset: CMTime
     }
 
+    /// `@unchecked Sendable`: immutable wrapper for non-`Sendable`
+    /// `AVAssetReaderTrackOutput` + `AVAssetWriterInput` pair.
     nonisolated private final class TrackPipe: @unchecked Sendable {
         let readerOutput: AVAssetReaderTrackOutput
         let writerInput: AVAssetWriterInput
@@ -220,6 +222,7 @@ enum ReplayBufferFinalizer {
         }
     }
 
+    /// `@unchecked Sendable`: immutable wrapper for non-`Sendable` `AVAssetWriter`.
     nonisolated private final class WriterBox: @unchecked Sendable {
         let writer: AVAssetWriter
 

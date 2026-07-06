@@ -12,6 +12,9 @@ import LocalCutCore
 ///
 /// Scene switches update only the current scene state; no pipeline rebuild,
 /// no texture reallocation, no encoder restart.
+/// `@unchecked Sendable`: per-source buffers, scene state, and transition
+/// timing are protected by `lock`; `CIContext` and `CVPixelBufferPool` are
+/// non-`Sendable` framework objects.
 nonisolated final class ProgramCompositor: @unchecked Sendable {
 
     /// The render canvas size (matches the project's render size).

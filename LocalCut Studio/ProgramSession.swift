@@ -69,6 +69,7 @@ nonisolated struct ProgramCaptureSource: Identifiable, Hashable, Sendable {
     }
 }
 
+/// `@unchecked Sendable`: immutable wrapper for non-`Sendable` `CVPixelBuffer`.
 nonisolated struct ProgramFrameBuffer: @unchecked Sendable {
     let pixelBuffer: CVPixelBuffer
 
