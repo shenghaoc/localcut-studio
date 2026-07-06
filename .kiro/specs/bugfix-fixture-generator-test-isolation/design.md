@@ -33,6 +33,19 @@ The output path is printed once at suite start via the lazy initializer's `print
 - **Normal mode** — the 9 tests exercise the serializer code paths (OTIO and EDL) even in no-op mode. The serializer calls still execute; only the file write is skipped. Tests pass in CI, local full-suite runs, and individual runs.
 - **Regeneration mode** — developers who modify the serializer and need to refresh golden fixtures set the env var and collect files from the printed temp path, then copy to `Tests/Fixtures/Interchange/`.
 
+## Regression coverage
+
+The normal-mode isolation test calls `writeFixture()` directly with a UUID-named
+sentinel fixture. It snapshots `NSTemporaryDirectory()` before and after the
+call, then verifies:
+
+- `outputDirectory` stays `nil`
+- no sentinel file appears under the old shared `localcut-fixtures` path
+- no new `localcut-fixtures*` output directory is created
+
+The test returns early when `LOCALCUT_REGENERATE_FIXTURES=1` is set, because
+regeneration mode is intentionally allowed to write fixture files.
+
 ## Non-goals
 
 - No change to golden fixture contents

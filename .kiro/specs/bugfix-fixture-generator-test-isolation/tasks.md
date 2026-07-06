@@ -9,6 +9,7 @@
 - [x] **B1.3** Add `isRegenerationEnabled` static computed property checking the env var.
 - [x] **B1.4** Add `outputDirectory` lazy static property that creates the unique temp directory only when regeneration is enabled, and prints the path.
 - [x] **B1.5** Update doc comment with regeneration usage instructions.
+- [x] **B1.6** Add an active normal-mode regression test that calls `writeFixture()` and verifies it does not create the legacy shared path or any fixture output directory.
 
 ## Verification
 
@@ -20,3 +21,5 @@
 - [x] **V6** No tests skipped or assertions weakened.
 - [x] **V7** No production code changed.
 - [x] **V8** Regeneration mode works: `LOCALCUT_REGENERATE_FIXTURES=1 xcodebuild test -only-testing "LocalCut StudioTests/FixtureGenerator"` writes files to a UUID-based temp directory and prints the path.
+- [x] **V9** Review follow-up: normal-mode regression test now exercises the actual write helper rather than only scanning pre-existing temp directories.
+- [x] **V10** Review follow-up validation rerun: `xcodebuild test -only-testing:"LocalCut StudioTests/FixtureGenerator"`, `xcodebuild test -skip-testing:"LocalCut StudioUITests"`, `swift test --package-path Packages/LocalCutCore`, `./Scripts/validate-otio-goldens.sh`, and `git diff --check`.

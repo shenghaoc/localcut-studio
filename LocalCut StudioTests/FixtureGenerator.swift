@@ -285,23 +285,30 @@ struct FixtureGenerator {
 
     // MARK: - Isolation regression test
 
-    @Test("Normal mode writes no files to temp directory")
-    func normalModeWritesNoFiles() {
-        // In normal mode (env var absent), outputDirectory is nil and
-        // writeFixture is a no-op. Verify the isolation contract:
-        // no directory is created under NSTemporaryDirectory().
+    @Test("Normal mode writeFixture is a no-op")
+    func normalModeWriteFixtureIsNoOp() throws {
+        guard !Self.isRegenerationEnabled else { return }
+
         let tmpBase = NSTemporaryDirectory()
         let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(atPath: tmpBase) else { return }
-        let localcutDirs = contents.filter { $0.hasPrefix("localcut-fixtures-") }
-        // No new directories should be created by the test suite in normal mode.
-        // (Pre-existing dirs from manual regeneration runs are fine.)
-        for dir in localcutDirs {
-            let fullPath = (tmpBase as NSString).appendingPathComponent(dir)
-            // Verify it's not created during this test run by checking
-            // that outputDirectory is nil.
-            #expect(FixtureGenerator.outputDirectory == nil,
-                    "outputDirectory should be nil in normal mode")
-        }
+        let before = Set(try fm.contentsOfDirectory(atPath: tmpBase))
+        let sentinelName = "normal-mode-\(UUID().uuidString).otio"
+        let legacyDir = (tmpBase as NSString).appendingPathComponent("localcut-fixtures")
+        let legacyPath = (legacyDir as NSString).appendingPathComponent(sentinelName)
+
+        #expect(Self.outputDirectory == nil, "outputDirectory should be nil in normal mode")
+        try writeFixture(sentinelName, content: "sentinel")
+        #expect(Self.outputDirectory == nil, "writeFixture should not initialize an output directory")
+        #expect(
+            !fm.fileExists(atPath: legacyPath),
+            "normal mode must not write to the legacy shared path")
+
+        let after = Set(try fm.contentsOfDirectory(atPath: tmpBase))
+        let createdFixtureDirs = after
+            .subtracting(before)
+            .filter { $0.hasPrefix("localcut-fixtures") }
+        #expect(
+            createdFixtureDirs.isEmpty,
+            "normal mode must not create fixture output directories")
     }
 }

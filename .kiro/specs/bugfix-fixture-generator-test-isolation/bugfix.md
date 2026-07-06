@@ -16,7 +16,7 @@ All 9 `FixtureGenerator` tests call `writeFixture(_ name:content:)` which writes
 
 The tests pass individually because the test runner has different sandbox/permission context when invoked with `-only-testing`, but fail as a suite due to these isolation issues.
 
-- **Fix**: Gate fixture file writing behind the `LOCALCUT_REGENERATE_FIXTURES=1` environment variable. In normal test mode, `writeFixture()` is a no-op — tests pass without writing anything. In regeneration mode, use `NSTemporaryDirectory()` with a UUID-based subdirectory to avoid collisions between parallel runs.
+- **Fix**: Gate fixture file writing behind the `LOCALCUT_REGENERATE_FIXTURES=1` environment variable. In normal test mode, `writeFixture()` is a no-op — tests pass without writing anything. In regeneration mode, use `NSTemporaryDirectory()` with a UUID-based subdirectory to avoid collisions between parallel runs. The regression test now calls `writeFixture()` with a UUID sentinel in normal mode and verifies it does not create the old shared path or any new fixture output directory.
 
 ### B2 — Regeneration mode uses shared directory without collision protection
 
