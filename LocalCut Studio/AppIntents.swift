@@ -31,10 +31,37 @@ final class LocalCutAppIntentRouter {
         }
     }
 
-    /// Lets the @Sendable task closure release predecessor links; access stays
-    /// on this router's main-actor execution path.
-    private final class TaskReference: @unchecked Sendable {
-        var task: Task<Void, Error>?
+    /// Lets the @Sendable task closure release predecessor links after each
+    /// action completes while the mutable state stays on `@MainActor`.
+    @MainActor
+    private final class TaskReference: Sendable {
+        var task: Task<Void, Never>?
+    }
+
+    private actor ActionCompletion {
+        private var result: Result<Void, Error>?
+        private var continuation: CheckedContinuation<Void, Error>?
+
+        func wait() async throws {
+            if let result {
+                try result.get()
+                return
+            }
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+            }
+        }
+
+        func finish(with result: Result<Void, Error>) {
+            guard self.result == nil else { return }
+            self.result = result
+            continuation?.resume(with: result)
+            continuation = nil
+        }
+
+        func cancel() {
+            finish(with: .failure(CancellationError()))
+        }
     }
 
     private let model: EditorModel
@@ -56,22 +83,31 @@ final class LocalCutAppIntentRouter {
 
         let model = self.model
         let routeAction = self.routeAction
+        let completion = ActionCompletion()
         let actionTask = Task { @MainActor in
             defer {
                 predecessorRef.task = nil
                 currentRef.task = nil
             }
             if let predecessor = predecessorRef.task {
-                _ = await predecessor.result
+                await predecessor.value
             }
-            try Task.checkCancellation()
-            try await routeAction(action, model)
+            do {
+                try Task.checkCancellation()
+                try await routeAction(action, model)
+                await completion.finish(with: .success(()))
+            } catch {
+                await completion.finish(with: .failure(error))
+            }
         }
         currentRef.task = actionTask
         try await withTaskCancellationHandler {
-            try await actionTask.value
+            try await completion.wait()
         } onCancel: {
             actionTask.cancel()
+            Task {
+                await completion.cancel()
+            }
         }
     }
 
