@@ -46,9 +46,9 @@ nonisolated enum CapturePermissionAuthorizer {
     }
 }
 
-/// `@unchecked Sendable`: mutable state (`target`, `stream`, writers, frame
-/// flags) is protected by `stateLock`; delegate callbacks from ScreenCaptureKit
-/// are confined to `outputQueue`.
+/// `@unchecked Sendable`: mutable state (`target`, `stream`, writers,
+/// `excludingWindowIDs`) is protected by `stateLock`; `dropNextScreenFrame`
+/// and delegate callbacks from ScreenCaptureKit are confined to `outputQueue`.
 nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     nonisolated var supportsSourceSwitching: Bool { true }
 

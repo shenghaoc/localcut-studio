@@ -210,7 +210,8 @@ enum ReplayBufferFinalizer {
     }
 
     /// `@unchecked Sendable`: immutable wrapper for non-`Sendable`
-    /// `AVAssetReaderTrackOutput` + `AVAssetWriterInput` pair.
+    /// `AVAssetReaderTrackOutput` + `AVAssetWriterInput` pair. Both objects
+    /// are used exclusively inside the serial `writerQueue` pump callback.
     nonisolated private final class TrackPipe: @unchecked Sendable {
         let readerOutput: AVAssetReaderTrackOutput
         let writerInput: AVAssetWriterInput
