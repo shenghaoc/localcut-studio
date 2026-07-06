@@ -209,4 +209,32 @@ struct AppIntentsTests {
         #expect(outcome == .failed)
         #expect(model.statusMessage == "Could not access \(outputURL.lastPathComponent).")
     }
+
+    @Test func importMediaCommandPropagatesImportFailure() async {
+        let model = EditorModel()
+        let inputURL = URL(fileURLWithPath: "/private/tmp/app-intents-import-failure.mov")
+
+        let outcome = await model.performImportMediaCommand(
+            presentPanel: {
+                (.OK, [inputURL])
+            },
+            importMediaAction: { _ in
+                model.statusMessage = "Could not import \(inputURL.lastPathComponent): metadata unavailable"
+                return .failed
+            })
+
+        #expect(outcome == .failed)
+        #expect(model.statusMessage == "Could not import \(inputURL.lastPathComponent): metadata unavailable")
+    }
+
+    @Test func exportCoordinatorPropagatesQueueRejection() async {
+        let model = EditorModel()
+        let outputURL = URL(fileURLWithPath: "/private/tmp/app-intents-export-queue-rejection.mov")
+        let outcome = await ExportCoordinator().export(to: outputURL, model: model) { _ in
+            .failed("Output destination unavailable.")
+        }
+
+        #expect(outcome == .failed)
+        #expect(model.statusMessage == "Output destination unavailable.")
+    }
 }

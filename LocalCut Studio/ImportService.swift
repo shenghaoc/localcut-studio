@@ -4,7 +4,8 @@ import LocalCutCore
 
 @MainActor
 final class ImportService {
-    func importMedia(urls: [URL], wantsBundling: Bool = true, model: EditorModel) async {
+    func importMedia(urls: [URL], wantsBundling: Bool = true, model: EditorModel) async -> EditorCommandOutcome {
+        guard !urls.isEmpty else { return .actionCancelled }
         let generation = model.sessionGeneration
         var loaded: [MediaItem] = []
         for url in urls {
@@ -23,7 +24,7 @@ final class ImportService {
 
                 guard model.sessionGeneration == generation else {
                     if didAccess { url.stopAccessingSecurityScopedResource() }
-                    return
+                    return .actionCancelled
                 }
 
                 model.retainAccess(url, didStart: didAccess)
@@ -36,8 +37,8 @@ final class ImportService {
                 model.statusMessage = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
             }
         }
-        guard !loaded.isEmpty else { return }
-        guard model.sessionGeneration == generation else { return }
+        guard !loaded.isEmpty else { return .failed }
+        guard model.sessionGeneration == generation else { return .actionCancelled }
 
         let before = model.captureState()
         model.project.mediaItems.append(contentsOf: loaded)
@@ -49,5 +50,6 @@ final class ImportService {
         for item in loaded {
             Task { await item.loadThumbnail() }
         }
+        return .completed
     }
 }

@@ -370,7 +370,7 @@ final class EditorModel {
 
     /// Loads the given files into the media bin, reading metadata and a poster
     /// frame for each. Security-scoped access is retained for the session.
-    func importMedia(urls: [URL], wantsBundling: Bool = true) async {
+    func importMedia(urls: [URL], wantsBundling: Bool = true) async -> EditorCommandOutcome {
         await importService.importMedia(urls: urls, wantsBundling: wantsBundling, model: self)
     }
 

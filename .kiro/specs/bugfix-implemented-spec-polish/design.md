@@ -6,8 +6,8 @@ pure helpers that are unit-testable; no edits to composition time-range math; ne
 (mirroring the existing `[Effect].renderCacheHash` pattern). The only project-setting change is the
 release-validation cleanup that disables unused Swift localization-string extraction and links the
 system AppIntents framework for the app and test targets so Xcode 26's metadata extractor completes
-without a false "missing dependency" warning. The app does not ship any App Intents implementation
-in this PR.
+without a false "missing dependency" warning. The concrete App Intents implementation now lives in
+the dedicated `feature-app-intents` spec; this bugfix spec owns only the build-setting cleanup.
 
 ## Engine / model
 

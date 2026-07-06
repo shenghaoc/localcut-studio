@@ -324,6 +324,27 @@ struct RenderQueueTests {
         #expect(queue.jobs[0] == before, "retrying a queued job should be a no-op")
     }
 
+    @Test("Resolved directory bookmarks expand back to the intended output file")
+    func outputURLAppendsDisplayNameForDirectoryBookmarks() {
+        let bookmark = Data([0x44])
+        let job = QueueJob(
+            preset: BuiltInExportPresets.web720p,
+            outputBookmark: bookmark,
+            outputDisplayName: "Queued.mp4",
+            projectSnapshot: snapshot(),
+            status: .completed)
+        let queue = RenderQueue(jobs: [job], persistsToDisk: false) { resolved in
+            #expect(resolved == bookmark)
+            return BookmarkResolution(
+                url: URL(fileURLWithPath: "/tmp/render-queue-output", isDirectory: true),
+                refreshedBookmark: nil)
+        }
+
+        let outputURL = queue.outputURL(forJobID: job.id)
+
+        #expect(outputURL?.path == "/tmp/render-queue-output/Queued.mp4")
+    }
+
     @Test("clearCompleted drops terminal jobs only")
     func clearCompletedDropsTerminal() {
         let queue = RenderQueue(persistsToDisk: false)

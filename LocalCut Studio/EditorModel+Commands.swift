@@ -125,6 +125,29 @@ extension EditorModel {
 
     @discardableResult
     func performImportMediaCommand() async -> EditorCommandOutcome {
+        await performImportMediaCommand(
+            presentPanel: { [self] in
+                await presentImportMediaPanel()
+            },
+            importMediaAction: { [self] urls in
+                await importMedia(urls: urls, wantsBundling: copyImportsIntoBundle)
+            })
+    }
+
+    @discardableResult
+    func performImportMediaCommand(
+        presentPanel: @escaping @MainActor () async -> (NSApplication.ModalResponse, [URL]),
+        importMediaAction: @escaping @MainActor ([URL]) async -> EditorCommandOutcome
+    ) async -> EditorCommandOutcome {
+        let (response, urls) = await presentPanel()
+        guard response == .OK, !urls.isEmpty else {
+            statusMessage = String(localized: "Import cancelled.")
+            return .panelCancelled
+        }
+        return await importMediaAction(urls)
+    }
+
+    private func presentImportMediaPanel() async -> (NSApplication.ModalResponse, [URL]) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.movie, .video, .audiovisualContent,
                                      .audio, .mpeg4Movie, .quickTimeMovie]
@@ -149,12 +172,7 @@ extension EditorModel {
                 cancellationHandle.cancel()
             }
         }
-        guard response == .OK, !panel.urls.isEmpty else {
-            statusMessage = String(localized: "Import cancelled.")
-            return .panelCancelled
-        }
-        await importMedia(urls: panel.urls, wantsBundling: copyImportsIntoBundle)
-        return .completed
+        return (response, panel.urls)
     }
 
     @discardableResult
