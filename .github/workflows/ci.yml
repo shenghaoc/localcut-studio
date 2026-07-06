@@ -124,6 +124,9 @@ jobs:
           swift --version
           sw_vers
 
+      # SPM resolves the LocalCutWebRTC package unconditionally; the XCFramework
+      # binary target must exist on disk even though we compile without the
+      # LOCALCUT_ENABLE_WEBRTC flag so the stub code paths are exercised.
       - name: Download WebRTC XCFramework
         run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
@@ -131,11 +134,16 @@ jobs:
         run: |
           xcodebuild -list -project "$PROJECT"
 
+      # Build-only: the stubs are compilation guards whose correctness is
+      # verified by a successful compile. The full test job covers the
+      # WebRTC-enabled code path end-to-end.
       - name: Build without WebRTC
         run: |
           set -o pipefail
           rm -rf "$DERIVED_DATA"
 
+          # Strip LOCALCUT_ENABLE_WEBRTC from the project-level setting
+          # so the #if !LOCALCUT_ENABLE_WEBRTC stub paths are compiled.
           xcodebuild build \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -143,7 +151,7 @@ jobs:
             -destination 'platform=macOS' \
             -derivedDataPath "$DERIVED_DATA" \
             CODE_SIGNING_ALLOWED=NO \
-            SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG \$(inherited)" \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG \
             | tee xcodebuild.log
 
       - name: Upload failure diagnostics
@@ -153,5 +161,6 @@ jobs:
           name: xcode-build-non-webrtc-diagnostics
           path: |
             xcodebuild.log
+            DerivedData/Build/Logs/Build/*.xcactivitylog
           if-no-files-found: warn
           retention-days: 7
