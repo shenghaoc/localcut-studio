@@ -6,6 +6,7 @@ import LocalCutCore
 enum EditorCommandOutcome: Equatable, Sendable {
     case completed
     case actionCancelled
+    case failed
     case panelCancelled
 }
 
@@ -90,15 +91,35 @@ extension EditorModel {
 
     @discardableResult
     func performNewProjectCommand() async -> EditorCommandOutcome {
+        await performNewProjectCommand(
+            confirmSave: { [self] in
+                await confirmSaveIfNeeded()
+            },
+            resetDocument: { [self] in
+                newDocument()
+            })
+    }
+
+    @discardableResult
+    func performNewProjectCommand(
+        confirmSave: @escaping @MainActor () async -> Bool,
+        resetDocument: @escaping @MainActor () -> Void
+    ) async -> EditorCommandOutcome {
         guard !blockDocumentCommandWhileRecording() else { return .actionCancelled }
         let previousStatus = statusMessage
-        guard await confirmSaveIfNeeded() else {
+        guard await confirmSave() else {
             if statusMessage == previousStatus {
                 statusMessage = String(localized: "Action cancelled.")
             }
             return .actionCancelled
         }
-        newDocument()
+        guard !Task.isCancelled else {
+            if statusMessage == previousStatus {
+                statusMessage = String(localized: "Action cancelled.")
+            }
+            return .actionCancelled
+        }
+        resetDocument()
         return .completed
     }
 
@@ -138,11 +159,34 @@ extension EditorModel {
 
     @discardableResult
     func performExportProjectCommand() async -> EditorCommandOutcome {
+        await performExportProjectCommand(
+            presentPanel: { [self] in
+                await presentExportProjectPanel()
+            },
+            exportProject: { [self] url in
+                await export(to: url)
+            })
+    }
+
+    @discardableResult
+    func performExportProjectCommand(
+        presentPanel: @escaping @MainActor () async -> (NSApplication.ModalResponse, URL?),
+        exportProject: @escaping @MainActor (URL) async -> EditorCommandOutcome
+    ) async -> EditorCommandOutcome {
         guard totalDuration > 0 else {
             statusMessage = String(localized: "Add media to the timeline before exporting.")
             return .actionCancelled
         }
         guard resolveChapterMarkersBeforeExport() else { return .actionCancelled }
+        let (response, url) = await presentPanel()
+        guard response == .OK, let url else {
+            statusMessage = String(localized: "Export cancelled.")
+            return .panelCancelled
+        }
+        return await exportProject(url)
+    }
+
+    private func presentExportProjectPanel() async -> (NSApplication.ModalResponse, URL?) {
         let preset = BuiltInExportPresets.defaultPreset
         let panel = NSSavePanel()
         if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
@@ -168,12 +212,7 @@ extension EditorModel {
                 cancellationHandle.cancel()
             }
         }
-        guard response == .OK, let url = panel.url else {
-            statusMessage = String(localized: "Export cancelled.")
-            return .panelCancelled
-        }
-        await export(to: url)
-        return .completed
+        return (response, panel.url)
     }
 
     /// File ▸ Export Timeline (.otio) — serializes the project to OpenTimelineIO

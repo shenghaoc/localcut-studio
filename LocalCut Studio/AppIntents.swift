@@ -17,6 +17,7 @@ final class LocalCutAppIntentRouter {
     enum RouterError: LocalizedError, Equatable {
         case emptyTimeline
         case actionCancelled
+        case actionFailed
         case panelCancelled
 
         var errorDescription: String? {
@@ -25,20 +26,52 @@ final class LocalCutAppIntentRouter {
                 String(localized: "Add media to the timeline before exporting.")
             case .actionCancelled:
                 String(localized: "The action was cancelled.")
+            case .actionFailed:
+                String(localized: "The action could not be completed.")
             case .panelCancelled:
                 String(localized: "The panel was dismissed.")
             }
         }
     }
 
-    /// Lets the @Sendable task closure release predecessor links after each
-    /// action completes while the mutable state stays on `@MainActor`.
+    /// Holds the queue barrier on `@MainActor` so queued actions serialize
+    /// without sharing raw tasks across actor boundaries.
     @MainActor
     private final class TaskReference: Sendable {
-        var task: Task<Void, Never>?
+        let barrier: ActionBarrier
+
+        init(finished: Bool = false) {
+            barrier = ActionBarrier(finished: finished)
+        }
     }
 
-    private actor ActionCompletion {
+    private actor ActionBarrier {
+        private var isFinished: Bool
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        init(finished: Bool = false) {
+            isFinished = finished
+        }
+
+        func wait() async {
+            guard !isFinished else { return }
+            await withCheckedContinuation { continuation in
+                waiters.append(continuation)
+            }
+        }
+
+        func finish() {
+            guard !isFinished else { return }
+            isFinished = true
+            let waiters = self.waiters
+            self.waiters.removeAll()
+            for continuation in waiters {
+                continuation.resume()
+            }
+        }
+    }
+
+    private actor ActionResult {
         private var result: Result<Void, Error>?
         private var continuation: CheckedContinuation<Void, Error>?
 
@@ -66,7 +99,7 @@ final class LocalCutAppIntentRouter {
 
     private let model: EditorModel
     private let routeAction: @MainActor @Sendable (Action, EditorModel) async throws -> Void
-    private var actionChain = TaskReference()
+    private var actionChain = TaskReference(finished: true)
 
     init(
         model: EditorModel,
@@ -83,30 +116,31 @@ final class LocalCutAppIntentRouter {
 
         let model = self.model
         let routeAction = self.routeAction
-        let completion = ActionCompletion()
+        let result = ActionResult()
+        let predecessorBarrier = predecessorRef.barrier
+        let currentBarrier = currentRef.barrier
         let actionTask = Task { @MainActor in
-            defer {
-                predecessorRef.task = nil
-                currentRef.task = nil
-            }
-            if let predecessor = predecessorRef.task {
-                await predecessor.value
-            }
+            await predecessorBarrier.wait()
             do {
                 try Task.checkCancellation()
                 try await routeAction(action, model)
-                await completion.finish(with: .success(()))
+                await result.finish(with: .success(()))
             } catch {
-                await completion.finish(with: .failure(error))
+                await result.finish(with: .failure(error))
             }
+            await currentBarrier.finish()
         }
-        currentRef.task = actionTask
         try await withTaskCancellationHandler {
-            try await completion.wait()
+            try await result.wait()
         } onCancel: {
             actionTask.cancel()
             Task {
-                await completion.cancel()
+                await result.cancel()
+            }
+            Task { @MainActor in
+                if actionChain === currentRef {
+                    actionChain = predecessorRef
+                }
             }
         }
     }
@@ -130,12 +164,14 @@ final class LocalCutAppIntentRouter {
         }
     }
 
-    private static func throwIfNeeded(_ outcome: EditorCommandOutcome) throws {
+    static func throwIfNeeded(_ outcome: EditorCommandOutcome) throws {
         switch outcome {
         case .completed:
             return
         case .actionCancelled:
             throw RouterError.actionCancelled
+        case .failed:
+            throw RouterError.actionFailed
         case .panelCancelled:
             throw RouterError.panelCancelled
         }

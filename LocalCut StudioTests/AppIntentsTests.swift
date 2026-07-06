@@ -71,10 +71,22 @@ struct AppIntentsTests {
     @Test func routerErrorTypesAreDistinct() {
         #expect(LocalCutAppIntentRouter.RouterError.panelCancelled
                 != LocalCutAppIntentRouter.RouterError.actionCancelled)
+        #expect(LocalCutAppIntentRouter.RouterError.actionFailed
+                != LocalCutAppIntentRouter.RouterError.actionCancelled)
         #expect(LocalCutAppIntentRouter.RouterError.emptyTimeline
                 != LocalCutAppIntentRouter.RouterError.actionCancelled)
         #expect(LocalCutAppIntentRouter.RouterError.emptyTimeline
                 != LocalCutAppIntentRouter.RouterError.panelCancelled)
+    }
+
+    @Test func failedCommandOutcomeMapsToActionFailedRouterError() {
+        do {
+            try LocalCutAppIntentRouter.throwIfNeeded(.failed)
+            Issue.record("Expected actionFailed.")
+        } catch LocalCutAppIntentRouter.RouterError.actionFailed {
+        } catch {
+            Issue.record("Expected actionFailed, got \(error)")
+        }
     }
 
     @Test func actionChainSerializesConcurrentActions() async throws {
@@ -153,5 +165,48 @@ struct AppIntentsTests {
         } catch {
             Issue.record("Expected CancellationError for second action, got \(error)")
         }
+    }
+
+    @Test func newProjectCommandCancelledAfterPromptDoesNotResetDocument() async {
+        let model = EditorModel()
+        let started = AppIntentStartSignal()
+        let tracker = AppIntentEventTracker()
+        let task = Task {
+            await model.performNewProjectCommand(
+                confirmSave: {
+                    await started.markStarted()
+                    try? await Task.sleep(for: .seconds(60))
+                    return true
+                },
+                resetDocument: {
+                    tracker.events.append("reset")
+                })
+        }
+
+        await started.waitUntilStarted()
+        task.cancel()
+
+        let outcome = await task.value
+
+        #expect(outcome == .actionCancelled)
+        #expect(tracker.events.isEmpty)
+    }
+
+    @Test func exportProjectCommandPropagatesQueueFailure() async {
+        let model = EditorModel()
+        model.totalDuration = 1
+        let outputURL = URL(fileURLWithPath: "/private/tmp/app-intents-export-failure.mov")
+
+        let outcome = await model.performExportProjectCommand(
+            presentPanel: {
+                (.OK, outputURL)
+            },
+            exportProject: { _ in
+                model.statusMessage = "Could not access \(outputURL.lastPathComponent)."
+                return .failed
+            })
+
+        #expect(outcome == .failed)
+        #expect(model.statusMessage == "Could not access \(outputURL.lastPathComponent).")
     }
 }

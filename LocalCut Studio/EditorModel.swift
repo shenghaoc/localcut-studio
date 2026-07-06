@@ -1369,7 +1369,7 @@ final class EditorModel {
     /// `RenderQueue` runner picks it up immediately and reports progress
     /// through `renderQueue.totalProgress` instead of the legacy
     /// `exportProgress` field.
-    func export(to url: URL) async {
+    func export(to url: URL) async -> EditorCommandOutcome {
         await exportCoordinator.export(to: url, model: self)
     }
 }
