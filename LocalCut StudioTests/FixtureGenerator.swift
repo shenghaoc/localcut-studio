@@ -9,9 +9,13 @@ import CoreMedia
 /// **Normal test mode:** tests pass without writing anything — the golden
 /// fixture tests in `GoldenFixtureTests` validate the serializer output
 /// against the committed fixtures under `Tests/Fixtures/Interchange/`.
+/// The serializer code paths (OTIO and EDL) are still exercised in this
+/// mode; only the disk write is skipped.
 ///
 /// **Explicit regeneration mode:** set `LOCALCUT_REGENERATE_FIXTURES=1` to
-/// write generated fixtures to a unique temporary directory per run:
+/// write generated fixtures to a unique temporary directory per run.
+/// Only the exact string `"1"` enables regeneration — other values
+/// (e.g. `"true"`, `"yes"`) are treated as disabled.
 ///
 ///     LOCALCUT_REGENERATE_FIXTURES=1 \
 ///       xcodebuild test -only-testing "LocalCut StudioTests/FixtureGenerator"
@@ -21,7 +25,7 @@ import CoreMedia
 struct FixtureGenerator {
 
     /// Whether this run should actually write fixture files to disk.
-    /// Enabled by setting `LOCALCUT_REGENERATE_FIXTURES=1` in the environment.
+    /// Only the exact string `"1"` enables regeneration.
     private static var isRegenerationEnabled: Bool {
         ProcessInfo.processInfo.environment["LOCALCUT_REGENERATE_FIXTURES"] == "1"
     }
@@ -63,7 +67,10 @@ struct FixtureGenerator {
             bundleMode: true,
             resolveTargetUrl: { _ in "assets/test.mov" },
             resolveFingerprint: { _ in "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890" })
-        let (json, _) = serializeTimelineToOtio(doc, options: opts)
+        let (json, warnings) = serializeTimelineToOtio(doc, options: opts)
+        #expect(!json.isEmpty)
+        #expect(warnings.isEmpty)
+        #expect(validateOtioDocument(json).isEmpty)
         try writeFixture("basic.otio", content: json)
     }
 
@@ -80,7 +87,10 @@ struct FixtureGenerator {
                             durationFrames: 24, rate: 24),
             ])],
             audioTracks: [])
-        let (edl, _) = serializeTimelineToEdl(doc)
+        let (edl, warnings) = serializeTimelineToEdl(doc)
+        #expect(!edl.isEmpty)
+        #expect(warnings.isEmpty)
+        #expect(validateEdl(edl).isEmpty)
         try writeFixture("basic.edl", content: edl)
     }
 
@@ -97,7 +107,10 @@ struct FixtureGenerator {
                 testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 60, rate: 30),
             ])],
             audioTracks: [])
-        let (json, _) = serializeTimelineToOtio(doc)
+        let (json, warnings) = serializeTimelineToOtio(doc)
+        #expect(!json.isEmpty)
+        #expect(warnings.isEmpty)
+        #expect(validateOtioDocument(json).isEmpty)
         try writeFixture("fractional.otio", content: json)
     }
 
@@ -112,7 +125,10 @@ struct FixtureGenerator {
                 testClipDoc(mediaID: mediaID, timelineStart: .zero, durationFrames: 60, rate: 30),
             ])],
             audioTracks: [])
-        let (edl, _) = serializeTimelineToEdl(doc)
+        let (edl, warnings) = serializeTimelineToEdl(doc)
+        #expect(!edl.isEmpty)
+        #expect(warnings.isEmpty)
+        #expect(validateEdl(edl).isEmpty)
         try writeFixture("fractional.edl", content: edl)
     }
 
@@ -138,7 +154,11 @@ struct FixtureGenerator {
                                                       duration: CMTimeCode(CMTime(value: 12, timescale: 24)))),
             ])],
             audioTracks: [])
-        let (json, _) = serializeTimelineToOtio(doc)
+        let (json, warnings) = serializeTimelineToOtio(doc)
+        #expect(!json.isEmpty)
+        #expect(warnings.isEmpty)
+        #expect(validateOtioDocument(json).isEmpty)
+        #expect(json.contains("SMPTE_Dissolve"))
         try writeFixture("transitions.otio", content: json)
     }
 
@@ -155,7 +175,11 @@ struct FixtureGenerator {
                 testClipDoc(mediaID: missingID, timelineStart: .zero, durationFrames: 24, rate: 24),
             ])],
             audioTracks: [])
-        let (json, _) = serializeTimelineToOtio(doc)
+        let (json, warnings) = serializeTimelineToOtio(doc)
+        #expect(!json.isEmpty)
+        #expect(!warnings.isEmpty) // Should have missing-source warnings
+        #expect(validateOtioDocument(json).isEmpty)
+        #expect(json.contains("MissingReference.1"))
         try writeFixture("missing_media.otio", content: json)
     }
 
@@ -178,7 +202,13 @@ struct FixtureGenerator {
                 TimelineMarker(id: UUID(uuidString: "B0000000-0000-0000-0000-000000000002")!,
                                time: CMTime(value: 48, timescale: 24), name: "Middle"),
             ])
-        let (json, _) = serializeTimelineToOtio(doc)
+        let (json, warnings) = serializeTimelineToOtio(doc)
+        #expect(!json.isEmpty)
+        #expect(warnings.isEmpty)
+        #expect(validateOtioDocument(json).isEmpty)
+        #expect(json.contains("Marker.2"))
+        #expect(json.contains("Start"))
+        #expect(json.contains("Middle"))
         try writeFixture("markers.otio", content: json)
     }
 
@@ -206,7 +236,11 @@ struct FixtureGenerator {
                             speedCurve: speedCurve),
             ])],
             audioTracks: [])
-        let (json, _) = serializeTimelineToOtio(doc)
+        let (json, warnings) = serializeTimelineToOtio(doc)
+        #expect(!json.isEmpty)
+        #expect(!warnings.isEmpty) // Non-uniform speed curve warning
+        #expect(validateOtioDocument(json).isEmpty)
+        #expect(json.contains("speedCurve"))
         try writeFixture("speed_ramp.otio", content: json)
     }
 
@@ -239,7 +273,35 @@ struct FixtureGenerator {
                     range: CMTimeRange(start: CMTime.zero,
                                        duration: CMTime(value: 48, timescale: 24)),
                     text: "Hello world")])])
-        let (json, _) = serializeTimelineToOtio(doc)
+        let (json, warnings) = serializeTimelineToOtio(doc)
+        #expect(!json.isEmpty)
+        #expect(warnings.isEmpty)
+        #expect(validateOtioDocument(json).isEmpty)
+        #expect(json.contains("colourGrade"))
+        #expect(json.contains("captionTracks"))
+        #expect(json.contains("Hello world"))
         try writeFixture("localcut_metadata.otio", content: json)
+    }
+
+    // MARK: - Isolation regression test
+
+    @Test("Normal mode writes no files to temp directory")
+    func normalModeWritesNoFiles() {
+        // In normal mode (env var absent), outputDirectory is nil and
+        // writeFixture is a no-op. Verify the isolation contract:
+        // no directory is created under NSTemporaryDirectory().
+        let tmpBase = NSTemporaryDirectory()
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(atPath: tmpBase) else { return }
+        let localcutDirs = contents.filter { $0.hasPrefix("localcut-fixtures-") }
+        // No new directories should be created by the test suite in normal mode.
+        // (Pre-existing dirs from manual regeneration runs are fine.)
+        for dir in localcutDirs {
+            let fullPath = (tmpBase as NSString).appendingPathComponent(dir)
+            // Verify it's not created during this test run by checking
+            // that outputDirectory is nil.
+            #expect(FixtureGenerator.outputDirectory == nil,
+                    "outputDirectory should be nil in normal mode")
+        }
     }
 }

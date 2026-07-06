@@ -8,7 +8,7 @@ Replace the unconditional `/tmp/localcut-fixtures/` write with a two-mode design
 
 ### Normal mode (default)
 
-`writeFixture()` checks `ProcessInfo.processInfo.environment["LOCALCUT_REGENERATE_FIXTURES"]`. When the variable is absent or not `"1"`, the function returns immediately — no directory creation, no file writes. All 9 tests pass as no-ops.
+In normal mode, the lazily-initialized `outputDirectory` is `nil` because the `LOCALCUT_REGENERATE_FIXTURES` env var is absent or not `"1"`. `writeFixture()` checks `Self.outputDirectory` with a guard-let and returns immediately when it's `nil` — no directory creation, no file writes. All 9 tests pass as no-ops, though the serializer code paths (OTIO and EDL) are still exercised; only the disk write is skipped.
 
 Golden fixture validation is already handled by the separate `GoldenFixtureTests` suite, which compares fresh serializer output against committed fixtures under `Tests/Fixtures/Interchange/`. The generator tests are not needed for validation.
 
