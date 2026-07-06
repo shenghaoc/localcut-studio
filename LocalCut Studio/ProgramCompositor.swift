@@ -33,8 +33,15 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
     private var sourceBuffers: [UUID: CVPixelBuffer] = [:]
 
     /// The current scene definition being composited.
-    private(set) var currentScene: SceneDefinition?
+    private var currentScene: SceneDefinition?
     private var scenes: [SceneDefinition] = []
+
+    /// Thread-safe read-only access to the current scene.
+    nonisolated var activeScene: SceneDefinition? {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentScene
+    }
 
     /// Transition state: when non-nil, we're lerping opacity over 200ms.
     private var transitionStartTime: Date?

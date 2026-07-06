@@ -3,6 +3,7 @@ import os
 
 /// `@unchecked Sendable`: reconnect state (`attemptCount`, `etag`,
 /// `iceServers`, `disconnectTime`) is behind `OSAllocatedUnfairLock`.
+/// `clock` and `sleep` are immutable test-seam closures set once in `init`.
 final class ReconnectController: @unchecked Sendable {
     nonisolated let maxAttempts: Int = 5
     private let backoffLadder: [Double] = [2, 4, 8, 16, 16]
