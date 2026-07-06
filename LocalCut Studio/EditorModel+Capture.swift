@@ -1054,10 +1054,11 @@ extension EditorModel {
                 statusMessage = error
             } else if let duration = manager.lastSavedDuration {
                 let clipCount = manager.lastSavedClipCount ?? 1
-                replaySaveMessage = clipCount == 1
+                let message = clipCount == 1
                     ? String(format: "Saved %.1fs replay clip.", duration)
                     : String(format: "Saved %d replay clips spanning %.1fs.", clipCount, duration)
-                statusMessage = replaySaveMessage!
+                replaySaveMessage = message
+                statusMessage = message
             }
         }
     }

@@ -522,7 +522,9 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
 
         // Write processed interleaved Float32 data back to channelData[0].
         interleaved.withUnsafeBufferPointer { ptr in
-            channelData[0].update(from: ptr.baseAddress!, count: totalSamples)
+            if let baseAddress = ptr.baseAddress {
+                channelData[0].update(from: baseAddress, count: totalSamples)
+            }
         }
 
         // Create a format description for the output (interleaved Float32).

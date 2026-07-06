@@ -309,8 +309,8 @@ func otioTimeRange(start: CMTime, duration: CMTime,
 func isSpeedCurveUniform(_ curve: Keyframed<Float>) -> Bool {
     let speed = TimeRemapping.clampedSpeed(curve.defaultValue)
     return curve.keyframes.allSatisfy { kf in
-        abs(TimeRemapping.clampedSpeed(kf.value) - speed) < 0.0001
-            && (kf.incomingHandle == nil || abs(TimeRemapping.clampedSpeed(kf.incomingHandle!.y) - speed) < 0.0001)
-            && (kf.outgoingHandle == nil || abs(TimeRemapping.clampedSpeed(kf.outgoingHandle!.y) - speed) < 0.0001)
+        let inMatch = kf.incomingHandle.map { abs(TimeRemapping.clampedSpeed($0.y) - speed) < 0.0001 } ?? true
+        let outMatch = kf.outgoingHandle.map { abs(TimeRemapping.clampedSpeed($0.y) - speed) < 0.0001 } ?? true
+        return abs(TimeRemapping.clampedSpeed(kf.value) - speed) < 0.0001 && inMatch && outMatch
     }
 }
