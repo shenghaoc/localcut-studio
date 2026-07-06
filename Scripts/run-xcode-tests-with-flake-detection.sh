@@ -38,9 +38,6 @@ FLAKY_THRESHOLD="${FLAKY_THRESHOLD:-5}"
 FLAKY_REPORT="${FLAKY_REPORT:-flaky-report.json}"
 
 # Counters
-TOTAL_TESTS=0
-PASSED_TESTS=0
-FAILED_TESTS=0
 FLAKY_TESTS=0
 RETRIED_TESTS=0
 
@@ -76,9 +73,8 @@ set -e
 if [ $FIRST_RUN_EXIT -eq 0 ]; then
     echo ""
     echo "=== All tests passed on first run ==="
-    # Count tests from log
-    TOTAL_TESTS=$(grep -c "Test case.*passed" xcodebuild.log || echo "0")
-    echo "Total tests passed: $TOTAL_TESTS"
+    PASSED_COUNT=$(grep -ic "Test Case.*passed" xcodebuild.log || echo "0")
+    echo "Tests passed: $PASSED_COUNT (no failures detected)"
     exit 0
 fi
 
@@ -92,9 +88,18 @@ FAILED_TEST_IDS=()
 
 if [ -d "$RESULT_BUNDLE" ]; then
     # Use xcresulttool to get test results as JSON
+    XCRESULTTOOL_STDERR=$(mktemp)
     RESULT_JSON=$(xcrun xcresulttool get test-results summary \
         --path "$RESULT_BUNDLE" \
-        --format json 2>/dev/null || echo "{}")
+        --format json 2>"$XCRESULTTOOL_STDERR" || echo "{}")
+    XCRESULTTOOL_EXIT=$?
+
+    if [ "$RESULT_JSON" = "{}" ] || [ $XCRESULTTOOL_EXIT -ne 0 ]; then
+        echo "WARNING: xcresulttool failed (exit $XCRESULTTOOL_EXIT), stderr:"
+        cat "$XCRESULTTOOL_STDERR" >&2
+        echo "Falling back to log parsing..."
+    fi
+    rm -f "$XCRESULTTOOL_STDERR"
 
     # Parse failed tests from the JSON output
     # The structure is: testNodes[].children[].name, testNodes[].children[].testStatus
@@ -109,7 +114,8 @@ import sys
 
 try:
     data = json.load(sys.stdin)
-except:
+except (json.JSONDecodeError, ValueError) as exc:
+    print(f'Warning: could not parse xcresulttool JSON: {exc}', file=sys.stderr)
     sys.exit(0)
 
 def extract_failed_tests(node, prefix=''):
@@ -138,7 +144,7 @@ for node in test_nodes:
     failed = extract_failed_tests(node)
     for f in failed:
         print(f)
-" 2>/dev/null || true)
+" || true)
 fi
 
 # If xcresulttool didn't work, try parsing the log output
@@ -151,7 +157,7 @@ if [ ${#FAILED_TEST_IDS[@]} -eq 0 ]; then
             test_id="${BASH_REMATCH[1]}"
             FAILED_TEST_IDS+=("$test_id")
         fi
-    done < <(grep -i "Test [Cc]ase.*failed" xcodebuild.log || true)
+    done < <(grep -i "Test Case.*failed" xcodebuild.log || true)
 fi
 
 if [ ${#FAILED_TEST_IDS[@]} -eq 0 ]; then
@@ -196,8 +202,8 @@ for test_id in "${FAILED_TEST_IDS[@]}"; do
         RETRY_EXIT=$?
         set -e
 
-        # Clean up retry result bundle
-        rm -rf "$RETRY_RESULT"
+        # Clean up retry result bundle (before set -e to avoid abort on cleanup)
+        rm -rf "$RETRY_RESULT" || true
 
         if [ $RETRY_EXIT -eq 0 ]; then
             echo "  ✓ PASSED on attempt $attempt — classifying as FLAKY"
@@ -214,55 +220,40 @@ for test_id in "${FAILED_TEST_IDS[@]}"; do
     else
         echo "  ✗ FAILED all $MAX_RETRIES retries — deterministic failure"
         DETERMINISTIC_FAILURES+=("$test_id")
-        FAILED_TESTS=$((FAILED_TESTS + 1))
     fi
 done
 
-# Generate flaky test report
+# Generate flaky test report using Python for safe JSON serialization
 echo ""
 echo "=== Generating flaky test report ==="
 
-cat > "$FLAKY_REPORT" << EOF
-{
-  "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-  "summary": {
-    "total_failed_on_first_run": ${#FAILED_TEST_IDS[@]},
-    "flaky_passed_on_retry": $FLAKY_TESTS,
-    "deterministic_failures": $FAILED_TESTS,
-    "max_retries_used": $MAX_RETRIES
-  },
-  "flaky_tests": [
-EOF
+python3 -c "
+import json
+import sys
+from datetime import datetime, timezone
 
-# Add flaky test entries
-for i in "${!FLAKY_NAMES[@]}"; do
-    name="${FLAKY_NAMES[$i]}"
-    if [ $i -lt $(( ${#FLAKY_NAMES[@]} - 1 )) ]; then
-        echo "    {\"name\": \"$name\", \"passed_on_retry\": true}," >> "$FLAKY_REPORT"
-    else
-        echo "    {\"name\": \"$name\", \"passed_on_retry\": true}" >> "$FLAKY_REPORT"
-    fi
-done
+flaky_names = sys.argv[1].split('\n') if sys.argv[1] else []
+deterministic_names = sys.argv[2].split('\n') if sys.argv[2] else []
+max_retries = int(sys.argv[3])
+report_path = sys.argv[4]
 
-cat >> "$FLAKY_REPORT" << EOF
-  ],
-  "deterministic_failures": [
-EOF
-
-# Add deterministic failure entries
-for i in "${!DETERMINISTIC_FAILURES[@]}"; do
-    name="${DETERMINISTIC_FAILURES[$i]}"
-    if [ $i -lt $(( ${#DETERMINISTIC_FAILURES[@]} - 1 )) ]; then
-        echo "    {\"name\": \"$name\"}," >> "$FLAKY_REPORT"
-    else
-        echo "    {\"name\": \"$name\"}" >> "$FLAKY_REPORT"
-    fi
-done
-
-cat >> "$FLAKY_REPORT" << EOF
-  ]
+report = {
+    'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'summary': {
+        'total_failed_on_first_run': len(flaky_names) + len(deterministic_names),
+        'flaky_passed_on_retry': len(flaky_names),
+        'deterministic_failures': len(deterministic_names),
+        'max_retries_used': max_retries
+    },
+    'flaky_tests': [{'name': n, 'passed_on_retry': True} for n in flaky_names if n],
+    'deterministic_failures': [{'name': n} for n in deterministic_names if n]
 }
-EOF
+
+with open(report_path, 'w') as f:
+    json.dump(report, f, indent=2)
+" "$(printf '%s\n' "${FLAKY_NAMES[@]}")" \
+  "$(printf '%s\n' "${DETERMINISTIC_FAILURES[@]}")" \
+  "$MAX_RETRIES" "$FLAKY_REPORT"
 
 echo "Report written to: $FLAKY_REPORT"
 
@@ -271,7 +262,7 @@ echo ""
 echo "=== Test Summary ==="
 echo "Failed on first run:    ${#FAILED_TEST_IDS[@]}"
 echo "Flaky (passed retry):   $FLAKY_TESTS"
-echo "Deterministic failures: $FAILED_TESTS"
+echo "Deterministic failures: ${#DETERMINISTIC_FAILURES[@]}"
 echo ""
 
 # Check flaky threshold
@@ -293,9 +284,9 @@ if [ $FLAKY_TESTS -gt 0 ]; then
 fi
 
 # Final exit code
-if [ $FAILED_TESTS -gt 0 ]; then
+if [ ${#DETERMINISTIC_FAILURES[@]} -gt 0 ]; then
     echo ""
-    echo "FAILED: $FAILED_TESTS deterministic test failure(s):"
+    echo "FAILED: ${#DETERMINISTIC_FAILURES[@]} deterministic test failure(s):"
     for name in "${DETERMINISTIC_FAILURES[@]}"; do
         echo "  ✗ $name"
     done

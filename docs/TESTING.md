@@ -34,7 +34,7 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 ### 4. MediaMTX WHIP Integration (Network-dependent)
 - **Location:** `LocalCut StudioTests/WhipMediaMTXIntegrationTests.swift`
 - **Run command:** `LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh`
-- **CI behavior:** Retried by wrapper if container/startup failure detected.
+- **CI behavior:** Skipped if no container runtime and not required. In CI (where it is required), fails immediately if MediaMTX cannot start within 30 seconds. The wrapper attempts Docker, then Podman, then a direct binary fallback on macOS. No retry logic.
 - **Characteristics:** Requires MediaMTX container or binary, network port binding.
 
 ## Flaky-Test Detection
@@ -44,7 +44,7 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 CI uses `Scripts/run-xcode-tests-with-flake-detection.sh` to run Xcode tests:
 
 1. **First run:** Full test suite runs normally.
-2. **On failure:** Script extracts failed test identifiers from `xcresult` bundle.
+2. **On failure:** Script extracts failed test identifiers from `xcresult` bundle. If `xcresulttool` is unavailable or fails, the script falls back to parsing `xcodebuild.log` for failed test case lines.
 3. **Retry:** Each failed test is retried individually (up to `MAX_RETRIES` times).
 4. **Classification:**
    - **Flaky:** Test fails on first run but passes on retry.
@@ -114,7 +114,7 @@ A test is **NOT flaky** if:
 - It fails consistently on retry (deterministic failure).
 - It fails due to build errors.
 - It fails because of missing dependencies or configuration.
-- FixtureGenerator failures (these are deterministic fixture-isolation issues).
+- FixtureGenerator failures (these stem from a known fixture-isolation problem where tests share mutable fixture state, tracked separately in the fixture-isolation PR).
 
 ### Who May Quarantine a Test
 
@@ -124,10 +124,10 @@ A test is **NOT flaky** if:
 
 ### Quarantine Process
 
-1. **Prove flakiness:** Run the test 3+ times locally. Document pass/fail ratio.
+1. **Prove flakiness:** Run the test at least 10 times locally. A test that fails in fewer than 50% of runs (and passes on subsequent runs) is considered flaky. A test that fails in every run is a deterministic failure and must not be quarantined.
 2. **File an issue:** Create a GitHub issue with:
    - Test name and suite
-   - Failure frequency (e.g., "fails 1 in 5 runs")
+   - Failure frequency (e.g., "fails 2 in 10 runs")
    - Root cause hypothesis (if known)
    - Link to CI failure logs
 3. **Add to quarantine list:** Update the table below with:
@@ -166,6 +166,7 @@ A test is **NOT flaky** if:
 3. **Quarantine is temporary.** Every quarantined test must have a fix plan.
 4. **No silent skips.** All quarantined tests are visible in the quarantine list above.
 5. **FixtureGenerator failures are not quarantined.** These are deterministic fixture-isolation issues that belong to the fixture-isolation PR.
+6. **Quarantine list is advisory.** The list is a human-process convention with no automated enforcement. Quarantined tests are not excluded from the flaky count in CI. If a quarantined test causes the flaky threshold to be exceeded, it must be fixed, mocked, or removed.
 
 ### Reporting
 
@@ -210,7 +211,7 @@ LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.
 ### Jobs
 
 1. **package-test:** Runs LocalCutCore package tests (deterministic, no retry).
-2. **test:** Runs Xcode tests with flake detection, OTIO golden validation, and MediaMTX integration.
+2. **test:** Runs Xcode tests with flake detection, OTIO golden validation, and MediaMTX integration. Depends on `package-test` — it only runs after package tests pass, to fail fast on pure-logic regressions.
 
 ### Artifacts
 
@@ -221,8 +222,7 @@ LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.
 
 ### Concurrency
 
-- CI cancels in-progress runs for the same PR branch.
-- Pushes to `main` run to completion.
+- CI cancels in-progress runs for the same concurrency group. For PRs, the group is the head branch; for `main` pushes, the group is the branch itself, so a subsequent push to `main` will cancel a prior in-flight `main` run.
 
 ## Troubleshooting
 
@@ -247,4 +247,4 @@ If MediaMTX tests fail:
 1. Check if Docker/Podman is running.
 2. Check port availability (8889, 9997).
 3. Review MediaMTX logs in the failure artifacts.
-4. These failures are retried automatically by the wrapper.
+4. These failures are not retried — the wrapper only retries individual Xcode test cases, not the MediaMTX integration script.
