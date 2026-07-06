@@ -3,6 +3,31 @@ import AppKit
 import UniformTypeIdentifiers
 import LocalCutCore
 
+enum EditorCommandOutcome: Equatable, Sendable {
+    case completed
+    case actionCancelled
+    case failed
+    case panelCancelled
+}
+
+/// Captures AppKit panels behind a Sendable handle so cancellation can hop
+/// back to the main actor without sending the panel across actors directly.
+/// `@unchecked Sendable` is required because `NSSavePanel` is `@MainActor`-
+/// isolated and not `Sendable`; the handle is only ever created and consumed
+/// on `@MainActor`, so the runtime invariant holds.
+@MainActor
+private final class PanelCancellationHandle: @unchecked Sendable {
+    let panel: NSSavePanel
+
+    init(_ panel: NSSavePanel) {
+        self.panel = panel
+    }
+
+    func cancel() {
+        panel.cancel(nil)
+    }
+}
+
 /// AppKit panel/prompt glue for the document menu commands and the close flow.
 /// Kept apart from the pure persistence logic so the model's save/open/undo code
 /// stays free of panel presentation.
@@ -12,11 +37,7 @@ extension EditorModel {
 
     /// File ▸ New — offers to save first, then resets to an empty project.
     func requestNew() {
-        Task {
-            guard !blockDocumentCommandWhileRecording() else { return }
-            guard await confirmSaveIfNeeded() else { return }
-            newDocument()
-        }
+        Task { _ = await performNewProjectCommand() }
     }
 
     /// File ▸ Open — offers to save first, then presents an open panel that
@@ -58,25 +79,132 @@ extension EditorModel {
     /// menu home and a standard ⌘I shortcut. Uses the Media bin's default of
     /// copying imports into the bundle.
     func requestImport() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.movie, .video, .audiovisualContent,
-                                     .audio, .mpeg4Movie, .quickTimeMovie]
-        panel.allowsMultipleSelection = true
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.begin { @MainActor [weak self] response in
-            guard response == .OK, let self, !panel.urls.isEmpty else { return }
-            let urls = panel.urls
-            Task { await self.importMedia(urls: urls, wantsBundling: self.copyImportsIntoBundle) }
-        }
+        Task { _ = await performImportMediaCommand() }
     }
 
     /// File ▸ Export… — presents the same save panel the toolbar Export button
     /// uses and queues a render with the default preset, so the app's primary
     /// output action has a menu home and a ⇧⌘E shortcut.
     func requestExport() {
-        guard totalDuration > 0 else { return }
-        guard resolveChapterMarkersBeforeExport() else { return }
+        Task { _ = await performExportProjectCommand() }
+    }
+
+    @discardableResult
+    func performNewProjectCommand() async -> EditorCommandOutcome {
+        await performNewProjectCommand(
+            confirmSave: { [self] in
+                await confirmSaveIfNeeded()
+            },
+            resetDocument: { [self] in
+                newDocument()
+            })
+    }
+
+    @discardableResult
+    func performNewProjectCommand(
+        confirmSave: @escaping @MainActor () async -> Bool,
+        resetDocument: @escaping @MainActor () -> Void
+    ) async -> EditorCommandOutcome {
+        guard !blockDocumentCommandWhileRecording() else { return .actionCancelled }
+        let previousStatus = statusMessage
+        guard await confirmSave() else {
+            if statusMessage == previousStatus {
+                statusMessage = String(localized: "Action cancelled.")
+            }
+            return .actionCancelled
+        }
+        guard !Task.isCancelled else {
+            if statusMessage == previousStatus {
+                statusMessage = String(localized: "Action cancelled.")
+            }
+            return .actionCancelled
+        }
+        resetDocument()
+        return .completed
+    }
+
+    @discardableResult
+    func performImportMediaCommand() async -> EditorCommandOutcome {
+        await performImportMediaCommand(
+            presentPanel: { [self] in
+                await presentImportMediaPanel()
+            },
+            importMediaAction: { [self] urls in
+                await importMedia(urls: urls, wantsBundling: copyImportsIntoBundle)
+            })
+    }
+
+    @discardableResult
+    func performImportMediaCommand(
+        presentPanel: @escaping @MainActor () async -> (NSApplication.ModalResponse, [URL]),
+        importMediaAction: @escaping @MainActor ([URL]) async -> EditorCommandOutcome
+    ) async -> EditorCommandOutcome {
+        let (response, urls) = await presentPanel()
+        guard response == .OK, !urls.isEmpty else {
+            statusMessage = String(localized: "Import cancelled.")
+            return .panelCancelled
+        }
+        return await importMediaAction(urls)
+    }
+
+    private func presentImportMediaPanel() async -> (NSApplication.ModalResponse, [URL]) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.movie, .video, .audiovisualContent,
+                                     .audio, .mpeg4Movie, .quickTimeMovie]
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        let cancellationHandle = PanelCancellationHandle(panel)
+        let response = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                MainActor.assumeIsolated {
+                    guard !Task.isCancelled else {
+                        continuation.resume(returning: NSApplication.ModalResponse.cancel)
+                        return
+                    }
+                    cancellationHandle.panel.begin { response in
+                        continuation.resume(returning: response)
+                    }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                cancellationHandle.cancel()
+            }
+        }
+        return (response, panel.urls)
+    }
+
+    @discardableResult
+    func performExportProjectCommand() async -> EditorCommandOutcome {
+        await performExportProjectCommand(
+            presentPanel: { [self] in
+                await presentExportProjectPanel()
+            },
+            exportProject: { [self] url in
+                await export(to: url)
+            })
+    }
+
+    @discardableResult
+    func performExportProjectCommand(
+        presentPanel: @escaping @MainActor () async -> (NSApplication.ModalResponse, URL?),
+        exportProject: @escaping @MainActor (URL) async -> EditorCommandOutcome
+    ) async -> EditorCommandOutcome {
+        guard totalDuration > 0 else {
+            statusMessage = String(localized: "Add media to the timeline before exporting.")
+            return .actionCancelled
+        }
+        guard resolveChapterMarkersBeforeExport() else { return .actionCancelled }
+        let (response, url) = await presentPanel()
+        guard response == .OK, let url else {
+            statusMessage = String(localized: "Export cancelled.")
+            return .panelCancelled
+        }
+        return await exportProject(url)
+    }
+
+    private func presentExportProjectPanel() async -> (NSApplication.ModalResponse, URL?) {
         let preset = BuiltInExportPresets.defaultPreset
         let panel = NSSavePanel()
         if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
@@ -84,10 +212,25 @@ extension EditorModel {
         }
         panel.nameFieldStringValue = "\(project.name).\(preset.defaultFilenameExtension)"
         panel.canCreateDirectories = true
-        panel.begin { @MainActor [weak self] response in
-            guard response == .OK, let url = panel.url, let self else { return }
-            Task { await self.export(to: url) }
+        let cancellationHandle = PanelCancellationHandle(panel)
+        let response = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                MainActor.assumeIsolated {
+                    guard !Task.isCancelled else {
+                        continuation.resume(returning: NSApplication.ModalResponse.cancel)
+                        return
+                    }
+                    cancellationHandle.panel.begin { response in
+                        continuation.resume(returning: response)
+                    }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                cancellationHandle.cancel()
+            }
         }
+        return (response, panel.url)
     }
 
     /// File ▸ Export Timeline (.otio) — serializes the project to OpenTimelineIO

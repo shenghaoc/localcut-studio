@@ -206,8 +206,8 @@ struct RenderQueueInspectorView: View {
     // MARK: - Add to queue
 
     /// Opens an `NSSavePanel` filtered to the preset's container, captures a
-    /// security-scoped bookmark for the chosen URL, and enqueues a job
-    /// carrying the current project's snapshot.
+    /// security-scoped bookmark for the chosen destination folder, and
+    /// enqueues a job carrying the current project's snapshot.
     private func addToQueue(preset: ExportPreset) {
         let panel = NSSavePanel()
         if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
@@ -217,13 +217,7 @@ struct RenderQueueInspectorView: View {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        let didStart = url.startAccessingSecurityScopedResource()
-        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
-
-        guard let bookmark = try? url.bookmarkData(
-            options: .withSecurityScope,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil) else {
+        guard let bookmark = RenderQueue.outputBookmark(for: url) else {
             model.statusMessage = "Could not access \(url.lastPathComponent)."
             return
         }
@@ -234,7 +228,7 @@ struct RenderQueueInspectorView: View {
             outputBookmark: bookmark,
             outputDisplayName: url.lastPathComponent,
             projectSnapshot: snapshot)
-        model.renderQueue.enqueue(job)
+        _ = model.renderQueue.enqueue(job)
         model.statusMessage = "Queued \(preset.name) → \(url.lastPathComponent)."
     }
 }

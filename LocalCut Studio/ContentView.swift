@@ -1,15 +1,27 @@
 import SwiftUI
+import AppIntents
 import AppKit
 import UniformTypeIdentifiers
 import LocalCutCore
+
+/// Keeps cold-start App Intents and the visible window on the same editor model,
+/// even if SwiftUI recreates the `App` value during the process lifetime.
+@MainActor
+private enum LocalCutStudioAppState {
+    static let model = EditorModel()
+    static let appIntentRouter = LocalCutAppIntentRouter(model: model)
+}
 
 @main
 struct LocalCutStudioApp: App {
     // The editor owns the single AVPlayer and is the document controller; it lives
     // at app scope so the menu commands and window can share it.
-    @State private var model = EditorModel()
+    @State private var model = LocalCutStudioAppState.model
 
+    @MainActor
     init() {
+        let appIntentRouter = LocalCutStudioAppState.appIntentRouter
+        AppDependencyManager.shared.add(dependency: appIntentRouter)
         // Activate memory pressure monitoring at app launch.
         MemoryPressureHandler.shared.activate()
     }
@@ -28,12 +40,10 @@ struct LocalCutStudioApp: App {
                 RecorderUITestHarnessView()
                     .frame(minWidth: 420, minHeight: 320)
             } else {
-                EditorView(model: model)
-                    .frame(minWidth: 1000, minHeight: 640)
+                editorView
             }
 #else
-            EditorView(model: model)
-                .frame(minWidth: 1000, minHeight: 640)
+            editorView
 #endif
         }
         .defaultSize(width: 1360, height: 860)
@@ -44,6 +54,12 @@ struct LocalCutStudioApp: App {
             ViewCommands(model: model)
             RecorderCommands(model: model)
         }
+    }
+
+    @MainActor
+    private var editorView: some View {
+        EditorView(model: model)
+            .frame(minWidth: 1000, minHeight: 640)
     }
 }
 

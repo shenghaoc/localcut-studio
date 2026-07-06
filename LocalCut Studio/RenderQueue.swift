@@ -29,6 +29,11 @@ nonisolated enum QueueJobStatus: String, Codable, Hashable, Sendable {
     }
 }
 
+nonisolated enum QueueEnqueueOutcome: Equatable, Sendable {
+    case queued
+    case failed(String)
+}
+
 /// One render job: the recipe (`preset`) + where to write it
 /// (`outputBookmark`) + a frozen project snapshot the runner expands into an
 /// `AVComposition` at job-start.
@@ -47,12 +52,12 @@ nonisolated enum QueueJobStatus: String, Codable, Hashable, Sendable {
 struct QueueJob: Codable, Equatable, Sendable, Identifiable {
     let id: UUID
     var preset: ExportPreset
-    /// Security-scoped bookmark to the destination URL. App Sandbox does not
-    /// grant arbitrary write paths, so the queue keeps the bookmark per job
-    /// rather than holding a live URL.
+    /// Security-scoped bookmark to the destination container. Older jobs may
+    /// still carry a bookmark to the file URL itself; resolution handles both
+    /// shapes so queued renders survive upgrades and retries.
     var outputBookmark: Data
-    /// Display-only filename for the inspector list. The bookmark is the
-    /// source of truth for the actual write.
+    /// Display filename for the inspector list and the leaf name appended when
+    /// `outputBookmark` resolves to a directory URL.
     var outputDisplayName: String
     var projectSnapshot: ProjectDocument
     var status: QueueJobStatus
@@ -301,7 +306,8 @@ final class RenderQueue {
     /// Adds a job to the back of the queue and (by default) starts the runner
     /// if idle. Tests pass `autoStart: false` to inspect queue state without
     /// kicking off the export Task.
-    func enqueue(_ job: QueueJob, autoStart: Bool = true) {
+    @discardableResult
+    func enqueue(_ job: QueueJob, autoStart: Bool = true) -> QueueEnqueueOutcome {
         guard ExportPreset.isSupportedCombination(container: job.preset.containerFormat,
                                                   codec: job.preset.videoCodec) else {
             var rejected = job
@@ -313,7 +319,7 @@ final class RenderQueue {
             log("job \(job.id.uuidString.prefix(8)) failed — \(rejected.errorMessage ?? "")")
             persist()
             recomputeTotalProgress()
-            return
+            return .failed(rejected.errorMessage ?? "Could not queue export.")
         }
         if let hostError = job.preset.hostCapabilityError() {
             var rejected = job
@@ -323,13 +329,14 @@ final class RenderQueue {
             log("job \(job.id.uuidString.prefix(8)) failed — \(rejected.errorMessage ?? "")")
             persist()
             recomputeTotalProgress()
-            return
+            return .failed(rejected.errorMessage ?? "Could not queue export.")
         }
         jobs.append(job)
         log("job \(job.id.uuidString.prefix(8)) enqueued — \(job.preset.name)")
         persist()
         recomputeTotalProgress()
         if autoStart { start() }
+        return .queued
     }
 
     /// Cancels a job by id. Queued jobs flip straight to `.cancelled`; the
@@ -387,7 +394,8 @@ final class RenderQueue {
             jobs[index].outputBookmark = refreshed
             persist()
         }
-        return resolution.url
+        return Self.outputDestinationURL(resolvedURL: resolution.url,
+                                         displayName: jobs[index].outputDisplayName)
     }
 
     /// Drops every terminal (completed / cancelled / failed) job from the list.
@@ -510,7 +518,8 @@ final class RenderQueue {
         if let refreshed = outputResolution.refreshedBookmark {
             refreshOutputBookmark(jobID: id, bookmark: refreshed)
         }
-        let outputURL = outputResolution.url
+        let outputURL = Self.outputDestinationURL(resolvedURL: outputResolution.url,
+                                                  displayName: outputDisplayName)
         let didStart = outputURL.startAccessingSecurityScopedResource()
         defer { if didStart { outputURL.stopAccessingSecurityScopedResource() } }
 
@@ -1402,6 +1411,23 @@ final class RenderQueue {
                                      relativeTo: nil)
     }
 
+    nonisolated static func outputBookmark(for outputURL: URL) -> Data? {
+        let containerURL = outputURL.deletingLastPathComponent()
+        let didStart = containerURL.startAccessingSecurityScopedResource()
+        defer { if didStart { containerURL.stopAccessingSecurityScopedResource() } }
+        return try? containerURL.bookmarkData(options: .withSecurityScope,
+                                              includingResourceValuesForKeys: nil,
+                                              relativeTo: nil)
+    }
+
+    private nonisolated static func outputDestinationURL(
+        resolvedURL: URL,
+        displayName: String
+    ) -> URL {
+        guard resolvedURL.hasDirectoryPath else { return resolvedURL }
+        return resolvedURL.appendingPathComponent(displayName, isDirectory: false)
+    }
+
     // MARK: Helpers
 
     /// Pre-resolved bookmark result. The URL is resolved off MainActor;
@@ -1635,16 +1661,17 @@ final class RenderQueue {
     /// Builds + enqueues a job for the toolbar's Export shortcut, then starts
     /// the runner. The toolbar handler picks the destination URL, captures
     /// a security-scoped bookmark, snapshots the project, and calls this.
+    @discardableResult
     func enqueueWithDefaultPreset(outputURL: URL,
                                   project: Project,
                                   bookmark: Data,
-                                  projectDocumentURL: URL? = nil) {
+                                  projectDocumentURL: URL? = nil) -> QueueEnqueueOutcome {
         let snapshot = ProjectDocument(project: project, queueBundleURL: projectDocumentURL)
         let job = QueueJob(
             preset: BuiltInExportPresets.defaultPreset,
             outputBookmark: bookmark,
             outputDisplayName: outputURL.lastPathComponent,
             projectSnapshot: snapshot)
-        enqueue(job)
+        return enqueue(job)
     }
 }
