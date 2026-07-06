@@ -101,11 +101,7 @@ final class AudioMasterBus {
 
     @ObservationIgnored private var livePlayerNode: AVAudioPlayerNode?
     /// In-flight live voice-cleanup scheduling task.
-    ///
-    /// **Isolation invariant:** All reads and writes occur on `@MainActor`.
-    /// `nonisolated(unsafe)` satisfies the compiler for the `Task.detached`
-    /// capture pattern; the detached task itself does not access this property.
-    @ObservationIgnored nonisolated(unsafe) private var liveSchedulingTask: Task<Void, Never>?
+    @ObservationIgnored private var liveSchedulingTask: Task<Void, Never>?
     @ObservationIgnored private var currentLiveComposition: AVComposition?
     @ObservationIgnored private var currentLiveAudioMix: AVAudioMix?
     @ObservationIgnored private let liveCleanupSettingsStore = LiveVoiceCleanupSettingsStore()

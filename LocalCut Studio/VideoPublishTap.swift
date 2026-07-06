@@ -30,11 +30,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     }
     #else
     /// Latest captured pixel buffer (non-WebRTC path).
-    ///
-    /// **Isolation invariant:** Written under `lock` in `capturePixelBuffer`;
-    /// `nonisolated(unsafe)` allows `private(set)` visibility without actor
-    /// isolation. Readers should hold `lock` or accept a benign stale read.
-    nonisolated(unsafe) private(set) var latestPixelBuffer: CVPixelBuffer?
+    private(set) var latestPixelBuffer: CVPixelBuffer?
     init() {}
     nonisolated func detachFromWebRTC() {}
     #endif

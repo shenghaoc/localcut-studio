@@ -152,13 +152,7 @@ final class EditorModel {
 
     /// In-flight loudness measurement task. Cancelled on the next invocation
     /// to prevent concurrent full-composition decode + DSP operations.
-    ///
-    /// **Isolation invariant:** All reads and writes occur on `@MainActor`
-    /// (including inside the unstructured `Task` body, which inherits main-
-    /// actor isolation). `nonisolated(unsafe)` satisfies the compiler for the
-    /// `Task { [weak self] in ... }` capture pattern; no off-main-actor access
-    /// occurs at runtime.
-    @ObservationIgnored nonisolated(unsafe) var loudnessTask: Task<Void, Never>?
+    @ObservationIgnored var loudnessTask: Task<Void, Never>?
 
     /// Session cache of imported LUT filenames keyed by their bookmark, so the
     /// inspector can show a LUT's name without resolving the security-scoped
