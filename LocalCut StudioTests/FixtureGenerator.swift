@@ -4,15 +4,41 @@ import CoreMedia
 @testable import LocalCutCore
 @testable import LocalCut_Studio
 
-/// Generates fixture content and writes to /tmp for manual collection.
-/// Run: xcodebuild test -only-testing "LocalCut StudioTests/FixtureGenerator"
-/// Then copy files from /tmp/localcut-fixtures/ to Tests/Fixtures/Interchange/.
+/// Generates fixture content and writes to disk for manual collection.
+///
+/// **Normal test mode:** tests pass without writing anything — the golden
+/// fixture tests in `GoldenFixtureTests` validate the serializer output
+/// against the committed fixtures under `Tests/Fixtures/Interchange/`.
+///
+/// **Explicit regeneration mode:** set `LOCALCUT_REGENERATE_FIXTURES=1` to
+/// write generated fixtures to a unique temporary directory per run:
+///
+///     LOCALCUT_REGENERATE_FIXTURES=1 \
+///       xcodebuild test -only-testing "LocalCut StudioTests/FixtureGenerator"
+///
+/// The output path is printed at the start of the suite.
 @Suite("Fixture generator")
 struct FixtureGenerator {
 
+    /// Whether this run should actually write fixture files to disk.
+    /// Enabled by setting `LOCALCUT_REGENERATE_FIXTURES=1` in the environment.
+    private static var isRegenerationEnabled: Bool {
+        ProcessInfo.processInfo.environment["LOCALCUT_REGENERATE_FIXTURES"] == "1"
+    }
+
+    /// Shared output directory for this regeneration run, created once lazily.
+    /// Uses a UUID-based subdirectory to avoid collisions between parallel runs.
+    private static let outputDirectory: String? = {
+        guard isRegenerationEnabled else { return nil }
+        let base = NSTemporaryDirectory()
+        let dir = (base as NSString).appendingPathComponent("localcut-fixtures-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        print("FixtureGenerator: writing to \(dir)")
+        return dir
+    }()
+
     private func writeFixture(_ name: String, content: String) throws {
-        let dir = "/tmp/localcut-fixtures"
-        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        guard let dir = Self.outputDirectory else { return }
         let path = "\(dir)/\(name)"
         try content.write(toFile: path, atomically: true, encoding: .utf8)
         print("Wrote \(path)")
