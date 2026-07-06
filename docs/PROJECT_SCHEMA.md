@@ -71,7 +71,7 @@ Two fields use extra-lenient decoding to avoid failing on malformed or future va
 
 ## Migration functions
 
-The codebase includes `migrateSceneDoc(_:)` as the designated entry point for schema upgrades. Currently it is a no-op (schema is at V1). Future schema bumps should add migration logic there, gated on the document's `schemaVersion`.
+The codebase includes `migrateSceneDoc(_:)` as the designated entry point for schema upgrades. Currently it stamps `schemaVersion = sceneSchemaVersion` on every read (V1 → V1, a no-op in effect). Future schema bumps should add migration logic before the stamp, gated on the document's `schemaVersion`.
 
 No other explicit migration functions exist. The `decodeIfPresent`-with-defaults pattern serves as the implicit migration strategy.
 
@@ -109,6 +109,7 @@ Explicit migrations become necessary when:
 3. **A field's type changes** — the old type cannot decode into the new type.
 4. **Default values are insufficient** — the correct value depends on other fields or requires user input.
 5. **Data must be transformed** — e.g., splitting one field into two, or merging fields.
+6. **A field is removed** — old documents still contain the key; its data may need to be mapped to new fields before discarding.
 
 In these cases, add a migration function called from `init(from:)`, gated on `schemaVersion < N`. The `migrateSceneDoc` function is the pattern to follow.
 
@@ -129,5 +130,6 @@ The following tests verify schema compatibility:
 
 - `Packages/LocalCutCore/Sources/LocalCutCore/Models/DocumentTypes.swift` — `ProjectDocument` Codable conformance.
 - `LocalCut Studio/DocumentController.swift` — open/save logic, schema version check.
+- `LocalCut Studio/EditorModel+Persistence.swift` — core persistence wiring.
 - `Packages/LocalCutCore/Sources/LocalCutCore/Models/SceneModels.swift` — `migrateSceneDoc`.
 - `LocalCut StudioTests/PersistenceTests.swift` — schema compatibility tests.
