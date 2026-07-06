@@ -1,12 +1,12 @@
 # Project Document Schema
 
-This document describes the versioning and compatibility model for LocalCut Studio project files (`.lcstudio` and `.lcstudiobundle`).
+This document describes the versioning and compatibility model for LocalCut Studio project files (`.lcstudio` single-file and `.lcbundle` packages).
 
 ## Current schema version
 
 | Format | Version |
 |--------|---------|
-| Bundle (`.lcstudiobundle`) | 10 |
+| Bundle (`.lcbundle`) | 10 |
 | Single-file (`.lcstudio`) | 10 |
 
 Both formats share the same `ProjectDocument` structure. The version is stored in the `schemaVersion` JSON key.
@@ -59,6 +59,8 @@ The project **opens read-only**. The app:
 
 This prevents silent data loss: the user must explicitly choose to save a downconverted copy.
 
+> **Caveat:** This guarantee applies to additive changes only. If a newer version introduces a new enum case for an existing typed field (e.g., a new `Effect` case), the synthesized `Codable` decoder may throw before reaching the schema-version guard. Such projects would fail to open rather than opening read-only.
+
 ### Saving always writes the current schema
 
 Every save writes `schemaVersion = currentSchemaVersion` (or `singleFileSchemaVersion`). The project is always persisted in the latest known format, regardless of what version it was opened from.
@@ -72,9 +74,9 @@ Two fields use extra-lenient decoding to avoid failing on malformed or future va
 
 ## Migration functions
 
-The codebase includes `migrateSceneDoc(_:)` as the designated entry point for schema upgrades. Currently it stamps `schemaVersion = sceneSchemaVersion` on every read (V1 → V1, a no-op in effect). Future schema bumps should add migration logic before the stamp, gated on the document's `schemaVersion`.
+The codebase includes `migrateSceneDoc(_:)` as the designated entry point for **scene-level** schema upgrades. Currently it stamps `schemaVersion = sceneSchemaVersion` on every read (V1 → V1, a no-op in effect). Future scene-schema bumps should add migration logic before the stamp, gated on the scene doc's `schemaVersion`.
 
-No other explicit migration functions exist. The `decodeIfPresent`-with-defaults pattern serves as the implicit migration strategy.
+For **project-level** schema upgrades, add migration logic in `ProjectDocument.init(from:)`, gated on `schemaVersion < N`. No project-level migration functions exist today; the `decodeIfPresent`-with-defaults pattern serves as the implicit strategy.
 
 ## Known limitations
 
