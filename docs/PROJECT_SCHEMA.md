@@ -18,8 +18,8 @@ Both formats share the same `ProjectDocument` structure. The version is stored i
 | 1–4 | 1–38 | `name`, `renderWidth`, `renderHeight`, `frameRate`, `media`, `videoTracks`, `audioTracks`, `captionTracks`, `markers` |
 | 5–6 | 38a | Look effects on clips |
 | 6–7 | 38b | `overlays` (OverlayClip persistence) |
-| 7 | 43 | `callouts`, `paddedBackground`, `screencastEventLogs`, per-clip `transformKeyframes` |
-| 8 | 39 | `aspect`, `coverFrame` |
+| 7 | 39 | `aspect`, `coverFrame` |
+| 8 | 43 | `callouts`, `paddedBackground`, `screencastEventLogs`, per-clip `transformKeyframes` |
 | 9 | 44 | `keystrokeOverlayClips` |
 | 10 | 45 | `sceneDoc`, `layoutTracks` |
 
