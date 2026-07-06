@@ -19,7 +19,7 @@ final class ScreencastEventLogWriter {
     ///
     /// **Isolation invariant:** Installed/removed on `@MainActor` in
     /// `startMonitoring`/`stopMonitoring`; also removed in `deinit` (nonisolated)
-    /// via `DispatchQueue.main.async`. `NSEvent.removeMonitor` is thread-safe.
+    /// via `DispatchQueue.main.async` (main-thread affinity required by AppKit).
     nonisolated(unsafe) private var localMonitor: Any?
     /// Global NSEvent monitor for non-own-app recordings.
     ///
@@ -118,11 +118,11 @@ final class ScreencastEventLogWriter {
         }
     }
 
-    /// Remove the monitor as a safety net. `NSEvent.removeMonitor` is
-    /// thread-safe, but dispatching to main is a defensive measure since
-    /// `deinit` can be called from any executor. The monitor handler captures
-    /// `self` weakly, so any events arriving between deallocation and the
-    /// async removal are harmless.
+    /// Remove the monitor as a safety net. `NSEvent.removeMonitor` must be
+    /// called from the same thread that installed the monitor (main thread
+    /// here), but `deinit` can be called from any executor, so dispatch the
+    /// removal. The monitor handler captures `self` weakly, so any events
+    /// arriving between deallocation and the async removal are harmless.
     deinit {
         let local = localMonitor
         let global = globalMonitor

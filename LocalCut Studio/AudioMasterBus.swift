@@ -285,7 +285,8 @@ final class AudioMasterBus {
 
         // Confinement: `composition` and `audioMix` are freshly-built local
         // values consumed only by the detached task below. `nonisolated(unsafe)`
-        // transfers ownership without copying; the originals go out of scope.
+        // suppresses isolation checking so the detached task can capture them;
+        // the originals go out of scope after this block.
         nonisolated(unsafe) let comp = composition
         nonisolated(unsafe) let mix = audioMix
         let settingsStore = liveCleanupSettingsStore

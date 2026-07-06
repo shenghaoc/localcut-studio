@@ -250,7 +250,11 @@ final class EditorModel {
     @ObservationIgnored var cachedProjectedBeatTimes: [CMTime] = []
     @ObservationIgnored var projectedBeatTimesRevision: Int = 0
     @ObservationIgnored var lastProjectedBeatTimesRevision: Int = -1
-    @ObservationIgnored var activeOverlaySourceRegistryID: UUID?
+    /// Active overlay source registry ID for the current preview.
+    ///
+    /// **Isolation invariant:** Mutated on `@MainActor`; read in `deinit`
+    /// (nonisolated) for resource cleanup via `EffectCompositor.releaseOverlaySources`.
+    @ObservationIgnored nonisolated(unsafe) var activeOverlaySourceRegistryID: UUID?
 
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.
