@@ -6,7 +6,15 @@ final class ReconnectController: @unchecked Sendable {
     private let backoffLadder: [Double] = [2, 4, 8, 16, 16]
     nonisolated let gracePeriod: TimeInterval = 3.0
 
+    /// Clock function for timing. Test seam for deterministic timing.
+    ///
+    /// **Isolation invariant:** Set once before any concurrent access (typically
+    /// in test setup). Read from any thread via `nonisolated` methods.
     nonisolated(unsafe) var clock: @Sendable () -> TimeInterval = { Date.timeIntervalSinceReferenceDate }
+    /// Sleep function for backoff delays. Test seam for deterministic timing.
+    ///
+    /// **Isolation invariant:** Set once before any concurrent access (typically
+    /// in test setup). Read from any thread via `nonisolated` methods.
     nonisolated(unsafe) var sleep: @Sendable (TimeInterval) async throws -> Void = { duration in
         try await Task.sleep(for: .seconds(duration))
     }

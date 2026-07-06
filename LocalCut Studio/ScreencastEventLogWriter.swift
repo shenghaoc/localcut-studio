@@ -15,7 +15,15 @@ final class ScreencastEventLogWriter {
     private var target: CaptureTarget
     private var captureRegion: CaptureRegion?
     private var events: [ScreencastEvent] = []
+    /// Local NSEvent monitor for own-app recordings.
+    ///
+    /// **Isolation invariant:** Installed/removed on `@MainActor` in
+    /// `startMonitoring`/`stopMonitoring`; also removed in `deinit` (nonisolated)
+    /// via `DispatchQueue.main.async`. `NSEvent.removeMonitor` is thread-safe.
     nonisolated(unsafe) private var localMonitor: Any?
+    /// Global NSEvent monitor for non-own-app recordings.
+    ///
+    /// **Isolation invariant:** Same as `localMonitor`.
     nonisolated(unsafe) private var globalMonitor: Any?
 
     /// Creates a writer that will store events relative to the given start time.

@@ -3,7 +3,17 @@ import AVFoundation
 import LocalCutCore
 
 final class PreviewRebuildCoordinator {
+    /// Pending debounced rebuild task.
+    ///
+    /// **Isolation invariant:** Set/cancelled on `@MainActor` in
+    /// `rebuildDebounced`; also cancelled from the nonisolated `cancelAll()`.
+    /// Task cancellation is idempotent, so the benign race is safe.
     nonisolated(unsafe) private var pendingRebuildTask: Task<Void, Never>?
+    /// Active in-flight rebuild task.
+    ///
+    /// **Isolation invariant:** Set/cancelled on `@MainActor` in
+    /// `scheduleRebuild`; also cancelled from the nonisolated `cancelAll()`.
+    /// Task cancellation is idempotent, so the benign race is safe.
     nonisolated(unsafe) private var activeRebuildTask: Task<Void, Never>?
     private var inFlightPreviewOverlaySourceRegistryIDs = Set<UUID>()
 

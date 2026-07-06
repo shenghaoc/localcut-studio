@@ -152,6 +152,12 @@ final class EditorModel {
 
     /// In-flight loudness measurement task. Cancelled on the next invocation
     /// to prevent concurrent full-composition decode + DSP operations.
+    ///
+    /// **Isolation invariant:** All reads and writes occur on `@MainActor`
+    /// (including inside the unstructured `Task` body, which inherits main-
+    /// actor isolation). `nonisolated(unsafe)` satisfies the compiler for the
+    /// `Task { [weak self] in ... }` capture pattern; no off-main-actor access
+    /// occurs at runtime.
     @ObservationIgnored nonisolated(unsafe) var loudnessTask: Task<Void, Never>?
 
     /// Session cache of imported LUT filenames keyed by their bookmark, so the
@@ -186,11 +192,26 @@ final class EditorModel {
     var recordingMicLevel: Float = 0
     var recordingLiveMonitorLatencyMs: Double = 0
     var recoveredCaptureSessions: [CaptureSessionResult] = []
+    /// Security-scoped URL for the recordings folder. Set once during recording
+    /// setup on `@MainActor`; stopped in `deinit`.
+    ///
+    /// **Isolation invariant:** Written on `@MainActor`, read in `deinit`
+    /// (nonisolated) for resource cleanup. The write-to-read race is benign
+    /// because `stopAccessingSecurityScopedResource` is idempotent.
     @ObservationIgnored nonisolated(unsafe) var recordingsFolderAccessURL: URL?
+    /// In-flight recording monitor task. Cancelled in `deinit` for cleanup.
+    ///
+    /// **Isolation invariant:** All runtime reads/writes occur on `@MainActor`.
+    /// `nonisolated(unsafe)` allows the nonisolated `deinit` to cancel it;
+    /// task cancellation is idempotent.
     @ObservationIgnored nonisolated(unsafe) var recordingMonitorTask: Task<Void, Never>?
     /// Accumulated wall-clock time spent paused, subtracted from elapsed display.
+    ///
+    /// **Isolation invariant:** All access on `@MainActor` during recording.
     @ObservationIgnored nonisolated(unsafe) var recordingPausedDuration: TimeInterval = 0
     /// Wall-clock time when the current pause started, or nil if not paused.
+    ///
+    /// **Isolation invariant:** All access on `@MainActor` during recording.
     @ObservationIgnored nonisolated(unsafe) var pauseStartedAt: Date?
 
     // Phase 42 — Recorder UX
@@ -201,6 +222,9 @@ final class EditorModel {
     var hasLastRecordingTake = false
     /// Stored request for retake: replaces the most recent chunk-set in the same
     /// timeline slot.
+    ///
+    /// **Isolation invariant:** Set once on `@MainActor` during recording start;
+    /// read later on `@MainActor` for retake.
     @ObservationIgnored nonisolated(unsafe) var lastRecordingRequest: CaptureStartRequest?
     /// Tracks the timeline slots occupied by the most recent recording landing,
     /// so retake can replace them without touching unrelated tracks.
@@ -221,7 +245,15 @@ final class EditorModel {
     /// Floating control panel controller.
     @ObservationIgnored let floatingPanelController = FloatingPanelController()
 
+    /// AVPlayer time observer. Installed on `@MainActor`, removed in `deinit`.
+    ///
+    /// **Isolation invariant:** `removeTimeObserver` is thread-safe; `deinit`
+    /// access is benign.
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
+    /// AVPlayer end-of-item observer. Installed on `@MainActor`, removed in `deinit`.
+    ///
+    /// **Isolation invariant:** `NotificationCenter.removeObserver` is
+    /// thread-safe; `deinit` access is benign.
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
     @ObservationIgnored let beatAnalyzer = BeatAnalyzer()
     // `nonisolated(unsafe)` so the nonisolated `deinit` can cancel it, matching
@@ -272,11 +304,18 @@ final class EditorModel {
     /// to `project.mediaItems.map(\.url)`) can't accidentally revoke it on
     /// undo/redo (the bundle URL is never equal to any media item URL —
     /// item URLs point at files *inside* the bundle).
+    ///
+    /// **Isolation invariant:** Mutated on `@MainActor`; iterated in `deinit`
+    /// (nonisolated) to stop security-scoped access. `stopAccessingSecurity-
+    /// ScopedResource` is idempotent, so the benign race is safe.
     @ObservationIgnored nonisolated(unsafe) var accessedURLs: Set<URL> = []
 
     /// Security-scoped access on the outer `.lcbundle` directory, when the
     /// current document is a bundle. Tracked separately from `accessedURLs`
     /// for the reason in that property's doc. Stopped on session teardown.
+    ///
+    /// **Isolation invariant:** Mutated on `@MainActor`; read in `deinit`
+    /// (nonisolated) for resource cleanup. Idempotent stop is safe.
     @ObservationIgnored nonisolated(unsafe) var bundleAccessURL: URL?
 
     /// Bumped on every session swap (New/Open). Async import/relink capture it

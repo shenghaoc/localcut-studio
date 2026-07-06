@@ -100,6 +100,11 @@ final class AudioMasterBus {
     // MARK: - Live voice-cleanup preview routing (T1.7 / T1.8 / T1.9)
 
     @ObservationIgnored private var livePlayerNode: AVAudioPlayerNode?
+    /// In-flight live voice-cleanup scheduling task.
+    ///
+    /// **Isolation invariant:** All reads and writes occur on `@MainActor`.
+    /// `nonisolated(unsafe)` satisfies the compiler for the `Task.detached`
+    /// capture pattern; the detached task itself does not access this property.
     @ObservationIgnored nonisolated(unsafe) private var liveSchedulingTask: Task<Void, Never>?
     @ObservationIgnored private var currentLiveComposition: AVComposition?
     @ObservationIgnored private var currentLiveAudioMix: AVAudioMix?
@@ -282,6 +287,9 @@ final class AudioMasterBus {
         player.reset()
         liveGainReductionStore.update(LiveGainReduction())
 
+        // Confinement: `composition` and `audioMix` are freshly-built local
+        // values consumed only by the detached task below. `nonisolated(unsafe)`
+        // transfers ownership without copying; the originals go out of scope.
         nonisolated(unsafe) let comp = composition
         nonisolated(unsafe) let mix = audioMix
         let settingsStore = liveCleanupSettingsStore

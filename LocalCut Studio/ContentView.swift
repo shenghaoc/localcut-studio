@@ -575,6 +575,11 @@ struct WindowConfigurator: NSViewRepresentable {
     final class Coordinator: NSObject, NSWindowDelegate {
         var model: EditorModel
         weak var window: NSWindow?
+        /// Previous window delegate, restored on detach.
+        ///
+        /// **Isolation invariant:** Set/read on `@MainActor` in `attach(to:)`.
+        /// `nonisolated(unsafe)` allows the weak reference to be read without
+        /// actor hop during delegate restoration.
         nonisolated(unsafe) weak var previousDelegate: NSWindowDelegate?
 
         init(model: EditorModel) {
