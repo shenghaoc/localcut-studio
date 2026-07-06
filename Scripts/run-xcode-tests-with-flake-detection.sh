@@ -25,6 +25,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Run from the project root so relative paths work regardless of caller cwd.
+cd "$PROJECT_DIR"
+
 # Configurable parameters
 PROJECT="${PROJECT:-LocalCut Studio.xcodeproj}"
 SCHEME="${SCHEME:-LocalCut Studio}"
@@ -142,12 +145,13 @@ fi
 if [ ${#FAILED_TEST_IDS[@]} -eq 0 ]; then
     echo "Falling back to log parsing for failed tests..."
     while IFS= read -r line; do
-        # Extract test identifiers from "Test case 'X/Y()' failed" lines
-        if [[ "$line" =~ Test\ case\ \'([^\']+)\'\ failed ]]; then
+        # Extract test identifiers from "Test case 'X/Y()' failed" or
+        # "Test Case 'X/Y()' failed" lines (case-insensitive match).
+        if [[ "${line,,}" =~ test\ case\ \'([^\']+)\'\ failed ]]; then
             test_id="${BASH_REMATCH[1]}"
             FAILED_TEST_IDS+=("$test_id")
         fi
-    done < <(grep "Test case.*failed" xcodebuild.log || true)
+    done < <(grep -i "Test [Cc]ase.*failed" xcodebuild.log || true)
 fi
 
 if [ ${#FAILED_TEST_IDS[@]} -eq 0 ]; then
@@ -168,39 +172,50 @@ echo "--- Retrying failed tests ---"
 
 for test_id in "${FAILED_TEST_IDS[@]}"; do
     RETRIED_TESTS=$((RETRIED_TESTS + 1))
-    echo ""
-    echo "Retrying: $test_id (attempt 1 of $MAX_RETRIES)"
+    PASSED_ON_RETRY=false
 
-    # Create a fresh result bundle for this retry
-    RETRY_RESULT="RetryResult-${RETRIED_TESTS}.xcresult"
-    rm -rf "$RETRY_RESULT"
+    for attempt in $(seq 1 "$MAX_RETRIES"); do
+        echo ""
+        echo "Retrying: $test_id (attempt $attempt of $MAX_RETRIES)"
 
-    set +e
-    xcodebuild test \
-        -project "$PROJECT" \
-        -scheme "$SCHEME" \
-        -configuration Debug \
-        -destination 'platform=macOS' \
-        -derivedDataPath "$DERIVED_DATA" \
-        -resultBundlePath "$RETRY_RESULT" \
-        -only-testing:"$test_id" \
-        CODE_SIGNING_ALLOWED=NO \
-        2>&1 | tee "retry-${RETRIED_TESTS}.log"
-    RETRY_EXIT=$?
-    set -e
+        # Create a fresh result bundle for this retry
+        RETRY_RESULT="RetryResult-${RETRIED_TESTS}-${attempt}.xcresult"
+        rm -rf "$RETRY_RESULT"
 
-    if [ $RETRY_EXIT -eq 0 ]; then
-        echo "  ✓ PASSED on retry — classifying as FLAKY"
+        set +e
+        xcodebuild test \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            -resultBundlePath "$RETRY_RESULT" \
+            -only-testing:"$test_id" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "retry-${RETRIED_TESTS}-${attempt}.log"
+        RETRY_EXIT=$?
+        set -e
+
+        # Clean up retry result bundle
+        rm -rf "$RETRY_RESULT"
+
+        if [ $RETRY_EXIT -eq 0 ]; then
+            echo "  ✓ PASSED on attempt $attempt — classifying as FLAKY"
+            PASSED_ON_RETRY=true
+            break
+        fi
+
+        echo "  ✗ FAILED on attempt $attempt"
+    done
+
+    if [ "$PASSED_ON_RETRY" = true ]; then
         FLAKY_TESTS=$((FLAKY_TESTS + 1))
         FLAKY_NAMES+=("$test_id")
     else
-        echo "  ✗ FAILED on retry — deterministic failure"
+        echo "  ✗ FAILED all $MAX_RETRIES retries — deterministic failure"
         DETERMINISTIC_FAILURES+=("$test_id")
         FAILED_TESTS=$((FAILED_TESTS + 1))
     fi
-
-    # Clean up retry result bundle
-    rm -rf "$RETRY_RESULT"
 done
 
 # Generate flaky test report
