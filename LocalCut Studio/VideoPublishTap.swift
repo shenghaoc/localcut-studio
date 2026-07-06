@@ -33,9 +33,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     }
     #else
     var latestPixelBuffer: CVPixelBuffer? {
-        lock.lock()
-        defer { lock.unlock() }
-        return latestPixelBufferStorage
+        lock.withLock { latestPixelBufferStorage }
     }
 
     private var latestPixelBufferStorage: CVPixelBuffer?

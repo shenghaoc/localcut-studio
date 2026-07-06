@@ -38,9 +38,7 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
 
     /// Thread-safe read-only access to the current scene.
     nonisolated var activeScene: SceneDefinition? {
-        lock.lock()
-        defer { lock.unlock() }
-        return currentScene
+        lock.withLock { currentScene }
     }
 
     /// Transition state: when non-nil, we're lerping opacity over 200ms.

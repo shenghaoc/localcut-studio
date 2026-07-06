@@ -182,8 +182,6 @@ private nonisolated final class ResumeBox: @unchecked Sendable {
 /// `ResumeBox`, `state` is touched exclusively inside the pump's request block,
 /// which AVFoundation invokes serially on `pumpQueue`, and the box never escapes
 /// that closure. `@unchecked Sendable` documents that confinement.
-/// `@unchecked Sendable`: `state` is touched exclusively inside the serial
-/// `pumpQueue` callback; the box never escapes that closure.
 private nonisolated final class VoiceCleanupStateBox: @unchecked Sendable {
     var state = VoiceCleanupProcessorState()
 }
