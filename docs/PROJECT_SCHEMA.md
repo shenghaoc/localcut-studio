@@ -18,10 +18,11 @@ Both formats share the same `ProjectDocument` structure. The version is stored i
 | 1–4 | 1–38 | `name`, `renderWidth`, `renderHeight`, `frameRate`, `media`, `videoTracks`, `audioTracks`, `captionTracks`, `markers` |
 | 5–6 | 38a | Look effects on clips |
 | 6–7 | 38b | `overlays` (OverlayClip persistence) |
-| 7 | 39 | `aspect`, `coverFrame` |
 | 8 | 43 | `callouts`, `paddedBackground`, `screencastEventLogs`, per-clip `transformKeyframes` |
 | 9 | 44 | `keystrokeOverlayClips` |
 | 10 | 45 | `sceneDoc`, `layoutTracks` |
+
+> **Note:** Phase 39 added `aspect` and `coverFrame` but did not bump the schema version. These fields decode with defaults on older documents.
 
 ## Compatibility model
 
@@ -40,7 +41,7 @@ The project opens normally. Missing fields receive their defaults:
 | `frameRate` | `30` |
 | `workingColourSpace` | `.sRGB` |
 | `media`, `videoTracks`, `audioTracks`, `captionTracks`, `markers`, `overlays`, `callouts`, `screencastEventLogs`, `keystrokeOverlayClips`, `layoutTracks` | `[]` |
-| `audioBus` | `AudioBusDoc()` (gain 1, no track inputs) |
+| `audioBus` | `AudioBusDoc()` (gain 1, no track inputs, default voice cleanup) |
 | `aspect` | inferred from render width/height |
 | `paddedBackground`, `coverFrame` | `nil` |
 | `sceneDoc` | `SceneDoc()` (empty) |
@@ -52,7 +53,7 @@ Per-clip fields (`opacity`, `effects`, `transition`, `geometry`, `volumeEnvelope
 The project **opens read-only**. The app:
 
 1. Decodes the document (unknown keys are ignored, missing fields get defaults).
-2. Sets `documentURL = nil` so the file cannot be overwritten.
+2. Sets `documentURL = nil` so the document saves via Save As rather than overwriting the original.
 3. Marks the document as dirty, prompting "Save As" on close.
 4. Shows a status message: *"saved in a newer format — saving downconverts to this version"*.
 
@@ -122,9 +123,11 @@ The following tests verify schema compatibility:
 - `PersistenceTests.decodesWithDefaults` — empty JSON decodes with all defaults.
 - `ColourManagementTests.legacyDocumentDecodesAsSRGB` — schema 2 without `workingColourSpace` defaults to sRGB.
 - `ColourManagementTests.unknownWorkingSpaceDecodesAsSRGB` — unknown enum value falls back safely.
-- `CaptionsAndKeyframesTests` — verifies schema version >= 2.
+- `CaptionsAndKeyframesTests.projectDocumentSchemaV2` — verifies schema version >= 2.
+- `CaptionsAndKeyframesTests.captionPersistenceLegacyDoc` — legacy document (schema 1) without `captionTracks` decodes to empty.
 - `MarkersTests.schemaVersionBumped` — verifies schema version >= 3.
 - `AudioMasterBusTests.schemaVersionAdvancesToV3` — verifies schema version >= 3.
+- `ProjectBundleTests.singleFileSaveDownconvertsSchemaVersion` — single-file save uses `singleFileSchemaVersion` with no `bundleFormat`.
 
 ## Relevant source files
 
