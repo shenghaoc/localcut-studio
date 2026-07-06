@@ -35,7 +35,9 @@ final class LocalCutAppIntentRouter {
     private let routeAction: @MainActor @Sendable (Action, EditorModel) async throws -> Void
     private var actionChain: Task<Void, Error>?
 
-    init(
+    /// SwiftUI appearance hooks can register the live `@State` model from a
+    /// nonisolated closure; all routing work still runs on `@MainActor`.
+    nonisolated init(
         model: EditorModel,
         routeAction: @escaping @MainActor @Sendable (Action, EditorModel) async throws -> Void = LocalCutAppIntentRouter.route
     ) {
