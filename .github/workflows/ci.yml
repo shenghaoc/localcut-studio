@@ -63,6 +63,12 @@ jobs:
           swift --version
           sw_vers
 
+      - name: Cache WebRTC XCFramework
+        uses: actions/cache@v4
+        with:
+          path: Packages/LocalCutWebRTC/WebRTC.xcframework
+          key: webrtc-xcframework-140.0.0
+
       - name: Download WebRTC XCFramework
         run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
@@ -103,7 +109,7 @@ jobs:
           retention-days: 7
 
   build-non-webrtc:
-    name: Build (non-WebRTC stubs)
+    name: Test (non-WebRTC stubs)
     runs-on: macos-26
     timeout-minutes: 30
     needs: package-test
@@ -111,6 +117,7 @@ jobs:
     env:
       PROJECT: "LocalCut Studio.xcodeproj"
       SCHEME: "LocalCut Studio"
+      RESULT_BUNDLE: TestResults.xcresult
       DERIVED_DATA: DerivedData
 
     steps:
@@ -127,6 +134,12 @@ jobs:
       # SPM resolves the LocalCutWebRTC package unconditionally; the XCFramework
       # binary target must exist on disk even though we compile without the
       # LOCALCUT_ENABLE_WEBRTC flag so the stub code paths are exercised.
+      - name: Cache WebRTC XCFramework
+        uses: actions/cache@v4
+        with:
+          path: Packages/LocalCutWebRTC/WebRTC.xcframework
+          key: webrtc-xcframework-140.0.0
+
       - name: Download WebRTC XCFramework
         run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
@@ -134,22 +147,23 @@ jobs:
         run: |
           xcodebuild -list -project "$PROJECT"
 
-      # Build-only: the stubs are compilation guards whose correctness is
-      # verified by a successful compile. The full test job covers the
-      # WebRTC-enabled code path end-to-end.
-      - name: Build without WebRTC
+      # Runs tests to validate the non-WebRTC stub paths at runtime.
+      # The nonWebRTCVideoTapStoresLatestFrame test exercises the stub
+      # VideoPublishTap; the WebRTC-enabled test job covers the real path.
+      - name: Test without WebRTC
         run: |
           set -o pipefail
-          rm -rf "$DERIVED_DATA"
+          rm -rf "$RESULT_BUNDLE" "$DERIVED_DATA"
 
           # Strip LOCALCUT_ENABLE_WEBRTC from the project-level setting
           # so the #if !LOCALCUT_ENABLE_WEBRTC stub paths are compiled.
-          xcodebuild build \
+          xcodebuild test \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -configuration Debug \
             -destination 'platform=macOS' \
             -derivedDataPath "$DERIVED_DATA" \
+            -resultBundlePath "$RESULT_BUNDLE" \
             CODE_SIGNING_ALLOWED=NO \
             SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG \
             | tee xcodebuild.log
@@ -158,9 +172,10 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: xcode-build-non-webrtc-diagnostics
+          name: xcode-test-non-webrtc-diagnostics
           path: |
             xcodebuild.log
+            TestResults.xcresult
             DerivedData/Build/Logs/Build/*.xcactivitylog
           if-no-files-found: warn
           retention-days: 7
