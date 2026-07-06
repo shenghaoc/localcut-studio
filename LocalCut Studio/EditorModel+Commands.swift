@@ -114,6 +114,10 @@ extension EditorModel {
         let response = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 MainActor.assumeIsolated {
+                    guard !Task.isCancelled else {
+                        continuation.resume(returning: NSApplication.ModalResponse.cancel)
+                        return
+                    }
                     panel.begin { response in
                         continuation.resume(returning: response)
                     }
@@ -150,6 +154,10 @@ extension EditorModel {
         let response = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 MainActor.assumeIsolated {
+                    guard !Task.isCancelled else {
+                        continuation.resume(returning: NSApplication.ModalResponse.cancel)
+                        return
+                    }
                     panel.begin { response in
                         continuation.resume(returning: response)
                     }
