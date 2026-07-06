@@ -101,3 +101,57 @@ jobs:
             TestResults.xcresult
           if-no-files-found: warn
           retention-days: 7
+
+  build-non-webrtc:
+    name: Build (non-WebRTC stubs)
+    runs-on: macos-26
+    timeout-minutes: 30
+    needs: package-test
+
+    env:
+      PROJECT: "LocalCut Studio.xcodeproj"
+      SCHEME: "LocalCut Studio"
+      DERIVED_DATA: DerivedData
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcode-select -p
+          swift --version
+          sw_vers
+
+      - name: Download WebRTC XCFramework
+        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
+
+      - name: Validate Xcode project
+        run: |
+          xcodebuild -list -project "$PROJECT"
+
+      - name: Build without WebRTC
+        run: |
+          set -o pipefail
+          rm -rf "$DERIVED_DATA"
+
+          xcodebuild build \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS="DEBUG \$(inherited)" \
+            | tee xcodebuild.log
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xcode-build-non-webrtc-diagnostics
+          path: |
+            xcodebuild.log
+          if-no-files-found: warn
+          retention-days: 7
