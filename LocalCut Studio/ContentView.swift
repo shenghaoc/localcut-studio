@@ -4,15 +4,24 @@ import AppKit
 import UniformTypeIdentifiers
 import LocalCutCore
 
+/// Keeps cold-start App Intents and the visible window on the same editor model,
+/// even if SwiftUI recreates the `App` value during the process lifetime.
+@MainActor
+private enum LocalCutStudioAppState {
+    static let model = EditorModel()
+    static let appIntentRouter = LocalCutAppIntentRouter(model: model)
+}
+
 @main
 struct LocalCutStudioApp: App {
     // The editor owns the single AVPlayer and is the document controller; it lives
     // at app scope so the menu commands and window can share it.
-    @State private var model = EditorModel()
+    @State private var model = LocalCutStudioAppState.model
 
     @MainActor
     init() {
-        LocalCutAppShortcuts.updateAppShortcutParameters()
+        let appIntentRouter = LocalCutStudioAppState.appIntentRouter
+        AppDependencyManager.shared.add(dependency: appIntentRouter)
         // Activate memory pressure monitoring at app launch.
         MemoryPressureHandler.shared.activate()
     }
@@ -51,15 +60,6 @@ struct LocalCutStudioApp: App {
     private var editorView: some View {
         EditorView(model: model)
             .frame(minWidth: 1000, minHeight: 640)
-            .onAppear {
-                Task { [model] in
-                    await MainActor.run {
-                        AppDependencyManager.shared.add(
-                            dependency: LocalCutAppIntentRouter(model: model)
-                        )
-                    }
-                }
-            }
     }
 }
 
