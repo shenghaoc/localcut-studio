@@ -151,16 +151,11 @@ private struct PanelRecordingElapsedView: View {
     let model: EditorModel
 
     var body: some View {
-        Text(formatElapsed(model.recordingElapsedSeconds))
+        let elapsed = formatElapsed(model.recordingElapsedSeconds)
+        Text(elapsed)
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
-            .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(formatElapsed(model.recordingElapsedSeconds))")
-    }
-
-    private func formatElapsed(_ seconds: Double) -> String {
-        let m = (Int(seconds) % 3600) / 60
-        let s = Int(seconds) % 60
-        return String(format: "%02d:%02d", m, s)
+            .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(elapsed)")
     }
 }
 

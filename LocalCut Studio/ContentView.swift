@@ -431,15 +431,7 @@ struct EditorView: View {
                         .layoutPriority(1)
                         .accessibilityLabel(recordingStatusMessage)
                 }
-                if let free = model.recordingDiskFreeBytes {
-                    Text("|")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                    Text("\(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(model.recordingDiskWarning == .warn ? .yellow : .secondary)
-                        .accessibilityLabel("Disk free: \(ByteCountFormatter.string(fromByteCount: free, countStyle: .file))")
-                }
+                RecordingDiskSpaceView(model: model)
                 Spacer()
             } else {
                 Text(model.statusMessage)
@@ -685,21 +677,41 @@ private struct RecordingElapsedView: View {
     let model: EditorModel
 
     var body: some View {
-        Text(formatElapsed(model.recordingElapsedSeconds))
+        let elapsed = formatElapsed(model.recordingElapsedSeconds)
+        Text(elapsed)
             .font(.caption.monospacedDigit())
             .foregroundStyle(model.isPaused ? .orange : .red)
-            .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(formatElapsed(model.recordingElapsedSeconds))")
+            .accessibilityLabel("\(model.isPaused ? "Paused" : "Recording") elapsed \(elapsed)")
     }
+}
 
-    private func formatElapsed(_ seconds: Double) -> String {
-        let h = Int(seconds) / 3600
-        let m = (Int(seconds) % 3600) / 60
-        let s = Int(seconds) % 60
-        if h > 0 {
-            return String(format: "%d:%02d:%02d", h, m, s)
+/// Isolates observation of `model.recordingDiskFreeBytes` and `model.recordingDiskWarning`
+/// so the parent view is not invalidated by disk-space polling.
+private struct RecordingDiskSpaceView: View {
+    let model: EditorModel
+
+    var body: some View {
+        if let free = model.recordingDiskFreeBytes {
+            Text("|")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Text("\(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(model.recordingDiskWarning == .warn ? .yellow : .secondary)
+                .accessibilityLabel("Disk free: \(ByteCountFormatter.string(fromByteCount: free, countStyle: .file))")
         }
-        return String(format: "%02d:%02d", m, s)
     }
+}
+
+/// Formats elapsed seconds as `mm:ss` or `h:mm:ss` when hours are nonzero.
+func formatElapsed(_ seconds: Double) -> String {
+    let h = Int(seconds) / 3600
+    let m = (Int(seconds) % 3600) / 60
+    let s = Int(seconds) % 60
+    if h > 0 {
+        return String(format: "%d:%02d:%02d", h, m, s)
+    }
+    return String(format: "%02d:%02d", m, s)
 }
 
 #Preview("Editor") {
