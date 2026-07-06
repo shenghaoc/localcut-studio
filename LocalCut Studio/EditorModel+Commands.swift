@@ -16,7 +16,7 @@ enum EditorCommandOutcome: Equatable, Sendable {
 /// on `@MainActor`, so the runtime invariant holds.
 @MainActor
 private final class PanelCancellationHandle: @unchecked Sendable {
-    private let panel: NSSavePanel
+    let panel: NSSavePanel
 
     init(_ panel: NSSavePanel) {
         self.panel = panel
@@ -118,7 +118,7 @@ extension EditorModel {
                         continuation.resume(returning: NSApplication.ModalResponse.cancel)
                         return
                     }
-                    panel.begin { response in
+                    cancellationHandle.panel.begin { response in
                         continuation.resume(returning: response)
                     }
                 }
@@ -158,7 +158,7 @@ extension EditorModel {
                         continuation.resume(returning: NSApplication.ModalResponse.cancel)
                         return
                     }
-                    panel.begin { response in
+                    cancellationHandle.panel.begin { response in
                         continuation.resume(returning: response)
                     }
                 }

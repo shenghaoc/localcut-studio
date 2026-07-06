@@ -31,9 +31,15 @@ final class LocalCutAppIntentRouter {
         }
     }
 
+    /// Lets the @Sendable task closure release predecessor links; access stays
+    /// on this router's main-actor execution path.
+    private final class TaskReference: @unchecked Sendable {
+        var task: Task<Void, Error>?
+    }
+
     private let model: EditorModel
     private let routeAction: @MainActor @Sendable (Action, EditorModel) async throws -> Void
-    private var actionChain: Task<Void, Error>?
+    private var actionChain = TaskReference()
 
     init(
         model: EditorModel,
@@ -44,15 +50,24 @@ final class LocalCutAppIntentRouter {
     }
 
     func perform(_ action: Action) async throws {
-        let predecessor = actionChain
+        let predecessorRef = actionChain
+        let currentRef = TaskReference()
+        actionChain = currentRef
+
         let model = self.model
         let routeAction = self.routeAction
         let actionTask = Task { @MainActor in
-            _ = await predecessor?.result
+            defer {
+                predecessorRef.task = nil
+                currentRef.task = nil
+            }
+            if let predecessor = predecessorRef.task {
+                _ = await predecessor.result
+            }
             try Task.checkCancellation()
             try await routeAction(action, model)
         }
-        actionChain = actionTask
+        currentRef.task = actionTask
         try await withTaskCancellationHandler {
             try await actionTask.value
         } onCancel: {
