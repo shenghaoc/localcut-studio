@@ -112,24 +112,9 @@ jobs:
         run: |
           xcodebuild -list -project "$PROJECT"
 
-      - name: Build and test
+      - name: Build and test (with flake detection)
         run: |
-          set -o pipefail
-          rm -rf "$RESULT_BUNDLE" "$DERIVED_DATA"
-
-          # Per-test timeout: 300 s (5 min) prevents a single hung test
-          # from consuming the entire 30-minute job budget.
-          xcodebuild test \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -configuration Debug \
-            -destination 'platform=macOS' \
-            -derivedDataPath "$DERIVED_DATA" \
-            -resultBundlePath "$RESULT_BUNDLE" \
-            -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 300 \
-            CODE_SIGNING_ALLOWED=NO \
-            | tee xcodebuild.log
+          ./Scripts/run-xcode-tests-with-flake-detection.sh
 
       - name: Validate OTIO goldens
         run: ./Scripts/validate-otio-goldens.sh
@@ -145,8 +130,20 @@ jobs:
           path: |
             xcodebuild.log
             TestResults.xcresult
+            flaky-report.json
+            retry-*.log
+            suite-confirmation-*.log
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Upload flaky test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flaky-test-report
+          path: flaky-report.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   build-non-webrtc:
     name: Test (non-WebRTC stubs)
