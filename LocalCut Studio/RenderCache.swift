@@ -613,8 +613,12 @@ final class RenderCache: Sendable {
                               height: Int(extent.height.rounded()))
     }
 
-    /// Raw byte estimate for a `(width, height)` BGRA bitmap. Kept public so
-    /// tests can construct expected costs without a CIImage in hand.
+    /// Raw byte estimate for a `(width, height)` BGRA bitmap. This is an
+    /// upper bound — the actual `CIImage` may be backed by a compressed GPU
+    /// texture or use a different pixel format. The overestimate is safe for
+    /// budget purposes (premature eviction) but may cause the cache to hold
+    /// fewer entries than the budget allows. Kept public so tests can construct
+    /// expected costs without a CIImage in hand.
     nonisolated static func estimatedBytes(width: Int, height: Int) -> Int {
         max(0, width) * max(0, height) * 4
     }
