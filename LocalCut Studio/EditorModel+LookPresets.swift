@@ -343,13 +343,11 @@ extension EditorModel {
         guard isSafeLookPresetLUTPath(reference.relativePath) else { return nil }
         let directoryURL = sourceURL.deletingLastPathComponent()
         let lutURL = directoryURL.appendingPathComponent(reference.relativePath)
-        let didAccessPreset = sourceURL.startAccessingSecurityScopedResource()
+        // Accessing the parent directory grants access to children, so only
+        // the directory access is needed. The preset file and LUT are children.
         let didAccessDirectory = directoryURL.startAccessingSecurityScopedResource()
-        let didAccessLUT = lutURL.startAccessingSecurityScopedResource()
         defer {
-            if didAccessLUT { lutURL.stopAccessingSecurityScopedResource() }
             if didAccessDirectory { directoryURL.stopAccessingSecurityScopedResource() }
-            if didAccessPreset { sourceURL.stopAccessingSecurityScopedResource() }
         }
         guard FileManager.default.isReadableFile(atPath: lutURL.path),
               let bookmark = try? lutURL.bookmarkData(options: .withSecurityScope,
