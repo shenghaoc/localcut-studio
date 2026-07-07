@@ -117,6 +117,8 @@ jobs:
           set -o pipefail
           rm -rf "$RESULT_BUNDLE" "$DERIVED_DATA"
 
+          # Per-test timeout: 300 s (5 min) prevents a single hung test
+          # from consuming the entire 30-minute job budget.
           xcodebuild test \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -124,6 +126,8 @@ jobs:
             -destination 'platform=macOS' \
             -derivedDataPath "$DERIVED_DATA" \
             -resultBundlePath "$RESULT_BUNDLE" \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 300 \
             CODE_SIGNING_ALLOWED=NO \
             | tee xcodebuild.log
 
@@ -194,6 +198,8 @@ jobs:
 
           # Strip LOCALCUT_ENABLE_WEBRTC from the project-level setting
           # so the #if !LOCALCUT_ENABLE_WEBRTC stub paths are compiled.
+          # Keep the same per-test timeout as the WebRTC-enabled lane so a
+          # hung stub-path test cannot consume the whole 30-minute job.
           xcodebuild test \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -201,6 +207,8 @@ jobs:
             -destination 'platform=macOS' \
             -derivedDataPath "$DERIVED_DATA" \
             -resultBundlePath "$RESULT_BUNDLE" \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 300 \
             CODE_SIGNING_ALLOWED=NO \
             SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG \
             | tee xcodebuild.log

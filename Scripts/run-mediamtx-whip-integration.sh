@@ -165,6 +165,8 @@ LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 xcodebuild test \
     -configuration Debug \
     -destination 'platform=macOS' \
     -only-testing:"LocalCut StudioTests/WhipMediaMTXIntegrationTests" \
+    -test-timeouts-enabled YES \
+    -default-test-execution-time-allowance 300 \
     CODE_SIGNING_ALLOWED=NO \
     2>&1 | tail -30
 

@@ -12,7 +12,9 @@
 > GitHub-hosted runners, then enables the required suite. Follow-up CI also
 > prepares the pinned WebRTC XCFramework once per run, shares it between Xcode
 > jobs as an artifact, and runs a flag-stripped non-WebRTC `xcodebuild test`
-> pass to compile and exercise the fallback stubs.
+> pass to compile and exercise the fallback stubs. All Xcode CI test
+> invocations use a 300-second per-test timeout so one hung test cannot consume
+> the 30-minute job budget.
 
 ## Dependency + entitlements
 
@@ -53,4 +55,4 @@
 - [x] **T7.1** Unit tests for client + reconnect + budget.
 - [x] **T7.2** CI integration test publishing to MediaMTX under the CI harness.
 - [x] **T7.3** Bundle-exclusion test.
-- [x] **T7.4** `xcodebuild` (Debug, macOS) green for both the default WebRTC-enabled app path and the non-WebRTC stub path.
+- [x] **T7.4** `xcodebuild` (Debug, macOS) green for both the default WebRTC-enabled app path and the non-WebRTC stub path, with Xcode per-test timeouts enabled on both CI lanes and the focused MediaMTX integration run.
