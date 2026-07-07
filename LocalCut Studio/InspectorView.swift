@@ -81,10 +81,15 @@ struct InspectorView: View {
     /// the Screencast Tools section: a selected video clip (for zoom-n-pan),
     /// existing callouts, overlays, or screencast event logs.
     private var hasScreencastContent: Bool {
-        model.selectedClip != nil && model.track(for: model.selectedClipID ?? UUID())?.kind == .video
+        (model.selectedClipID != nil && selectedClipIsVideo)
             || !model.project.callouts.isEmpty
             || !model.project.overlays.isEmpty
             || !model.project.screencastEventLogs.isEmpty
+    }
+
+    private var selectedClipIsVideo: Bool {
+        guard let id = model.selectedClipID else { return false }
+        return model.track(for: id)?.kind == .video
     }
 
     /// Whether the project has tutorial-related content that warrants showing

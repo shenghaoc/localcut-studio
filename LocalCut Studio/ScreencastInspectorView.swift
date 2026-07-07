@@ -224,7 +224,7 @@ struct ScreencastInspectorView: View {
                 TextField("X", value: Binding(
                     get: { Double(binding.wrappedValue.positionOffset.width) },
                     set: { var c = binding.wrappedValue; c.positionOffset.width = CGFloat($0); binding.wrappedValue = c }),
-                          format: .number.precision(.fractionLength(0)))
+                          format: .number.precision(.fractionLength(3)))
                     .frame(width: 72)
                     .multilineTextAlignment(.trailing)
             }
@@ -232,7 +232,7 @@ struct ScreencastInspectorView: View {
                 TextField("Y", value: Binding(
                     get: { Double(binding.wrappedValue.positionOffset.height) },
                     set: { var c = binding.wrappedValue; c.positionOffset.height = CGFloat($0); binding.wrappedValue = c }),
-                          format: .number.precision(.fractionLength(0)))
+                          format: .number.precision(.fractionLength(3)))
                     .frame(width: 72)
                     .multilineTextAlignment(.trailing)
             }
@@ -242,7 +242,7 @@ struct ScreencastInspectorView: View {
                 Slider(value: Binding(
                     get: { binding.wrappedValue.scale },
                     set: { binding.wrappedValue.scale = $0 }),
-                       in: 0.1...4, step: 0.05)
+                       in: 0.25...4, step: 0.05)
                     .accessibilityLabel("Scale")
                     .accessibilityValue(String(format: "%.2fx", binding.wrappedValue.scale))
                 Text(String(format: "%.2fx", binding.wrappedValue.scale))
