@@ -2,12 +2,21 @@ import Foundation
 
 @MainActor
 final class ExportCoordinator {
+    /// Exports using the default preset (toolbar/menu shortcut).
     func export(to url: URL, model: EditorModel) async -> EditorCommandOutcome {
+        await export(to: url, model: model, preset: BuiltInExportPresets.defaultPreset)
+    }
+
+    /// Exports using a specific preset (from the render queue inspector).
+    func export(to url: URL, model: EditorModel, preset: ExportPreset) async -> EditorCommandOutcome {
         await export(to: url, model: model) { bookmark in
-            model.renderQueue.enqueueWithDefaultPreset(outputURL: url,
-                                                       project: model.project,
-                                                       bookmark: bookmark,
-                                                       projectDocumentURL: model.documentURL)
+            let snapshot = ProjectDocument(project: model.project, queueBundleURL: model.documentURL)
+            let job = QueueJob(
+                preset: preset,
+                outputBookmark: bookmark,
+                outputDisplayName: url.lastPathComponent,
+                projectSnapshot: snapshot)
+            return model.renderQueue.enqueue(job)
         }
     }
 
@@ -17,12 +26,12 @@ final class ExportCoordinator {
         enqueue: @MainActor (Data) -> QueueEnqueueOutcome
     ) async -> EditorCommandOutcome {
         guard let bookmark = RenderQueue.outputBookmark(for: url) else {
-            model.statusMessage = "Could not access \(url.lastPathComponent)."
+            model.statusMessage = "Could not access \(url.lastPathComponent). Check that the destination is writable."
             return .failed
         }
         switch enqueue(bookmark) {
         case .queued:
-            model.statusMessage = "Queued \(url.lastPathComponent) with \(BuiltInExportPresets.defaultPreset.name)."
+            model.statusMessage = "Queued \(url.lastPathComponent)."
             return .completed
         case .failed(let message):
             model.statusMessage = message
