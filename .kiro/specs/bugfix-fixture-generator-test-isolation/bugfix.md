@@ -16,13 +16,13 @@ All 9 `FixtureGenerator` tests call `writeFixture(_ name:content:)` which writes
 
 The tests pass individually because the test runner has different sandbox/permission context when invoked with `-only-testing`, but fail as a suite due to these isolation issues.
 
-- **Fix**: Gate fixture file writing behind the `LOCALCUT_REGENERATE_FIXTURES=1` environment variable. In normal test mode, `writeFixture()` is a no-op — tests pass without writing anything. In regeneration mode, use `NSTemporaryDirectory()` with a UUID-based subdirectory to avoid collisions between parallel runs. The regression test now calls `writeFixture()` with a UUID sentinel in normal mode and verifies it does not create the old shared path or any new fixture output directory.
+- **Fix**: Gate fixture file writing behind an explicit `LOCALCUT_REGENERATE_FIXTURES` Swift compilation condition for the xcodebuild CLI, with runtime `LOCALCUT_REGENERATE_FIXTURES=1` still accepted in runners that propagate environment variables into the test host. In normal test mode, `writeFixture()` is a no-op — tests pass without writing anything. In regeneration mode, use `NSTemporaryDirectory()` with a UUID-based subdirectory to avoid collisions between parallel runs. The regression tests now call `writeFixture()` with UUID sentinels in both normal and regeneration modes, verifying normal mode does not create the old shared path or any fixture output directory and regeneration mode writes to its UUID-scoped output directory.
 
 ### B2 — Regeneration mode uses shared directory without collision protection
 
 When developers explicitly regenerate fixtures, the old code wrote to `/tmp/localcut-fixtures/` — the same path every time. Multiple regeneration runs (or parallel test workers) would overwrite each other's output.
 
-- **Fix**: In regeneration mode, create a unique subdirectory under `NSTemporaryDirectory()` using `localcut-fixtures-<UUID>` naming. The path is printed at suite start so developers know where to collect the files.
+- **Fix**: In regeneration mode, create a unique subdirectory under `NSTemporaryDirectory()` using `localcut-fixtures-<UUID>` naming. For the sandboxed app-hosted test process, that resolves under `~/Library/Containers/com.shenghaoc.LocalCutStudio/Data/tmp/`.
 
 ## Why it matters
 

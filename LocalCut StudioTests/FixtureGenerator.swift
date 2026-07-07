@@ -12,22 +12,29 @@ import CoreMedia
 /// The serializer code paths (OTIO and EDL) are still exercised in this
 /// mode; only the disk write is skipped.
 ///
-/// **Explicit regeneration mode:** set `LOCALCUT_REGENERATE_FIXTURES=1` to
-/// write generated fixtures to a unique temporary directory per run.
-/// Only the exact string `"1"` enables regeneration — other values
-/// (e.g. `"true"`, `"yes"`) are treated as disabled.
+/// **Explicit regeneration mode:** pass the `LOCALCUT_REGENERATE_FIXTURES`
+/// Swift compilation condition to write generated fixtures to a unique
+/// temporary directory per run. A runtime `LOCALCUT_REGENERATE_FIXTURES=1`
+/// environment variable is also accepted when the test host propagates it.
 ///
-///     LOCALCUT_REGENERATE_FIXTURES=1 \
-///       xcodebuild test -only-testing "LocalCut StudioTests/FixtureGenerator"
+///     xcodebuild test -only-testing "LocalCut StudioTests/FixtureGenerator" \
+///       OTHER_SWIFT_FLAGS='$(inherited) -D LOCALCUT_REGENERATE_FIXTURES'
 ///
-/// The output path is printed at the start of the suite.
+/// The output directory is the test host temporary directory with a
+/// `localcut-fixtures-<UUID>` suffix. For the sandboxed app host this is under
+/// `~/Library/Containers/com.shenghaoc.LocalCutStudio/Data/tmp/`.
 @Suite("Fixture generator")
 struct FixtureGenerator {
 
     /// Whether this run should actually write fixture files to disk.
-    /// Only the exact string `"1"` enables regeneration.
+    /// The compile-time flag is the reliable xcodebuild CLI path; the runtime
+    /// env var keeps compatibility with runners that pass env through.
     private static var isRegenerationEnabled: Bool {
+#if LOCALCUT_REGENERATE_FIXTURES
+        true
+#else
         ProcessInfo.processInfo.environment["LOCALCUT_REGENERATE_FIXTURES"] == "1"
+#endif
     }
 
     /// Shared output directory for this regeneration run, created once lazily.
@@ -310,5 +317,22 @@ struct FixtureGenerator {
         #expect(
             createdFixtureDirs.isEmpty,
             "normal mode must not create fixture output directories")
+    }
+
+    @Test("Regeneration mode writeFixture writes a sentinel file")
+    func regenerationModeWriteFixtureWritesSentinelFile() throws {
+        guard Self.isRegenerationEnabled else { return }
+
+        let dir = try #require(Self.outputDirectory)
+        #expect(
+            (dir as NSString).lastPathComponent.hasPrefix("localcut-fixtures-"),
+            "regeneration output should use a UUID-scoped fixture directory")
+
+        let sentinelName = "regeneration-mode-\(UUID().uuidString).otio"
+        let sentinelPath = (dir as NSString).appendingPathComponent(sentinelName)
+        try writeFixture(sentinelName, content: "sentinel")
+        #expect(
+            FileManager.default.fileExists(atPath: sentinelPath),
+            "regeneration mode should write fixture content to the output directory")
     }
 }
