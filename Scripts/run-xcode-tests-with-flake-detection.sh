@@ -104,9 +104,9 @@ if [ -d "$RESULT_BUNDLE" ]; then
     fi
     rm -f "$XCRESULTTOOL_STDERR"
 
-    # Parse failed tests from the JSON output
-    # The structure is: testNodes[].children[].name, testNodes[].children[].testStatus
-    # We need to extract "SuiteName/TestName" format for -only-testing:
+    # Parse failed tests from the JSON output.
+    # xcresulttool schema v0.1.0: testFailures[].testIdentifierString
+    # contains the full "TargetName/testName()" format needed for -only-testing:.
     while IFS= read -r line; do
         if [ -n "$line" ]; then
             FAILED_TEST_IDS+=("$line")
@@ -121,32 +121,12 @@ except (json.JSONDecodeError, ValueError) as exc:
     print(f'Warning: could not parse xcresulttool JSON: {exc}', file=sys.stderr)
     sys.exit(0)
 
-def extract_failed_tests(node, prefix=''):
-    results = []
-    name = node.get('name', '')
-    status = node.get('testStatus', '')
-
-    if status == 'Failure':
-        # Build the full test identifier
-        if prefix:
-            full_id = f'{prefix}/{name}'
-        else:
-            full_id = name
-        results.append(full_id)
-
-    # Recurse into children
-    for child in node.get('children', []):
-        child_prefix = f'{prefix}/{name}' if prefix else name
-        results.extend(extract_failed_tests(child, child_prefix))
-
-    return results
-
-# Navigate to test nodes
-test_nodes = data.get('testNodes', [])
-for node in test_nodes:
-    failed = extract_failed_tests(node)
-    for f in failed:
-        print(f)
+# Use testFailures (xcresulttool schema v0.1.0) which provides
+# testIdentifierString in 'TargetName/testName()' format.
+for failure in data.get('testFailures', []):
+    identifier = failure.get('testIdentifierString', '')
+    if identifier:
+        print(identifier)
 " || true)
 fi
 
