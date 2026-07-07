@@ -515,7 +515,9 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
         precondition(totalSamples > 0, "Expected non-empty audio buffer")
         var interleaved = [Float](repeating: 0, count: totalSamples)
         interleaved.withUnsafeMutableBufferPointer { ptr in
-            ptr.baseAddress?.update(from: channelData[0], count: totalSamples)
+            // Safe: precondition above guarantees totalSamples > 0, so
+            // baseAddress is non-nil for a non-empty array.
+            ptr.baseAddress!.update(from: channelData[0], count: totalSamples)
         }
 
         // Process through VoiceCleanupDSP.
@@ -525,10 +527,10 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
             settings: settings, state: &state)
 
         // Write processed interleaved Float32 data back to channelData[0].
+        // Safe: precondition above guarantees totalSamples > 0, so
+        // baseAddress is non-nil for a non-empty array.
         interleaved.withUnsafeBufferPointer { ptr in
-            if let baseAddress = ptr.baseAddress {
-                channelData[0].update(from: baseAddress, count: totalSamples)
-            }
+            channelData[0].update(from: ptr.baseAddress!, count: totalSamples)
         }
 
         // Create a format description for the output (interleaved Float32).
