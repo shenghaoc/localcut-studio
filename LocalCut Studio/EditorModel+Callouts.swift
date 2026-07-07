@@ -16,13 +16,14 @@ extension EditorModel {
             start: CMTime(seconds: currentTime, preferredTimescale: 600),
             duration: defaultDuration)
 
-        // Assign sequential step numbers for step-number callouts.
+        // Assign sequential step numbers for step-number callouts only.
+        // Non-step callouts use 0 (unused) to avoid carrying stale data.
         let stepNumber: Int
         if kind == .stepNumber {
             let existingSteps = project.callouts.filter { $0.kind == .stepNumber }
             stepNumber = (existingSteps.map(\.stepNumber).max() ?? 0) + 1
         } else {
-            stepNumber = 1
+            stepNumber = 0
         }
 
         let callout = CalloutClip(kind: kind, timeRange: timeRange, stepNumber: stepNumber)
