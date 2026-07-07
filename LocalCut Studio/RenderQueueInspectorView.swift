@@ -88,11 +88,9 @@ struct RenderQueueInspectorView: View {
     @ViewBuilder
     private var queueList: some View {
         if model.renderQueue.jobs.isEmpty {
-            ContentUnavailableView(
-                "No Renders Queued",
-                systemImage: "square.and.arrow.up",
-                description: Text("Add a preset above to queue a render.")
-            )
+            Text("No renders queued. Add a preset above to queue a render.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 if model.renderQueue.isRunning {
