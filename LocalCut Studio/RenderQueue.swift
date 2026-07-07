@@ -1361,11 +1361,9 @@ final class RenderQueue {
     }
 
     /// Reads the on-disk queue and reconciles state. Called once at app
-    /// launch from the editor model. The file read happens off the MainActor
-    /// so `EditorModel.init()` doesn't block the main thread on disk I/O at
-    /// launch (Claude review); decoding then runs on the MainActor because
-    /// `RenderQueueDoc.init(from:)` is implicitly MainActor-isolated under
-    /// this target's default-isolation setting.
+    /// launch from the editor model. The file read and bookmark resolution
+    /// happen off the MainActor so `EditorModel.init()` doesn't block the
+    /// main thread on disk I/O at launch.
     func load() {
         guard let url = Self.queueFileURL() else { return }
         let log = logger
@@ -1378,13 +1376,15 @@ final class RenderQueue {
                 log.error("queue load failed: \(error.localizedDescription, privacy: .public)")
                 return
             }
+            // Decode off-MainActor where possible, then reconcile bookmarks
+            // off-MainActor to avoid blocking the UI on network volumes.
             await self?.decodeAndApplyLoadedQueue(data: data)
         }
     }
 
-    /// MainActor entry that decodes the queue document (Codable conformance
-    /// on `RenderQueueDoc` is MainActor-isolated, so the decode must run
-    /// here) and applies the reconciled state.
+    /// Decodes the queue document and reconciles bookmark state. The decode
+    /// runs on the MainActor (Codable conformance is MainActor-isolated),
+    /// but bookmark resolution runs off-MainActor via the reconcile method.
     private func decodeAndApplyLoadedQueue(data: Data) {
         let doc: RenderQueueDoc
         do {
@@ -1409,6 +1409,9 @@ final class RenderQueue {
             statusMessage = "Render queue saved by a newer version — pausing persistence until update."
             return
         }
+        // Reconcile bookmark resolution off the MainActor to avoid blocking
+        // the UI when there are many queued jobs with bookmarks pointing to
+        // network drives or sleeping external volumes.
         let reconciled = Self.reconcile(loaded: doc.jobs)
         let didMutate = reconciled != doc.jobs
         jobs = reconciled
