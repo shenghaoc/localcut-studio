@@ -177,6 +177,13 @@ extension EditorModel {
     /// re-imported `.lclook` can relink the LUT. Returns the LUT bookmark to copy
     /// alongside the preset — resolved off the main actor at write time.
     private func lookExportPreset(for clip: Clip, to url: URL) -> (preset: LookPresetV1, lutBookmark: Data?) {
+        // Warn if non-look effects (colour grade, skin smooth) are present but
+        // will not be included in the preset.
+        let nonLookEffects = clip.effects.filter { !$0.isLookEffect && !$0.isLUT }
+        if !nonLookEffects.isEmpty {
+            let names = nonLookEffects.map { $0.displayName }.joined(separator: ", ")
+            statusMessage = "Note: \(names) effect(s) are not included in look presets."
+        }
         var preset = LookPresetV1(name: defaultLookPresetName(for: clip), effects: clip.effects)
         guard let lut = selectedClipLUT(clip) else { return (preset, nil) }
         let presetBase = url.deletingPathExtension().lastPathComponent

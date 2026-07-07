@@ -413,6 +413,22 @@ extension Effect {
         lookKind != nil
     }
 
+    public var isLUT: Bool {
+        if case .lut = self { return true }
+        return false
+    }
+
+    public var displayName: String {
+        switch self {
+        case .colourGrade: "Colour Grade"
+        case .lut: "LUT"
+        case .skinSmooth: "Skin Smooth"
+        case .grain: "Grain"
+        case .halation: "Halation"
+        case .vignette: "Vignette"
+        }
+    }
+
     /// The primary keyframed parameter for look-pack effects — grain amount,
     /// halation strength, or vignette amount. `nil` for non-look effects. Used by
     /// the inspector's per-look keyframe editor so one code path drives all three.
