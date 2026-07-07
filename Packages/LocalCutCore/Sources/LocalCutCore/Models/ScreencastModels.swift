@@ -213,7 +213,8 @@ public struct ZoomPanProposal: Hashable, Codable, Identifiable, Sendable {
         self.id = id
         self.timeRange = timeRange
         self.targetPoint = targetPoint
-        self.endScale = endScale
+        // Clamp endScale to the same range as ZoomPanPreset.
+        self.endScale = max(1.0, min(5.0, endScale))
         self.keyframes = keyframes
         self.clickCount = clickCount
     }
@@ -229,7 +230,7 @@ public struct ZoomPanProposal: Hashable, Codable, Identifiable, Sendable {
         let durationCode = try c.decode(CMTimeCode.self, forKey: .timeRangeDuration)
         timeRange = CMTimeRange(start: startCode.cmTime, duration: durationCode.cmTime)
         targetPoint = try c.decode(CGPoint.self, forKey: .targetPoint)
-        endScale = try c.decode(Float.self, forKey: .endScale)
+        endScale = max(1.0, min(5.0, try c.decode(Float.self, forKey: .endScale)))
         keyframes = try c.decode([Keyframe<Transform2D>].self, forKey: .keyframes)
         clickCount = try c.decode(Int.self, forKey: .clickCount)
     }

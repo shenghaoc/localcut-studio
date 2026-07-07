@@ -9,6 +9,8 @@ extension EditorModel {
     // MARK: - Zoom-n-Pan Presets
 
     /// Apply a zoom-n-pan preset to the selected clip's transform keyframes.
+    /// Replaces any existing keyframes — the previous state is preserved in the
+    /// undo stack so the user can revert if the replacement was unintended.
     @MainActor
     func applyZoomPanPreset(kind: ZoomPanPresetKind) {
         guard let clipID = selectedClipID,
@@ -20,6 +22,7 @@ extension EditorModel {
         }
 
         let clip = project.videoTracks[trackIndex].clips[clipIndex]
+        let hadKeyframes = clip.transformKeyframes.isAnimated
         let preset = ZoomPanPreset(kind: kind, duration: clip.duration)
         let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clip.duration)
 
@@ -32,7 +35,8 @@ extension EditorModel {
             project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes =
                 Keyframed(keyframes: keyframes, defaultValue: .identity)
         }
-        statusMessage = "Applied \(kind.displayName.lowercased()) preset."
+        let replacedNote = hadKeyframes ? " (replaced existing keyframes — undo to restore)" : ""
+        statusMessage = "Applied \(kind.displayName.lowercased()) preset\(replacedNote)."
         Task { [weak self] in await self?.rebuild() }
     }
 
