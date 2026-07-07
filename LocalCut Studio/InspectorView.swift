@@ -43,8 +43,12 @@ struct InspectorView: View {
             CoverInspectorView(model: model)
             projectSection
             overlayListSection
-            ScreencastInspectorView(model: model)
-            TutorialFinishingInspectorView(model: model)
+            if hasScreencastContent {
+                ScreencastInspectorView(model: model)
+            }
+            if hasTutorialContent {
+                TutorialFinishingInspectorView(model: model)
+            }
         }
         .formStyle(.grouped)
         .fileImporter(
@@ -71,6 +75,27 @@ struct InspectorView: View {
 
     private func clipIsVideo(_ clip: Clip) -> Bool {
         model.track(for: clip.id)?.kind == .video
+    }
+
+    /// Whether the project has screencast-related content that warrants showing
+    /// the Screencast Tools section: a selected video clip (for zoom-n-pan),
+    /// existing callouts, overlays, or screencast event logs.
+    private var hasScreencastContent: Bool {
+        model.selectedClip != nil && model.track(for: model.selectedClipID ?? UUID())?.kind == .video
+            || !model.project.callouts.isEmpty
+            || !model.project.overlays.isEmpty
+            || !model.project.screencastEventLogs.isEmpty
+    }
+
+    /// Whether the project has tutorial-related content that warrants showing
+    /// the Tutorial Finishing section: audio tracks with clips (for silence
+    /// detection), screencast event logs (for keystroke overlay), chapter
+    /// markers, or keystroke overlay clips.
+    private var hasTutorialContent: Bool {
+        model.project.audioTracks.contains { !$0.clips.isEmpty }
+            || !model.project.screencastEventLogs.isEmpty
+            || model.hasChapterMarkers
+            || !model.project.keystrokeOverlayClips.isEmpty
     }
 
     @ViewBuilder

@@ -134,11 +134,14 @@ struct PublishPanel: View {
         }
     }
 
+    @ViewBuilder
     private var rtmpHonestySection: some View {
-        Section {
-            Text("RTMP-only platforms are not directly supported. Use a WHIP-to-RTMP gateway such as MediaMTX. LocalCut does not host or proxy relays.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        if publishState.endpointType == .custom {
+            Section {
+                Text("RTMP-only platforms are not directly supported. Use a WHIP-to-RTMP gateway such as MediaMTX. LocalCut does not host or proxy relays.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

@@ -170,6 +170,11 @@ extension EditorModel {
             for cut in cutTimes {
                 let outputOffset = CMTimeMaximum(.zero, CMTimeMinimum(cut - clip.timelineStart, clip.outputDuration))
                 let outputDuration = outputOffset - segmentOutputOffset
+                // Skip zero-duration pieces (e.g. duplicate beat times).
+                guard outputDuration > .zero else {
+                    segmentTimelineStart = cut
+                    continue
+                }
                 pieces.append(piece(from: clip,
                                     timelineStart: segmentTimelineStart,
                                     outputOffset: segmentOutputOffset,
@@ -180,18 +185,25 @@ extension EditorModel {
             }
 
             let tailOutputDuration = clip.outputDuration - segmentOutputOffset
-            pieces.append(piece(from: clip,
-                                timelineStart: segmentTimelineStart,
-                                outputOffset: segmentOutputOffset,
-                                outputDuration: tailOutputDuration,
-                                preservesIDAndTransition: pieces.isEmpty))
+            if tailOutputDuration > .zero {
+                pieces.append(piece(from: clip,
+                                    timelineStart: segmentTimelineStart,
+                                    outputOffset: segmentOutputOffset,
+                                    outputDuration: tailOutputDuration,
+                                    preservesIDAndTransition: pieces.isEmpty))
+            }
+
+            guard !pieces.isEmpty else {
+                statusMessage = "No valid cut points found."
+                return
+            }
 
             context.track.clips.replaceSubrange(context.index...context.index, with: pieces)
             context.track.clips.sort { $0.timelineStart < $1.timelineStart }
             selectedClipID = pieces.first?.id
             selectedTransitionClipID = nil
             selectedOverlayID = nil
-            statusMessage = "Cut clip at \(cutTimes.count) beat\(cutTimes.count == 1 ? "" : "s")."
+            statusMessage = "Cut clip at \(pieces.count - 1) beat\(pieces.count - 1 == 1 ? "" : "s")."
             scheduleRebuild()
         }
     }

@@ -61,7 +61,7 @@ struct RenderQueueInspectorView: View {
                         model.setProjectAspect(preset.projectAspect)
                     }
                     .controlSize(.mini)
-                    .help("Switch the project canvas before queueing this preset.")
+                    .help("Change the project's render canvas to \(preset.projectAspect.displayName). This affects preview and export — existing clip layout may shift.")
                 }
             }
         }

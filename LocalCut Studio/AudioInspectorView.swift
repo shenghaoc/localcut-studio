@@ -174,6 +174,9 @@ struct AudioInspectorView: View {
                     model.measureCurrentProjectLoudness()
                 }
                 .disabled(model.project.duration.seconds < 3)
+                .help(model.project.duration.seconds < 3
+                      ? "Project must be at least 3 seconds for accurate loudness measurement."
+                      : "Measure the current project's integrated loudness (EBU R128).")
                 Spacer()
                 if let measured = model.project.voiceCleanup.loudness.measuredLUFS {
                     Text(String(format: "%.1f LUFS", measured))
