@@ -534,8 +534,12 @@ extension ExportPreset {
             if matches(width, height, 1920, 1080) { return AVAssetExportPresetHEVC1920x1080 }
             if matches(width, height, 3840, 2160) { return AVAssetExportPresetHEVC3840x2160 }
         case proRes422:
+            // ProRes session presets enforce Apple's fixed output dimensions.
+            // Custom presets with non-standard sizes will be silently resized
+            // by the session. The writer fallback path honours any render size.
             return AVAssetExportPresetAppleProRes422LPCM
         case proRes4444:
+            // Same limitation as ProRes 422 above.
             return AVAssetExportPresetAppleProRes4444LPCM
         // Other ProRes flavours (HQ, LT, Proxy) intentionally fall through to
         // the AVAssetWriter path: AVFoundation's session presets don't expose
