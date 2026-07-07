@@ -222,6 +222,8 @@ struct RenderQueueInspectorView: View {
             return
         }
 
+        // Show progress while resolving the bookmark (may be slow on network volumes).
+        model.statusMessage = "Preparing \(url.lastPathComponent)…"
         guard let bookmark = RenderQueue.outputBookmark(for: url) else {
             model.statusMessage = "Could not access \(url.lastPathComponent). Check that the destination is writable."
             return
