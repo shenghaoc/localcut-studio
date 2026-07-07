@@ -509,6 +509,10 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
         guard let channelData = pcmBuffer.floatChannelData else { return nil }
         let channels = Int(format.channelCount)
         let totalSamples = Int(frameCount) * channels
+        // totalSamples > 0 is guaranteed by the guards above (frameCount > 0,
+        // channels > 0). This invariant ensures baseAddress is non-nil in the
+        // unsafe buffer pointer closures below.
+        precondition(totalSamples > 0, "Expected non-empty audio buffer")
         var interleaved = [Float](repeating: 0, count: totalSamples)
         interleaved.withUnsafeMutableBufferPointer { ptr in
             ptr.baseAddress?.update(from: channelData[0], count: totalSamples)
