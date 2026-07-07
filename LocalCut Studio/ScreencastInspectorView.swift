@@ -51,6 +51,7 @@ struct ScreencastInspectorView: View {
                     Button(kind.displayName) {
                         model.applyZoomPanPreset(kind: kind)
                     }
+                    .accessibilityHint("Apply \(kind.displayName) preset to the selected clip")
                 }
             }
             ClipTransformKeyframeEditor(model: model)
@@ -88,6 +89,7 @@ struct ScreencastInspectorView: View {
                         }
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel("\(callout.kind.displayName) callout at \(String(format: "%.1f", callout.timeRange.start.seconds)) seconds")
                     .accessibilityAddTraits(
                         callout.id == model.selectedCalloutID ? .isSelected : []
                     )
@@ -381,9 +383,10 @@ struct ScreencastInspectorView: View {
     private var paddedBackgroundSection: some View {
         DisclosureGroup("Padded Background") {
             if model.project.paddedBackground != nil {
-                Button("Choose Image...") {
+                Button("Choose Image…") {
                     showBackgroundImageImporter = true
                 }
+                .accessibilityHint("Import an image for the padded background")
                 paddedBackgroundControls
                 Button("Remove Background") {
                     model.removePaddedBackground()
@@ -392,7 +395,7 @@ struct ScreencastInspectorView: View {
                 Button("Apply Gradient Background") {
                     model.applyPaddedBackground()
                 }
-                Button("Choose Image...") {
+                Button("Choose Image…") {
                     showBackgroundImageImporter = true
                 }
             }
@@ -457,7 +460,7 @@ struct ScreencastInspectorView: View {
 
     @ViewBuilder
     private var autoZoomSection: some View {
-        Button("Import Event Log...") {
+        Button("Import Event Log…") {
             showEventLogImporter = true
         }
         if model.hasAutoZoomProposals {

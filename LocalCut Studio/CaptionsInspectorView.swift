@@ -82,6 +82,7 @@ struct CaptionsInspectorView: View {
                     // undo stack alongside every other caption edit.
                     model.setCaptionTrackMuted(new, in: track.id)
                 }))
+                .accessibilityLabel("Mute \(track.name)")
 
             Picker("Preset", selection: presetSelectionBinding(for: track)) {
                 Text("Custom").tag(Optional<String>.none)
@@ -100,7 +101,7 @@ struct CaptionsInspectorView: View {
                 Button(role: .destructive) {
                     model.removeCaptionTrack(id: track.id)
                 } label: { Image(systemName: "trash") }
-                    .help("Remove track")
+                    .help("Remove \(track.name)")
                     .accessibilityLabel("Remove caption track")
             }
 
@@ -267,6 +268,7 @@ struct CaptionsInspectorView: View {
                     model.clearCaptionStyleKeyframes(line.id, in: track.id)
                 }
                 .disabled(model.captionStyleKeyframeCount(line.id, in: track.id) == 0)
+                .help("Remove all animated style keyframes for this caption line")
             }
             .buttonStyle(.borderless)
         } label: {

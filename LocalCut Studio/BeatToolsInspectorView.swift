@@ -38,12 +38,15 @@ struct BeatToolsInspectorView: View {
             }
             .disabled(!model.canAnalyzeBeatsForSelection)
             .help("Analyse the selected audio source and cache beat markers.")
+            .accessibilityHint("Analyse the selected audio source and cache beat markers.")
 
             Toggle("Show Beat Markers", isOn: $model.showBeatMarkers)
                 .disabled(model.beatAnalyses.isEmpty)
+                .help("Display beat markers on the timeline ruler")
 
             Toggle("Snap to Beats", isOn: $model.snapToBeats)
                 .disabled(model.beatAnalyses.isEmpty)
+                .help("Snap timeline edits to detected beat positions")
 
             LabeledSliderRow(
                 label: "Offset",

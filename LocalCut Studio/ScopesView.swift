@@ -175,7 +175,7 @@ struct ScopesView: View {
     }
 
     private func placeholder(into context: GraphicsContext, size: CGSize, label: String) {
-        let text = Text(label).font(.caption2).foregroundStyle(.white.opacity(0.4))
+        let text = Text(label).font(.caption2).foregroundStyle(.tertiary)
         context.draw(text, at: CGPoint(x: size.width / 2, y: size.height / 2), anchor: .center)
     }
 }
@@ -187,6 +187,9 @@ struct ScopesView: View {
 /// sample changes in the parent — the background only redraws when `kind` flips.
 private struct ScopeBackgroundView: View, Equatable {
     let kind: ScopeKind
+
+    private static let frameColor = Color.white.opacity(0.2)
+    private static let gridColor = Color.white.opacity(0.12)
 
     /// Colour-bar reference targets at 75% saturation (BT.601).
     private static let vectorscopeTargets: [(label: String, rgb: (r: Float, g: Float, b: Float), color: Color)] = [
@@ -215,7 +218,7 @@ private struct ScopeBackgroundView: View, Equatable {
 
     private func drawWaveformBackground(into context: GraphicsContext, size: CGSize) {
         let frameRect = scopeFrameRect(for: size)
-        context.stroke(Path(frameRect), with: .color(.white.opacity(0.15)), lineWidth: 0.5)
+        context.stroke(Path(frameRect), with: .color(Self.frameColor), lineWidth: 0.5)
         drawWaveformGraticule(into: context, frameRect: frameRect)
     }
 
@@ -227,10 +230,10 @@ private struct ScopeBackgroundView: View, Equatable {
             var line = Path()
             line.move(to: CGPoint(x: frameRect.minX, y: y))
             line.addLine(to: CGPoint(x: frameRect.maxX, y: y))
-            context.stroke(line, with: .color(.white.opacity(0.12)), lineWidth: 0.5)
+            context.stroke(line, with: .color(Self.gridColor), lineWidth: 0.5)
             let label = Text("\(Int(fraction * 100))")
                 .font(.system(size: 8))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(.white.opacity(0.5))
             // Anchor .bottomLeading keeps text above the line; clamp to min Y
             // so the top "100" label isn't clipped at the frame edge.
             let labelY = max(y, frameRect.minY + 9)
@@ -246,9 +249,9 @@ private struct ScopeBackgroundView: View, Equatable {
 
         // Outer chroma circle + a 75%-saturation reference ring (colour-bar
         // targets sit on/near it) + crosshairs as a reference grid.
-        context.stroke(Path(ellipseIn: plot), with: .color(.white.opacity(0.2)), lineWidth: 0.5)
+        context.stroke(Path(ellipseIn: plot), with: .color(Self.frameColor), lineWidth: 0.5)
         let inner = plot.insetBy(dx: plot.width * 0.125, dy: plot.height * 0.125)
-        context.stroke(Path(ellipseIn: inner), with: .color(.white.opacity(0.12)), lineWidth: 0.5)
+        context.stroke(Path(ellipseIn: inner), with: .color(Self.gridColor), lineWidth: 0.5)
         var crosshair = Path()
         crosshair.move(to: CGPoint(x: plot.midX, y: plot.minY))
         crosshair.addLine(to: CGPoint(x: plot.midX, y: plot.maxY))

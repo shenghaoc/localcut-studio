@@ -191,7 +191,7 @@ struct DocumentCommands: Commands {
         // inside Edit (after pasteboard) keeps the menu bar conventional.
         CommandGroup(after: .pasteboard) {
             Divider()
-            Button("Split Clip at Playhead") { model.splitSelectedClipAtPlayhead() }
+            Button("Split at Playhead") { model.splitSelectedClipAtPlayhead() }
                 .keyboardShortcut("k", modifiers: .command)
                 .disabled(model.selectedClipID == nil)
             Button("Analyse Beats for Selection") { model.analyzeBeatsForSelection() }
@@ -214,6 +214,7 @@ struct DocumentCommands: Commands {
                     model.deleteSelectedClip()
                 }
             }
+            .keyboardShortcut(.delete, modifiers: [])
             .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             Divider()
             // No key equivalent here: the timeline's EditorKeyHandler already owns
@@ -437,7 +438,7 @@ struct EditorView: View {
                 if model.recordingBackpressureCount > 0 {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundStyle(.yellow)
+                        .foregroundStyle(.orange)
                         .accessibilityLabel("\(model.recordingBackpressureCount) backpressure warning\(model.recordingBackpressureCount == 1 ? "" : "s")")
                 }
                 if let recordingStatusMessage {
@@ -494,7 +495,7 @@ struct EditorView: View {
     private var relinkBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
+                .foregroundStyle(.orange)
                 .accessibilityHidden(true)
             Text("\(model.unresolvedMedia.count) media file(s) need relinking.")
                 .font(.caption)
@@ -722,6 +723,7 @@ private struct RecordingDiskSpaceView: View {
             Text("|")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
             Text("\(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(model.recordingDiskWarning == .warn ? .yellow : .secondary)

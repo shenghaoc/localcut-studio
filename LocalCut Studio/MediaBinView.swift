@@ -164,6 +164,7 @@ private struct RecoveredRecordingRow: View {
             Image(systemName: "recordingtape")
                 .foregroundStyle(.secondary)
                 .frame(width: 28)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Recovered recording")
                     .font(.subheadline)

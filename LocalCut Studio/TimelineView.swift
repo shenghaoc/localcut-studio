@@ -378,6 +378,7 @@ struct TimelineView: View {
             }
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
+            .accessibilityHidden(true)
             // Declarative resize cursor signals the ruler is scrubbable. Region-
             // based, so there's no shared NSCursor push/pop stack to unbalance
             // when the ruler Canvas rebuilds on zoom.
@@ -438,6 +439,7 @@ struct TimelineView: View {
                         .fill(.regularMaterial.opacity(0.8)))
                 .frame(width: labelWidth)
                 .allowsHitTesting(false)
+                .accessibilityHidden(true)
             MarkerDiamond()
                 .fill(fill)
                 .overlay(MarkerDiamond().stroke(strokeColor, lineWidth: strokeWidth))
@@ -554,7 +556,7 @@ struct TimelineView: View {
                     model.commitCoalescedUndo()
                 }
                 Divider()
-                Button("Delete Caption Line", role: .destructive) {
+                Button("Remove Caption Line", role: .destructive) {
                     model.removeCaptionLine(line.id, in: track.id)
                 }
             }
@@ -642,18 +644,19 @@ struct TimelineView: View {
                 model.selectClip(id: clip.id)
                 model.splitSelectedClipAtPlayhead()
             }
+            .disabled(model.selectedClipID == nil)
             // Transitions are video-only — hide the entry on audio clips
             // rather than showing it greyed out (canAddTransition would
             // disable it but the entry would still appear, which is
             // misleading UX for a concept that never applies to audio).
             if kind == .video {
-                Button("Add Transition Before This Clip") {
+                Button("Add Transition at Selected Cut") {
                     model.addTransition(toClipID: clip.id)
                 }
                 .disabled(!model.canAddTransition(toClipID: clip.id))
             }
             Divider()
-            Button("Delete Clip", role: .destructive) {
+            Button("Delete Selected Clip", role: .destructive) {
                 model.selectClip(id: clip.id)
                 model.deleteSelectedClip()
             }
@@ -1071,6 +1074,7 @@ private struct PlayheadView: View {
                 .frame(maxHeight: .infinity)
                 .offset(x: x - lineWidth / 2)
                 .allowsHitTesting(false)
+                .accessibilityHidden(true)
 
             // Draggable head pinned to the ruler/lane boundary.
             PlayheadHead()

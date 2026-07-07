@@ -98,6 +98,7 @@ struct TutorialFinishingInspectorView: View {
                         model.runSilenceDetection(parameters: silenceParams)
                     }
                     .disabled(!model.canRunSilenceDetection)
+                    .help("Analyse audio tracks for silent passages based on the thresholds above")
 
                     if model.hasSilenceProposals {
                         Button("Review (\(model.silenceProposals.count))") {
@@ -123,6 +124,7 @@ struct TutorialFinishingInspectorView: View {
                     Button("Add Keystroke Overlay") {
                         model.addKeystrokeOverlayFromEventLog()
                     }
+                    .help("Create a visual keystroke overlay from the imported event log")
 
                     ForEach(model.project.keystrokeOverlayClips) { clip in
                         HStack {
@@ -142,6 +144,7 @@ struct TutorialFinishingInspectorView: View {
                             }
                             .buttonStyle(.borderless)
                             .accessibilityLabel("Remove keystroke overlay")
+                            .help("Remove this keystroke overlay from the timeline")
                         }
                     }
                 }
@@ -171,6 +174,7 @@ struct TutorialFinishingInspectorView: View {
                         Button("Convert All Markers to Chapters") {
                             model.convertAllMarkersToChapters()
                         }
+                        .help("Change every timeline marker to a chapter marker for YouTube export")
                     }
 
                     if !issues.isEmpty {
@@ -196,6 +200,7 @@ struct TutorialFinishingInspectorView: View {
                         showChapterExport = true
                     }
                     .disabled(!model.hasChapterMarkers || !issues.isEmpty)
+                    .help("Save chapter timestamps to a plain-text sidecar file")
                 }
             }
         }
@@ -228,6 +233,7 @@ struct TutorialFinishingInspectorView: View {
                     Button("Apply Tutorial Preset") {
                         applyTutorialPreset()
                     }
+                    .help("Apply the built-in tutorial caption style preset to the first caption track")
                 }
             }
         }

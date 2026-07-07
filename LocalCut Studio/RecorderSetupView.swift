@@ -48,6 +48,7 @@ struct RecorderSetupView: View {
                             Label(regionButtonTitle, systemImage: "crop")
                         }
                         .disabled(!includeRegionCapture || !canPickRegion || isPickingRegion)
+                        .accessibilityHint("Draw a rectangle on screen to capture only that area")
                         if let selectedRegion, includeRegionCapture {
                             Text("\(selectedRegion.outputWidth) x \(selectedRegion.outputHeight)")
                                 .font(.caption)
@@ -128,6 +129,8 @@ struct RecorderSetupView: View {
                             .foregroundStyle(model.recordingsFolderAccessURL == nil ? .secondary : .primary)
                         Spacer()
                         Button("Choose…") { _ = model.chooseRecordingsFolder() }
+                            .accessibilityLabel("Choose recordings folder")
+                            .accessibilityHint("Select where recordings are saved")
                     }
                 }
             }
@@ -210,7 +213,7 @@ struct RecorderSetupView: View {
     }
 
     private var regionButtonTitle: String {
-        selectedRegion == nil ? "Select Region..." : "Change Region..."
+        selectedRegion == nil ? "Select Region…" : "Change Region…"
     }
 
     private func loadSources() async {
