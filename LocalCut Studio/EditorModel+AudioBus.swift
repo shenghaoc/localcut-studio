@@ -65,13 +65,17 @@ extension EditorModel {
                             target: AnyHashable = AnyHashable("audio.voiceCleanup"),
                             mutate: (inout VoiceCleanupSettings) -> Void) {
         let apply: () -> Void = { [self] in
-            let wasPreviewActive = project.voiceCleanup.requiresOfflineProcessing
+            let wasDSPActive = project.voiceCleanup.requiresOfflineProcessing
+            let wasLoudnessActive = project.voiceCleanup.loudnessGainLinear != 1.0
             var settings = project.voiceCleanup
             mutate(&settings)
             settings.clamp()
             project.voiceCleanup = settings
             audioBus.updateLiveCleanupSettings(settings)
-            if wasPreviewActive != settings.requiresOfflineProcessing {
+            // Rebuild when DSP pipeline state changes or loudness gain changes.
+            let isDSPActive = settings.requiresOfflineProcessing
+            let isLoudnessActive = settings.loudnessGainLinear != 1.0
+            if wasDSPActive != isDSPActive || wasLoudnessActive != isLoudnessActive {
                 scheduleRebuild()
             }
         }
