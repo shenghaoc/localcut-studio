@@ -190,12 +190,8 @@ extension EditorModel {
 
     private func nearestCalloutTransformKeyframe(in keyframes: Keyframed<Transform2D>,
                                                  to time: CMTime) -> Keyframe<Transform2D>? {
-        let tolerance = calloutKeyframeHitToleranceSeconds
-        return keyframes.keyframes
-            .map { keyframe in (keyframe, abs((keyframe.time - time).seconds)) }
-            .filter { $0.1 <= tolerance }
-            .min { $0.1 < $1.1 }?
-            .0
+        EditorModel.nearestTransformKeyframe(in: keyframes, to: time,
+                                              tolerance: calloutKeyframeHitToleranceSeconds)
     }
 
     private func staticTransform(for callout: CalloutClip) -> Transform2D {

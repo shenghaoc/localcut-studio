@@ -140,8 +140,18 @@ extension EditorModel {
         in keyframes: Keyframed<Transform2D>,
         to time: CMTime
     ) -> Keyframe<Transform2D>? {
-        let tolerance = clipTransformKeyframeHitToleranceSeconds
-        return keyframes.keyframes
+        Self.nearestTransformKeyframe(in: keyframes, to: time,
+                                      tolerance: clipTransformKeyframeHitToleranceSeconds)
+    }
+
+    /// Shared helper for finding the nearest transform keyframe within a
+    /// tolerance. Used by both clip and callout keyframe navigation.
+    static func nearestTransformKeyframe(
+        in keyframes: Keyframed<Transform2D>,
+        to time: CMTime,
+        tolerance: Double
+    ) -> Keyframe<Transform2D>? {
+        keyframes.keyframes
             .map { keyframe in (keyframe, abs((keyframe.time - time).seconds)) }
             .filter { $0.1 <= tolerance }
             .min { $0.1 < $1.1 }?
