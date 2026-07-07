@@ -6,11 +6,14 @@ import LocalCutCore
 
 // MARK: - Analyzer
 
-/// Background actor that decodes an asset to mono `Float` samples and runs the
-/// pure, deterministic `BeatDetectionCore` analysis over them. The DSP, the
-/// `BeatAnalysis` model, and the `.beat` cache live in `LocalCutCore`; only the
-/// AVFoundation decode stays in the app target.
-actor BeatAnalyzer {
+/// Decodes an asset to mono `Float` samples and runs the pure, deterministic
+/// `BeatDetectionCore` analysis over them. The DSP, the `BeatAnalysis` model,
+/// and the `.beat` cache live in `LocalCutCore`; only the AVFoundation decode
+/// stays in the app target.
+///
+/// No mutable instance state — the actor isolation was unnecessary overhead.
+/// The `analyze` method is async because it performs AVFoundation I/O.
+struct BeatAnalyzer {
     private let targetSampleRate: Double = 22_050
 
     func analyze(url: URL) async throws -> BeatAnalysis {
