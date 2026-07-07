@@ -92,29 +92,29 @@ func serializeTimelineToEdl(_ doc: ProjectDocument,
         // Reel name.
         let reelName: String
         let mediaRef = mediaLookup[ic.mediaID]
-        if mediaRef == nil {
+        if let mediaRef {
+            // Warn for unresolved media (empty bookmark, no bundle path).
+            if mediaRef.bookmark.isEmpty, mediaRef.bundleRelativePath == nil {
+                warnings.append(missingSourceWarning(
+                    mediaID: ic.mediaID, trackName: track.name,
+                    clipName: mediaRef.displayName))
+            }
+            reelName = makeReelName(
+                displayName: mediaRef.displayName,
+                counts: &reelCounts,
+                allocated: &allocatedReels)
+        } else {
             reelName = "AX"
             warnings.append(missingSourceWarning(
                 mediaID: ic.mediaID, trackName: track.name, clipName: nil))
-        } else {
-            // Warn for unresolved media (empty bookmark, no bundle path).
-            if mediaRef!.bookmark.isEmpty, mediaRef!.bundleRelativePath == nil {
-                warnings.append(missingSourceWarning(
-                    mediaID: ic.mediaID, trackName: track.name,
-                    clipName: mediaRef!.displayName))
-            }
-            reelName = makeReelName(
-                displayName: mediaRef!.displayName,
-                counts: &reelCounts,
-                allocated: &allocatedReels)
         }
 
         // Track designator: always "V" for video.
         let trackDesignator = "V"
 
         // Transition: for EDL, all transitions become straight cuts.
-        if ic.doc.transition != nil, index > 0 {
-            let transitionType = ic.doc.transition!.type
+        if let transition = ic.doc.transition, index > 0 {
+            let transitionType = transition.type
             warnings.append(transitionDegradedWarning(
                 clipID: ic.doc.mediaID,
                 trackName: track.name,

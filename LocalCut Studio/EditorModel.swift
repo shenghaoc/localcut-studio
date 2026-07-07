@@ -139,8 +139,6 @@ final class EditorModel {
     var replayBufferDuration: ReplayBufferConfig.DurationOption = .seconds30
     /// Whether a replay save is currently in progress.
     var replaySaveInProgress: Bool = false
-    /// The last saved replay duration message for UI display.
-    var replaySaveMessage: String?
 
     // Skin smoothing debug
     var showSkinMask = false

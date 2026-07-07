@@ -509,10 +509,14 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
         guard let channelData = pcmBuffer.floatChannelData else { return nil }
         let channels = Int(format.channelCount)
         let totalSamples = Int(frameCount) * channels
+        guard channels > 0, totalSamples > 0 else { return nil }
         var interleaved = [Float](repeating: 0, count: totalSamples)
-        interleaved.withUnsafeMutableBufferPointer { ptr in
-            ptr.baseAddress?.update(from: channelData[0], count: totalSamples)
+        let didCopySamples = interleaved.withUnsafeMutableBufferPointer { ptr -> Bool in
+            guard let destination = ptr.baseAddress else { return false }
+            destination.update(from: channelData[0], count: totalSamples)
+            return true
         }
+        guard didCopySamples else { return nil }
 
         // Process through VoiceCleanupDSP.
         let sampleRate = format.sampleRate
@@ -521,9 +525,12 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
             settings: settings, state: &state)
 
         // Write processed interleaved Float32 data back to channelData[0].
-        interleaved.withUnsafeBufferPointer { ptr in
-            channelData[0].update(from: ptr.baseAddress!, count: totalSamples)
+        let didWriteSamples = interleaved.withUnsafeBufferPointer { ptr -> Bool in
+            guard let source = ptr.baseAddress else { return false }
+            channelData[0].update(from: source, count: totalSamples)
+            return true
         }
+        guard didWriteSamples else { return nil }
 
         // Create a format description for the output (interleaved Float32).
         var outputFormatDesc: CMAudioFormatDescription?

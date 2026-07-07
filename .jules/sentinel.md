@@ -33,3 +33,7 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Vulnerability:** Found force unwraps (`!`) in `BeatDetectionCore.swift` and `CaptureCoordinator.swift`.
 **Learning:** Force-unwrapping poses a Denial of Service (crash) risk if the application receives unexpected inputs or if the assumption about the data structure's content fails.
 **Prevention:** Always use safe optional binding (`if let`, `guard let`) when dealing with optional variables, especially when those variables depend on complex parsing logic, hardware configuration, or external media processing.
+## 2026-07-06 — Force Unwrap Vulnerability Mitigation
+**Vulnerability:** Force unwraps (`!`) were discovered in various files like `EdlSerializer.swift`, `Time.swift`, `CaptureRunningSessions.swift`, and `EditorModel+Capture.swift`.
+**Learning:** Swift's strict memory safety means force unwrapping nil values results in a runtime crash, creating a vector for application instability and potential Denial of Service (DoS) vulnerabilities.
+**Prevention:** Avoid force-unwrapping (`!`) entirely. Use safe optional binding (`if let`, `guard let`), optional chaining (`?.`), nil-coalescing (`??`), or local variable restructuring to safely access values.
