@@ -30,16 +30,6 @@ nonisolated enum ExportAspect: String, Codable, Hashable, Sendable, CaseIterable
         try container.encode(rawValue)
     }
 
-    var ratio: CGSize {
-        switch self {
-        case .widescreen: CGSize(width: 16, height: 9)
-        case .vertical: CGSize(width: 9, height: 16)
-        case .square: CGSize(width: 1, height: 1)
-        case .portrait4x5: CGSize(width: 4, height: 5)
-        case .cinema21x9: CGSize(width: 21, height: 9)
-        }
-    }
-
     var displayName: String {
         switch self {
         case .widescreen: "16:9"
