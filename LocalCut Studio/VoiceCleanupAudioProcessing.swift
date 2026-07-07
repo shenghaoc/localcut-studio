@@ -215,7 +215,8 @@ enum VoiceCleanupAudioProcessing {
                 multiplier: 1,
                 divisor: Int32(max(1, frameCount)))
         } else {
-            sampleDuration = CMTime(value: 1, timescale: CMTimeScale(sampleRate))
+            let safeRate = max(1, Int32(sampleRate.rounded()))
+            sampleDuration = CMTime(value: 1, timescale: CMTimeScale(safeRate))
         }
 
         var timing = CMSampleTimingInfo(

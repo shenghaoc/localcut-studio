@@ -198,7 +198,7 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     private let frameDurationSeconds: Double
 
     private let stateLock = NSLock()
-    private var delegate: RTCAudioDeviceDelegate?
+    private weak var delegate: RTCAudioDeviceDelegate?
     private var isRecordingActive = false
     private var isPlayoutActive = false
 

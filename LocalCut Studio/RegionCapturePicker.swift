@@ -64,7 +64,7 @@ final class RegionCapturePicker {
 
 private final class RegionCaptureWindowController {
     private let panel: RegionCapturePanel
-    private var keyMonitor: Any?
+    nonisolated(unsafe) private var keyMonitor: Any?
     private var completion: ((CaptureRegion?) -> Void)?
 
     init(screen: NSScreen,
@@ -123,6 +123,12 @@ private final class RegionCaptureWindowController {
         }
         panel.close()
         completion(region)
+    }
+
+    deinit {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+        }
     }
 }
 
