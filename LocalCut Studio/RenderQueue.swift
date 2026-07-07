@@ -1062,6 +1062,13 @@ final class RenderQueue {
         writer: AVAssetWriter
     ) throws {
         for group in metadata.groups {
+            // Wait briefly for the input to become ready if the writer's
+            // internal buffer is momentarily full.
+            var waited = 0
+            while !metadata.input.isReadyForMoreMediaData && waited < 10 {
+                Thread.sleep(forTimeInterval: 0.01)
+                waited += 1
+            }
             guard metadata.input.isReadyForMoreMediaData else {
                 throw RenderQueueError.writerInitializationFailed("Chapter metadata input was not ready.")
             }
