@@ -44,4 +44,4 @@
 - **R7.1** Unit tests for `WhipClient` (mocked `URLSession`), reconnect state machine (fake timers), `EncoderBudget` integration.
 - **R7.2** CI integration: publish to MediaMTX under the CI harness; assert ingest via the MediaMTX API; teardown sends DELETE.
 - **R7.3** Bundle-exclusion test for the publish settings store.
-- **R7.4** `xcodebuild` (Debug, macOS) green; no test count regression.
+- **R7.4** `xcodebuild` (Debug, macOS) green for the default WebRTC-enabled build and for a non-WebRTC build that strips `LOCALCUT_ENABLE_WEBRTC`; no test count regression.

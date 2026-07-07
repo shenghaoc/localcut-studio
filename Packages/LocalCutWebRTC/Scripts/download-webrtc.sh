@@ -158,7 +158,7 @@ ZIP_FILE="${DOWNLOAD_DIR}/WebRTC-M${MILESTONE}.xcframework.zip"
 
 if [ ! -f "${ZIP_FILE}" ]; then
     echo "Downloading ${URL}..."
-    curl -L -o "${ZIP_FILE}" "${URL}"
+    curl -L --retry 3 --retry-delay 5 -o "${ZIP_FILE}" "${URL}"
     
     # Verify checksum
     echo "Verifying checksum..."
