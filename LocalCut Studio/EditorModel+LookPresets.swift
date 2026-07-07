@@ -306,7 +306,11 @@ extension EditorModel {
         let clipSeed = grainSeed(for: id)
         return effects.map { effect in
             guard case .grain(var grain) = effect else { return effect }
-            grain.seed ^= clipSeed
+            // Use addition instead of XOR to avoid the self-inverse property.
+            // XOR is its own inverse: applying the same preset twice toggles
+            // the seed back to the original. Addition ensures each application
+            // produces a distinct grain pattern.
+            grain.seed &+= clipSeed
             return .grain(grain)
         }
     }
