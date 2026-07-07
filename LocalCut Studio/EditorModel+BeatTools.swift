@@ -317,6 +317,11 @@ extension EditorModel {
         }.value
     }
 
+    /// Synchronous beat cache persistence for the save path. Called from
+    /// `DocumentController` during user-initiated save. For projects with many
+    /// analyzed sources, this could cause a perceptible UI freeze. A future
+    /// improvement would move this to a background task and use the async
+    /// `persistBeatCaches` method instead.
     func persistBeatCachesSynchronously(to bundleURL: URL) {
         let directory = bundleBeatCacheDirectoryURL(for: bundleURL)
         for (mediaID, analysis) in beatAnalyses {
