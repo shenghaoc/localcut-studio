@@ -38,13 +38,48 @@ jobs:
       - name: Run package tests
         run: swift test --package-path "$PACKAGE_PATH"
 
+  webrtc-xcframework:
+    name: Prepare WebRTC XCFramework
+    runs-on: macos-26
+    timeout-minutes: 15
+    # Keep the fast pure-logic gate first; only prepare the large binary
+    # dependency when the shared package tests are already green.
+    needs: package-test
+
+    env:
+      WEBRTC_ARCHIVE: webrtc-xcframework.tgz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Cache WebRTC XCFramework
+        uses: actions/cache@v4
+        with:
+          path: Packages/LocalCutWebRTC/WebRTC.xcframework
+          key: webrtc-xcframework-140.0.0
+
+      - name: Download WebRTC XCFramework
+        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
+
+      - name: Package WebRTC XCFramework
+        run: tar -czf "$WEBRTC_ARCHIVE" -C Packages/LocalCutWebRTC WebRTC.xcframework
+
+      - name: Upload WebRTC XCFramework artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: webrtc-xcframework
+          path: ${{ env.WEBRTC_ARCHIVE }}
+          if-no-files-found: error
+          retention-days: 1
+
   test:
     name: Test (macOS 26 / Xcode)
     runs-on: macos-26
     timeout-minutes: 30
-    # The pure-logic package tests are the fast loop — gate the expensive
-    # Xcode build/test on them so a broken engine fails in seconds, not minutes.
-    needs: package-test
+    # Both Xcode jobs consume the single prepared WebRTC artifact instead of
+    # downloading the XCFramework independently on separate runners.
+    needs: webrtc-xcframework
 
     env:
       PROJECT: "LocalCut Studio.xcodeproj"
@@ -63,14 +98,15 @@ jobs:
           swift --version
           sw_vers
 
-      - name: Cache WebRTC XCFramework
-        uses: actions/cache@v4
+      - name: Download WebRTC XCFramework artifact
+        uses: actions/download-artifact@v7
         with:
-          path: Packages/LocalCutWebRTC/WebRTC.xcframework
-          key: webrtc-xcframework-140.0.0
+          name: webrtc-xcframework
 
-      - name: Download WebRTC XCFramework
-        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
+      - name: Install WebRTC XCFramework
+        run: |
+          tar -xzf webrtc-xcframework.tgz -C Packages/LocalCutWebRTC
+          ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
       - name: Validate Xcode project
         run: |
@@ -112,7 +148,7 @@ jobs:
     name: Test (non-WebRTC stubs)
     runs-on: macos-26
     timeout-minutes: 30
-    needs: package-test
+    needs: webrtc-xcframework
 
     env:
       PROJECT: "LocalCut Studio.xcodeproj"
@@ -134,14 +170,15 @@ jobs:
       # SPM resolves the LocalCutWebRTC package unconditionally; the XCFramework
       # binary target must exist on disk even though we compile without the
       # LOCALCUT_ENABLE_WEBRTC flag so the stub code paths are exercised.
-      - name: Cache WebRTC XCFramework
-        uses: actions/cache@v4
+      - name: Download WebRTC XCFramework artifact
+        uses: actions/download-artifact@v7
         with:
-          path: Packages/LocalCutWebRTC/WebRTC.xcframework
-          key: webrtc-xcframework-140.0.0
+          name: webrtc-xcframework
 
-      - name: Download WebRTC XCFramework
-        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
+      - name: Install WebRTC XCFramework
+        run: |
+          tar -xzf webrtc-xcframework.tgz -C Packages/LocalCutWebRTC
+          ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
       - name: Validate Xcode project
         run: |

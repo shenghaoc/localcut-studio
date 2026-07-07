@@ -9,12 +9,15 @@
 > product for a reduced publish UI. Local `xcodebuild test` passes with the
 > MediaMTX suite disabled by default; the CI script starts MediaMTX with
 > Docker/Podman when available or a pinned verified macOS release binary on
-> GitHub-hosted runners, then enables the required suite.
+> GitHub-hosted runners, then enables the required suite. Follow-up CI also
+> prepares the pinned WebRTC XCFramework once per run, shares it between Xcode
+> jobs as an artifact, and runs a flag-stripped non-WebRTC `xcodebuild test`
+> pass to compile and exercise the fallback stubs.
 
 ## Dependency + entitlements
 
 - [x] **T1.1** Add a macOS-capable WebRTC XCFramework via SPM (selected: `stasel/WebRTC` 140.0.0 through `Packages/LocalCutWebRTC`; 141.0.0+ release artifacts tested so far have broken macOS public headers), pinned to a stable release. The official GoogleWebRTC CocoaPods binary is iOS-only and would not link the macOS target. Document size + licence (BSD-3-Clause) in design.md and `docs/USER-GUIDE.md`; record which package + release we picked.
-- [x] **T1.2** Build flag to drop the dep for users who don't need streaming.
+- [x] **T1.2** Build flag to drop the WebRTC runtime path for users who don't need streaming, plus CI coverage that strips `LOCALCUT_ENABLE_WEBRTC` and exercises the fallback stubs.
 - [x] **T1.3** Add `com.apple.security.network.client` to the entitlements file (sandbox blocks outgoing HTTP + WebRTC without it). Smoke-test that the publish flow makes its first POST under the sandbox.
 
 ## WHIP client
@@ -50,4 +53,4 @@
 - [x] **T7.1** Unit tests for client + reconnect + budget.
 - [x] **T7.2** CI integration test publishing to MediaMTX under the CI harness.
 - [x] **T7.3** Bundle-exclusion test.
-- [x] **T7.4** `xcodebuild` (Debug, macOS) green.
+- [x] **T7.4** `xcodebuild` (Debug, macOS) green for both the default WebRTC-enabled app path and the non-WebRTC stub path.
