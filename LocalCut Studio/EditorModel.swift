@@ -79,11 +79,11 @@ final class EditorModel {
     /// Global draw/snap offset in seconds, clamped by the inspector to ±200 ms.
     /// Changing it must drop the projected-beat memo so markers, snap targets,
     /// and cut/align reflect the new offset on the next read.
-    var beatOffsetSeconds: Double = 0 {
+    var beatOffsetSeconds: Double = BeatToolsDefaults.offsetSeconds {
         didSet { invalidateProjectedBeatTimesCache() }
     }
     /// Maximum distance for Align to Beat in seconds.
-    var beatAlignWindowSeconds: Double = 0.15
+    var beatAlignWindowSeconds: Double = BeatToolsDefaults.alignWindowSeconds
     /// Per-source beat analyses. Mutating this set (analysis completes, caches
     /// load, document reset) invalidates the projected-beat memo.
     var beatAnalyses: [MediaItem.ID: BeatAnalysis] = [:] {
