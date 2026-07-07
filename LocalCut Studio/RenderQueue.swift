@@ -230,6 +230,12 @@ final class RenderQueue {
     @ObservationIgnored
     private var runnerToken: UUID?
 
+    /// Tracks the most recent `persist()` write task so the next persist can
+    /// await it, guaranteeing writes land on disk in call order even though
+    /// `Task.detached` does not inherit the MainActor's serial execution.
+    @ObservationIgnored
+    private var pendingWriteTask: Task<Void, Never>?
+
     @ObservationIgnored
     private var suppressAutoRestartAfterRunnerStops = false
 
@@ -1277,9 +1283,11 @@ final class RenderQueue {
     /// Writes the current queue to disk atomically. Called on every state
     /// transition; the encode happens on the MainActor (where `jobs` lives)
     /// but the actual file write is hopped to a detached task so a slow
-    /// disk can't stall the UI (Gemini review). Uses `Task.detached`
-    /// rather than GCD to match `load()` — no `self` is captured (only
-    /// Sendable value types), so there is no retain-cycle risk.
+    /// disk can't stall the UI. Uses `Task.detached` rather than GCD to
+    /// match `load()` — no `self` is captured (only Sendable value types),
+    /// so there is no retain-cycle risk. Writes are serialized via
+    /// `pendingWriteTask` so concurrent calls always land on disk in call
+    /// order (Gemini review).
     private func persist() {
         guard persistsToDisk, !refusingPersist, let url = Self.queueFileURL() else { return }
         let doc = RenderQueueDoc(jobs: jobs)
@@ -1293,7 +1301,9 @@ final class RenderQueue {
             return
         }
         let log = logger
-        Task.detached(priority: .utility) {
+        let previousTask = pendingWriteTask
+        pendingWriteTask = Task.detached(priority: .utility) {
+            _ = await previousTask?.value
             do {
                 try encoded.write(to: url, options: .atomic)
             } catch {
