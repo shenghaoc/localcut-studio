@@ -233,6 +233,8 @@ final class RenderQueue {
     /// Tracks the most recent `persist()` write task so the next persist can
     /// await it, guaranteeing writes land on disk in call order even though
     /// `Task.detached` does not inherit the MainActor's serial execution.
+    /// Without this chain, two successive `persist()` calls could spawn two
+    /// overlapping writes where the second finishes first.
     @ObservationIgnored
     private var pendingWriteTask: Task<Void, Never>?
 
@@ -1286,10 +1288,14 @@ final class RenderQueue {
     /// disk can't stall the UI. Uses `Task.detached` rather than GCD to
     /// match `load()` — no `self` is captured (only Sendable value types),
     /// so there is no retain-cycle risk. Writes are serialized via
-    /// `pendingWriteTask` so concurrent calls always land on disk in call
-    /// order (Gemini review).
+    /// `pendingWriteTask` so the detached file-writes always complete on
+    /// disk in the order `persist()` was called (Gemini review).
     private func persist() {
-        guard persistsToDisk, !refusingPersist, let url = Self.queueFileURL() else { return }
+        guard persistsToDisk, !refusingPersist else { return }
+        guard let url = Self.queueFileURL() else {
+            logger.error("queue persist skipped: Application Support directory unavailable")
+            return
+        }
         let doc = RenderQueueDoc(jobs: jobs)
         let encoded: Data
         do {
