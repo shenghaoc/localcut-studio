@@ -98,12 +98,17 @@ extension EditorModel {
         let newDuration = CMTimeMaximum(duration ?? line.range.duration, minDuration)
 
         updated.range = CMTimeRange(start: newStart, duration: newDuration)
+        let newEnd = newStart + newDuration
         if let words = updated.words, newStart != oldStart {
             let delta = newStart - oldStart
-            updated.words = words.map { word in
-                WordTiming(range: CMTimeRange(start: CMTimeMaximum(word.range.start + delta, .zero),
-                                              duration: word.range.duration),
-                           word: word.word)
+            updated.words = words.compactMap { word -> WordTiming? in
+                let shiftedStart = CMTimeMaximum(word.range.start + delta, .zero)
+                // Clamp word end to the new line boundary.
+                let shiftedEnd = CMTimeMinimum(shiftedStart + word.range.duration, newEnd)
+                let clampedDuration = CMTimeMaximum(shiftedEnd - shiftedStart, .zero)
+                guard clampedDuration > .zero else { return nil }
+                return WordTiming(range: CMTimeRange(start: shiftedStart, duration: clampedDuration),
+                                  word: word.word)
             }
         }
         updateCaptionLine(updated, in: trackID)

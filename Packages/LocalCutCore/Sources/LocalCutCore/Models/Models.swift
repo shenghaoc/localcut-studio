@@ -949,7 +949,11 @@ public struct CaptionStyleKeyframes: Hashable, Codable, Sendable {
     }
 
     public func hasKeyframe(at time: CMTime) -> Bool {
-        allKeyframeTimes.contains(time)
+        // Use semantic time comparison (seconds) rather than CMTime value
+        // equality, so differently-timescaled representations of the same
+        // wall-clock time still match.
+        let seconds = time.seconds
+        return allKeyframeTimes.contains { abs($0.seconds - seconds) < 0.0005 }
     }
 
     public func values(at time: CMTime) -> CaptionStyleKeyframeValues {
