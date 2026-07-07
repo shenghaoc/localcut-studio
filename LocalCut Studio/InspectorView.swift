@@ -1119,6 +1119,7 @@ struct InspectorView: View {
             if model.project.overlays.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("No overlays. Add an animated image, alpha video, or Lottie overlay to the project.")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                     addOverlayMenu
                         .buttonStyle(.borderedProminent)

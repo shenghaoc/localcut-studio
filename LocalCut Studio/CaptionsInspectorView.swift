@@ -19,6 +19,7 @@ struct CaptionsInspectorView: View {
             if model.project.captionTracks.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("No caption tracks. Import an SRT/VTT or add an empty track to begin.")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                     HStack {
                         Button("Import SRT/VTT…") { showSRTImporter = true }
