@@ -31,7 +31,7 @@ final class ExportCoordinator {
         }
         switch enqueue(bookmark) {
         case .queued:
-            model.statusMessage = "Queued \(url.lastPathComponent)."
+            model.statusMessage = "Queued \(url.lastPathComponent). The render will start shortly — check the Renders section in the inspector for progress."
             return .completed
         case .failed(let message):
             model.statusMessage = message
