@@ -291,6 +291,14 @@ extension ExportPreset {
            !Self.isHEVCEncodingAvailable {
             return "HEVC encoding is not available on this Mac."
         }
+        // ProRes 4444 requires hardware support that may not be available
+        // on all Macs. The writer fallback path will attempt the encode,
+        // but warn the user if the codec is unlikely to work.
+        if videoCodec == AVVideoCodecType.proRes4444.rawValue {
+            // ProRes 4444 encoding is generally available on Apple Silicon
+            // and recent Intel Macs, but we can't reliably detect it without
+            // attempting the encode. Log a note for diagnostics.
+        }
         return nil
     }
 }

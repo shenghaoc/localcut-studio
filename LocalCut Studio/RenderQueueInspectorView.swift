@@ -214,10 +214,16 @@ struct RenderQueueInspectorView: View {
         }
         panel.nameFieldStringValue = "\(model.project.name).\(preset.defaultFilenameExtension)"
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let response = panel.runModal()
+        guard response == .OK, let url = panel.url else {
+            if response == .cancel {
+                model.statusMessage = "Export cancelled."
+            }
+            return
+        }
 
         guard let bookmark = RenderQueue.outputBookmark(for: url) else {
-            model.statusMessage = "Could not access \(url.lastPathComponent)."
+            model.statusMessage = "Could not access \(url.lastPathComponent). Check that the destination is writable."
             return
         }
 
