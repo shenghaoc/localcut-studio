@@ -4,7 +4,7 @@ import CoreGraphics
 
 /// Generates deterministic zoom-pan proposals by clustering click bursts in a
 /// screencast event log. Each proposal is review-before-apply.
-public enum AutoZoomProposalGenerator {
+public enum AutoZoomProposalGenerator: Sendable {
     /// Parameters controlling how click events are clustered into bursts.
     public struct ClusteringParameters: Hashable, Sendable {
         /// Maximum time gap (seconds) between clicks in the same burst.

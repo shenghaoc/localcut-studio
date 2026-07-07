@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreMedia
+import os
 @preconcurrency import ScreenCaptureKit
 import LocalCutCore
 
@@ -49,7 +50,7 @@ nonisolated enum CapturePermissionAuthorizer {
 nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     nonisolated var supportsSourceSwitching: Bool { true }
 
-    private let stateLock = NSLock()
+    private let stateLock = OSAllocatedUnfairLock(initialState: ())
     private var target: CaptureTarget
     private let frameRate: Double
     private var videoWriter: ContinuousCaptureWriter?

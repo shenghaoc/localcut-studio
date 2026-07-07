@@ -9,7 +9,7 @@ import Accelerate
 /// Pure DSP only — no AVFoundation. The app's `BeatAnalyzer` actor decodes an
 /// asset to `[Float]` and feeds it here, which keeps this logic testable via
 /// `swift test --package-path Packages/LocalCutCore`.
-public enum BeatDetectionCore {
+public enum BeatDetectionCore: Sendable {
     public static let defaultFrameSize = 1024
     public static let defaultHopSize = 512
     public static let emittedTimescale: CMTimeScale = 600

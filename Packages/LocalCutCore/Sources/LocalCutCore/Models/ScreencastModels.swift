@@ -165,7 +165,7 @@ public struct ZoomPanPreset: Hashable, Codable, Sendable {
 ///
 /// These prevent whip-pan and jarring motion by capping how fast and how
 /// abruptly the transform can change between keyframes.
-public enum ZoomPanBounds {
+public enum ZoomPanBounds: Sendable {
     /// Reference width used to convert normalised transform translations into
     /// render-space points for preset-time bounds enforcement.
     public static let referenceRenderWidth: Float = 1920

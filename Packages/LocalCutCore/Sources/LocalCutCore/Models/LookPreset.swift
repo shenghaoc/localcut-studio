@@ -148,7 +148,7 @@ public struct LookPresetV1: Hashable, Codable, Sendable {
 /// Starter presets available without file I/O. The app exposes these in the
 /// inspector and writes/imports the same `LookPresetV1` JSON shape for user
 /// presets.
-public enum LookPresetLibrary {
+public enum LookPresetLibrary: Sendable {
     public static let builtInPresets: [LookPresetV1] = [
         preset("Clean Film", grain: 0.12, grainSize: 1.1, halation: 0.08, threshold: 0.78, radius: 12, vignette: 0.08),
         preset("Warm 16mm", grain: 0.22, grainSize: 1.8, halation: 0.28, threshold: 0.68, radius: 18, vignette: 0.18),

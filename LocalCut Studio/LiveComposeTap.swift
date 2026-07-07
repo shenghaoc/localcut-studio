@@ -1,4 +1,5 @@
 import Foundation
+import os
 @preconcurrency import CoreVideo
 import CoreMedia
 
@@ -17,7 +18,7 @@ nonisolated final class LiveComposeTap: @unchecked Sendable {
     let sourceID: UUID
 
     /// Lock protecting all mutable state.
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock(initialState: ())
 
     private var _isDisposed = false
 

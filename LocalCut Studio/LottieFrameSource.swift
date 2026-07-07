@@ -3,6 +3,7 @@ import AppKit
 import CoreImage
 import CoreMedia
 import Lottie
+import os
 import LocalCutCore
 
 /// Renders a Lottie JSON file into deterministic CIImage frames for the overlay
@@ -17,9 +18,12 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
     private let startFrame: CGFloat
     private let frameCount: Int
     private let totalDuration: TimeInterval
-    private let lock = NSLock()
-    private var cache: [Int: CIImage] = [:]
-    private var cacheOrder: [Int] = []
+
+    private struct CacheState: Sendable {
+        var cache: [Int: CIImage] = [:]
+        var cacheOrder: [Int] = []
+    }
+    private let cacheState = OSAllocatedUnfairLock(initialState: CacheState())
     private let maxCachedFrames: Int
     /// Maximum bytes used to drive per-frame cache eviction. At 1080p
     /// (8 MiB/frame) this holds ~8 frames; at 4K (33 MiB/frame) ~2.
@@ -152,9 +156,9 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
         }
 
         let index = min(frameCount - 1, max(0, Int(floor(effectiveTime * frameRate))))
-        if let cached = lock.withLock({ () -> CIImage? in
-            guard let cached = cache[index] else { return nil }
-            touchCachedFrame(at: index)
+        if let cached = cacheState.withLock({ state -> CIImage? in
+            guard let cached = state.cache[index] else { return nil }
+            touchCachedFrame(at: index, in: &state)
             return cached
         }) {
             return cached
@@ -164,12 +168,12 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
             return nil
         }
 
-        lock.withLock {
-            cache[index] = image
-            touchCachedFrame(at: index)
-            while cacheOrder.count > maxCachedFrames {
-                let evicted = cacheOrder.removeFirst()
-                cache.removeValue(forKey: evicted)
+        cacheState.withLock { state in
+            state.cache[index] = image
+            touchCachedFrame(at: index, in: &state)
+            while state.cacheOrder.count > maxCachedFrames {
+                let evicted = state.cacheOrder.removeFirst()
+                state.cache.removeValue(forKey: evicted)
             }
         }
 
@@ -177,19 +181,19 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
     }
 
     nonisolated var cachedFrameCount: Int {
-        lock.withLock { cache.count }
+        cacheState.withLock { $0.cache.count }
     }
 
     nonisolated func purgeCachedFrames() {
-        lock.withLock {
-            cache.removeAll()
-            cacheOrder.removeAll()
+        cacheState.withLock { state in
+            state.cache.removeAll()
+            state.cacheOrder.removeAll()
         }
     }
 
-    private func touchCachedFrame(at index: Int) {
-        cacheOrder.removeAll { $0 == index }
-        cacheOrder.append(index)
+    private func touchCachedFrame(at index: Int, in state: inout CacheState) {
+        state.cacheOrder.removeAll { $0 == index }
+        state.cacheOrder.append(index)
     }
 
     private static func containsAfterEffectsLayerEffects(_ value: Any) -> Bool {

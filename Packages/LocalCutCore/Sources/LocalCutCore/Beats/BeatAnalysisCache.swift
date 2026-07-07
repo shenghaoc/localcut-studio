@@ -5,7 +5,7 @@ import Foundation
 /// Binary, versioned, SHA-keyed cache for `BeatAnalysis` blobs. The header is a
 /// 4-byte magic (`LCBT`) + little-endian `UInt32` version followed by the JSON
 /// payload, so a format change can reject stale blobs by bumping `version`.
-public enum BeatAnalysisCache {
+public enum BeatAnalysisCache: Sendable {
     private static let magic = Data([0x4C, 0x43, 0x42, 0x54]) // "LCBT"
     // v2: the tempo-octave correction changed estimator output, so v1 blobs
     // (which may hold the old half-tempo result) must be rejected and

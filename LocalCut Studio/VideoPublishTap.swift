@@ -1,5 +1,6 @@
 import Foundation
 import CoreVideo
+import os
 
 #if LOCALCUT_ENABLE_WEBRTC
 import WebRTC
@@ -34,7 +35,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     nonisolated func detachFromWebRTC() {}
     #endif
 
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock(initialState: ())
     private var isClosed = false
     private var isInFlight = false
     private var pendingBuffer: CVPixelBuffer?

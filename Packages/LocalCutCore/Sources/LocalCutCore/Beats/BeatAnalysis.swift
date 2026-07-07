@@ -51,7 +51,7 @@ public struct ProjectedBeatMarker: Identifiable, Hashable, Sendable {
 /// Errors raised while decoding an asset or running beat detection. The decode
 /// cases originate in the app's AVFoundation `BeatAnalyzer`; `.insufficientSamples`
 /// is also raised by the pure `BeatDetectionCore`.
-public enum BeatAnalysisError: LocalizedError {
+public enum BeatAnalysisError: LocalizedError, Sendable {
     case noAudioTrack
     case readerConfigurationFailed
     case readerFailed(String)

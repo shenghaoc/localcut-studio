@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreMedia
+import os
 import LocalCutCore
 
 nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
@@ -45,7 +46,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private let onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)?
     /// Called when a new sample boundary is available for the replay buffer.
     private let onEncodedChunk: (@Sendable (EncodedChunk) -> Void)?
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock(initialState: ())
 
     /// Roughly two seconds of drops at 30 fps before we warn the user; a single
     /// hiccup shouldn't raise an alarm, sustained loss should.

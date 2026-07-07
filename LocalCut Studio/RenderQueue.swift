@@ -1291,7 +1291,7 @@ final class RenderQueue {
             return
         }
         let log = logger
-        DispatchQueue.global(qos: .utility).async {
+        Task.detached(priority: .utility) {
             do {
                 try encoded.write(to: url, options: .atomic)
             } catch {

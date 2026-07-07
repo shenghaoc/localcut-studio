@@ -2,6 +2,7 @@ import Foundation
 import CoreImage
 import CoreVideo
 import Metal
+import os
 import LocalCutCore
 
 // MARK: - ProgramCompositor
@@ -24,7 +25,7 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
     private let pixelBufferPool: CVPixelBufferPool?
 
     /// Lock protecting all mutable state below.
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock(initialState: ())
 
     /// Per-source latest pixel buffer.
     private var sourceBuffers: [UUID: CVPixelBuffer] = [:]
