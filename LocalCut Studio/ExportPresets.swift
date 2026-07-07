@@ -469,6 +469,9 @@ nonisolated enum BuiltInExportPresets {
             guidanceSourceURL: "https://ads.tiktok.com/help/article/tiktok-auction-in-feed-ads",
             guidanceValidatedAt: "2026-06-25"))
 
+    /// ProRes 4K preset. The bitrate bracket is `.max` for display purposes
+    /// but is ignored by the session path — ProRes uses Apple's fixed internal
+    /// bitrate determined by the profile (422 HQ, 422, etc.).
     static let proRes4K = ExportPreset(
         id: proRes4KID,
         name: "ProRes 4K",
