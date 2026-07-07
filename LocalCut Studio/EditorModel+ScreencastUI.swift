@@ -33,7 +33,7 @@ extension EditorModel {
                 Keyframed(keyframes: keyframes, defaultValue: .identity)
         }
         statusMessage = "Applied \(kind.displayName.lowercased()) preset."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     // MARK: - Auto-Zoom Proposals
@@ -77,7 +77,7 @@ extension EditorModel {
                 Keyframed(keyframes: merged, defaultValue: .identity)
         }
         statusMessage = "Applied auto-zoom proposal."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Skip (dismiss) an auto-zoom proposal without modifying the timeline.
@@ -126,7 +126,7 @@ extension EditorModel {
         }
         autoZoomProposals.removeAll()
         statusMessage = "Applied \(proposals.count) auto-zoom proposals."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Import a standalone Phase 43 `events.json` file and generate proposals.
@@ -169,7 +169,7 @@ extension EditorModel {
             project.paddedBackground = PaddedBackgroundPreset()
         }
         statusMessage = "Applied padded background."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Apply an image-backed padded background. The bookmark is persisted for
@@ -194,7 +194,7 @@ extension EditorModel {
             project.paddedBackground = preset
         }
         statusMessage = "Applied \(url.lastPathComponent) as padded background."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Mutate the padded background preset with one undo coalescing target.
@@ -215,6 +215,6 @@ extension EditorModel {
             project.paddedBackground = nil
         }
         statusMessage = "Removed padded background."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 }

@@ -203,7 +203,8 @@ extension EditorModel {
             return
         }
         let withLUT = lutBookmark != nil && preset.lut != nil
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             do {
                 // Encode is cheap, but the disk writes can stall on a slow network
                 // share or iCloud Drive, so push them off the main actor. The .lclook

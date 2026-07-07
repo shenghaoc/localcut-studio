@@ -112,7 +112,7 @@ struct MediaBinView: View {
         ) { result in
             if case .success(let urls) = result {
                 let wantsBundling = model.copyImportsIntoBundle
-                Task { await model.importMedia(urls: urls, wantsBundling: wantsBundling) }
+                Task { [weak model] in await model?.importMedia(urls: urls, wantsBundling: wantsBundling) }
             }
         }
         .onChange(of: model.selectedMediaID) { _, newValue in

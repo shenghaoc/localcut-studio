@@ -52,7 +52,7 @@ extension EditorModel {
         }
         selectedClipID = clipID
         statusMessage = "Clip transform keyframe set at \(TimeFormatting.timecode(localTime.seconds))."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     @MainActor
@@ -67,7 +67,7 @@ extension EditorModel {
             project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes.removeKeyframe(id: keyframe.id)
         }
         statusMessage = "Removed clip transform keyframe."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     @MainActor
@@ -90,7 +90,7 @@ extension EditorModel {
                 Keyframed(defaultValue: .identity)
         }
         statusMessage = "Cleared clip transform keyframes."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     @MainActor

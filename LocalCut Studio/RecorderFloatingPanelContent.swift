@@ -33,7 +33,7 @@ struct RecorderFloatingPanelContent: View {
                 } else {
                     ForEach(screenOptions) { option in
                         Button {
-                            Task { await model.switchCaptureSource(to: option.target) }
+                            Task { [weak model] in await model?.switchCaptureSource(to: option.target) }
                         } label: {
                             Label(option.title, systemImage: iconName(for: option.target))
                         }
@@ -51,7 +51,7 @@ struct RecorderFloatingPanelContent: View {
             // Pause / Resume.
             if model.isPaused {
                 Button {
-                    Task { await model.resumeRecording() }
+                    Task { [weak model] in await model?.resumeRecording() }
                 } label: {
                     Image(systemName: "play.fill")
                 }
@@ -61,7 +61,7 @@ struct RecorderFloatingPanelContent: View {
                 .accessibilityLabel("Resume recording")
             } else if model.isRecording {
                 Button {
-                    Task { await model.pauseRecording() }
+                    Task { [weak model] in await model?.pauseRecording() }
                 } label: {
                     Image(systemName: "pause.fill")
                 }

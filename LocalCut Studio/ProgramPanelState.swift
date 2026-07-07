@@ -34,7 +34,8 @@ final class ProgramPanelState {
         if !capabilitySufficient {
             statusMessage = "Hardware insufficient: \(verdict.reason)"
         }
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             budgetMax = await budget.maxConcurrent
             updateBudgetReadout()
             await publishEncoderBudget(budget)
@@ -81,8 +82,8 @@ final class ProgramPanelState {
 
     func switchScene(to sceneId: UUID, model: EditorModel) {
         currentSceneId = sceneId
-        Task {
-            await model.programSession?.switchScene(to: sceneId)
+        Task { [weak model] in
+            await model?.programSession?.switchScene(to: sceneId)
         }
     }
 
@@ -110,7 +111,8 @@ final class ProgramPanelState {
         isStarting = true
         currentSceneId = first.id
         statusMessage = "Starting Program Mode..."
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             defer { isStarting = false }
             do {
                 try await programSession.start(
@@ -160,7 +162,8 @@ final class ProgramPanelState {
         ownsCurrentSession = false
         isRunning = false
         statusMessage = "Stopping Program Mode..."
-        Task {
+        Task { [weak self, weak model] in
+            guard let self, let model else { return }
             defer {
                 isStopping = false
                 model.programSession = nil
@@ -189,7 +192,8 @@ final class ProgramPanelState {
         guard isRunning, ownsCurrentSession, let session = model.programSession else { return }
         isRunning = false
         ownsCurrentSession = false
-        Task {
+        Task { [weak self, weak model] in
+            guard let self, let model else { return }
             do {
                 await model.stopWhipPublish()
                 let result = try await session.stop()

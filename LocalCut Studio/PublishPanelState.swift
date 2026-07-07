@@ -125,7 +125,8 @@ final class PublishPanelState {
             model.publishSettings.rememberToken = false
         }
 
-        Task {
+        Task { [weak self, weak model] in
+            guard let self, let model else { return }
             defer { isStarting = false }
             do {
                 try await model.startWhipPublish(config: config)
@@ -200,7 +201,8 @@ final class PublishPanelState {
         isStopping = true
         publishState = .ended
         statusMessage = "Stopping..."
-        Task {
+        Task { [weak self, weak model] in
+            guard let self, let model else { return }
             defer { isStopping = false }
             await model.stopWhipPublish()
             publishState = .idle
@@ -216,7 +218,9 @@ final class PublishPanelState {
         isWebRTCAvailable = false
         #endif
         isProgramOutputAvailable = model.programSession != nil
-        Task { isBudgetAvailable = await model.encoderBudget.availableCount > 0 }
+        Task { [weak self, weak model] in
+            self?.isBudgetAvailable = await (model?.encoderBudget.availableCount ?? 0) > 0
+        }
     }
 
     static func formattedBytes(_ bytes: Int64) -> String {

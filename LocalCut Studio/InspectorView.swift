@@ -62,8 +62,8 @@ struct InspectorView: View {
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
-                Task {
-                    await model.importLookPreset(url: url)
+                Task { [weak model] in
+                    await model?.importLookPreset(url: url)
                 }
             }
         }
@@ -1166,8 +1166,8 @@ struct InspectorView: View {
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
-                Task {
-                    await model.importOverlay(from: url, sourceType: pendingOverlayType)
+                Task { [weak model] in
+                    await model?.importOverlay(from: url, sourceType: pendingOverlayType)
                 }
             }
         }
@@ -1399,6 +1399,6 @@ private struct CoverInspectorView: View {
         panel.nameFieldStringValue = "\(model.project.name)-cover.\(format.fileExtension)"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await model.exportCover(to: url) }
+        Task { [weak model] in await model?.exportCover(to: url) }
     }
 }

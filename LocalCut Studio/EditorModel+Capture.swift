@@ -770,7 +770,8 @@ extension EditorModel {
     }
 
     func importRecoveredCaptureSession(_ result: CaptureSessionResult) {
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             // Keep the recovery row until landing actually succeeds, so a
             // temporarily unreadable source can be retried instead of vanishing.
             if ProgramRecovery.hasProgramData(manifest: result.manifest) {
@@ -1046,7 +1047,8 @@ extension EditorModel {
 
         replaySaveInProgress = true
 
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             await manager.saveLast(seconds: saveSeconds)
             replaySaveInProgress = false
             if let error = manager.lastSaveError {
@@ -1063,8 +1065,8 @@ extension EditorModel {
     /// Cleans up replay buffer resources on session end.
     func cleanupReplayBuffer() {
         guard let manager = replayBufferManager else { return }
-        Task {
-            await manager.cleanup()
+        Task { [weak manager] in
+            await manager?.cleanup()
         }
         replayBufferManager = nil
     }
