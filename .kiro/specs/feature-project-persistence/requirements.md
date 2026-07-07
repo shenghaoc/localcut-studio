@@ -21,7 +21,7 @@
 ## R4 — Safety
 
 - **R4.1** Saving is atomic; a failed save never corrupts the previous file.
-- **R4.2** No data loss: schema is versioned with forward-compatible decoding.
+- **R4.2** Project schema is versioned with lenient decoding for additive fields, defaults for older documents, and Save As-only handling for decoded newer documents so newer files are not silently overwritten.
 
 ## R5 — Verification
 

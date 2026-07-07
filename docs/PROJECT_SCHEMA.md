@@ -26,7 +26,7 @@ Both formats share the same `ProjectDocument` structure. The version is stored i
 
 ## Compatibility model
 
-LocalCut Studio uses **forward-compatible decoding**: every field in `ProjectDocument` is decoded with `decodeIfPresent` and a safe default. Unknown JSON keys are silently ignored by `JSONDecoder`.
+LocalCut Studio uses **forward-compatible decoding for known top-level document fields**: `ProjectDocument.init(from:)` decodes each field with `decodeIfPresent` and a safe default. Unknown JSON keys are silently ignored by `JSONDecoder`.
 
 ### Opening an older project (schemaVersion < current)
 
@@ -50,16 +50,16 @@ Per-clip fields (`opacity`, `effects`, `transition`, `geometry`, `volumeEnvelope
 
 ### Opening a newer project (schemaVersion > current)
 
-The project **opens read-only**. The app:
+If the document decodes successfully, the project opens as a Save As-only downconversion session. The app:
 
 1. Decodes the document (unknown keys are ignored, missing fields get defaults).
 2. Sets `documentURL = nil` so the document saves via Save As rather than overwriting the original.
 3. Marks the document as dirty, prompting "Save As" on close.
 4. Shows a status message: *"saved in a newer format — saving downconverts to this version"*.
 
-This prevents silent data loss: the user must explicitly choose to save a downconverted copy.
+This prevents silent overwrite of the newer file: the user must explicitly choose to save a downconverted copy.
 
-> **Caveat:** This guarantee applies to additive changes only. If a newer version introduces a new enum case for an existing typed field (e.g., a new `Effect` case), the synthesized `Codable` decoder may throw before reaching the schema-version guard. Such projects would fail to open rather than opening read-only.
+> **Caveat:** This guarantee applies after `ProjectDocument(data:)` succeeds and is reliable for additive keys. If a newer version introduces a new enum case or incompatible value under an existing typed field (e.g., a new `Effect` case), the synthesized `Codable` decoder may throw before `DocumentController.load` reaches the schema-version guard. Such projects fail to open rather than entering the Save As-only path.
 
 ### Saving always writes the current schema
 
@@ -102,7 +102,7 @@ The `bundleFormat` string (currently `"1"`) tracks the bundle directory layout, 
 
 The current `decodeIfPresent`-with-defaults strategy works when:
 
-- New fields are additive and have sensible defaults.
+- New project fields are additive and have sensible defaults.
 - Old fields are optional and can be ignored.
 
 Explicit migrations become necessary when:
@@ -114,7 +114,7 @@ Explicit migrations become necessary when:
 5. **Data must be transformed** — e.g., splitting one field into two, or merging fields.
 6. **A field is removed** — old documents still contain the key; its data may need to be mapped to new fields before discarding.
 
-In these cases, add a migration function called from `init(from:)`, gated on `schemaVersion < N`. The `migrateSceneDoc` function is the pattern to follow.
+In these cases, add a project migration function called from `ProjectDocument.init(from:)`, gated on `schemaVersion < N`. For scene-only changes inside `sceneDoc`, keep using `migrateSceneDoc(_:)`.
 
 ## Test coverage
 

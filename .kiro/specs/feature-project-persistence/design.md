@@ -1,10 +1,10 @@
 # Design: Project Persistence
 
-> Status: **Implemented**. Shipped in [#6](https://github.com/shenghaoc/localcut-studio/pull/6); schema since carried to v2 (caption tracks, [#10](https://github.com/shenghaoc/localcut-studio/pull/10)) and v3 (project bundles, [#20](https://github.com/shenghaoc/localcut-studio/pull/20)). See [tasks.md](./tasks.md) for the per-box source citations.
+> Status: **Implemented**. Shipped in [#6](https://github.com/shenghaoc/localcut-studio/pull/6); schema since carried through later phases to the current version documented in [`docs/PROJECT_SCHEMA.md`](../../../docs/PROJECT_SCHEMA.md). See [tasks.md](./tasks.md) for the per-box source citations.
 
 ## Approach
 
-Split the runtime model from a Codable document model. `Project` (runtime, holds live `AVURLAsset`s) is built from / written to a `ProjectDocument` (Codable, holds bookmarks + plain values). Use a versioned schema so future fields decode forward-compatibly.
+Split the runtime model from a Codable document model. `Project` (runtime, holds live `AVURLAsset`s) is built from / written to a `ProjectDocument` (Codable, holds bookmarks + plain values). Use a versioned schema with lenient defaults for known top-level fields so older documents keep opening; decoded newer documents are treated as Save As-only downconversion sessions. Non-additive nested type changes can still fail decode and need explicit migrations.
 
 ## Pieces
 
