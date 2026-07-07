@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import os
 import LocalCutCore
 
 // MARK: - Beat tools
@@ -305,7 +306,13 @@ extension EditorModel {
         let directory = bundleBeatCacheDirectoryURL(for: bundleURL)
         await Task.detached {
             for (key, analysis) in entries {
-                try? BeatAnalysisCache.write(analysis, key: key, in: directory)
+                do {
+                    try BeatAnalysisCache.write(analysis, key: key, in: directory)
+                } catch {
+                    // Log but don't throw — beat cache persistence is best-effort.
+                    os_log(.error, "BeatAnalysisCache: write failed for %{public}@: %{public}@",
+                           key, error.localizedDescription)
+                }
             }
         }.value
     }
@@ -314,7 +321,12 @@ extension EditorModel {
         let directory = bundleBeatCacheDirectoryURL(for: bundleURL)
         for (mediaID, analysis) in beatAnalyses {
             guard let key = beatAnalysisKeys[mediaID] else { continue }
-            try? BeatAnalysisCache.write(analysis, key: key, in: directory)
+            do {
+                try BeatAnalysisCache.write(analysis, key: key, in: directory)
+            } catch {
+                os_log(.error, "BeatAnalysisCache: write failed for %{public}@: %{public}@",
+                       key, error.localizedDescription)
+            }
         }
     }
 
