@@ -420,6 +420,10 @@ public struct CalloutClip: Hashable, Codable, Identifiable, Sendable {
         self.kind = kind
         self.timeRange = timeRange
         self.positionOffset = positionOffset
+        // Model allows up to 10× for backward compatibility (older projects
+        // may have values between 4 and 10). The inspector UI caps at 4× for
+        // usability — values above that are reachable only through presets or
+        // manual document editing.
         self.scale = max(0.1, min(10, scale))
         self.rotation = rotation
         self.transformKeyframes = transformKeyframes
