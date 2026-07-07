@@ -10,9 +10,7 @@
 		00000000000000000000A030 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A020 /* LocalCutCore */; };
 		00000000000000000000A031 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A021 /* LocalCutCore */; };
 		00000000000000000000A032 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A022 /* Lottie */; };
-		00000000000000000000A033 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A023 /* Lottie */; };
 		00000000000000000000A034 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A024 /* WebRTC */; };
-		00000000000000000000A035 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A025 /* WebRTC */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,8 +67,6 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				00000000000000000000A031 /* LocalCutCore in Frameworks */,
-				00000000000000000000A033 /* Lottie in Frameworks */,
-				00000000000000000000A035 /* WebRTC in Frameworks */,
 			);
 		};
 		000000000000000330000000 /* Frameworks */ = {
@@ -146,8 +142,6 @@
 			name = "LocalCut StudioTests";
 			packageProductDependencies = (
 				00000000000000000000A021 /* LocalCutCore */,
-				00000000000000000000A023 /* Lottie */,
-				00000000000000000000A025 /* WebRTC */,
 			);
 			productName = "LocalCut StudioTests";
 			productReference = 000000000000000000000220 /* LocalCut StudioTests.xctest */;
@@ -630,16 +624,7 @@
 			package = 00000000000000000000A011 /* XCRemoteSwiftPackageReference "lottie-ios" */;
 			productName = Lottie;
 		};
-		00000000000000000000A023 /* Lottie */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 00000000000000000000A011 /* XCRemoteSwiftPackageReference "lottie-ios" */;
-			productName = Lottie;
-		};
 		00000000000000000000A024 /* WebRTC */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = WebRTC;
-		};
-		00000000000000000000A025 /* WebRTC */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = WebRTC;
 		};
