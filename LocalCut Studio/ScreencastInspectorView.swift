@@ -456,19 +456,6 @@ struct ScreencastInspectorView: View {
     }
 }
 
-private extension Transform2D {
-    func replacing(translateX: Float? = nil,
-                   translateY: Float? = nil,
-                   scale: Float? = nil,
-                   rotationDegrees: Float? = nil) -> Transform2D {
-        Transform2D(
-            translateX: translateX ?? tx,
-            translateY: translateY ?? ty,
-            scale: scale ?? decomposedScale,
-            rotation: rotationDegrees.map { $0 * Float.pi / 180 } ?? decomposedRotation)
-    }
-}
-
 // MARK: - Auto-Zoom Review Sheet
 
 struct AutoZoomReviewSheet: View {
