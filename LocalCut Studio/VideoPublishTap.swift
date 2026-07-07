@@ -14,20 +14,20 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     init() {}
 
     nonisolated func attach(to factory: RTCPeerConnectionFactory) -> RTCVideoSource {
-        lock.lock()
-        defer { lock.unlock() }
-        if let videoSource { return videoSource }
-        let source = factory.videoSource()
-        videoSource = source
-        capturer = TapCapturer(source: source)
-        return source
+        lock.withLock { state in
+            if let videoSource { return videoSource }
+            let source = factory.videoSource()
+            videoSource = source
+            capturer = TapCapturer(source: source)
+            return source
+        }
     }
 
     nonisolated func detachFromWebRTC() {
-        lock.lock()
-        videoSource = nil
-        capturer = nil
-        lock.unlock()
+        lock.withLock { _ in
+            videoSource = nil
+            capturer = nil
+        }
     }
     #else
     nonisolated(unsafe) private(set) var latestPixelBuffer: CVPixelBuffer?
@@ -35,38 +35,39 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     nonisolated func detachFromWebRTC() {}
     #endif
 
-    private let lock = OSAllocatedUnfairLock(initialState: ())
-    private var isClosed = false
-    private var isInFlight = false
-    private var pendingBuffer: CVPixelBuffer?
+    private struct State: Sendable {
+        var isClosed = false
+        var isInFlight = false
+        var pendingBuffer: CVPixelBuffer?
+    }
+    private let lock = OSAllocatedUnfairLock(initialState: State())
 
     nonisolated func capturePixelBuffer(_ buffer: CVPixelBuffer) {
-        lock.lock()
-        guard !isClosed else { lock.unlock(); return }
-        if isInFlight {
-            pendingBuffer = buffer
-            lock.unlock()
-            return
+        let shouldDeliver = lock.withLock { state -> Bool in
+            guard !state.isClosed else { return false }
+            if state.isInFlight {
+                state.pendingBuffer = buffer
+                return false
+            }
+            state.isInFlight = true
+            return true
         }
-        isInFlight = true
-        lock.unlock()
+        guard shouldDeliver else { return }
         deliverFrame(buffer)
     }
 
     nonisolated func close() {
-        lock.lock()
-        guard !isClosed else { lock.unlock(); return }
-        isClosed = true
-        pendingBuffer = nil
-        isInFlight = false
-        lock.unlock()
+        lock.withLock { state in
+            guard !state.isClosed else { return }
+            state.isClosed = true
+            state.pendingBuffer = nil
+            state.isInFlight = false
+        }
     }
 
     private nonisolated func deliverFrame(_ buffer: CVPixelBuffer) {
         #if LOCALCUT_ENABLE_WEBRTC
-        lock.lock()
-        let activeCapturer = capturer
-        lock.unlock()
+        let activeCapturer = lock.withLock { $0.capturer }
         if let activeCapturer {
             let frame = RTCVideoFrame(
                 buffer: RTCCVPixelBuffer(pixelBuffer: buffer),
@@ -76,21 +77,16 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
             activeCapturer.didCapture(frame)
         }
         #else
-        lock.lock()
-        latestPixelBuffer = buffer
-        lock.unlock()
+        lock.withLock { $0.latestPixelBuffer = buffer }
         #endif
 
-        lock.lock()
-        let next = pendingBuffer
-        pendingBuffer = nil
-        if let next {
-            lock.unlock()
-            deliverFrame(next)
-        } else {
-            isInFlight = false
-            lock.unlock()
+        let next = lock.withLock { state -> CVPixelBuffer? in
+            let pending = state.pendingBuffer
+            state.pendingBuffer = nil
+            if pending == nil { state.isInFlight = false }
+            return pending
         }
+        if let next { deliverFrame(next) }
     }
 }
 

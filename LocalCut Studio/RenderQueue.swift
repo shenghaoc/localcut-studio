@@ -1291,6 +1291,9 @@ final class RenderQueue {
             return
         }
         let log = logger
+        // GCD → Task.detached: cancellation-safe because Data.write is atomic.
+        // If the task is cancelled before completion, the on-disk state may be
+        // stale; load() reconciles on next launch.
         Task.detached(priority: .utility) {
             do {
                 try encoded.write(to: url, options: .atomic)

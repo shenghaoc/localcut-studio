@@ -223,11 +223,7 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     var outputNumberOfChannels: Int { channels }
     var outputLatency: TimeInterval { 0 }
 
-    var isInitialized: Bool {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return delegate != nil
-    }
+    var isInitialized: Bool { stateLock.withLock { delegate != nil } }
     var isPlayoutInitialized: Bool { true }
     var isPlaying: Bool { stateLock.withLock { isPlayoutActive } }
     var isRecordingInitialized: Bool { true }
@@ -236,16 +232,12 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     // MARK: - Lifecycle
 
     func initialize(with delegate: RTCAudioDeviceDelegate) -> Bool {
-        stateLock.lock()
-        self.delegate = delegate
-        stateLock.unlock()
+        stateLock.withLock { self.delegate = delegate }
         return true
     }
 
     func terminateDevice() -> Bool {
-        stateLock.lock()
-        delegate = nil
-        stateLock.unlock()
+        stateLock.withLock { delegate = nil }
         return true
     }
 
