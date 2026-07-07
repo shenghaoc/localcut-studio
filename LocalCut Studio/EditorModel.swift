@@ -265,6 +265,28 @@ final class EditorModel {
     /// (nonisolated) for resource cleanup via `EffectCompositor.releaseOverlaySources`.
     @ObservationIgnored nonisolated(unsafe) var activeOverlaySourceRegistryID: UUID?
 
+    // MARK: - Clip lookup index
+
+    /// O(1) clip lookup: maps clip ID to (trackKind, trackIndex, clipIndex).
+    /// Rebuilt on every project mutation via `rebuildClipIndex()`.
+    @ObservationIgnored private var clipIndex: [Clip.ID: (trackKind: TrackKind, trackIndex: Int, clipIndex: Int)] = [:]
+
+    /// Rebuilds the clip index from the current project state.
+    func rebuildClipIndex() {
+        var index: [Clip.ID: (trackKind: TrackKind, trackIndex: Int, clipIndex: Int)] = [:]
+        for (ti, track) in project.videoTracks.enumerated() {
+            for (ci, clip) in track.clips.enumerated() {
+                index[clip.id] = (.video, ti, ci)
+            }
+        }
+        for (ti, track) in project.audioTracks.enumerated() {
+            for (ci, clip) in track.clips.enumerated() {
+                index[clip.id] = (.audio, ti, ci)
+            }
+        }
+        clipIndex = index
+    }
+
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.
     var documentURL: URL?
@@ -461,6 +483,7 @@ final class EditorModel {
     /// single chokepoint that drops the projected-beat memo when the timeline
     /// layout the beats project through changes.
     func scheduleRebuild() {
+        rebuildClipIndex()
         invalidateProjectedBeatTimesCache()
         previewRebuildCoordinator.scheduleRebuild(model: self)
     }
@@ -1074,10 +1097,7 @@ final class EditorModel {
 
     var selectedClip: Clip? {
         guard let id = selectedClipID else { return nil }
-        for track in allTracks {
-            if let clip = track.clips.first(where: { $0.id == id }) { return clip }
-        }
-        return nil
+        return clip(for: id)
     }
 
     var selectedMedia: MediaItem? {
@@ -1085,16 +1105,36 @@ final class EditorModel {
         return project.media(for: id)
     }
 
-    /// Finds the `Track` that contains the clip with the given ID.
+    /// Finds the `Track` that contains the clip with the given ID. O(1) via index.
     func track(for clipID: Clip.ID) -> Track? {
-        allTracks.first { $0.clips.contains(where: { $0.id == clipID }) }
+        guard let entry = clipIndex[clipID] else { return nil }
+        switch entry.trackKind {
+        case .video:
+            guard entry.trackIndex < project.videoTracks.count else { return nil }
+            return project.videoTracks[entry.trackIndex]
+        case .audio:
+            guard entry.trackIndex < project.audioTracks.count else { return nil }
+            return project.audioTracks[entry.trackIndex]
+        case .layout:
+            return nil
+        }
     }
 
+    /// Returns the clip with the given ID. O(1) via index.
     func clip(for clipID: Clip.ID) -> Clip? {
-        for track in allTracks {
-            if let clip = track.clips.first(where: { $0.id == clipID }) { return clip }
+        guard let entry = clipIndex[clipID] else { return nil }
+        switch entry.trackKind {
+        case .video:
+            guard entry.trackIndex < project.videoTracks.count,
+                  entry.clipIndex < project.videoTracks[entry.trackIndex].clips.count else { return nil }
+            return project.videoTracks[entry.trackIndex].clips[entry.clipIndex]
+        case .audio:
+            guard entry.trackIndex < project.audioTracks.count,
+                  entry.clipIndex < project.audioTracks[entry.trackIndex].clips.count else { return nil }
+            return project.audioTracks[entry.trackIndex].clips[entry.clipIndex]
+        case .layout:
+            return nil
         }
-        return nil
     }
 
     // MARK: - Transitions
