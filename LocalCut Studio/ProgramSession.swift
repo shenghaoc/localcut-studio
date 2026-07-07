@@ -1,7 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreMedia
-@preconcurrency import CoreVideo
+import CoreVideo
 import LocalCutCore
 
 // MARK: - Program session error

@@ -1,6 +1,6 @@
 import Foundation
 import os
-@preconcurrency import CoreVideo
+import CoreVideo
 import CoreMedia
 
 // MARK: - LiveComposeTap
