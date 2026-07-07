@@ -53,6 +53,8 @@
 ## Verification
 
 - [x] **T7.1** Unit tests for client + reconnect + budget.
-- [x] **T7.2** CI integration test publishing to MediaMTX under the CI harness.
+- [x] **T7.2** CI integration test publishing to MediaMTX under the CI harness;
+  the harness retries MediaMTX startup/readiness but not the focused WHIP Xcode
+  test after the service is ready.
 - [x] **T7.3** Bundle-exclusion test.
 - [x] **T7.4** `xcodebuild` (Debug, macOS) green for both the default WebRTC-enabled app path and the non-WebRTC stub path, with Xcode per-test timeouts enabled on both CI lanes and the focused MediaMTX integration run.

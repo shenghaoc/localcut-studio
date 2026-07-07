@@ -6,6 +6,12 @@
 # Starts MediaMTX in a container when Docker/Podman is available. In required
 # environments such as CI, falls back to a pinned MediaMTX release binary on
 # macOS so GitHub-hosted macOS runners can execute the test without Docker.
+#
+# Environment variables:
+#   MEDIAMTX_STARTUP_ATTEMPTS      — Startup/readiness attempts before failing (default: 2)
+#   MEDIAMTX_READY_TIMEOUT_SECONDS — Seconds to wait for readiness per attempt (default: 30)
+#   MEDIAMTX_RETRY_DELAY_SECONDS   — Delay between startup attempts (default: 2)
+#   XCODEBUILD_BIN                 — xcodebuild executable override for local harnesses (default: "xcodebuild")
 
 set -euo pipefail
 
@@ -20,6 +26,10 @@ MEDIAMTX_DOWNLOAD_DIR="${PROJECT_DIR}/.build/mediamtx"
 MEDIAMTX_LOG="${MEDIAMTX_DOWNLOAD_DIR}/mediamtx.log"
 MEDIAMTX_PID=""
 CONTAINER_CMD=""
+MEDIAMTX_STARTUP_ATTEMPTS="${MEDIAMTX_STARTUP_ATTEMPTS:-2}"
+MEDIAMTX_READY_TIMEOUT_SECONDS="${MEDIAMTX_READY_TIMEOUT_SECONDS:-30}"
+MEDIAMTX_RETRY_DELAY_SECONDS="${MEDIAMTX_RETRY_DELAY_SECONDS:-2}"
+XCODEBUILD_BIN="${XCODEBUILD_BIN:-xcodebuild}"
 
 echo "=== MediaMTX WHIP Integration Test ==="
 
@@ -124,42 +134,70 @@ cleanup() {
         kill "${MEDIAMTX_PID}" 2>/dev/null || true
         wait "${MEDIAMTX_PID}" 2>/dev/null || true
     fi
+    MEDIAMTX_PID=""
 }
 trap cleanup EXIT
 
-if command -v docker &>/dev/null; then
-    CONTAINER_CMD="docker"
-    start_container
-elif command -v podman &>/dev/null; then
-    CONTAINER_CMD="podman"
-    start_container
-elif integration_required; then
-    echo "No container runtime found; using direct MediaMTX binary fallback."
-    start_binary
-else
-    echo "SKIP: No container runtime (docker/podman) found."
-    exit 0
-fi
+start_mediamtx() {
+    CONTAINER_CMD=""
+    if command -v docker &>/dev/null; then
+        CONTAINER_CMD="docker"
+        start_container
+    elif command -v podman &>/dev/null; then
+        CONTAINER_CMD="podman"
+        start_container
+    elif integration_required; then
+        echo "No container runtime found; using direct MediaMTX binary fallback."
+        start_binary
+    else
+        echo "SKIP: No container runtime (docker/podman) found."
+        exit 0
+    fi
+}
 
-# Wait for MediaMTX to be ready
-echo "Waiting for MediaMTX to start..."
-for i in $(seq 1 30); do
-    if curl -s http://localhost:9997/v3/config/get >/dev/null 2>&1; then
-        echo "MediaMTX is ready."
+wait_for_mediamtx() {
+    echo "Waiting for MediaMTX to start..."
+    for i in $(seq 1 "${MEDIAMTX_READY_TIMEOUT_SECONDS}"); do
+        if curl -s http://localhost:9997/v3/config/get >/dev/null 2>&1; then
+            echo "MediaMTX is ready."
+            return 0
+        fi
+        if [ "$i" -eq "${MEDIAMTX_READY_TIMEOUT_SECONDS}" ]; then
+            echo "ERROR: MediaMTX did not start within ${MEDIAMTX_READY_TIMEOUT_SECONDS} seconds."
+            show_mediamtx_logs
+            return 1
+        fi
+        sleep 1
+    done
+}
+
+MEDIAMTX_STARTED=false
+for attempt in $(seq 1 "${MEDIAMTX_STARTUP_ATTEMPTS}"); do
+    echo "--- MediaMTX startup attempt ${attempt} of ${MEDIAMTX_STARTUP_ATTEMPTS} ---"
+
+    if start_mediamtx && wait_for_mediamtx; then
+        MEDIAMTX_STARTED=true
         break
     fi
-    if [ "$i" -eq 30 ]; then
-        echo "ERROR: MediaMTX did not start within 30 seconds."
-        show_mediamtx_logs
-        exit 1
+
+    echo "MediaMTX startup attempt ${attempt} failed."
+    cleanup
+
+    if [ "$attempt" -lt "${MEDIAMTX_STARTUP_ATTEMPTS}" ]; then
+        echo "Retrying MediaMTX startup in ${MEDIAMTX_RETRY_DELAY_SECONDS} second(s)..."
+        sleep "${MEDIAMTX_RETRY_DELAY_SECONDS}"
     fi
-    sleep 1
 done
+
+if [ "${MEDIAMTX_STARTED}" != true ]; then
+    echo "ERROR: MediaMTX failed to start after ${MEDIAMTX_STARTUP_ATTEMPTS} attempt(s)."
+    exit 1
+fi
 
 # Run the integration test via xcodebuild
 echo "Running integration test..."
 cd "${PROJECT_DIR}"
-LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 xcodebuild test \
+LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 "${XCODEBUILD_BIN}" test \
     -project "LocalCut Studio.xcodeproj" \
     -scheme "LocalCut Studio" \
     -configuration Debug \

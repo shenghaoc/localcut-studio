@@ -133,6 +133,7 @@ jobs:
             flaky-report.json
             retry-*.log
             suite-confirmation-*.log
+            .build/mediamtx/mediamtx.log
           if-no-files-found: warn
           retention-days: 7
 

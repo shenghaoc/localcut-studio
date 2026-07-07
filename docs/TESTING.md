@@ -34,7 +34,7 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 ### 4. MediaMTX WHIP Integration (Network-dependent)
 - **Location:** `LocalCut StudioTests/WhipMediaMTXIntegrationTests.swift`
 - **Run command:** `LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh`
-- **CI behavior:** Skipped if no container runtime and not required. In CI (where it is required), fails immediately if MediaMTX cannot start within 30 seconds. The wrapper attempts Docker, then Podman, then a direct binary fallback on macOS. No retry logic.
+- **CI behavior:** Skipped if no container runtime and not required. In CI (where it is required), retries MediaMTX startup/readiness before failing. The wrapper attempts Docker, then Podman, then a direct binary fallback on macOS. Once MediaMTX is ready, the focused WHIP Xcode test is not retried.
 - **Characteristics:** Requires MediaMTX container or binary, network port binding.
 
 ## Flaky-Test Detection
@@ -45,14 +45,16 @@ CI uses `Scripts/run-xcode-tests-with-flake-detection.sh` to run Xcode tests:
 
 1. **First run:** Full test suite runs normally.
 2. **On failure:** Script extracts failed test identifiers from `xcresult` bundle. If `xcresulttool` is unavailable or fails, the script falls back to parsing `xcodebuild.log` for failed test case lines.
-3. **Retry:** Each failed test is retried individually (up to `MAX_RETRIES` times).
+3. **Retry:** Each valid failed test identifier is retried individually (up to `MAX_RETRIES` times). Build failures and test-runner/bootstrap failures are not retried.
 4. **Classification:**
    - **Flaky:** Test fails on first run but passes on retry.
    - **Deterministic:** Test fails consistently.
-5. **Reporting:** Generates `flaky-report.json` with details.
-6. **CI outcome:**
+5. **Full-suite confirmation:** If all failed tests pass in isolation, CI re-runs the full Xcode suite before allowing the job to pass. A suite that still fails is treated as order-dependent/shared-state failure, not an allowed flaky pass.
+6. **Reporting:** Generates `flaky-report.json` with details.
+7. **CI outcome:**
    - Deterministic failures → CI fails.
-   - Flaky tests only → CI passes with warnings.
+   - Isolated retries pass and the full suite recovers → CI passes with warnings.
+   - Isolated retries pass but the full suite still fails → CI fails.
    - Flaky count exceeds threshold → CI fails.
 
 ### Configuration
@@ -64,14 +66,31 @@ Environment variables:
 | `MAX_RETRIES` | 2 | Maximum retry attempts per flaky test |
 | `FLAKY_THRESHOLD` | 5 | Maximum allowed flaky tests before CI fails |
 | `FLAKY_REPORT` | `flaky-report.json` | Path to write flaky test report |
+| `LOG_DIR` | `.` | Directory for `xcodebuild.log`, `retry-*.log`, and `suite-confirmation-*.log` |
+| `TEST_TIMEOUTS_ENABLED` | `YES` | Enables Xcode per-test timeout handling for every wrapper-run `xcodebuild test` invocation |
+| `DEFAULT_TEST_EXECUTION_TIME_ALLOWANCE` | `300` | Per-test timeout in seconds for the initial run, isolated retries, and full-suite confirmation |
+
+### MediaMTX Startup Retry Configuration
+
+`Scripts/run-mediamtx-whip-integration.sh` retries only MediaMTX startup/readiness failures:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEDIAMTX_STARTUP_ATTEMPTS` | 2 | Startup/readiness attempts before failing the integration step |
+| `MEDIAMTX_READY_TIMEOUT_SECONDS` | 30 | Seconds to wait for MediaMTX readiness per startup attempt |
+| `MEDIAMTX_RETRY_DELAY_SECONDS` | 2 | Delay between failed startup attempts |
+| `XCODEBUILD_BIN` | `xcodebuild` | Xcode build executable override for local harnesses |
 
 ### What Gets Retried
 
 - **Retried:** Individual Xcode test cases that fail on first run.
+- **Retried:** MediaMTX startup/readiness when the WHIP integration harness cannot bring up the service.
 - **Not retried:**
   - LocalCutCore package tests (deterministic).
   - OTIO golden validation (deterministic).
+  - The focused MediaMTX WHIP Xcode test after MediaMTX is ready.
   - Build failures (not test failures).
+  - Test-runner/bootstrap failures that are not valid `-only-testing:` identifiers.
   - Tests that fail on all retries (deterministic).
 
 ### Interpreting Results
@@ -84,7 +103,10 @@ Environment variables:
     "total_failed_on_first_run": 3,
     "flaky_passed_on_retry": 2,
     "deterministic_failures": 1,
-    "max_retries_used": 2
+    "max_retries_used": 2,
+    "suite_confirmation_required": true,
+    "suite_confirmation_passed": true,
+    "suite_confirmation_attempts": 1
   },
   "flaky_tests": [
     {"name": "SuiteName/testName()", "passed_on_retry": true}
@@ -112,7 +134,9 @@ A test is **flaky** if:
 
 A test is **NOT flaky** if:
 - It fails consistently on retry (deterministic failure).
+- It passes in isolation but the full suite does not recover on retry, which indicates order dependence or shared mutable state.
 - It fails due to build errors.
+- It fails due to test-runner/bootstrap errors.
 - It fails because of missing dependencies or configuration.
 - FixtureGenerator failures (these stem from a known fixture-isolation problem where tests share mutable fixture state, tracked separately in the fixture-isolation PR).
 
@@ -171,7 +195,7 @@ A test is **NOT flaky** if:
 ### Reporting
 
 - **CI artifacts:** `flaky-report.json` is uploaded on every run (30-day retention).
-- **Failure artifacts:** `xcodebuild.log`, `TestResults.xcresult`, and `retry-*.log` are uploaded on failure (7-day retention).
+- **Failure artifacts:** `xcodebuild.log`, `TestResults.xcresult`, `retry-*.log`, `suite-confirmation-*.log`, and `.build/mediamtx/mediamtx.log` are uploaded on failure (7-day retention).
 - **Monitoring:** Review flaky reports weekly. Escalate if flaky count trends upward.
 
 ## Running Tests Locally
@@ -247,4 +271,4 @@ If MediaMTX tests fail:
 1. Check if Docker/Podman is running.
 2. Check port availability (8889, 9997).
 3. Review MediaMTX logs in the failure artifacts.
-4. These failures are not retried — the wrapper only retries individual Xcode test cases, not the MediaMTX integration script.
+4. Startup/readiness failures are retried by the MediaMTX harness. If the focused WHIP Xcode test fails after MediaMTX is ready, treat it as a real integration failure.
