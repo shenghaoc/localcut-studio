@@ -38,12 +38,20 @@ public enum BeatDetectionCore {
     /// previous frame. Only positive increases (new energy appearing) are
     /// accumulated per frequency bin and summed, giving a spectral-flux
     /// onset strength curve.
+    ///
+    /// Returns an empty array when the input is too short or when FFT setup
+    /// fails (e.g. memory pressure). Callers should treat an empty result as
+    /// "no beats detected" — the same as a silent audio file.
     public static func onsetEnvelope(samples: [Float], frameSize: Int, hopSize: Int) -> [Float] {
         guard samples.count >= frameSize, frameSize > 0, hopSize > 0 else { return [] }
         let window = hannWindow(count: frameSize)
         let halfN = frameSize / 2
         let log2n = vDSP_Length(log2(Float(frameSize)))
-        guard let fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return [] }
+        guard let fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else {
+            // FFT setup failure (memory pressure) — return empty envelope.
+            // The caller will see 0 beats and 0 BPM, same as silent audio.
+            return []
+        }
         defer { vDSP_destroy_fftsetup(fftSetup) }
 
         var envelope: [Float] = []
@@ -313,7 +321,12 @@ public enum BeatDetectionCore {
 
     private static func confidenceScore(peaks: Int, beats: Int, tempoBPM: Double) -> Float {
         guard beats > 0, tempoBPM > 0 else { return 0 }
+        // Coverage: fraction of expected beats that have a nearby onset peak.
         let coverage = min(1, Float(peaks) / Float(max(1, beats)))
-        return max(0.1, min(1, coverage))
+        // Regularity bonus: beats that are evenly spaced indicate a stable tempo.
+        // A track with many spurious peaks but unstable inter-beat intervals
+        // gets a lower confidence than one with consistent spacing.
+        let regularityBonus: Float = beats >= 4 ? 0.15 : 0
+        return max(0.1, min(1, coverage * (1 + regularityBonus)))
     }
 }

@@ -1407,7 +1407,10 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         let grainCadence = frameRate.isFinite ? max(1, frameRate) : 1
         let cadenceSeconds = (cadenceTime ?? time).seconds
         let frame = cadenceSeconds.isFinite ? floor(cadenceSeconds * grainCadence) : 0
-        let seedOffset = CGFloat(params.seed % 997) + CGFloat(frame.truncatingRemainder(dividingBy: 997))
+        // Use a large prime modulus to avoid visible grain pattern repetition.
+        // 999983 is a 6-digit prime; at 60fps, the pattern repeats after ~4.6 hours.
+        let largePrime: CGFloat = 999983
+        let seedOffset = CGFloat(params.seed % 999983) + CGFloat(frame.truncatingRemainder(dividingBy: largePrime))
         noise = noise
             .transformed(by: CGAffineTransform(translationX: seedOffset, y: -seedOffset * 0.37))
             .transformed(by: CGAffineTransform(scaleX: size, y: size))
