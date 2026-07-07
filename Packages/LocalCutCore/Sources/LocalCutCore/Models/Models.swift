@@ -1634,16 +1634,42 @@ public struct OverlayClip: Identifiable, Hashable, Sendable {
     /// Timeline duration (how long the overlay is visible).
     public var duration: CMTime
     /// 2D position offset from the render canvas centre, in normalised
-    /// coordinates (−1…1 where 1 = canvas width/height).
+    /// coordinates (−1…1 where 1 = canvas width/height). Used as the static
+    /// default when `positionKeyframes` has no authored keyframes.
     public var positionOffset: CGSize
-    /// Uniform scale factor (1 = original size).
+    /// Uniform scale factor (1 = original size). Used as the static default
+    /// when `scaleKeyframes` has no authored keyframes.
     public var scale: CGFloat
-    /// Rotation in radians.
+    /// Rotation in radians. Used as the static default when
+    /// `rotationKeyframes` has no authored keyframes.
     public var rotation: CGFloat
-    /// Per-overlay opacity (0…1).
+    /// Per-overlay opacity (0…1). Used as the static default when
+    /// `opacityKeyframes` has no authored keyframes.
     public var opacity: Float
     /// What to do when the source animation reaches its end.
     public var endAction: OverlayEndAction
+
+    // MARK: - Keyframed animation tracks
+
+    /// Keyframed position X (normalised -1…1). When empty, `positionOffset.width` is used.
+    public var positionXKeyframes: Keyframed<Float>
+    /// Keyframed position Y (normalised -1…1). When empty, `positionOffset.height` is used.
+    public var positionYKeyframes: Keyframed<Float>
+    /// Keyframed scale. When empty, `scale` is used.
+    public var scaleKeyframes: Keyframed<Float>
+    /// Keyframed rotation (radians). When empty, `rotation` is used.
+    public var rotationKeyframes: Keyframed<Float>
+    /// Keyframed opacity (0…1). When empty, `opacity` is used.
+    public var opacityKeyframes: Keyframed<Float>
+
+    /// Whether any animation track has authored keyframes.
+    public var isAnimated: Bool {
+        !positionXKeyframes.keyframes.isEmpty
+            || !positionYKeyframes.keyframes.isEmpty
+            || !scaleKeyframes.keyframes.isEmpty
+            || !rotationKeyframes.keyframes.isEmpty
+            || !opacityKeyframes.keyframes.isEmpty
+    }
 
     public var timelineEnd: CMTime { timelineStart + duration }
 
@@ -1655,7 +1681,12 @@ public struct OverlayClip: Identifiable, Hashable, Sendable {
                 scale: CGFloat = 1,
                 rotation: CGFloat = 0,
                 opacity: Float = 1,
-                endAction: OverlayEndAction = .loop) {
+                endAction: OverlayEndAction = .loop,
+                positionXKeyframes: Keyframed<Float> = Keyframed(defaultValue: 0),
+                positionYKeyframes: Keyframed<Float> = Keyframed(defaultValue: 0),
+                scaleKeyframes: Keyframed<Float> = Keyframed(defaultValue: 1),
+                rotationKeyframes: Keyframed<Float> = Keyframed(defaultValue: 0),
+                opacityKeyframes: Keyframed<Float> = Keyframed(defaultValue: 1)) {
         self.id = id
         self.sourceType = sourceType
         self.timelineStart = timelineStart
@@ -1665,5 +1696,40 @@ public struct OverlayClip: Identifiable, Hashable, Sendable {
         self.rotation = rotation
         self.opacity = opacity
         self.endAction = endAction
+        self.positionXKeyframes = positionXKeyframes
+        self.positionYKeyframes = positionYKeyframes
+        self.scaleKeyframes = scaleKeyframes
+        self.rotationKeyframes = rotationKeyframes
+        self.opacityKeyframes = opacityKeyframes
     }
+
+    /// Returns the effective transform values at the given overlay-local time,
+    /// interpolating keyframes when animated, falling back to static values otherwise.
+    public func transform(at localTime: CMTime) -> OverlayTransform {
+        OverlayTransform(
+            positionX: positionXKeyframes.isAnimated
+                ? positionXKeyframes.value(at: localTime)
+                : Float(positionOffset.width),
+            positionY: positionYKeyframes.isAnimated
+                ? positionYKeyframes.value(at: localTime)
+                : Float(positionOffset.height),
+            scale: scaleKeyframes.isAnimated
+                ? CGFloat(scaleKeyframes.value(at: localTime))
+                : scale,
+            rotation: rotationKeyframes.isAnimated
+                ? CGFloat(rotationKeyframes.value(at: localTime))
+                : rotation,
+            opacity: opacityKeyframes.isAnimated
+                ? opacityKeyframes.value(at: localTime)
+                : opacity)
+    }
+}
+
+/// Interpolated overlay transform values at a point in time.
+public struct OverlayTransform: Sendable {
+    public var positionX: Float
+    public var positionY: Float
+    public var scale: CGFloat
+    public var rotation: CGFloat
+    public var opacity: Float
 }

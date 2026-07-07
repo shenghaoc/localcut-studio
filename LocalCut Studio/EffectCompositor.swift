@@ -71,6 +71,33 @@ struct OverlayRenderItem: Sendable {
     let rotation: CGFloat
     let opacity: Float
     let endAction: OverlayEndAction
+    /// Keyframed animation tracks. When empty, the static values above are used.
+    let positionXKeyframes: Keyframed<Float>
+    let positionYKeyframes: Keyframed<Float>
+    let scaleKeyframes: Keyframed<Float>
+    let rotationKeyframes: Keyframed<Float>
+    let opacityKeyframes: Keyframed<Float>
+
+    /// Returns the effective transform at the given overlay-local time,
+    /// interpolating keyframes when animated.
+    func transform(at localTime: CMTime) -> OverlayTransform {
+        OverlayTransform(
+            positionX: positionXKeyframes.isAnimated
+                ? positionXKeyframes.value(at: localTime)
+                : Float(positionOffset.width),
+            positionY: positionYKeyframes.isAnimated
+                ? positionYKeyframes.value(at: localTime)
+                : Float(positionOffset.height),
+            scale: scaleKeyframes.isAnimated
+                ? CGFloat(scaleKeyframes.value(at: localTime))
+                : scale,
+            rotation: rotationKeyframes.isAnimated
+                ? CGFloat(rotationKeyframes.value(at: localTime))
+                : rotation,
+            opacity: opacityKeyframes.isAnimated
+                ? opacityKeyframes.value(at: localTime)
+                : opacity)
+    }
 }
 
 /// One keystroke overlay scheduled inside a composition instruction.
@@ -852,20 +879,23 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
             return nil
         }
 
+        // Interpolate keyframed transform at the current time.
+        let xform = item.transform(at: localTime)
+
         var image = frame
 
         let overlayW = source.naturalSize.width
         let overlayH = source.naturalSize.height
         guard let transform = Self.overlayTransform(
             naturalSize: CGSize(width: overlayW, height: overlayH),
-            scale: item.scale,
-            rotation: item.rotation,
-            positionOffset: item.positionOffset,
+            scale: xform.scale,
+            rotation: xform.rotation,
+            positionOffset: CGSize(width: CGFloat(xform.positionX), height: CGFloat(xform.positionY)),
             renderSize: renderSize) else { return nil }
         image = image.transformed(by: transform)
 
-        if item.opacity < 1 {
-            image = scaled(image, by: Float(item.opacity))
+        if xform.opacity < 1 {
+            image = scaled(image, by: xform.opacity)
         }
 
         let renderRect = CGRect(origin: .zero, size: renderSize)

@@ -1185,7 +1185,12 @@ enum CompositionBuilder {
                 scale: overlay.scale,
                 rotation: overlay.rotation,
                 opacity: overlay.opacity,
-                endAction: overlay.endAction))
+                endAction: overlay.endAction,
+                positionXKeyframes: overlay.positionXKeyframes,
+                positionYKeyframes: overlay.positionYKeyframes,
+                scaleKeyframes: overlay.scaleKeyframes,
+                rotationKeyframes: overlay.rotationKeyframes,
+                opacityKeyframes: overlay.opacityKeyframes))
         }
         return items
     }

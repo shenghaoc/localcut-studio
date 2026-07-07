@@ -1132,10 +1132,80 @@ struct InspectorView: View {
             }
             .help("What happens when the overlay source reaches its end: Hide (stop), Freeze (hold last frame), or Loop.")
 
+            overlayKeyframeSection(overlay)
+
             Button("Remove Overlay", role: .destructive) {
                 model.removeOverlay(id: overlay.id)
             }
         }
+    }
+
+    @ViewBuilder
+    private func overlayKeyframeSection(_ overlay: OverlayClip) -> some View {
+        let localTime = overlayLocalPlayheadTime(overlay)
+        DisclosureGroup("Animation Keyframes") {
+            HStack {
+                Text(localTime.map { "At \(TimeFormatting.timecode($0.seconds))" } ?? "Move playhead over overlay")
+                    .font(.caption)
+                    .foregroundStyle(localTime == nil ? .orange : .secondary)
+                Spacer()
+                if overlay.isAnimated {
+                    Text("Animated")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .help(localTime == nil
+                  ? "Scrub the playhead to a position within this overlay to add animation keyframes."
+                  : "Add keyframes at the current time to animate the overlay.")
+
+            HStack(spacing: 8) {
+                Button {
+                    addOrUpdateOverlayKeyframe(overlay, localTime: localTime)
+                } label: {
+                    Label("Add Keyframe", systemImage: "plus.diamond.fill")
+                }
+                .disabled(localTime == nil)
+
+                Button(role: .destructive) {
+                    model.removeOverlayKeyframes(at: overlay.id, localTime: localTime)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .help("Remove keyframes at current time")
+                .accessibilityLabel("Remove overlay keyframes at current time")
+                .disabled(localTime == nil || !overlay.isAnimated)
+
+                if overlay.isAnimated {
+                    Button(role: .destructive) {
+                        model.clearOverlayKeyframes(overlay.id)
+                    } label: {
+                        Text("Clear All")
+                            .font(.caption)
+                    }
+                }
+            }
+            .controlSize(.small)
+        }
+        .help("Animate position, scale, rotation, and opacity over time using keyframes.")
+    }
+
+    private func overlayLocalPlayheadTime(_ overlay: OverlayClip) -> CMTime? {
+        let playhead = CMTime(seconds: model.currentTime, preferredTimescale: 600)
+        guard playhead >= overlay.timelineStart, playhead < overlay.timelineEnd else { return nil }
+        return playhead - overlay.timelineStart
+    }
+
+    private func addOrUpdateOverlayKeyframe(_ overlay: OverlayClip, localTime: CMTime?) {
+        guard let localTime else { return }
+        model.addOrUpdateOverlayKeyframe(
+            at: overlay.id,
+            localTime: localTime,
+            positionX: Float(overlay.positionOffset.width),
+            positionY: Float(overlay.positionOffset.height),
+            scale: Float(overlay.scale),
+            rotation: Float(overlay.rotation),
+            opacity: overlay.opacity)
     }
 
     // MARK: - Overlay list
