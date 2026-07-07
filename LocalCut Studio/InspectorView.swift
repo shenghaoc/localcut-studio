@@ -1059,6 +1059,7 @@ struct InspectorView: View {
                         to: CGSize(width: 0, height: overlay.positionOffset.height))
                     model.commitCoalescedUndo()
                 })
+                .help("Horizontal offset from centre. 0% = centred; ±100% = shifted by one full canvas width.")
 
             LabeledSliderRow(
                 label: "Position Y",
@@ -1079,6 +1080,7 @@ struct InspectorView: View {
                         to: CGSize(width: overlay.positionOffset.width, height: 0))
                     model.commitCoalescedUndo()
                 })
+                .help("Vertical offset from centre. 0% = centred; ±100% = shifted by one full canvas height.")
 
             LabeledSliderRow(
                 label: "Opacity",
@@ -1105,6 +1107,7 @@ struct InspectorView: View {
                     model.setOverlayScale(overlay.id, to: 1)
                     model.commitCoalescedUndo()
                 })
+                .help("Uniform scale factor. 1× = original size.")
 
             LabeledSliderRow(
                 label: "Rotation",
@@ -1118,6 +1121,7 @@ struct InspectorView: View {
                     model.setOverlayRotation(overlay.id, to: 0)
                     model.commitCoalescedUndo()
                 })
+                .help("Rotation in degrees. Positive = clockwise.")
 
             Picker("End Action", selection: Binding(
                 get: { overlay.endAction },
@@ -1126,6 +1130,7 @@ struct InspectorView: View {
                     Text(action.displayName).tag(action)
                 }
             }
+            .help("What happens when the overlay source reaches its end: Hide (stop), Freeze (hold last frame), or Loop.")
 
             Button("Remove Overlay", role: .destructive) {
                 model.removeOverlay(id: overlay.id)
