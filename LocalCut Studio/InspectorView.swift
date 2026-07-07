@@ -543,6 +543,16 @@ struct InspectorView: View {
                     step: 1,
                     onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetHalation(\.radius, to: 16))
+                LabeledSliderRow(
+                    label: "Red Boost",
+                    spokenLabel: "Red Boost",
+                    display: String(format: "%.2f", model.selectedClipHalation.redBoost),
+                    value: halationBinding(\.redBoost),
+                    range: 0...2,
+                    step: 0.05,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: resetHalation(\.redBoost, to: 0.85))
+                    .help("Red/orange colour bias of the halation glow.")
             }
 
             DisclosureGroup("Vignette") {

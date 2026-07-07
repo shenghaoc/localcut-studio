@@ -926,7 +926,7 @@ final class EditorModel {
         set {
             guard let id = selectedClipID else { return }
             performCoalescedUndoable("Adjust Skin Smooth", target: id, rebuild: .debounced) {
-                for track in allTracks {
+                for track in project.videoTracks {
                     guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                     var smooth = newValue
                     smooth.clamp()
@@ -948,7 +948,7 @@ final class EditorModel {
     func updateSelectedClipSkinSmooth(_ transform: @escaping (inout SkinSmoothEffect) -> Void) {
         guard let id = selectedClipID else { return }
         performCoalescedUndoable("Adjust Skin Smooth", target: id, rebuild: .debounced) {
-            for track in allTracks {
+            for track in project.videoTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 if let effectIndex = track.clips[index].effects.firstIndex(where: {
                     if case .skinSmooth = $0 { return true }; return false
@@ -1059,7 +1059,7 @@ final class EditorModel {
 
     private func mutateSelectedSkinSmooth(clipID: Clip.ID,
                                           _ transform: (inout SkinSmoothEffect) -> Void) {
-        for track in allTracks {
+        for track in project.videoTracks {
             guard let index = track.clips.firstIndex(where: { $0.id == clipID }) else { continue }
             if let effectIndex = track.clips[index].effects.firstIndex(where: {
                 if case .skinSmooth = $0 { return true }; return false
@@ -1085,7 +1085,7 @@ final class EditorModel {
     func resetClipSkinSmooth() {
         guard let id = selectedClipID else { return }
         performUndoable("Reset Skin Smooth") {
-            for track in allTracks {
+            for track in project.videoTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 track.clips[index].effects.removeAll { if case .skinSmooth = $0 { return true }; return false }
                 RenderCache.shared.invalidate(clipID: id)
