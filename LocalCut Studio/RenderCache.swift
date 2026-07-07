@@ -312,14 +312,23 @@ final class RenderCache: Sendable {
     private let diskBudget: Int
     private let cacheDirectory: URL?
 
-    nonisolated private static let diskColorSpace: CGColorSpace = {
-        CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-    }()
+    /// Creates a CIContext for disk writes that preserves the source color space.
+    /// Wide-gamut content (Display P3, Rec. 2020) is written in its native space
+    /// instead of being downconverted to sRGB.
+    nonisolated static func diskContext(for colorSpace: WorkingColourSpace) -> CIContext {
+        let cgSpace = colorSpace.cgColorSpace
+        return CIContext(options: [
+            .cacheIntermediates: false,
+            .workingColorSpace: cgSpace,
+            .outputColorSpace: cgSpace,
+        ])
+    }
 
-    nonisolated private static let diskContext = CIContext(options: [
+    /// Default sRGB context for fallback.
+    nonisolated private static let srgbContext = CIContext(options: [
         .cacheIntermediates: false,
-        .workingColorSpace: diskColorSpace,
-        .outputColorSpace: diskColorSpace,
+        .workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+        .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
     ])
 
     nonisolated init(byteBudget: Int = RenderCache.defaultByteBudget,
@@ -410,11 +419,14 @@ final class RenderCache: Sendable {
             let url = cacheDirectory
                 .appendingPathComponent(Self.diskFilename(for: key))
                 .appendingPathExtension("png")
-            try Self.diskContext.writePNGRepresentation(
+            // Use a context that preserves the source color space for wide-gamut content.
+            let context = Self.diskContext(for: key.workingColourSpace)
+            let colorSpace = key.workingColourSpace.cgColorSpace
+            try context.writePNGRepresentation(
                 of: entry.image,
                 to: url,
                 format: .RGBA8,
-                colorSpace: Self.diskColorSpace)
+                colorSpace: colorSpace)
             let values = try url.resourceValues(forKeys: [.fileSizeKey])
             return DiskEntry(url: url, byteCost: max(0, values.fileSize ?? entry.byteCost))
         } catch {
