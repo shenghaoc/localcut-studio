@@ -19,6 +19,7 @@ struct BeatToolsInspectorView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(source.name)
                 }
                 if let analysis = model.beatAnalyses[source.id] {
                     LabeledContent("Tempo", value: "\(Int(analysis.tempoBPM.rounded())) BPM")
@@ -57,6 +58,7 @@ struct BeatToolsInspectorView: View {
 
             LabeledSliderRow(
                 label: "Align Window",
+                spokenLabel: "Beat Alignment Window",
                 display: "\(Int(model.beatAlignWindowSeconds * 1000)) ms",
                 spokenValue: "\(Int(model.beatAlignWindowSeconds * 1000)) milliseconds",
                 value: $model.beatAlignWindowSeconds,
