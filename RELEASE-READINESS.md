@@ -33,5 +33,6 @@ Gate checklist before tagging a release. Pair with [`BLOCKER-CLASSIFICATION.md`]
 
 - [ ] Version/build numbers bumped (`MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`)
 - [ ] `docs/` updated for user-facing changes; shortcuts reference current
+- [ ] Project schema changes reviewed against [`docs/PROJECT_SCHEMA.md`](docs/PROJECT_SCHEMA.md)
 - [ ] README status section reflects what shipped
 - [ ] Tag created; release notes summarize completed specs

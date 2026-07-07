@@ -1,6 +1,6 @@
 # Tasks: Project Persistence
 
-> Status: **Implemented**. Shipped in [#6](https://github.com/shenghaoc/localcut-studio/pull/6) (PR title: "Project persistence: Codable document, save/open, relink & undo/redo"). Code lives in `LocalCut Studio/ProjectDocument.swift` and `LocalCut Studio/EditorModel+Persistence.swift`; tests in `LocalCut StudioTests/PersistenceTests.swift` and `LocalCut StudioTests/UndoRedoTests.swift`. Has since carried schema bumps for caption tracks ([#10](https://github.com/shenghaoc/localcut-studio/pull/10), v2) and project bundles ([#20](https://github.com/shenghaoc/localcut-studio/pull/20), v3).
+> Status: **Implemented**. Shipped in [#6](https://github.com/shenghaoc/localcut-studio/pull/6) (PR title: "Project persistence: Codable document, save/open, relink & undo/redo"). Code now lives in `Packages/LocalCutCore/Sources/LocalCutCore/Models/DocumentTypes.swift`, `LocalCut Studio/DocumentController.swift`, and `LocalCut Studio/EditorModel+Persistence.swift`; tests in `LocalCut StudioTests/PersistenceTests.swift` and `LocalCut StudioTests/UndoRedoTests.swift`. Current schema versioning and compatibility behavior are documented in [`docs/PROJECT_SCHEMA.md`](../../../docs/PROJECT_SCHEMA.md).
 
 ## Document model
 
@@ -8,6 +8,7 @@
 - [x] **T1.2** Snapshot `Project` → document and reconstruct document → `Project`.
 - [x] **T1.3** Security-scoped bookmark create/resolve for media; relink flow for missing media.
 - [x] **T1.4** Unit tests: encode/decode round-trip equality.
+- [x] **T1.5** Maintain `docs/PROJECT_SCHEMA.md` as the current ProjectDocument schema and compatibility reference.
 
 ## Lifecycle
 

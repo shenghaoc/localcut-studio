@@ -13,6 +13,11 @@ public struct ProjectDocument: Codable, Equatable, Sendable {
     // persistence. Prior bump (6/5) was for look effects in Phase 38a.
     // Single-file bumped to 7 in Phase 43: `callouts`, `paddedBackground`,
     // and per-clip `transformKeyframes` added.
+    //
+    // Compatibility: known top-level fields use `decodeIfPresent` with safe
+    // defaults. Older documents open with missing fields defaulted; decoded
+    // newer documents save through Save As. See docs/PROJECT_SCHEMA.md for
+    // caveats around non-additive nested type changes.
     public static let currentSchemaVersion = 10
     public static let singleFileSchemaVersion = 10
     public static let currentBundleFormat = "1"
