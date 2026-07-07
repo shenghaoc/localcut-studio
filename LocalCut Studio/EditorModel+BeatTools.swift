@@ -46,9 +46,11 @@ extension EditorModel {
             for clip in track.clips where clip.id != clipID {
                 guard let media = project.media(for: clip.mediaID), media.hasAudio,
                       let analysis = beatAnalyses[media.id] else { continue }
-                if !projectedBeatTimes(for: clip, analysis: analysis, offset: offset).isEmpty {
-                    return true
-                }
+                // Short-circuit: compute beats for this clip and return
+                // immediately if any are found, avoiding the full cross-clip
+                // dedup/sort that projectedBeatTimes(excluding:) performs.
+                let beats = projectedBeatTimes(for: clip, analysis: analysis, offset: offset)
+                if !beats.isEmpty { return true }
             }
         }
         return false
