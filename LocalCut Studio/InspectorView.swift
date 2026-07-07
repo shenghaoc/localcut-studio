@@ -495,7 +495,7 @@ struct InspectorView: View {
             DisclosureGroup("Grain") {
                 LabeledSliderRow(
                     label: "Amount",
-                    display: "\(Int(model.selectedClipGrain.amount.defaultValue * 100))%",
+                    display: "\(Int(model.lookStrengthAtPlayhead(.grain) * 100))%",
                     value: grainBinding(\.amount.defaultValue),
                     range: 0...1,
                     step: 0.01,
@@ -520,7 +520,7 @@ struct InspectorView: View {
             DisclosureGroup("Halation") {
                 LabeledSliderRow(
                     label: "Strength",
-                    display: "\(Int(model.selectedClipHalation.strength.defaultValue * 100))%",
+                    display: "\(Int(model.lookStrengthAtPlayhead(.halation) * 100))%",
                     value: halationBinding(\.strength.defaultValue),
                     range: 0...1,
                     step: 0.01,
@@ -548,7 +548,7 @@ struct InspectorView: View {
             DisclosureGroup("Vignette") {
                 LabeledSliderRow(
                     label: "Amount",
-                    display: "\(Int(model.selectedClipVignette.amount.defaultValue * 100))%",
+                    display: "\(Int(model.lookStrengthAtPlayhead(.vignette) * 100))%",
                     value: vignetteBinding(\.amount.defaultValue),
                     range: -1...1,
                     step: 0.01,

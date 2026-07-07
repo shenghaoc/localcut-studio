@@ -1268,11 +1268,11 @@ final class RenderQueue {
         var active = 0.0
         for job in jobs {
             switch job.status {
-            case .completed, .cancelled, .failed:
+            case .completed:
                 completed += 1
             case .running:
                 active += max(0, min(1, job.progress))
-            case .queued:
+            case .queued, .cancelled, .failed:
                 break
             }
         }

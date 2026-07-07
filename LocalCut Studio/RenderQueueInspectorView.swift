@@ -103,11 +103,12 @@ struct RenderQueueInspectorView: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Clear Completed") {
+                    Button("Clear Finished") {
                         model.renderQueue.clearCompleted()
                     }
                     .controlSize(.small)
                     .disabled(!model.renderQueue.jobs.contains(where: { $0.isTerminal }))
+                    .help("Remove completed, cancelled, and failed renders from the list.")
                 }
             }
         }

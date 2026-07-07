@@ -409,7 +409,9 @@ extension EditorModel {
             return
         }
         let existingID = lookStrengthKeyframeAtPlayhead(kind)?.id
-        let value = selectedClipLookStrength(kind).defaultValue
+        // Capture the interpolated value at the playhead, not the default.
+        // This prevents a visible jump when adding a keyframe mid-animation.
+        let value = lookStrengthAtPlayhead(kind)
         performUndoable(existingID == nil ? "Add \(kind.displayName) Keyframe"
                                           : "Update \(kind.displayName) Keyframe") {
             mutateLookStrength(kind, clipID: id) { track in
