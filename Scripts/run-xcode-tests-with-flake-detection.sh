@@ -89,15 +89,18 @@ FAILED_TEST_IDS=()
 if [ -d "$RESULT_BUNDLE" ]; then
     # Use xcresulttool to get test results as JSON
     XCRESULTTOOL_STDERR=$(mktemp)
+    set +e
     RESULT_JSON=$(xcrun xcresulttool get test-results summary \
         --path "$RESULT_BUNDLE" \
-        --format json 2>"$XCRESULTTOOL_STDERR" || echo "{}")
+        --format json 2>"$XCRESULTTOOL_STDERR")
     XCRESULTTOOL_EXIT=$?
+    set -e
 
-    if [ "$RESULT_JSON" = "{}" ] || [ $XCRESULTTOOL_EXIT -ne 0 ]; then
+    if [ $XCRESULTTOOL_EXIT -ne 0 ]; then
         echo "WARNING: xcresulttool failed (exit $XCRESULTTOOL_EXIT), stderr:"
         cat "$XCRESULTTOOL_STDERR" >&2
         echo "Falling back to log parsing..."
+        RESULT_JSON="{}"
     fi
     rm -f "$XCRESULTTOOL_STDERR"
 
@@ -227,6 +230,10 @@ done
 echo ""
 echo "=== Generating flaky test report ==="
 
+# Build newline-separated strings safely (empty arrays produce empty strings).
+FLAKY_NAMES_STR=$(printf '%s\n' "${FLAKY_NAMES[@]+"${FLAKY_NAMES[@]}"}")
+DETERMINISTIC_NAMES_STR=$(printf '%s\n' "${DETERMINISTIC_FAILURES[@]+"${DETERMINISTIC_FAILURES[@]}"}")
+
 python3 -c "
 import json
 import sys
@@ -251,8 +258,8 @@ report = {
 
 with open(report_path, 'w') as f:
     json.dump(report, f, indent=2)
-" "$(printf '%s\n' "${FLAKY_NAMES[@]}")" \
-  "$(printf '%s\n' "${DETERMINISTIC_FAILURES[@]}")" \
+" "$FLAKY_NAMES_STR" \
+  "$DETERMINISTIC_NAMES_STR" \
   "$MAX_RETRIES" "$FLAKY_REPORT"
 
 echo "Report written to: $FLAKY_REPORT"
@@ -275,7 +282,7 @@ fi
 # Report flaky tests as warnings
 if [ $FLAKY_TESTS -gt 0 ]; then
     echo "WARNING: $FLAKY_TESTS flaky test(s) detected:"
-    for name in "${FLAKY_NAMES[@]}"; do
+    for name in "${FLAKY_NAMES[@]+"${FLAKY_NAMES[@]}"}"; do
         echo "  ⚠ $name"
     done
     echo ""
@@ -287,7 +294,7 @@ fi
 if [ ${#DETERMINISTIC_FAILURES[@]} -gt 0 ]; then
     echo ""
     echo "FAILED: ${#DETERMINISTIC_FAILURES[@]} deterministic test failure(s):"
-    for name in "${DETERMINISTIC_FAILURES[@]}"; do
+    for name in "${DETERMINISTIC_FAILURES[@]+"${DETERMINISTIC_FAILURES[@]}"}"; do
         echo "  ✗ $name"
     done
     exit 1
