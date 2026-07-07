@@ -12,6 +12,7 @@ struct MarkersInspectorView: View {
             if model.project.markers.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("No markers. Press M while the timeline is focused, or use the button below.")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                     Button("Add at Playhead") { model.addMarkerAtPlayhead() }
                         .buttonStyle(.borderedProminent)
