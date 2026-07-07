@@ -217,7 +217,8 @@ final class PublishPanelState {
         #endif
         isProgramOutputAvailable = model.programSession != nil
         Task { [weak self, weak model] in
-            self?.isBudgetAvailable = await (model?.encoderBudget.availableCount ?? 0) > 0
+            guard let self, let model else { return }
+            isBudgetAvailable = await model.encoderBudget.availableCount > 0
         }
     }
 

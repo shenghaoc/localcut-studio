@@ -37,7 +37,10 @@ extension EditorModel {
 
     /// File ▸ New — offers to save first, then resets to an empty project.
     func requestNew() {
-        Task { [weak self] in _ = await self?.performNewProjectCommand() }
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await performNewProjectCommand()
+        }
     }
 
     /// File ▸ Open — offers to save first, then presents an open panel that
@@ -81,14 +84,20 @@ extension EditorModel {
     /// menu home and a standard ⌘I shortcut. Uses the Media bin's default of
     /// copying imports into the bundle.
     func requestImport() {
-        Task { [weak self] in _ = await self?.performImportMediaCommand() }
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await performImportMediaCommand()
+        }
     }
 
     /// File ▸ Export… — presents the same save panel the toolbar Export button
     /// uses and queues a render with the default preset, so the app's primary
     /// output action has a menu home and a ⇧⌘E shortcut.
     func requestExport() {
-        Task { [weak self] in _ = await self?.performExportProjectCommand() }
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await performExportProjectCommand()
+        }
     }
 
     @discardableResult
