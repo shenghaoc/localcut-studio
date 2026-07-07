@@ -125,17 +125,16 @@ final class PublishPanelState {
             model.publishSettings.rememberToken = false
         }
 
-        Task { [weak self, weak model] in
-            guard let self, let model else { return }
-            defer { isStarting = false }
+        Task { [weak self] in
+            defer { self?.isStarting = false }
             do {
                 try await model.startWhipPublish(config: config)
                 // Observe session state changes instead of assuming Live.
-                observeSessionState(model: model)
-                startStatsPolling(model: model)
+                self?.observeSessionState(model: model)
+                self?.startStatsPolling(model: model)
             } catch {
-                publishState = .failed
-                statusMessage = error.localizedDescription
+                self?.publishState = .failed
+                self?.statusMessage = error.localizedDescription
             }
         }
     }
@@ -201,13 +200,12 @@ final class PublishPanelState {
         isStopping = true
         publishState = .ended
         statusMessage = "Stopping..."
-        Task { [weak self, weak model] in
-            guard let self, let model else { return }
-            defer { isStopping = false }
+        Task { [weak self] in
+            defer { self?.isStopping = false }
             await model.stopWhipPublish()
-            publishState = .idle
-            statusMessage = "Publish ended."
-            stats = nil
+            self?.publishState = .idle
+            self?.statusMessage = "Publish ended."
+            self?.stats = nil
         }
     }
 

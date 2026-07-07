@@ -1047,10 +1047,9 @@ extension EditorModel {
 
         replaySaveInProgress = true
 
-        Task { [weak self] in
-            guard let self else { return }
+        Task {
             await manager.saveLast(seconds: saveSeconds)
-            replaySaveInProgress = false
+            self.replaySaveInProgress = false
             if let error = manager.lastSaveError {
                 statusMessage = error
             } else if let duration = manager.lastSavedDuration {
@@ -1065,9 +1064,9 @@ extension EditorModel {
     /// Cleans up replay buffer resources on session end.
     func cleanupReplayBuffer() {
         guard let manager = replayBufferManager else { return }
-        Task { [weak manager] in
-            await manager?.cleanup()
-        }
         replayBufferManager = nil
+        Task {
+            await manager.cleanup()
+        }
     }
 }
