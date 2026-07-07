@@ -209,13 +209,23 @@ public enum ZoomPanPresetGenerator {
             }
         }
 
-        if keyframes.last?.value == .identity, let last = result.last {
-            result[result.count - 1] = Keyframe<Transform2D>(
-                id: last.id,
-                time: last.time,
-                value: .identity,
-                incomingHandle: last.incomingHandle,
-                outgoingHandle: last.outgoingHandle)
+        // Restore the last keyframe to identity only if doing so wouldn't
+        // re-introduce a velocity violation in the final segment.
+        if keyframes.last?.value == .identity, result.count >= 2 {
+            let lastIndex = result.count - 1
+            let prev = result[lastIndex - 1].value
+            let dt = result[lastIndex].time.seconds - result[lastIndex - 1].time.seconds
+            if dt > 0 {
+                let velocity = translationVelocity(from: prev, to: .identity, dt: Float(dt))
+                if velocity <= ZoomPanBounds.maxVelocity * 1.01 {
+                    result[lastIndex] = Keyframe<Transform2D>(
+                        id: result[lastIndex].id,
+                        time: result[lastIndex].time,
+                        value: .identity,
+                        incomingHandle: result[lastIndex].incomingHandle,
+                        outgoingHandle: result[lastIndex].outgoingHandle)
+                }
+            }
         }
 
         return result

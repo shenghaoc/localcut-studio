@@ -65,8 +65,10 @@ extension EditorModel {
     var selectedCalloutLocalPlayheadTime: CMTime? {
         guard let callout = selectedCallout else { return nil }
         let playhead = CMTime(seconds: currentTime, preferredTimescale: 600)
+        let calloutEnd = callout.timeRange.start + callout.timeRange.duration
+        // Use exclusive end (<) matching the compositor's visibility check.
         guard playhead >= callout.timeRange.start,
-              playhead <= callout.timeRange.start + callout.timeRange.duration else { return nil }
+              playhead < calloutEnd else { return nil }
         return CMTimeMaximum(.zero, playhead - callout.timeRange.start)
     }
 
