@@ -1117,11 +1117,9 @@ struct InspectorView: View {
     private var overlayListSection: some View {
         Section("Overlays") {
             if model.project.overlays.isEmpty {
-                ContentUnavailableView {
-                    Label("No Overlays", systemImage: "square.3.layers.3d")
-                } description: {
-                    Text("Add an animated image, alpha video, or Lottie overlay to the project.")
-                } actions: {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("No overlays. Add an animated image, alpha video, or Lottie overlay to the project.")
+                        .foregroundStyle(.secondary)
                     addOverlayMenu
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)

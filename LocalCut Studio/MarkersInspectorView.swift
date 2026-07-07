@@ -10,13 +10,9 @@ struct MarkersInspectorView: View {
     var body: some View {
         Section("Markers") {
             if model.project.markers.isEmpty {
-                // Empty state owns the sole call to action; the Add at Playhead
-                // button reappears only once there are markers.
-                ContentUnavailableView {
-                    Label("No Markers", systemImage: "mappin")
-                } description: {
-                    Text("Press M while the timeline is focused, or use the button below.")
-                } actions: {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("No markers. Press M while the timeline is focused, or use the button below.")
+                        .foregroundStyle(.secondary)
                     Button("Add at Playhead") { model.addMarkerAtPlayhead() }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)

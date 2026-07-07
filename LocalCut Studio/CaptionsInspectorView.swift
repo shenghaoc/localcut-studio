@@ -17,13 +17,9 @@ struct CaptionsInspectorView: View {
     var body: some View {
         Section("Captions") {
             if model.project.captionTracks.isEmpty {
-                // Empty state owns the sole call to action; the Import / Add
-                // Empty Track buttons reappear only once there are tracks.
-                ContentUnavailableView {
-                    Label("No Caption Tracks", systemImage: "captions.bubble")
-                } description: {
-                    Text("Import an SRT/VTT or add an empty track to begin.")
-                } actions: {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("No caption tracks. Import an SRT/VTT or add an empty track to begin.")
+                        .foregroundStyle(.secondary)
                     HStack {
                         Button("Import SRT/VTT…") { showSRTImporter = true }
                             .buttonStyle(.borderedProminent)
