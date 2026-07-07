@@ -406,8 +406,17 @@ final class RenderCache: Sendable {
     private nonisolated func spillEvictedEntries(_ entries: [(RenderCacheKey, Entry)]) {
         guard diskBudget > 0, cacheDirectory != nil else { return }
         for (key, entry) in entries {
-            guard let diskEntry = writeDiskEntry(entry, for: key) else { continue }
-            recordDiskEntry(diskEntry, for: key)
+            if let diskEntry = writeDiskEntry(entry, for: key) {
+                recordDiskEntry(diskEntry, for: key)
+            } else {
+                // Disk write failed (disk full, permissions error). Re-insert
+                // the entry into memory so it's not silently lost. The budget
+                // will be exceeded temporarily, but the next eviction cycle
+                // will handle it.
+                lock.withLock { state in
+                    state.insertMemory(key, entry: entry)
+                }
+            }
         }
     }
 
