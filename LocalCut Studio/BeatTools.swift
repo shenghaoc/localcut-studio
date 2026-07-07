@@ -61,6 +61,17 @@ struct BeatAnalyzer {
         while reader.status == .reading {
             try Task.checkCancellation()
             guard let buffer = output.copyNextSampleBuffer() else { break }
+            // Validate the actual sample rate matches the requested rate.
+            // AVAssetReader may silently deliver audio at a different rate
+            // if the codec doesn't support the requested rate.
+            let format = CMSampleBufferGetFormatDescription(buffer)
+            if let streamDesc = format?.audioStreamBasicDescription {
+                let actualRate = streamDesc.mSampleRate
+                if actualRate > 0 && abs(actualRate - targetSampleRate) > 1 {
+                    throw BeatAnalysisError.readerFailed(
+                        "Audio sample rate mismatch: requested \(targetSampleRate) Hz, got \(actualRate) Hz")
+                }
+            }
             samples.append(contentsOf: floats(from: buffer))
         }
 
