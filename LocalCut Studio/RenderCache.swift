@@ -339,6 +339,29 @@ final class RenderCache: Sendable {
         self.budget = byteBudget
         self.diskBudget = diskByteBudget
         self.cacheDirectory = cacheDirectory
+        // Clean up orphaned disk cache files from previous sessions.
+        cleanUpOrphanedDiskFiles()
+    }
+
+    /// Removes disk cache files that are not tracked in the current cache state.
+    /// Called at init to prevent unbounded growth from crashed exports.
+    private nonisolated func cleanUpOrphanedDiskFiles() {
+        guard let cacheDirectory else { return }
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]) else { return }
+
+        let trackedFiles = lock.withLock { state in
+            Set(state.diskEntries.values.map { $0.url })
+        }
+
+        for file in files where file.pathExtension == "png" {
+            if !trackedFiles.contains(file) {
+                try? fm.removeItem(at: file)
+            }
+        }
     }
 
     nonisolated var byteBudget: Int { budget }
