@@ -1024,6 +1024,8 @@ final class RenderQueue {
 
         await writer.finishWriting()
         if writer.status == .failed, let error = writer.error {
+            // Clean up partial output on writer failure.
+            writer.cancelWriting()
             throw error
         }
     }
