@@ -67,7 +67,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
 
     private nonisolated func deliverFrame(_ buffer: CVPixelBuffer) {
         #if LOCALCUT_ENABLE_WEBRTC
-        let activeCapturer = lock.withLock { $0.capturer }
+        let activeCapturer = lock.withLock { _ in capturer }
         if let activeCapturer {
             let frame = RTCVideoFrame(
                 buffer: RTCCVPixelBuffer(pixelBuffer: buffer),
@@ -77,7 +77,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
             activeCapturer.didCapture(frame)
         }
         #else
-        lock.withLock { $0.latestPixelBuffer = buffer }
+        lock.withLock { _ in latestPixelBuffer = buffer }
         #endif
 
         let next = lock.withLock { state -> CVPixelBuffer? in
