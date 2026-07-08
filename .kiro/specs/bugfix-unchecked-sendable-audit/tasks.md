@@ -28,3 +28,10 @@
 - [x] **V4** Full app suite passed:
   `xcodebuild test -project "LocalCut Studio.xcodeproj" -scheme "LocalCut Studio" -destination "platform=macOS" -derivedDataPath /private/tmp/LocalCutStudio-DerivedData-audit-unchecked-sendable`.
 - [x] **V5** PR #79 body updated with the rebased scope and validation results.
+- [x] **V6** Explicit Debug app build passed after rerunning outside the
+  sandbox-only Xcode cache/CoreSimulator permission failure:
+  `xcodebuild build -project "LocalCut Studio.xcodeproj" -scheme "LocalCut Studio" -configuration Debug -destination "platform=macOS" -derivedDataPath /private/tmp/LocalCutStudio-DerivedData-audit-unchecked-sendable`.
+- [x] **V7** Required audit command rerun:
+  `rg "@unchecked Sendable" "LocalCut Studio" Packages`.
+- [x] **V8** Actual conformance count verified from conformance lines:
+  `origin/main` 30, PR head 30.
