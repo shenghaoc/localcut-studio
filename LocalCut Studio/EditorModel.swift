@@ -227,10 +227,10 @@ final class EditorModel {
     /// inspector can show a LUT's name without resolving the security-scoped
     /// bookmark on the main actor on every render. Not persisted; a LUT from a
     /// reopened project shows a generic label until re-imported.
-    /// Ignored: read-only cache consumed by `selectedClipLUT()` during inspector
-    /// recomputation; the inspector already re-evaluates when the clip/selection
-    /// changes.  Enabling observation would cause spurious churn on document
-    /// restore (batch LUT import).
+    /// Ignored: read-only cache consumed by `selectedClipLUTName` and
+    /// `selectedClipLUT()` during inspector recomputation; the inspector already
+    /// re-evaluates when the clip/selection changes.  Enabling observation would
+    /// cause spurious churn on document restore (batch LUT import).
     @ObservationIgnored private(set) var lutDisplayNames: [Data: String] = [:]
 
     // Diagnostics
