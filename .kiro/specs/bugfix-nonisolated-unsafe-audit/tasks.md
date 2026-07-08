@@ -14,9 +14,11 @@
 - [x] **T4** Convert `ReconnectController.clock` and `sleep` from mutable
   unsafe test seams to immutable initializer dependencies, and update the
   timing test.
-- [x] **T5** Add the full audit table in [`audit.md`](audit.md).
-- [x] **T6** Add this Kiro bugfix spec and link it from `AGENTS.md`.
-- [x] **T7** Update PR #78's body so the before/after counts, verification, and
+- [x] **T5** Stop `EditorModel.bundleAccessURL` in `deinit` so the retained
+  invariant matches real security-scoped resource cleanup.
+- [x] **T6** Add the full audit table in [`audit.md`](audit.md).
+- [x] **T7** Add this Kiro bugfix spec and link it from `AGENTS.md`.
+- [x] **T8** Update PR #78's body so the before/after counts, verification, and
   spec reference match the final branch.
 
 ## Verification

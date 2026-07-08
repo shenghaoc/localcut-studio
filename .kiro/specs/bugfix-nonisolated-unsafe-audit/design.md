@@ -63,6 +63,15 @@ The scoped `nonisolated(unsafe)` locals are therefore still the minimal
 expression of the boundary, but the comment must name the shared immutable
 snapshot rather than claim detached-task-only ownership.
 
+## Bundle Security-Scoped Grant Cleanup
+
+`EditorModel.bundleAccessURL` is intentionally tracked separately from
+`accessedURLs` so document reconciliation does not revoke the outer bundle grant
+while imported media point at files inside the bundle. Because that property
+keeps a session-scoped resource grant, `EditorModel.deinit` must stop it
+alongside the per-file grants. The branch keeps the `nonisolated(unsafe)`
+annotation for the final teardown read and makes the cleanup real.
+
 ## Validation Strategy
 
 - `git diff --check` for whitespace.

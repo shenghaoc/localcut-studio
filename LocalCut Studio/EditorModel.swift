@@ -390,6 +390,7 @@ final class EditorModel {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         EffectCompositor.releaseOverlaySources(for: activeOverlaySourceRegistryID)
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
+        bundleAccessURL?.stopAccessingSecurityScopedResource()
         recordingsFolderAccessURL?.stopAccessingSecurityScopedResource()
     }
 

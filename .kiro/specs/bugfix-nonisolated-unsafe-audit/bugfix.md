@@ -63,6 +63,19 @@ constructing the controller.
 - **Impact**: No product behavior change. The timing logic is unchanged; the
   mutation window is removed.
 
+### B5 - Bundle security-scoped grant cleanup was documented but not balanced
+
+`EditorModel.bundleAccessURL` intentionally remains outside `accessedURLs` so
+undo/redo reconciliation cannot revoke the outer `.lcbundle` directory grant
+while media items point at files inside that bundle. The audit comment said the
+grant was balanced during teardown, but `EditorModel.deinit` only stopped
+`accessedURLs` and `recordingsFolderAccessURL`.
+
+- **Fix**: Stop `bundleAccessURL` in `EditorModel.deinit`.
+- **Impact**: No product behavior change beyond matching the documented
+  resource-lifetime invariant and preventing a teardown leak of the bundle
+  security-scoped grant.
+
 ## Audit Notes
 
 See [`audit.md`](audit.md) for the full working audit table, before/after
