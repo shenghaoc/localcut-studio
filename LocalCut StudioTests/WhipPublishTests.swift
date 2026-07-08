@@ -152,7 +152,7 @@ struct WhipPublishTests {
         let tap = VideoPublishTap()
         let buffer = try makeTestBuffer()
         tap.capturePixelBuffer(buffer)
-        #expect(tap.currentPixelBuffer != nil)
+        #expect(tap.latestPixelBuffer != nil)
         tap.close()
         #else
         #expect(Bool(true))
