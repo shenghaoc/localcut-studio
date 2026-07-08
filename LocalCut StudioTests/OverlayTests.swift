@@ -425,6 +425,51 @@ func renderQueueExportsAllOverlayKinds() async throws {
     #expect(duration.seconds > 0)
 }
 
+@MainActor
+@Test("Overlay keyframe add, update, and clear round-trip")
+func overlayKeyframeAddUpdateClear() {
+    let model = EditorModel()
+    let overlayID = UUID()
+    model.project.overlays = [
+        OverlayClip(
+            id: overlayID,
+            sourceType: .animatedImage,
+            timelineStart: .zero,
+            duration: CMTime(seconds: 10, preferredTimescale: 600)),
+    ]
+
+    let time1 = CMTime(seconds: 2, preferredTimescale: 600)
+    model.addOrUpdateOverlayKeyframe(
+        at: overlayID, localTime: time1,
+        positionX: 10, positionY: 20, scale: 1.5, rotation: 0.5, opacity: 0.8)
+    let overlay = model.project.overlays.first!
+    #expect(overlay.positionXKeyframes.keyframes.count == 1)
+    #expect(overlay.scaleKeyframes.keyframes.count == 1)
+    #expect(overlay.opacityKeyframes.keyframes.count == 1)
+
+    // Update at same time
+    model.addOrUpdateOverlayKeyframe(
+        at: overlayID, localTime: time1,
+        positionX: 30, positionY: 40, scale: 2.0, rotation: 1.0, opacity: 0.5)
+    #expect(model.project.overlays.first!.positionXKeyframes.keyframes.count == 1)
+
+    // Add a second keyframe
+    let time2 = CMTime(seconds: 5, preferredTimescale: 600)
+    model.addOrUpdateOverlayKeyframe(
+        at: overlayID, localTime: time2,
+        positionX: 50, positionY: 60, scale: 0.5, rotation: 0, opacity: 1.0)
+    #expect(model.project.overlays.first!.positionXKeyframes.keyframes.count == 2)
+
+    // Remove one keyframe
+    model.removeOverlayKeyframes(at: overlayID, localTime: time1)
+    #expect(model.project.overlays.first!.positionXKeyframes.keyframes.count == 1)
+
+    // Clear all
+    model.clearOverlayKeyframes(overlayID)
+    #expect(model.project.overlays.first!.positionXKeyframes.keyframes.isEmpty)
+    #expect(model.project.overlays.first!.scaleKeyframes.keyframes.isEmpty)
+}
+
 private func makeOverlayTempDirectory(_ label: String) throws -> URL {
     let url = URL(fileURLWithPath: NSTemporaryDirectory())
         .appendingPathComponent("overlay-tests-\(label)-\(UUID().uuidString)")

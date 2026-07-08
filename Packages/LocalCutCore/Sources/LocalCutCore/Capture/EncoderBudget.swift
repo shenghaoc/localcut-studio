@@ -35,6 +35,12 @@ public struct EncoderLease: Sendable, Identifiable {
 
     /// Releases this lease. Safe to call multiple times — only the first
     /// call has any effect.
+    /// Releases this lease asynchronously (fire-and-forget).
+    ///
+    /// The actual actor-side bookkeeping happens in a detached `Task`. If the
+    /// caller needs the budget ledger to reflect the release **before**
+    /// attempting another `acquire`, use `relinquish(budget:)` instead — the
+    /// async variant awaits the release.
     public func relinquish() {
         release()
     }
@@ -163,20 +169,7 @@ public actor EncoderBudget {
     /// Probes the default budget from hardware capabilities. Returns 4 if
     /// hardware encoders are available, 1 otherwise.
     private static func probeDefaultBudget() -> Int {
-        let count = probeHardwareEncoderCount()
+        let count = Capabilities.probeHardwareEncoderCount()
         return count > 0 ? 4 : 1
-    }
-
-    private static func probeHardwareEncoderCount() -> Int {
-        var listRef: CFArray?
-        let status = VTCopyVideoEncoderList(nil, &listRef)
-        guard status == noErr, let list = listRef else { return 0 }
-        let hwKey = kVTVideoEncoderList_IsHardwareAccelerated as String
-        var hwCount = 0
-        for entry in (list as NSArray) {
-            guard let dict = entry as? [String: Any] else { continue }
-            if (dict[hwKey] as? Bool) == true { hwCount += 1 }
-        }
-        return hwCount
     }
 }

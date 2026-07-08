@@ -424,10 +424,7 @@ public struct CaptureManifest: Hashable, Sendable {
         // A pause/resume cycle creates multiple source-ended records per source
         // (one per chunk). Aggregate duration and sample count across all chunks;
         // use the earliest timelineStartUs.
-        let endedBySourceID = records.reduce(into: [UUID: [CaptureSourceEndedRecord]]()) { result, record in
-            guard case .sourceEnded(let ended) = record else { return }
-            result[ended.sourceID, default: []].append(ended)
-        }
+        let endedBySourceID = endedRecordsBySourceID
         let droppedByID = records.reduce(into: [UUID: Int]()) { result, record in
             guard case .backpressure(let backpressure) = record else { return }
             result[backpressure.sourceID, default: 0] += backpressure.droppedSamples

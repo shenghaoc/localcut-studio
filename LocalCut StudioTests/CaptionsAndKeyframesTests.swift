@@ -569,6 +569,39 @@ func captionLineRetimingSortsAndUndo() {
     #expect(restoredLate?.words?.first?.range.start == time(5.5))
 }
 
+@Test("retimeCaptionLine clamps words that extend beyond the new line boundary")
+func captionRetimeClampsWordsBeyondBoundary() {
+    func time(_ seconds: Double) -> CMTime {
+        CMTime(seconds: seconds, preferredTimescale: 600)
+    }
+
+    let model = EditorModel()
+    let track = CaptionTrack(name: "T")
+    // Line at 5-7s with a word at 6-6.5s
+    let line = CaptionLine(
+        range: CMTimeRange(start: time(5), duration: time(2)),
+        text: "hello world",
+        words: [WordTiming(range: CMTimeRange(start: time(6), duration: time(0.5)),
+                           word: "hello"),
+                WordTiming(range: CMTimeRange(start: time(6.5), duration: time(0.5)),
+                           word: "world")])
+    track.addLine(line)
+    model.project.captionTracks = [track]
+
+    // Retime to 0-1s: words shift to 1-1.5 and 1.5-2, but line ends at 1s.
+    // Both words should be clamped or dropped.
+    model.retimeCaptionLine(line.id, in: track.id, start: time(0), duration: time(1))
+
+    let retimed = track.lines.first { $0.id == line.id }
+    #expect(retimed?.range.start == time(0))
+    #expect(retimed?.range.duration == time(1))
+    // Words that shifted beyond the new line end should be clamped.
+    for word in retimed?.words ?? [] {
+        let wordEnd = word.range.start + word.range.duration
+        #expect(wordEnd <= time(1) + CMTime(value: 1, timescale: 600))
+    }
+}
+
 @Test("setCaptionTrackMuted: routes through undo (Claude review #4)")
 func captionMuteIsUndoable() {
     let model = EditorModel()
