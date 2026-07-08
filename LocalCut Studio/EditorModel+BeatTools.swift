@@ -120,7 +120,9 @@ extension EditorModel {
 
     func projectedBeatMarkers(excluding clipID: Clip.ID? = nil) -> [ProjectedBeatMarker] {
         projectedBeatTimes(excluding: clipID).enumerated().map { offset, time in
-            ProjectedBeatMarker(id: "\(offset)-\(time.value)-\(time.timescale)", time: time)
+            // Use a deterministic ID based on the time value so the marker
+            // identity is stable across rebuilds when the same beat is projected.
+            ProjectedBeatMarker(id: "beat-\(time.value)-\(time.timescale)", time: time)
         }
     }
 
