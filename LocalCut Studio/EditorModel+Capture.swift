@@ -345,13 +345,19 @@ extension EditorModel {
                 let now = Date()
                 if now.timeIntervalSince(lastDiskCheck) >= 5 {
                     lastDiskCheck = now
-                    if let available = try? rootURL.resourceValues(
-                        forKeys: [.volumeAvailableCapacityForImportantUsageKey,
-                                  .volumeTotalCapacityKey])
-                        .volumeAvailableCapacityForImportantUsage,
-                       let total = try? rootURL.resourceValues(
-                        forKeys: [.volumeTotalCapacityKey])
-                        .volumeTotalCapacity {
+                    // Move synchronous file I/O off the main actor to avoid
+                    // blocking the UI on slow or network-mounted volumes.
+                    let diskInfo = await Task.detached {
+                        let available = try? rootURL.resourceValues(
+                            forKeys: [.volumeAvailableCapacityForImportantUsageKey,
+                                      .volumeTotalCapacityKey])
+                            .volumeAvailableCapacityForImportantUsage
+                        let total = try? rootURL.resourceValues(
+                            forKeys: [.volumeTotalCapacityKey])
+                            .volumeTotalCapacity
+                        return (available, total)
+                    }.value
+                    if let available = diskInfo.0, let total = diskInfo.1 {
                         self.recordingDiskFreeBytes = available
                         let fraction = total > 0 ? Double(available) / Double(total) : 0
                         if fraction < 0.05 {

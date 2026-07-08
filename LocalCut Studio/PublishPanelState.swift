@@ -66,8 +66,14 @@ final class PublishPanelState {
     }
 
     /// Task that observes the WhipSession state stream.
-    private var stateObservationTask: Task<Void, Never>?
-    private var statsPollingTask: Task<Void, Never>?
+    /// nonisolated(unsafe) so deinit can cancel from any thread.
+    @ObservationIgnored nonisolated(unsafe) private var stateObservationTask: Task<Void, Never>?
+    @ObservationIgnored nonisolated(unsafe) private var statsPollingTask: Task<Void, Never>?
+
+    deinit {
+        stateObservationTask?.cancel()
+        statsPollingTask?.cancel()
+    }
 
     func loadSettings(from model: EditorModel) {
         endpointType = model.publishSettings.endpointType
