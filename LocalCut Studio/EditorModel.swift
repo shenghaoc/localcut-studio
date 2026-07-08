@@ -39,10 +39,11 @@ import LocalCutPlatform
 /// **Cross-cutting notes** (non-exclusive — may reference properties already
 /// counted above):
 ///
-/// - **`nonisolated(unsafe)` overlap** — 7 properties carry both
+/// - **`nonisolated(unsafe)` overlap** — 8 properties carry both
 ///   `@ObservationIgnored` and `nonisolated(unsafe)`: `timeObserver`,
-///   `endObserver`, `beatAnalysisTask`, `activeOverlaySourceRegistryID`,
-///   `recordingsFolderAccessURL`, `accessedURLs`, `bundleAccessURL`. The
+///   `endObserver`, `recordingMonitorTask`, `beatAnalysisTask`,
+///   `activeOverlaySourceRegistryID`, `recordingsFolderAccessURL`,
+///   `accessedURLs`, `bundleAccessURL`. The
 ///   `nonisolated(unsafe)` exists for `deinit` access; the `@ObservationIgnored`
 ///   exists because the properties are opaque handles or cleanup bookkeeping.
 ///   Neither annotation implies the other.
