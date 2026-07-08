@@ -140,10 +140,12 @@ are all standard SwiftUI/AppKit (no new paradigms):
 - **Menu bar mirrors the toolbar.** `EditorModel.requestImport()` /
   `requestExport()` back new **File ▸ Import… (⌘I)** and **File ▸ Export…
   (⇧⌘E)**; **Edit ▸ Delete Selected Clip** and **Edit ▸ Add Marker (M)** mirror
-  the timeline; **View ▸ Show Inspector (⌥⌘I)** and **Go to Start (⌘↑)** join
-  Show Diagnostics. The **Space** shortcut for play/pause is intentionally not
-  a menu key-equivalent (those fire globally, swallowing spaces typed into text
-  fields) — it lives on a window-scoped `NSEvent` local monitor
+  the timeline without a bare Delete key equivalent; clip/transition deletion
+  is handled by the timeline-scoped `onDeleteCommand` so Backspace still belongs
+  to focused text fields. **View ▸ Show Inspector (⌥⌘I)** and **Go to Start
+  (⌘↑)** join Show Diagnostics. The **Space** shortcut for play/pause is
+  intentionally not a menu key-equivalent (those fire globally, swallowing
+  spaces typed into text fields) — it lives on a window-scoped `NSEvent` local monitor
   (`EditorKeyHandler` in `TimelineView.swift`) that yields to focused text
   inputs *and* any focused non-text control (so a Tab-focused checkbox /
   button receives Space normally).
@@ -216,7 +218,8 @@ custom additions are limited to the two genuinely-floating controls:
   render-format readout stays a `.thinMaterial` badge, because a non-interactive
   label is content, not a control.
 - **Diagnostics HUD** uses `.glassEffect(in: .rect(cornerRadius:))`, replacing a
-  hand-rolled `NSVisualEffectView` + clip + stroke.
+  hand-rolled `NSVisualEffectView` + clip + stroke, and keeps an explicit
+  maximum width so the top-trailing overlay remains a compact HUD.
 
 The same pass removes hard-coded colour literals (the project's own UI standards
 forbid colours that fight the system appearance):

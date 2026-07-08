@@ -206,7 +206,7 @@ struct DocumentCommands: Commands {
             Button("Remove Transition") { model.removeSelectedTransition() }
                 .disabled(model.selectedTransitionClipID == nil)
             // Mirror the destructive toolbar button so deleting a clip/transition
-            // has a menu home; the toolbar keeps the same ⌫ shortcut.
+            // has a menu home; the scoped timeline handler owns the Delete key.
             Button("Delete Selected Clip") {
                 if model.selectedTransitionClipID != nil {
                     model.removeSelectedTransition()
@@ -214,7 +214,6 @@ struct DocumentCommands: Commands {
                     model.deleteSelectedClip()
                 }
             }
-            .keyboardShortcut(.delete, modifiers: [])
             .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             Divider()
             // No key equivalent here: the timeline's EditorKeyHandler already owns
@@ -339,7 +338,6 @@ struct EditorView: View {
                 Label("Delete", systemImage: "trash")
             }
             .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
-            .keyboardShortcut(.delete, modifiers: [])
             .help("Delete selected clip or transition")
 
             if model.isRecording || model.isPaused {

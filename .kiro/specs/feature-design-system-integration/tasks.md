@@ -85,13 +85,15 @@
 
 - [x] **T9.1** Menu-bar completeness: `requestImport()`/`requestExport()` on the
   model; File ▸ Import… (⌘I) / Export… (⇧⌘E); Edit ▸ Delete Selected Clip /
-  Add Marker (M); View ▸ Show Inspector (⌥⌘I) / Go to Start (⌘↑). Spacebar
-  play/pause is handled by the window-scoped `EditorKeyHandler` NSEvent local
-  monitor (in `TimelineView.swift`) rather than a menu key-equivalent — a bare
-  `.space` menu shortcut is global in AppKit and would swallow spaces typed into
-  text inputs. The monitor also exempts focused non-text first responders
-  (NSControl + SwiftUI-hosted controls) so a Tab-focused checkbox/button
-  receives Space normally. Remove dead `exportTapped()`.
+  Add Marker (M); View ▸ Show Inspector (⌥⌘I) / Go to Start (⌘↑). Delete has no
+  bare menu/toolbar key equivalent; clips/transitions use the timeline-scoped
+  `onDeleteCommand` so text editing keeps Backspace. Spacebar play/pause is
+  handled by the window-scoped `EditorKeyHandler` NSEvent local monitor (in
+  `TimelineView.swift`) rather than a menu key-equivalent — a bare `.space` menu
+  shortcut is global in AppKit and would swallow spaces typed into text inputs.
+  The monitor also exempts focused non-text first responders (NSControl +
+  SwiftUI-hosted controls) so a Tab-focused checkbox/button receives Space
+  normally. Remove dead `exportTapped()`.
 - [x] **T9.2** Lift `isSideRailCollapsed` → `EditorModel.inspectorVisible`
   (UserDefaults-persisted); update toolbar, layout, collapsed-rail, and menu.
 - [x] **T9.3** Honor Reduce Motion on the scopes transition/animation; adaptive
@@ -124,9 +126,10 @@
   `.bar` strip; the render-format readout is a `.thinMaterial` badge — a
   non-interactive label belongs to the content layer, not glass.
 - [x] **T10.2** Replace the Diagnostics HUD's hand-rolled `NSVisualEffectView` +
-  clip + stroke with `.glassEffect(in: .rect(cornerRadius:))`; remove the dead
-  `VisualEffectBackground`. (HIG: Liquid Glass on the functional/floating layer
-  only, sparingly — system toolbars already adopt it automatically.)
+  clip + stroke with `.glassEffect(in: .rect(cornerRadius:))`; keep an explicit
+  max width so the overlay stays compact; remove the dead `VisualEffectBackground`.
+  (HIG: Liquid Glass on the functional/floating layer only, sparingly — system
+  toolbars already adopt it automatically.)
 - [x] **T10.3** De-hardcode `Theme.swift`: move the brand accent to
   `Assets.xcassets` as `AccentColor` (Display-P3, room for light/dark +
   high-contrast variants); back `lcLane` with `.underPageBackgroundColor` and
@@ -147,6 +150,10 @@
   VoiceOver instead of marking it decorative, and keep the clip context-menu
   Split command enabled for unselected clips because the command selects the
   clicked clip before splitting.
+- [x] **T10.7** Live review follow-up: remove global bare-Delete key equivalents
+  from menu/toolbar actions; restore white countdown text over the fixed dark
+  overlay; constrain the Diagnostics HUD width; verify the callout list keeps
+  `.isSelected` for VoiceOver.
 
 ## Verification
 

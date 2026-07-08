@@ -56,7 +56,7 @@ struct DiagnosticsView: View {
             capabilitiesSection
         }
         .padding(12)
-        .frame(minWidth: 280, alignment: .leading)
+        .frame(minWidth: 280, idealWidth: 320, maxWidth: 360, alignment: .leading)
         // Liquid Glass: a diagnostics HUD is a functional panel floating over the
         // editor content — the textbook case for the regular glass material,
         // which supplies its own blur, border, and luminosity adaptation (no

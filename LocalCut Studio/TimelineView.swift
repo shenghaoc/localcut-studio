@@ -105,6 +105,9 @@ struct TimelineView: View {
                                      onRename: { beginRenamingSelectedMarker() },
                                      onDelete: { deleteSelectedMarkerIfAny() },
                                      onTogglePlay: { model.togglePlayPause() }))
+        .onDeleteCommand {
+            _ = deleteSelectedClipOrTransitionIfAny()
+        }
         .onMoveCommand(perform: moveTimelineSelection)
         .onChange(of: focusedClipID) { _, newValue in
             guard let newValue, model.selectedClipID != newValue else { return }
@@ -129,11 +132,22 @@ struct TimelineView: View {
 
     /// Deletes the selected marker; returns whether anything was deleted so the
     /// Delete handler can decide whether to consume the key. When no marker is
-    /// selected the existing clip / transition delete shortcut keeps firing.
+    /// selected the scoped timeline delete command handles clips/transitions.
     @discardableResult
     private func deleteSelectedMarkerIfAny() -> Bool {
         guard let id = model.selectedMarkerID else { return false }
         model.removeMarker(id: id)
+        return true
+    }
+
+    @discardableResult
+    private func deleteSelectedClipOrTransitionIfAny() -> Bool {
+        if model.selectedTransitionClipID != nil {
+            model.removeSelectedTransition()
+            return true
+        }
+        guard model.selectedClipID != nil else { return false }
+        model.deleteSelectedClip()
         return true
     }
 
@@ -1170,9 +1184,8 @@ private struct MarkerDiamond: Shape {
 /// fields isn't stolen.
 ///
 /// `Delete` only consumes the event when there is a selected marker — when
-/// none is selected, the event falls through to the existing toolbar
-/// `.keyboardShortcut(.delete, modifiers: [])` that drives clip / transition
-/// deletion. That's the contract the spec calls out (R4.5).
+/// none is selected, the event falls through to the scoped `onDeleteCommand`
+/// that drives clip / transition deletion from timeline focus.
 /// Window-scoped key handler for bare-key editor shortcuts that must yield to
 /// text inputs: m / shift-m (add / rename marker), Delete (when a marker is
 /// selected), and Space (play/pause). These can't be menu/button
@@ -1296,8 +1309,8 @@ private struct EditorKeyHandler: NSViewRepresentable {
                 onRename?()
                 return true
             case .maybeDeleteMarker:
-                // Only consume when a marker is selected so the existing clip /
-                // transition delete shortcut keeps firing.
+                // Only consume when a marker is selected so the scoped clip /
+                // transition delete command can still fire.
                 return onDelete?() == true
             }
         }
@@ -1324,8 +1337,8 @@ enum EditorKeyHandlerPolicy: Sendable {
         case renameMarker
         /// Backspace/Forward-Delete — try to delete the selected marker; the
         /// Coordinator's `onDelete` callback returns whether a marker was
-        /// actually selected and consumed the key, so the toolbar's clip
-        /// delete shortcut keeps firing when no marker is selected.
+        /// actually selected and consumed the key, so the scoped timeline
+        /// delete command can handle clips/transitions when no marker is selected.
         case maybeDeleteMarker
     }
 

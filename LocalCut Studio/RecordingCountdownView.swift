@@ -20,7 +20,7 @@ struct RecordingCountdownView: View {
             VStack(spacing: 24) {
                 Text(model.countdownRemaining > 0 ? "\(model.countdownRemaining)" : "Recording")
                     .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
                     .scaleEffect(scale)
                     .animation(.easeInOut(duration: 0.3), value: scale)
                     .accessibilityLabel(model.countdownRemaining > 0
