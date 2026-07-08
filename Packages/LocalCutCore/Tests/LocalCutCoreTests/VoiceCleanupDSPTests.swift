@@ -12,12 +12,16 @@ func voiceCleanupDefaultsAreNoOp() {
     #expect(settings.requiresOfflineProcessing == false)
 }
 
-@Test("VoiceCleanupSettings: loudness gain requires offline processing")
-func loudnessGainRequiresOfflineProcessing() {
+@Test("VoiceCleanupSettings: loudness gain does not require offline processing")
+func loudnessGainDoesNotRequireOfflineProcessing() {
+    // Loudness normalisation is a linear gain stage applied through the
+    // live engine's mixer node volume (preview) and audio mix (export).
+    // It does NOT require the full offline DSP pipeline.
     var settings = VoiceCleanupSettings()
     settings.loudness.enabled = true
     settings.loudness.appliedGainDB = 3
-    #expect(settings.requiresOfflineProcessing)
+    #expect(!settings.requiresOfflineProcessing)
+    #expect(settings.loudnessGainLinear > 1.0)
 }
 
 @Test("VoiceCleanupDSP: limiter clamps samples to ceiling")
