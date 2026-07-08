@@ -1047,14 +1047,14 @@ extension EditorModel {
 
         replaySaveInProgress = true
 
-        Task {
+        Task { [weak self] in
             await manager.saveLast(seconds: saveSeconds)
-            self.replaySaveInProgress = false
+            self?.replaySaveInProgress = false
             if let error = manager.lastSaveError {
-                statusMessage = error
+                self?.statusMessage = error
             } else if let duration = manager.lastSavedDuration {
                 let clipCount = manager.lastSavedClipCount ?? 1
-                statusMessage = clipCount == 1
+                self?.statusMessage = clipCount == 1
                     ? String(format: "Saved %.1fs replay clip.", duration)
                     : String(format: "Saved %d replay clips spanning %.1fs.", clipCount, duration)
             }

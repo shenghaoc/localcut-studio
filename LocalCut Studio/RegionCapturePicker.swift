@@ -127,7 +127,13 @@ private final class RegionCaptureWindowController {
 
     deinit {
         if let keyMonitor {
-            NSEvent.removeMonitor(keyMonitor)
+            // NSEvent.removeMonitor must be called from the main thread,
+            // but deinit can run on any thread. Dispatch if needed.
+            if Thread.isMainThread {
+                NSEvent.removeMonitor(keyMonitor)
+            } else {
+                DispatchQueue.main.async { NSEvent.removeMonitor(keyMonitor) }
+            }
         }
     }
 }

@@ -127,14 +127,20 @@ final class PublishPanelState {
 
         Task { [weak self] in
             defer { self?.isStarting = false }
+            guard let self else {
+                // self deallocated before publish started — stop the session
+                // to avoid orphaned WHIP session with no observer.
+                await model.stopWhipPublish()
+                return
+            }
             do {
                 try await model.startWhipPublish(config: config)
                 // Observe session state changes instead of assuming Live.
-                self?.observeSessionState(model: model)
-                self?.startStatsPolling(model: model)
+                observeSessionState(model: model)
+                startStatsPolling(model: model)
             } catch {
-                self?.publishState = .failed
-                self?.statusMessage = error.localizedDescription
+                publishState = .failed
+                statusMessage = error.localizedDescription
             }
         }
     }
