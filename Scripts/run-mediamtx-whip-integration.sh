@@ -11,23 +11,13 @@
 #   MEDIAMTX_STARTUP_ATTEMPTS      — Startup/readiness attempts before failing (default: 2)
 #   MEDIAMTX_READY_TIMEOUT_SECONDS — Seconds to wait for readiness per attempt (default: 30)
 #   MEDIAMTX_RETRY_DELAY_SECONDS   — Delay between startup attempts (default: 2)
+#   DERIVED_DATA                   — Xcode DerivedData path (default: "DerivedData")
 #   XCODEBUILD_BIN                 — xcodebuild executable override for local harnesses (default: "xcodebuild")
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-
-# --start-only: start MediaMTX and exit without running the test.  Used by CI
-# to include the integration tests in the main xcodebuild run instead of a
-# separate invocation.
-START_ONLY=false
-if [ "${1:-}" = "--start-only" ]; then
-    START_ONLY=true
-    # Prevent GitHub Actions runner from tracking and killing the background
-    # process when this step exits.
-    export RUNNER_TRACKING_ID=""
-fi
 CONTAINER_NAME="localcut-mediamtx-test"
 CONFIG_FILE="${PROJECT_DIR}/Tests/Fixtures/MediaMTX/mediamtx.yml"
 IMAGE="bluenviron/mediamtx:latest"
@@ -40,6 +30,7 @@ CONTAINER_CMD=""
 MEDIAMTX_STARTUP_ATTEMPTS="${MEDIAMTX_STARTUP_ATTEMPTS:-2}"
 MEDIAMTX_READY_TIMEOUT_SECONDS="${MEDIAMTX_READY_TIMEOUT_SECONDS:-30}"
 MEDIAMTX_RETRY_DELAY_SECONDS="${MEDIAMTX_RETRY_DELAY_SECONDS:-2}"
+DERIVED_DATA="${DERIVED_DATA:-DerivedData}"
 XCODEBUILD_BIN="${XCODEBUILD_BIN:-xcodebuild}"
 
 echo "=== MediaMTX WHIP Integration Test ==="
@@ -216,23 +207,6 @@ if [ "${MEDIAMTX_STARTED}" != true ]; then
     exit 1
 fi
 
-# In --start-only mode the caller runs the tests itself (e.g. as part of the
-# main xcodebuild invocation).  Keep MediaMTX alive; the caller is responsible
-# for stopping it.
-if [ "${START_ONLY}" = true ]; then
-    if [ -n "${MEDIAMTX_PID}" ]; then
-        echo "MediaMTX started (--start-only mode). PID: ${MEDIAMTX_PID}"
-        # Write PID so the caller can stop the process precisely.
-        echo "${MEDIAMTX_PID}" > "${MEDIAMTX_DOWNLOAD_DIR}/mediamtx.pid"
-    else
-        echo "MediaMTX started (--start-only mode) in container: ${CONTAINER_NAME}"
-    fi
-    # Reset all traps so the process keeps running after this script exits.
-    # The CI 'Stop MediaMTX' step is responsible for cleanup.
-    trap - EXIT SIGTERM SIGINT
-    exit 0
-fi
-
 # Run the integration test via xcodebuild
 echo "Running integration test..."
 cd "${PROJECT_DIR}"
@@ -241,6 +215,7 @@ LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 "${XCODEBUILD_BIN}" test \
     -scheme "LocalCut Studio" \
     -configuration Debug \
     -destination 'platform=macOS' \
+    -derivedDataPath "${DERIVED_DATA}" \
     -only-testing:"LocalCut StudioTests/WhipMediaMTXIntegrationTests" \
     -test-timeouts-enabled YES \
     -default-test-execution-time-allowance 300 \

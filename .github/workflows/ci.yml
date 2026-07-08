@@ -109,27 +109,13 @@ jobs:
           ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
       - name: Restore DerivedData cache
-        uses: actions/cache@v4
+        id: deriveddata-cache
+        uses: actions/cache/restore@v4
         with:
           path: DerivedData
           key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
           restore-keys: |
             deriveddata-${{ runner.os }}-webrtc-
-
-      - name: Validate Xcode project
-        run: |
-          xcodebuild -list -project "$PROJECT"
-
-      - name: Start MediaMTX
-        id: mediamtx
-        run: |
-          ./Scripts/run-mediamtx-whip-integration.sh --start-only
-          # Read PID written by --start-only mode (binary fallback only).
-          # In container mode no PID file is written; the stop step handles
-          # both cases.
-          if [ -f .build/mediamtx/mediamtx.pid ]; then
-            echo "pid=$(cat .build/mediamtx/mediamtx.pid)" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Build and test (with flake detection)
         run: ./Scripts/run-xcode-tests-with-flake-detection.sh
@@ -139,17 +125,6 @@ jobs:
       # not be masked by a retry pass).
       - name: MediaMTX WHIP integration
         run: LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh
-
-      - name: Stop MediaMTX
-        if: always()
-        run: |
-          MEDIAMTX_PID="${{ steps.mediamtx.outputs.pid }}"
-          if [ -n "$MEDIAMTX_PID" ] && kill -0 "$MEDIAMTX_PID" 2>/dev/null; then
-            kill "$MEDIAMTX_PID" 2>/dev/null || true
-          fi
-          # Container-mode fallback: stop by name if a container was used.
-          docker rm -f localcut-mediamtx-test 2>/dev/null || true
-          podman rm -f localcut-mediamtx-test 2>/dev/null || true
 
       - name: Restore OTIO validator venv
         uses: actions/cache@v4
@@ -185,6 +160,13 @@ jobs:
           path: flaky-report.json
           if-no-files-found: ignore
           retention-days: 30
+
+      - name: Save DerivedData cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.deriveddata-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: DerivedData
+          key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
 
   build-non-webrtc:
     name: Test (non-WebRTC stubs)
@@ -223,18 +205,15 @@ jobs:
           ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
       - name: Restore DerivedData cache
-        uses: actions/cache@v4
+        id: deriveddata-cache
+        uses: actions/cache/restore@v4
         with:
           path: DerivedData
           key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
           restore-keys: |
             deriveddata-${{ runner.os }}-nonwebrtc-
 
-      - name: Validate Xcode project
-        run: |
-          xcodebuild -list -project "$PROJECT"
-
-      # Runs tests to validate the non-WebRTC stub paths at runtime.
+      # Runs the focused publish suite for the non-WebRTC stub path.
       # The nonWebRTCVideoTapStoresLatestFrame test exercises the stub
       # VideoPublishTap; the WebRTC-enabled test job covers the real path.
       - name: Test without WebRTC
@@ -253,6 +232,7 @@ jobs:
             -destination 'platform=macOS' \
             -derivedDataPath "$DERIVED_DATA" \
             -resultBundlePath "$RESULT_BUNDLE" \
+            -only-testing:"LocalCut StudioTests/WhipPublishTests" \
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 300 \
             CODE_SIGNING_ALLOWED=NO \
@@ -270,3 +250,10 @@ jobs:
             DerivedData/Build/Logs/Build/*.xcactivitylog
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Save DerivedData cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.deriveddata-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: DerivedData
+          key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
