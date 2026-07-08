@@ -1175,22 +1175,20 @@ private struct MarkerDiamond: Shape {
     }
 }
 
-/// AppKit local-event monitor that adds / renames / deletes markers from the
-/// timeline keyboard shortcuts. The monitor lives for the lifetime of the
-/// timeline view but is scoped two ways: it only fires for events targeted at
-/// the *hosting* window (Gemini review #1 — multi-project windows each install
-/// their own monitor and must not fight over each other's keys), and it
-/// defers to any text-input first responder so typing into caption / inspector
-/// fields isn't stolen.
-///
-/// `Delete` only consumes the event when there is a selected marker — when
-/// none is selected, the event falls through to the scoped `onDeleteCommand`
-/// that drives clip / transition deletion from timeline focus.
 /// Window-scoped key handler for bare-key editor shortcuts that must yield to
 /// text inputs: m / shift-m (add / rename marker), Delete (when a marker is
 /// selected), and Space (play/pause). These can't be menu/button
 /// key-equivalents because those fire before a focused text field, swallowing
 /// the key while the user is typing into a rename popover / caption field.
+///
+/// The monitor is scoped two ways: it only fires for events targeted at the
+/// *hosting* window (multi-project windows each install their own monitor and
+/// must not fight over each other's keys), and it defers to any text-input
+/// first responder so typing into caption / inspector fields isn't stolen.
+///
+/// `Delete` only consumes the event when there is a selected marker — when
+/// none is selected, the event falls through to the scoped `onDeleteCommand`
+/// that drives clip / transition deletion from timeline focus.
 private struct EditorKeyHandler: NSViewRepresentable {
     let onAdd: () -> Void
     let onRename: () -> Void

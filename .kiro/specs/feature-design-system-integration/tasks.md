@@ -99,8 +99,8 @@
 - [x] **T9.3** Honor Reduce Motion on the scopes transition/animation; adaptive
   marker stroke (`separatorColor`); clip-kind glyph; format-badge VoiceOver
   label; scopes `accessibilityValue`; secondary tool picker `.isHeader`.
-- [x] **T9.4** Standard controls/materials: status bar `.bar`; Beauty toggles →
-  checkbox; inspector timecodes `monospacedDigit`; render-queue
+- [x] **T9.4** Standard controls/materials: status bar `.bar`; Preserve Pitch +
+  Beauty toggles → checkbox; inspector timecodes `monospacedDigit`; render-queue
   inline `Text` placeholder; Master Gain via `LabeledSliderRow`; scopes on
   `lcLane`; timeline fonts → text styles; Align-Window reset.
 - [x] **T9.5** Pointer feedback: ruler resize cursor + scrub tooltip; marker
@@ -151,9 +151,14 @@
   Split command enabled for unselected clips because the command selects the
   clicked clip before splitting.
 - [x] **T10.7** Live review follow-up: remove global bare-Delete key equivalents
-  from menu/toolbar actions; restore white countdown text over the fixed dark
-  overlay; constrain the Diagnostics HUD width; verify the callout list keeps
-  `.isSelected` for VoiceOver.
+  from menu/toolbar actions; change the countdown Cancel button from `.bordered`
+  to `.borderedProminent` for contrast over the dark overlay; constrain the
+  Diagnostics HUD width; verify the callout list keeps `.isSelected` for
+  VoiceOver; replace `.yellow` warning indicators with `.orange` for
+  accessibility contrast; normalise status-message ellipsis from ASCII `...` to
+  Unicode `…`; add semantic timeline colour tokens (`lcCaptionFill`,
+  `lcCaptionStroke`, `lcTransitionFill`, `lcTransitionIcon`, `lcBeatMarker`,
+  `lcTrimHover`) to `Theme.swift`.
 
 ## Verification
 

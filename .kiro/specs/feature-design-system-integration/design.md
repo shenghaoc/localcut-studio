@@ -159,9 +159,10 @@ are all standard SwiftUI/AppKit (no new paradigms):
   film/waveform glyph so kind isn't hue-only (Differentiate Without Color); the
   format badge gets a spelled-out VoiceOver label; the scopes Canvas gains a
   live/empty accessibility value.
-- **Standard controls & materials.** The status bar uses `.bar`; the Beauty
-  toggles drop `.switch` for the Form-default checkbox; inspector timecodes use
-  `monospacedDigit`; the render-queue empty state uses inline `Text` with `.foregroundStyle(.secondary)`;
+- **Standard controls & materials.** The status bar uses `.bar`; the Preserve
+  Pitch toggle and Beauty toggles drop `.switch` for the Form-default checkbox;
+  inspector timecodes use `monospacedDigit`; the render-queue empty state uses
+  inline `Text` with `.foregroundStyle(.secondary)`;
   Master Gain uses the shared `LabeledSliderRow`; the scopes pane sits on the
   recessed content surface (`lcLane`) rather than a chrome material; timeline
   fonts use `caption2`/monospaced text styles instead of raw point sizes.

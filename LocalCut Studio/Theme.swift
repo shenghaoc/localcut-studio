@@ -23,16 +23,17 @@ extension Color {
     /// colour so it adapts with the appearance like `lcLane`.
     static let lcRail = Color(nsColor: .windowBackgroundColor)
 
-    /// Caption block fill colour — indigo at varying opacity for the timeline
-    /// caption lane. Uses the system indigo so it adapts to light/dark mode.
+    /// Caption block fill colour — base indigo for the timeline caption lane;
+    /// call sites apply varying opacity. Uses the system indigo so it adapts to
+    /// light/dark mode.
     static let lcCaptionFill = Color.indigo
 
     /// Caption block stroke colour — indigo at 75% opacity for the timeline
     /// caption lane border.
     static let lcCaptionStroke = Color.indigo.opacity(0.75)
 
-    /// Transition glyph fill colour — orange at varying opacity for the timeline
-    /// transition overlay.
+    /// Transition glyph fill colour — base orange for the timeline transition
+    /// overlay; call sites apply varying opacity (0.3 / 0.5 / 0.8).
     static let lcTransitionFill = Color.orange
 
     /// Beat marker colour — yellow at 65% opacity for the timeline ruler.

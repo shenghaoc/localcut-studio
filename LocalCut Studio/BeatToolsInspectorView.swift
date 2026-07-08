@@ -38,7 +38,6 @@ struct BeatToolsInspectorView: View {
             }
             .disabled(!model.canAnalyzeBeatsForSelection)
             .help("Analyse the selected audio source and cache beat markers.")
-            .accessibilityHint("Analyse the selected audio source and cache beat markers.")
 
             Toggle("Show Beat Markers", isOn: $model.showBeatMarkers)
                 .disabled(model.beatAnalyses.isEmpty)
