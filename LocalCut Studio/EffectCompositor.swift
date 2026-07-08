@@ -746,7 +746,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     ///
     /// **Isolation invariant:** Always acquired before accessing
     /// `overlaySourceRegistries`.
-    nonisolated(unsafe) private static let overlaySourceLock = NSLock()
+    private static let overlaySourceLock = NSLock()
     /// Frame-source registries keyed by preview/export session. Sources are
     /// intentionally not shared globally by overlay ID: a preview rebuild and an
     /// export can overlap with different resolved files for the same overlay ID.

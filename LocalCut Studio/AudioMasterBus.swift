@@ -283,10 +283,11 @@ final class AudioMasterBus {
         player.reset()
         liveGainReductionStore.update(LiveGainReduction())
 
-        // Confinement: `composition` and `audioMix` are freshly-built local
-        // values consumed only by the detached task below. `nonisolated(unsafe)`
-        // suppresses isolation checking so the detached task can capture them;
-        // the originals go out of scope after this block.
+        // Confinement: the main actor retains these immutable AVFoundation
+        // objects for seek reuse, while this detached decode task only reads the
+        // same snapshot. `nonisolated(unsafe)` is scoped to the task capture so
+        // Swift does not treat the read-only AVComposition/AVAudioMix references
+        // as mutable actor state crossing executors.
         nonisolated(unsafe) let comp = composition
         nonisolated(unsafe) let mix = audioMix
         let settingsStore = liveCleanupSettingsStore
