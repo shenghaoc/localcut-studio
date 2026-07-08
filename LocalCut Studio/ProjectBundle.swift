@@ -196,7 +196,7 @@ nonisolated struct ProjectBundleData: Sendable {
     var fingerprintsJSON: Data?
 }
 
-nonisolated enum ProjectBundle {
+nonisolated enum ProjectBundle: Sendable {
 
     /// Reads the raw metadata of a `.lcbundle`. Decode happens at the call site
     /// (on whichever actor owns the document model), so we can run this

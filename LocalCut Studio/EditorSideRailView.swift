@@ -126,7 +126,7 @@ struct EditorSideRailView: View {
 /// Primary side-rail groups, mirroring browser-editor's top-level rail tabs.
 /// `internal` (not `private`) so the stale-value fallback in `resolve` can be
 /// unit-tested.
-enum RailGroup: String, CaseIterable, Identifiable {
+enum RailGroup: String, CaseIterable, Identifiable, Sendable {
     case inspector
     case audio
     case captions
@@ -152,7 +152,7 @@ enum RailGroup: String, CaseIterable, Identifiable {
 }
 
 /// Secondary panels grouped under the Tools tab.
-enum ToolPanel: String, CaseIterable, Identifiable {
+enum ToolPanel: String, CaseIterable, Identifiable, Sendable {
     case beats
     case renders
     case markers

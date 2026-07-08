@@ -963,7 +963,7 @@ struct TimelineView: View {
 /// viewport-centre, and target-clamp formulas can be unit-tested without a
 /// View context (audit P3). Holding them in a top-level enum keeps the View
 /// methods one-liners that just delegate.
-enum TimelineScrollMath {
+enum TimelineScrollMath: Sendable {
     /// How many seconds of timeline a single page button advances. Floored at
     /// 5 s so the page step still feels useful when the user is zoomed in.
     static func pageSeconds(pps: CGFloat) -> Double {
@@ -1284,7 +1284,7 @@ private struct EditorKeyHandler: NSViewRepresentable {
 /// for the SwiftUI-hosted control path) without standing up an `NSWindow`.
 /// The Coordinator only has to translate live responder state into the four
 /// booleans the policy takes; the rest is deterministic.
-enum EditorKeyHandlerPolicy {
+enum EditorKeyHandlerPolicy: Sendable {
     enum Action: Equatable {
         /// Pass the event through unchanged. Used for any event we don't own
         /// (foreign window, modifier-laden chord, focused text input, etc.).

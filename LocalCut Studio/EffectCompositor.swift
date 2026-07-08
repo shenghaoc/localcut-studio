@@ -41,7 +41,7 @@ struct CompositorLayer {
 }
 
 /// A synthetic solid-colour scene layer scheduled by Program Mode layout clips.
-struct ColourCompositorLayer {
+struct ColourCompositorLayer: Sendable {
     let hex: String
     let transform: CGAffineTransform
     let opacity: Float

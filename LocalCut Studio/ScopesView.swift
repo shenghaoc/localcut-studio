@@ -2,7 +2,7 @@ import SwiftUI
 import LocalCutCore
 
 /// One of the scope panels the user can switch between.
-enum ScopeKind: String, CaseIterable, Identifiable {
+enum ScopeKind: String, CaseIterable, Identifiable, Sendable {
     case waveform
     case vectorscope
 

@@ -8,7 +8,7 @@ import LocalCutCore
 /// Handles landing a Program Session result into the project timeline.
 /// Creates ISO tracks for recorded sources plus 1 layout track,
 /// all in a single undoable transaction.
-enum ProgramLanding {
+enum ProgramLanding: Sendable {
 
     /// Lands a program session result into the project.
     ///

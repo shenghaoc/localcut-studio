@@ -177,7 +177,7 @@ enum SafeZoneLibrary {
     }
 }
 
-enum PreviewCanvasGeometry {
+enum PreviewCanvasGeometry: Sendable {
     static func canvasRect(container: CGSize, renderSize: CGSize) -> CGRect {
         guard container.width > 0, container.height > 0,
               renderSize.width > 0, renderSize.height > 0 else {

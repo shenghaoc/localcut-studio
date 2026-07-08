@@ -19,7 +19,7 @@ struct BuiltComposition {
 /// This is the native counterpart to the browser project's compositing engine:
 /// instead of a WebGPU pipeline we lean on AVFoundation composition tracks plus
 /// a custom video compositor to transform, grade, and stack each track.
-enum CompositionBuilder {
+enum CompositionBuilder: Sendable {
 
     enum BuildError: Error { case noVideoTrackInSource, noAudioTrackInSource }
 

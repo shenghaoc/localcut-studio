@@ -9,7 +9,7 @@ import LocalCutCore
 /// A lightweight, in-memory snapshot of the editable arrangement. Undo/redo swap
 /// whole snapshots rather than threading inverse operations through every edit,
 /// so one user action maps to exactly one undo step even when many helpers run.
-struct ProjectState: Equatable {
+struct ProjectState: Equatable, Sendable {
     struct TrackClips: Equatable {
         let trackID: UUID
         var name: String
@@ -104,7 +104,7 @@ struct ProjectState: Equatable {
     }
 }
 
-struct RecordingUndoState: Equatable {
+struct RecordingUndoState: Equatable, Sendable {
     var lastRecordingSlots: [RecordingSlot]
     var hasLastRecordingTake: Bool
     var lastRecordingPiPPreset: PiPPreset?

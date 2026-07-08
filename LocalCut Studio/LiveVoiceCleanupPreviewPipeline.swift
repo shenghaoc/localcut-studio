@@ -125,7 +125,7 @@ struct BypassRampState: Sendable {
     }
 }
 
-enum LiveVoiceCleanupPreviewPipeline {
+enum LiveVoiceCleanupPreviewPipeline: Sendable {
     nonisolated static let maxQueuedFrames = 16_384
 
     nonisolated static func decodeProcessAndSchedule(

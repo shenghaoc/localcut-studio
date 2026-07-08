@@ -30,7 +30,7 @@ extension OverlayFrameSource {
 
 // MARK: - Factory
 
-enum OverlayFrameSourceFactory {
+enum OverlayFrameSourceFactory: Sendable {
     /// Creates the appropriate frame source for the given overlay clip.
     /// The `sourceURL` is resolved from the bookmark or bundle-relative path.
     static func makeSource(for overlay: OverlayClip,

@@ -280,7 +280,7 @@ nonisolated enum CaptionDrawing {
 // MARK: - Animation
 
 /// The per-frame visual state of an animating line.
-struct CaptionAnimationFrame: Equatable {
+struct CaptionAnimationFrame: Equatable, Sendable {
     var translation: CGSize = .zero
     var scale: CGFloat = 1
     var opacity: Float = 1

@@ -4,7 +4,7 @@ import CoreMedia
 import Accelerate
 import LocalCutCore
 
-enum VoiceCleanupAudioProcessing {
+enum VoiceCleanupAudioProcessing: Sendable {
     struct PCMBlock {
         var samples: [Float]
         var channels: Int
@@ -242,7 +242,7 @@ enum VoiceCleanupAudioProcessing {
     }
 }
 
-enum VoiceCleanupError: LocalizedError {
+enum VoiceCleanupError: LocalizedError, Sendable {
     case readerOutputRejected
     case readerStartFailed
 
