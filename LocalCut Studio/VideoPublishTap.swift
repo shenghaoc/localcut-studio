@@ -29,7 +29,13 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
         lock.unlock()
     }
     #else
-    nonisolated(unsafe) private(set) var latestPixelBuffer: CVPixelBuffer?
+    var latestPixelBuffer: CVPixelBuffer? {
+        lock.lock()
+        defer { lock.unlock() }
+        return latestPixelBufferStorage
+    }
+
+    private var latestPixelBufferStorage: CVPixelBuffer?
     init() {}
     nonisolated func detachFromWebRTC() {}
     #endif
@@ -76,7 +82,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
         }
         #else
         lock.lock()
-        latestPixelBuffer = buffer
+        latestPixelBufferStorage = buffer
         lock.unlock()
         #endif
 

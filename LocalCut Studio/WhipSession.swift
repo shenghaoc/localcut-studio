@@ -67,7 +67,7 @@ actor WhipSession {
     #endif
 
     private var stateContinuation: AsyncStream<PublishState>.Continuation?
-    nonisolated(unsafe) private var _cachedStateStream: AsyncStream<PublishState>?
+    private var _cachedStateStream: AsyncStream<PublishState>?
     private var statsTask: Task<Void, Never>?
 
     init(client: some WhipClient, budget: EncoderBudget, config: PublishConfig = PublishConfig(), reconnectController: ReconnectController = ReconnectController()) {

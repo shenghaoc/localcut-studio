@@ -161,10 +161,10 @@ struct WhipPublishTests {
 
     @Test("Reconnect controller applies grace period and backoff ladder")
     func reconnectControllerTiming() async throws {
-        let controller = ReconnectController()
         let probe = TimeProbe(now: 100)
-        controller.clock = { probe.now }
-        controller.sleep = { duration in probe.recordSleep(duration) }
+        let controller = ReconnectController(
+            clock: { probe.now },
+            sleep: { duration in probe.recordSleep(duration) })
 
         controller.markDisconnected()
         probe.setNow(101.25)

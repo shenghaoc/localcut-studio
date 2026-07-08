@@ -15,7 +15,15 @@ final class ScreencastEventLogWriter {
     private var target: CaptureTarget
     private var captureRegion: CaptureRegion?
     private var events: [ScreencastEvent] = []
+    /// Local NSEvent monitor for own-app recordings.
+    ///
+    /// **Isolation invariant:** Installed/removed on `@MainActor` in
+    /// `startMonitoring`/`stopMonitoring`; also removed in `deinit` (nonisolated)
+    /// via `DispatchQueue.main.async` (main-thread affinity required by AppKit).
     nonisolated(unsafe) private var localMonitor: Any?
+    /// Global NSEvent monitor for non-own-app recordings.
+    ///
+    /// **Isolation invariant:** Same as `localMonitor`.
     nonisolated(unsafe) private var globalMonitor: Any?
 
     /// Creates a writer that will store events relative to the given start time.
@@ -110,9 +118,10 @@ final class ScreencastEventLogWriter {
         }
     }
 
-    /// Remove the monitor as a safety net. `NSEvent.removeMonitor` must run on
-    /// the main thread but `deinit` can be called from any executor, so dispatch
-    /// the removal. The monitor handler captures `self` weakly, so any events
+    /// Remove the monitor as a safety net. `NSEvent.removeMonitor` must be
+    /// called from the same thread that installed the monitor (main thread
+    /// here), but `deinit` can be called from any executor, so dispatch the
+    /// removal. The monitor handler captures `self` weakly, so any events
     /// arriving between deallocation and the async removal are harmless.
     deinit {
         let local = localMonitor

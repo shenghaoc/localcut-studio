@@ -100,7 +100,8 @@ final class AudioMasterBus {
     // MARK: - Live voice-cleanup preview routing (T1.7 / T1.8 / T1.9)
 
     @ObservationIgnored private var livePlayerNode: AVAudioPlayerNode?
-    @ObservationIgnored nonisolated(unsafe) private var liveSchedulingTask: Task<Void, Never>?
+    /// In-flight live voice-cleanup scheduling task.
+    @ObservationIgnored private var liveSchedulingTask: Task<Void, Never>?
     @ObservationIgnored private var currentLiveComposition: AVComposition?
     @ObservationIgnored private var currentLiveAudioMix: AVAudioMix?
     @ObservationIgnored private let liveCleanupSettingsStore = LiveVoiceCleanupSettingsStore()
@@ -282,6 +283,11 @@ final class AudioMasterBus {
         player.reset()
         liveGainReductionStore.update(LiveGainReduction())
 
+        // Confinement: the main actor retains these immutable AVFoundation
+        // objects for seek reuse, while this detached decode task only reads the
+        // same snapshot. `nonisolated(unsafe)` is scoped to the task capture so
+        // Swift does not treat the read-only AVComposition/AVAudioMix references
+        // as mutable actor state crossing executors.
         nonisolated(unsafe) let comp = composition
         nonisolated(unsafe) let mix = audioMix
         let settingsStore = liveCleanupSettingsStore

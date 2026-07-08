@@ -152,7 +152,7 @@ final class EditorModel {
 
     /// In-flight loudness measurement task. Cancelled on the next invocation
     /// to prevent concurrent full-composition decode + DSP operations.
-    @ObservationIgnored nonisolated(unsafe) var loudnessTask: Task<Void, Never>?
+    @ObservationIgnored var loudnessTask: Task<Void, Never>?
 
     /// Session cache of imported LUT filenames keyed by their bookmark, so the
     /// inspector can show a LUT's name without resolving the security-scoped
@@ -186,12 +186,24 @@ final class EditorModel {
     var recordingMicLevel: Float = 0
     var recordingLiveMonitorLatencyMs: Double = 0
     var recoveredCaptureSessions: [CaptureSessionResult] = []
+    /// Security-scoped URL for the recordings folder. Owned by `EditorModel`;
+    /// updated on `@MainActor` recording setup/teardown and stopped in `deinit`.
+    ///
+    /// **Isolation invariant:** Normal isolation cannot express this final
+    /// nonisolated cleanup read, but the model is no longer reachable by
+    /// main-actor workflows during `deinit`; the read only balances any
+    /// remaining security-scoped grant.
     @ObservationIgnored nonisolated(unsafe) var recordingsFolderAccessURL: URL?
+    /// In-flight recording monitor task. Cancelled in `deinit` for cleanup.
+    ///
+    /// **Isolation invariant:** All runtime reads/writes occur on `@MainActor`.
+    /// `nonisolated(unsafe)` allows the nonisolated `deinit` to cancel it;
+    /// task cancellation is idempotent.
     @ObservationIgnored nonisolated(unsafe) var recordingMonitorTask: Task<Void, Never>?
     /// Accumulated wall-clock time spent paused, subtracted from elapsed display.
-    @ObservationIgnored nonisolated(unsafe) var recordingPausedDuration: TimeInterval = 0
+    @ObservationIgnored var recordingPausedDuration: TimeInterval = 0
     /// Wall-clock time when the current pause started, or nil if not paused.
-    @ObservationIgnored nonisolated(unsafe) var pauseStartedAt: Date?
+    @ObservationIgnored var pauseStartedAt: Date?
 
     // Phase 42 — Recorder UX
     var isCountdownActive = false
@@ -201,7 +213,7 @@ final class EditorModel {
     var hasLastRecordingTake = false
     /// Stored request for retake: replaces the most recent chunk-set in the same
     /// timeline slot.
-    @ObservationIgnored nonisolated(unsafe) var lastRecordingRequest: CaptureStartRequest?
+    @ObservationIgnored var lastRecordingRequest: CaptureStartRequest?
     /// Tracks the timeline slots occupied by the most recent recording landing,
     /// so retake can replace them without touching unrelated tracks.
     @ObservationIgnored var lastRecordingSlots: [RecordingSlot] = []
@@ -221,17 +233,32 @@ final class EditorModel {
     /// Floating control panel controller.
     @ObservationIgnored let floatingPanelController = FloatingPanelController()
 
+    /// AVPlayer time observer. Installed on `@MainActor`, removed in `deinit`.
+    ///
+    /// **Isolation invariant:** `removeTimeObserver` is thread-safe; `deinit`
+    /// access is benign.
     @ObservationIgnored nonisolated(unsafe) private var timeObserver: Any?
+    /// AVPlayer end-of-item observer. Installed on `@MainActor`, removed in `deinit`.
+    ///
+    /// **Isolation invariant:** `NotificationCenter.removeObserver` is
+    /// thread-safe; `deinit` access is benign.
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
     @ObservationIgnored let beatAnalyzer = BeatAnalyzer()
-    // `nonisolated(unsafe)` so the nonisolated `deinit` can cancel it, matching
-    // the other deinit-accessed observers (timeObserver/endObserver/accessedURLs).
+    /// In-flight beat-analysis task.
+    ///
+    /// **Isolation invariant:** Owned and mutated by `EditorModel` on
+    /// `@MainActor`; read in nonisolated `deinit` only to issue idempotent task
+    /// cancellation after the model has left normal main-actor workflows.
     @ObservationIgnored nonisolated(unsafe) var beatAnalysisTask: Task<Void, Never>?
     @ObservationIgnored var beatAnalysisKeys: [MediaItem.ID: String] = [:]
     @ObservationIgnored var cachedProjectedBeatTimes: [CMTime] = []
     @ObservationIgnored var projectedBeatTimesRevision: Int = 0
     @ObservationIgnored var lastProjectedBeatTimesRevision: Int = -1
-    @ObservationIgnored var activeOverlaySourceRegistryID: UUID?
+    /// Active overlay source registry ID for the current preview.
+    ///
+    /// **Isolation invariant:** Mutated on `@MainActor`; read in `deinit`
+    /// (nonisolated) for resource cleanup via `EffectCompositor.releaseOverlaySources`.
+    @ObservationIgnored nonisolated(unsafe) var activeOverlaySourceRegistryID: UUID?
 
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.
@@ -272,11 +299,18 @@ final class EditorModel {
     /// to `project.mediaItems.map(\.url)`) can't accidentally revoke it on
     /// undo/redo (the bundle URL is never equal to any media item URL —
     /// item URLs point at files *inside* the bundle).
+    ///
+    /// **Isolation invariant:** Mutated on `@MainActor`; iterated in nonisolated
+    /// `deinit` after the model has left normal main-actor workflows. The read
+    /// is only for balancing remaining security-scoped grants.
     @ObservationIgnored nonisolated(unsafe) var accessedURLs: Set<URL> = []
 
     /// Security-scoped access on the outer `.lcbundle` directory, when the
     /// current document is a bundle. Tracked separately from `accessedURLs`
     /// for the reason in that property's doc. Stopped on session teardown.
+    ///
+    /// **Isolation invariant:** Mutated on `@MainActor`; read from nonisolated
+    /// teardown only to balance a remaining bundle security-scoped grant.
     @ObservationIgnored nonisolated(unsafe) var bundleAccessURL: URL?
 
     /// Bumped on every session swap (New/Open). Async import/relink capture it
@@ -356,6 +390,7 @@ final class EditorModel {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         EffectCompositor.releaseOverlaySources(for: activeOverlaySourceRegistryID)
         for url in accessedURLs { url.stopAccessingSecurityScopedResource() }
+        bundleAccessURL?.stopAccessingSecurityScopedResource()
         recordingsFolderAccessURL?.stopAccessingSecurityScopedResource()
     }
 

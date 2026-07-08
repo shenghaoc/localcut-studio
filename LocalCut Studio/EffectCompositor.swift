@@ -742,10 +742,16 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
 
     // MARK: - Overlays
 
+    /// Lock protecting `overlaySourceRegistries`.
+    ///
+    /// **Isolation invariant:** Always acquired before accessing
+    /// `overlaySourceRegistries`.
+    private static let overlaySourceLock = NSLock()
     /// Frame-source registries keyed by preview/export session. Sources are
     /// intentionally not shared globally by overlay ID: a preview rebuild and an
     /// export can overlap with different resolved files for the same overlay ID.
-    nonisolated(unsafe) private static var overlaySourceLock = NSLock()
+    ///
+    /// **Isolation invariant:** All access guarded by `overlaySourceLock`.
     nonisolated(unsafe) private static var overlaySourceRegistries: [UUID: OverlaySourceRegistry] = [:]
 
     /// Registers one immutable source map for a preview/export session.
