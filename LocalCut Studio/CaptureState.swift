@@ -5,6 +5,10 @@ import LocalCutCore
 
 /// Focused state container for capture/recording functionality.
 /// Extracted from EditorModel to improve cohesion and testability.
+///
+/// Note: This container holds the recording lifecycle properties.
+/// The EditorModel still owns the actual properties; this is a
+/// structural template for future decomposition.
 @Observable
 @MainActor
 final class CaptureState {
@@ -19,7 +23,6 @@ final class CaptureState {
     var recordingStartedAt: Date?
     var recordingElapsedSeconds: Double = 0
     var recordingDiskFreeBytes: Int64?
-    var recordingDiskWarning: RecordingDiskWarning?
     var recordingSourceCount: Int = 0
     var recordingBackpressureCount: Int = 0
     var recordingIncludesMicrophone = false
