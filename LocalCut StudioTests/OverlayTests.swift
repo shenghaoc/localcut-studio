@@ -168,7 +168,12 @@ func overlayRenderItemMetadata() {
         scale: 2.0,
         rotation: 1.57,
         opacity: 0.6,
-        endAction: .loop)
+        endAction: .loop,
+        positionXKeyframes: Keyframed<Float>(defaultValue: 0),
+        positionYKeyframes: Keyframed<Float>(defaultValue: 0),
+        scaleKeyframes: Keyframed<Float>(defaultValue: 1),
+        rotationKeyframes: Keyframed<Float>(defaultValue: 0),
+        opacityKeyframes: Keyframed<Float>(defaultValue: 1))
     #expect(item.sourceType == .alphaVideo)
     #expect(item.opacity == 0.6)
     #expect(item.endAction == .loop)
