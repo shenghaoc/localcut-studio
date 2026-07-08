@@ -3,12 +3,13 @@ import Foundation
 import CoreGraphics
 import CoreImage
 import CoreMedia
+import os
 import LocalCutCore
 @testable import LocalCut_Studio
 
 private nonisolated final class PurgeableOverlaySource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize = CGSize(width: 8, height: 8)
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock(initialState: ())
     private var retainedFrames: Int
 
     init(cachedFrames: Int) {
@@ -16,7 +17,7 @@ private nonisolated final class PurgeableOverlaySource: OverlayFrameSource, @unc
     }
 
     nonisolated var cachedFrameCount: Int {
-        lock.withLock { retainedFrames }
+        lock.withLock { _ in retainedFrames }
     }
 
     nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage? {
@@ -24,7 +25,7 @@ private nonisolated final class PurgeableOverlaySource: OverlayFrameSource, @unc
     }
 
     nonisolated func purgeCachedFrames() {
-        lock.withLock { retainedFrames = 0 }
+        lock.withLock { _ in retainedFrames = 0 }
     }
 }
 

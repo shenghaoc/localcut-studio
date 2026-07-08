@@ -278,7 +278,7 @@ struct MarkersEditorTests {
     @Test("selectMarker(id:) clears clip / transition / media focus on every UI surface (post-revision review P1)")
     func selectMarkerFunnelExclusivity() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = CMTime(seconds: 5, preferredTimescale: 600)
         model.project.mediaItems.append(media)
         let clip = Clip(mediaID: media.id, sourceStart: .zero,
@@ -304,7 +304,7 @@ struct MarkersEditorTests {
     @Test("Adding a marker clears clip / transition / media focus (Gemini review #4, Codex review #2)")
     func markerSelectionIsMutuallyExclusive() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = CMTime(seconds: 5, preferredTimescale: 600)
         model.project.mediaItems.append(media)
         let clip = Clip(mediaID: media.id, sourceStart: .zero,

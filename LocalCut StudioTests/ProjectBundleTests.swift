@@ -19,7 +19,7 @@ struct ProjectBundleTests {
     /// reclaims `NSTemporaryDirectory()` between launches, so test runs don't
     /// pollute long-term state.
     private func makeTempDirectory(_ label: String) throws -> URL {
-        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+        let url = URL(filePath: NSTemporaryDirectory())
             .appendingPathComponent("lcbundle-tests-\(label)-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
@@ -716,7 +716,7 @@ struct ProjectBundleTests {
         // `bundleAccessURL` (and not in `accessedURLs`). A non-security-scoped
         // tmp URL is fine here — the test exercises the bookkeeping, not the
         // kernel grant.
-        let bundleURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        let bundleURL = URL(filePath: NSTemporaryDirectory())
             .appendingPathComponent("Sample.lcbundle")
         model.adoptBundleAccess(bundleURL, didStart: true)
         #expect(model.bundleAccessURL == bundleURL)

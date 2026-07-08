@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import CoreVideo
 import CoreMedia
+import os
 @testable import LocalCut_Studio
 import LocalCutCore
 
@@ -9,19 +10,15 @@ import LocalCutCore
 struct ProgramSessionTests {
 
     private nonisolated final class FrameCounter: @unchecked Sendable {
-        private let lock = NSLock()
+        private let lock = OSAllocatedUnfairLock(initialState: ())
         private var storage = 0
 
         var value: Int {
-            lock.lock()
-            defer { lock.unlock() }
-            return storage
+            lock.withLock { _ in storage }
         }
 
         func increment() {
-            lock.lock()
-            storage += 1
-            lock.unlock()
+            lock.withLock { _ in storage += 1 }
         }
     }
 

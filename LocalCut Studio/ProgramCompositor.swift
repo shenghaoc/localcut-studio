@@ -2,6 +2,7 @@ import Foundation
 import CoreImage
 import CoreVideo
 import Metal
+import os
 import LocalCutCore
 
 // MARK: - ProgramCompositor
@@ -24,7 +25,7 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
     private let pixelBufferPool: CVPixelBufferPool?
 
     /// Lock protecting all mutable state below.
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock(initialState: ())
 
     /// Per-source latest pixel buffer.
     private var sourceBuffers: [UUID: CVPixelBuffer] = [:]
@@ -60,61 +61,57 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
 
     /// Updates the source buffer for a given source.
     func updateSource(_ sourceID: UUID, buffer: CVPixelBuffer) {
-        lock.lock()
-        defer { lock.unlock() }
-        sourceBuffers[sourceID] = buffer
+        lock.withLockUnchecked { _ in sourceBuffers[sourceID] = buffer }
     }
 
     /// Removes a source's buffer (on source disconnect).
     func removeSource(_ sourceID: UUID) {
-        lock.lock()
-        defer { lock.unlock() }
-        sourceBuffers.removeValue(forKey: sourceID)
+        lock.withLockUnchecked { _ in sourceBuffers.removeValue(forKey: sourceID) }
     }
 
     /// Sets the current scene. Called when the user switches scenes.
     func switchScene(to sceneId: UUID, enableTransitions: Bool = false) {
-        lock.lock()
-        defer { lock.unlock() }
-        let newScene = scenes.first(where: { $0.id == sceneId })
-        let changed = currentScene?.id != sceneId
-        currentScene = newScene
-        if changed && enableTransitions {
-            transitionStartTime = Date()
-        } else if changed {
-            transitionStartTime = nil
+        lock.withLock { _ in
+            let newScene = scenes.first(where: { $0.id == sceneId })
+            let changed = currentScene?.id != sceneId
+            currentScene = newScene
+            if changed && enableTransitions {
+                transitionStartTime = Date()
+            } else if changed {
+                transitionStartTime = nil
+            }
         }
     }
 
     /// Updates the full scene list (called when scenes are edited).
     func updateScenes(_ scenes: [SceneDefinition]) {
-        lock.lock()
-        defer { lock.unlock() }
-        self.scenes = scenes
-        if let currentId = currentScene?.id {
-            currentScene = scenes.first(where: { $0.id == currentId })
+        lock.withLock { _ in
+            self.scenes = scenes
+            if let currentId = currentScene?.id {
+                currentScene = scenes.first(where: { $0.id == currentId })
+            }
         }
     }
 
     /// Composites one output frame from the current scene's layers.
     func compositeFrame() -> CIImage? {
         // Snapshot mutable state under lock; render outside lock.
-        lock.lock()
-        let scene = currentScene
-        let transitionAlpha: Float
-        if let start = transitionStartTime {
-            let elapsed = Date().timeIntervalSince(start)
-            let progress = min(elapsed / transitionDuration, 1.0)
-            let t = 1.0 - pow(1.0 - progress, 3)
-            transitionAlpha = Float(t)
-            if progress >= 1.0 {
-                transitionStartTime = nil
+        let (scene, transitionAlpha, buffers) = lock.withLockUnchecked { _ -> (SceneDefinition?, Float, [UUID: CVPixelBuffer]) in
+            let scene = currentScene
+            let alpha: Float
+            if let start = transitionStartTime {
+                let elapsed = Date().timeIntervalSince(start)
+                let progress = min(elapsed / transitionDuration, 1.0)
+                let t = 1.0 - pow(1.0 - progress, 3)
+                alpha = Float(t)
+                if progress >= 1.0 {
+                    transitionStartTime = nil
+                }
+            } else {
+                alpha = 1.0
             }
-        } else {
-            transitionAlpha = 1.0
+            return (scene, alpha, sourceBuffers)
         }
-        let buffers = sourceBuffers
-        lock.unlock()
 
         guard let scene else { return nil }
 

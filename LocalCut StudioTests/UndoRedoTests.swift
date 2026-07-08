@@ -15,7 +15,7 @@ struct UndoRedoTests {
     /// A model with one 10s video clip on V1.
     private func makeModel(clipDuration: Double = 10) -> (EditorModel, Clip.ID) {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = time(clipDuration)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -79,7 +79,7 @@ struct UndoRedoTests {
     @Test("Removing one duplicate media keeps shared URL access until the last item is gone")
     func removeMediaKeepsSharedURLAccess() {
         let model = EditorModel()
-        let url = URL(fileURLWithPath: "/tmp/shared-source.mov")
+        let url = URL(filePath: "/tmp/shared-source.mov")
         let first = MediaItem(url: url)
         let second = MediaItem(url: url)
         model.project.mediaItems.append(contentsOf: [first, second])

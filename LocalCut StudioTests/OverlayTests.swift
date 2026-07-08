@@ -34,7 +34,7 @@ func overlayDefaults() {
 @Test("Overlay selection clears when another editable target is selected")
 func overlaySelectionClearsForOtherTargets() {
     let model = EditorModel()
-    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    let media = MediaItem(url: URL(filePath: "/dev/null"))
     model.project.mediaItems.append(media)
     let clip = Clip(mediaID: media.id,
                     sourceStart: .zero,
@@ -72,7 +72,7 @@ func overlaySelectionClearsForOtherTargets() {
 
 @Test("AnimatedImageSource returns nil for nonexistent file")
 func animatedImageSourceMissingFile() {
-    let url = URL(fileURLWithPath: "/nonexistent/file.webp")
+    let url = URL(filePath: "/nonexistent/file.webp")
     let source = AnimatedImageSource(url: url)
     #expect(source == nil)
 }
@@ -81,7 +81,7 @@ func animatedImageSourceMissingFile() {
 
 @Test("AlphaVideoSource returns nil for nonexistent file")
 func alphaVideoSourceMissingFile() async {
-    let url = URL(fileURLWithPath: "/nonexistent/file.mov")
+    let url = URL(filePath: "/nonexistent/file.mov")
     let source = await AlphaVideoSource.make(url: url)
     #expect(source == nil)
 }
@@ -117,9 +117,9 @@ func importOverlayRejectsMismatchedType() async throws {
 
 @Test("Overlay source types expose narrow importer filters")
 func overlaySourceTypeImporterFilters() {
-    #expect(OverlaySourceType.animatedImage.acceptsSourceURL(URL(fileURLWithPath: "/tmp/sticker.apng")))
-    #expect(OverlaySourceType.lottie.acceptsSourceURL(URL(fileURLWithPath: "/tmp/sticker.lottie")))
-    #expect(!OverlaySourceType.alphaVideo.acceptsSourceURL(URL(fileURLWithPath: "/tmp/sticker.json")))
+    #expect(OverlaySourceType.animatedImage.acceptsSourceURL(URL(filePath: "/tmp/sticker.apng")))
+    #expect(OverlaySourceType.lottie.acceptsSourceURL(URL(filePath: "/tmp/sticker.lottie")))
+    #expect(!OverlaySourceType.alphaVideo.acceptsSourceURL(URL(filePath: "/tmp/sticker.json")))
     #expect(OverlaySourceType.lottie.allowedContentTypes.contains(.dotLottie))
 }
 
@@ -421,7 +421,7 @@ func renderQueueExportsAllOverlayKinds() async throws {
 }
 
 private func makeOverlayTempDirectory(_ label: String) throws -> URL {
-    let url = URL(fileURLWithPath: NSTemporaryDirectory())
+    let url = URL(filePath: NSTemporaryDirectory())
         .appendingPathComponent("overlay-tests-\(label)-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url

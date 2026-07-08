@@ -302,7 +302,7 @@ struct TransitionsTests {
 
     private func makeModel() -> (EditorModel, Clip.ID, Clip.ID) {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = time(20)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -338,7 +338,7 @@ struct TransitionsTests {
     @Test("Default transition duration clamps to a short overlap")
     func addTransitionClampsDefault() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = time(20)
         media.hasVideo = true
         model.project.mediaItems.append(media)

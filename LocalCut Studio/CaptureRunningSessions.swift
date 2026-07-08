@@ -69,9 +69,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     private var excludingWindowIDs: Set<CGWindowID> = []
 
     private func withLockedState<T>(_ body: () throws -> T) rethrows -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return try body()
+        try stateLock.withLockUnchecked { _ in try body() }
     }
 
     init(target: CaptureTarget,

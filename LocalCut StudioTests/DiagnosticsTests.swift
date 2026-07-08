@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import AVFoundation
+import os
 import LocalCutCore
 @testable import LocalCut_Studio
 
@@ -14,11 +15,11 @@ struct DiagnosticsTests {
     /// actor (the build setting `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`
     /// would otherwise pin them to the main actor).
     private final class Clock: @unchecked Sendable {
-        private let lock = NSLock()
+        private let lock = OSAllocatedUnfairLock(initialState: ())
         nonisolated(unsafe) private var value: CFAbsoluteTime
         init(start: CFAbsoluteTime = 1_000) { self.value = start }
-        nonisolated func read() -> CFAbsoluteTime { lock.withLock { value } }
-        nonisolated func advance(by seconds: CFAbsoluteTime) { lock.withLock { value += seconds } }
+        nonisolated func read() -> CFAbsoluteTime { lock.withLock { _ in value } }
+        nonisolated func advance(by seconds: CFAbsoluteTime) { lock.withLock { _ in value += seconds } }
     }
 
     // MARK: - V1 — probes resolve to non-NaN within 2 s
@@ -154,10 +155,10 @@ struct DiagnosticsTests {
     }
 
     private final class DropsCounter: @unchecked Sendable {
-        private let lock = NSLock()
+        private let lock = OSAllocatedUnfairLock(initialState: ())
         private var value: Int = 0
-        func set(_ v: Int) { lock.withLock { value = v } }
-        func read() -> Int { lock.withLock { value } }
+        func set(_ v: Int) { lock.withLockUnchecked { _ in value = v } }
+        func read() -> Int { lock.withLockUnchecked { _ in value } }
     }
 
     // MARK: - Decoder count propagation

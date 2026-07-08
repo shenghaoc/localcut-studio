@@ -716,7 +716,7 @@ struct TimeRemappingKeyframeRebaseTests {
     @Test("Trim left earlier reveals trimmed-in media and keeps the right edge fixed")
     func trimLeftEarlierRevealsMedia() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = trTime(10)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -759,7 +759,7 @@ struct TimeRemappingKeyframeRebaseTests {
     @Test("Retiming one half of a linked A/V pair retimes the other")
     func linkedAudioVideoRetimeTogether() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = trTime(10)
         media.hasVideo = true
         media.hasAudio = true
@@ -783,7 +783,7 @@ struct TimeRemappingKeyframeRebaseTests {
     @Test("Linked A/V speed keyframes update and remove by source time")
     func linkedAudioVideoSpeedKeyframesSyncByTime() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = trTime(10)
         media.hasVideo = true
         media.hasAudio = true
@@ -823,7 +823,7 @@ struct TimeRemappingKeyframeRebaseTests {
     @Test("Look strength keyframes author in source-local time under retiming")
     func lookStrengthKeyframesUseSourceLocalTime() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = trTime(10)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -888,7 +888,7 @@ struct TimeRemappingKeyframeRebaseTests {
     @Test("Trim rebases skin-smooth strength keyframes alongside speed")
     func trimRebasesSkinSmoothKeyframes() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = trTime(10)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -920,7 +920,7 @@ struct TimeRemappingKeyframeRebaseTests {
     @Test("Trim left rebases speed keyframes onto the new source origin")
     func trimLeftRebasesSpeedKeyframes() throws {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = trTime(10)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -942,7 +942,7 @@ struct TimeRemappingKeyframeRebaseTests {
     @Test("Trim left inside a speed ramp preserves the evaluated boundary value")
     func trimLeftInsideRampPreservesBoundaryValue() throws {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = trTime(10)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -967,7 +967,7 @@ struct TimeRemappingKeyframeRebaseTests {
     @Test("Trim right drops speed keyframes past the new source duration")
     func trimRightDropsStaleSpeedKeyframes() throws {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = trTime(10)
         media.hasVideo = true
         model.project.mediaItems.append(media)

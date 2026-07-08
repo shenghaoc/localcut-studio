@@ -70,7 +70,7 @@ struct BeatDetectionCoreTests {
 
     @Test("Versioned cache header round-trips beat analysis")
     func cacheRoundTrip() throws {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+        let directory = URL(filePath: NSTemporaryDirectory())
             .appendingPathComponent("beat-cache-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let analysis = BeatAnalysis(
@@ -90,7 +90,7 @@ struct BeatDetectionCoreTests {
 
     @Test("A corrupt cache payload reads as a miss, not a thrown error")
     func corruptCacheReadsAsMiss() throws {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+        let directory = URL(filePath: NSTemporaryDirectory())
             .appendingPathComponent("beat-corrupt-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let analysis = BeatAnalysis(tempoBPM: 120,

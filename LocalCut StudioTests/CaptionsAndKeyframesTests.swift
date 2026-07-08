@@ -280,7 +280,7 @@ func skinSmoothStrengthKeyframeNavigation() {
 @MainActor
 private func makeSkinSmoothKeyframeModel(timelineStart: Double, duration: Double) -> (EditorModel, Clip.ID) {
     let model = EditorModel()
-    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    let media = MediaItem(url: URL(filePath: "/dev/null"))
     media.duration = CMTime(seconds: duration, preferredTimescale: 600)
     media.hasVideo = true
     model.project.mediaItems.append(media)
