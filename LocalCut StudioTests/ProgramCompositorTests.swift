@@ -53,7 +53,7 @@ struct ProgramCompositorTests {
 
         // The frames should be different (different transforms).
         // We can't easily compare CIImages, but we verify they both succeed.
-        #expect(compositor.currentScene?.name == "B")
+        #expect(compositor.activeScene?.name == "B")
     }
 
     @Test("No pipeline rebuild on switch — state only")
@@ -78,7 +78,7 @@ struct ProgramCompositorTests {
             compositor.switchScene(to: scenes[i % 2].id)
             _ = compositor.compositeFrame()
         }
-        #expect(compositor.currentScene?.name != nil)
+        #expect(compositor.activeScene?.name != nil)
     }
 
     @Test("No encoder restart on switch")
@@ -98,7 +98,7 @@ struct ProgramCompositorTests {
         // Switch to same scene — should be no-op.
         compositor.switchScene(to: sceneA.id)
         _ = compositor.compositeFrame()
-        #expect(compositor.currentScene?.name == "A")
+        #expect(compositor.activeScene?.name == "A")
     }
 
     @Test("Resolver output changes on next tick")

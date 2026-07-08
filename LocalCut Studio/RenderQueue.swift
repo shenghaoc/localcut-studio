@@ -164,6 +164,7 @@ nonisolated enum RenderQueueError: Error, LocalizedError {
 /// serial dispatch queue but the compiler doesn't model that, so the
 /// `@Sendable` closure can't capture a mutable `var`; this class wraps the
 /// state in an unfair lock instead.
+/// `@unchecked Sendable`: single `Bool` flag behind `OSAllocatedUnfairLock`.
 private nonisolated final class ResumeBox: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock<Bool>(initialState: false)
 

@@ -87,6 +87,8 @@ final class TitleRasterer: Sendable {
         CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
     }()
 
+    /// `@unchecked Sendable`: linked-list `previous`/`next` pointers are only
+    /// mutated under the parent cache's lock.
     nonisolated private final class CacheNode: @unchecked Sendable {
         let key: TitleRasterRequest
         var previous: CacheNode?

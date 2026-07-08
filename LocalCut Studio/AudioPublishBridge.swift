@@ -169,6 +169,7 @@ actor AudioPublishBridge {
     }
 }
 
+/// `@unchecked Sendable`: single `Bool` flag behind `OSAllocatedUnfairLock`.
 private nonisolated final class AudioCaptureStopToken: @unchecked Sendable {
     private let stopped = OSAllocatedUnfairLock<Bool>(initialState: false)
 
@@ -189,6 +190,8 @@ private nonisolated final class AudioCaptureStopToken: @unchecked Sendable {
 /// Recording samples are delivered via `deliverSamples(_:)` from the
 /// capture thread, which calls the delegate's `deliverRecordedData`
 /// block to push PCM into WebRTC's native ADM.
+/// `@unchecked Sendable`: `RTCAudioDevice` requires `Sendable`; mutable state
+/// (`delegate`, playout/recording flags, `sampleTime`) is protected by `stateLock`.
 nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecked Sendable {
     private let sampleRate: Double
     private let channels: Int

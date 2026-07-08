@@ -5,6 +5,9 @@ import CoreVideo
 import WebRTC
 #endif
 
+/// `@unchecked Sendable`: WebRTC source/capturer and frame delivery state
+/// (`isClosed`, `isInFlight`, `pendingBuffer`, `latestPixelBuffer`) are
+/// protected by `lock`.
 nonisolated final class VideoPublishTap: @unchecked Sendable {
     #if LOCALCUT_ENABLE_WEBRTC
     private var videoSource: RTCVideoSource?
@@ -30,9 +33,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     }
     #else
     var latestPixelBuffer: CVPixelBuffer? {
-        lock.lock()
-        defer { lock.unlock() }
-        return latestPixelBufferStorage
+        lock.withLock { latestPixelBufferStorage }
     }
 
     private var latestPixelBufferStorage: CVPixelBuffer?

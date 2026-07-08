@@ -112,6 +112,8 @@ enum RenderUnit {
 
 // MARK: - Custom instruction
 
+/// `@unchecked Sendable`: all properties are immutable `let`s; required by
+/// `AVVideoCompositionInstructionProtocol` for cross-actor use.
 final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructionProtocol, @unchecked Sendable {
     let timeRange: CMTimeRange
     let enablePostProcessing: Bool = false
@@ -170,6 +172,10 @@ final class EffectCompositionInstruction: NSObject, AVVideoCompositionInstructio
 
 // MARK: - Custom video compositor
 
+/// `@unchecked Sendable`: wraps non-`Sendable`
+/// `AVAsynchronousVideoCompositionRequest` for cross-actor transfer. Mutable
+/// `task` handle is safe because the struct is stored inside a lock-protected
+/// dictionary.
 nonisolated private struct PendingVideoCompositionRequest: @unchecked Sendable {
     let request: AVAsynchronousVideoCompositionRequest
     var task: Task<Void, Never>?

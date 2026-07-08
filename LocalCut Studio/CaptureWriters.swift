@@ -3,6 +3,8 @@ import AVFoundation
 import CoreMedia
 import LocalCutCore
 
+/// `@unchecked Sendable`: `FileHandle` mutations are serialised on a private
+/// `DispatchQueue`.
 nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
     let url: URL
     private let queue = DispatchQueue(label: "com.localcutstudio.capture.manifest")
@@ -34,6 +36,9 @@ nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
     }
 }
 
+/// `@unchecked Sendable`: writer state (`didStartWriting`, `isFinished`,
+/// timing, sample counts) is protected by `lock`; `AVAssetWriter` and
+/// `AVAssetWriterInput` are non-`Sendable` framework objects.
 nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     let source: CaptureSourceDescriptor
     private let outputURL: URL

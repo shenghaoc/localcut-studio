@@ -164,7 +164,8 @@ struct WhipPublishTests {
         let probe = TimeProbe(now: 100)
         let controller = ReconnectController(
             clock: { probe.now },
-            sleep: { duration in probe.recordSleep(duration) })
+            sleep: { duration in probe.recordSleep(duration) }
+        )
 
         controller.markDisconnected()
         probe.setNow(101.25)
