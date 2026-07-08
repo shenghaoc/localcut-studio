@@ -6,22 +6,8 @@ final class ReconnectController: @unchecked Sendable {
     private let backoffLadder: [Double] = [2, 4, 8, 16, 16]
     nonisolated let gracePeriod: TimeInterval = 3.0
 
-    /// Clock function for timing. Test seam for deterministic timing.
-    ///
-    /// **Isolation invariant:** Set once before any concurrent access (typically
-    /// in test setup). Read from any thread via `nonisolated` methods.
-    /// Concurrent mutation after construction is not safe; this property is
-    /// effectively `let` after setup.
-    nonisolated(unsafe) var clock: @Sendable () -> TimeInterval = { Date.timeIntervalSinceReferenceDate }
-    /// Sleep function for backoff delays. Test seam for deterministic timing.
-    ///
-    /// **Isolation invariant:** Set once before any concurrent access (typically
-    /// in test setup). Read from any thread via `nonisolated` methods.
-    /// Concurrent mutation after construction is not safe; this property is
-    /// effectively `let` after setup.
-    nonisolated(unsafe) var sleep: @Sendable (TimeInterval) async throws -> Void = { duration in
-        try await Task.sleep(for: .seconds(duration))
-    }
+    nonisolated let clock: @Sendable () -> TimeInterval
+    nonisolated let sleep: @Sendable (TimeInterval) async throws -> Void
 
     private struct State {
         var attemptCount: Int = 0
@@ -33,7 +19,15 @@ final class ReconnectController: @unchecked Sendable {
 
     private let state = OSAllocatedUnfairLock(initialState: State())
 
-    nonisolated init() {}
+    nonisolated init(
+        clock: @escaping @Sendable () -> TimeInterval = { Date.timeIntervalSinceReferenceDate },
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { duration in
+            try await Task.sleep(for: .seconds(duration))
+        }
+    ) {
+        self.clock = clock
+        self.sleep = sleep
+    }
 
     nonisolated var attemptCount: Int { state.withLock { $0.attemptCount } }
     nonisolated var canAttemptReconnect: Bool { state.withLock { $0.attemptCount < maxAttempts } }

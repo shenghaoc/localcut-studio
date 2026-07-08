@@ -579,7 +579,9 @@ struct WindowConfigurator: NSViewRepresentable {
         ///
         /// **Isolation invariant:** Set/read on `@MainActor` in `attach(to:)`;
         /// also read from nonisolated `responds(to:)` and
-        /// `forwardingTarget(for:)` for delegate message forwarding.
+        /// `forwardingTarget(for:)` for AppKit delegate forwarding on the main
+        /// thread, which Swift's actor model cannot express for Objective-C
+        /// message forwarding.
         nonisolated(unsafe) weak var previousDelegate: NSWindowDelegate?
 
         init(model: EditorModel) {

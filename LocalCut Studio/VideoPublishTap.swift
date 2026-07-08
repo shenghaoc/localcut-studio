@@ -29,13 +29,13 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
         lock.unlock()
     }
     #else
-    /// Latest captured pixel buffer (non-WebRTC path).
-    ///
-    /// **Isolation invariant:** Written under `lock` in `deliverFrame`.
-    /// `nonisolated(unsafe)` suppresses isolation checking for this
-    /// `@unchecked Sendable` class. The getter is NOT lock-protected;
-    /// callers should accept a benign stale read.
-    nonisolated(unsafe) private(set) var latestPixelBuffer: CVPixelBuffer?
+    var latestPixelBuffer: CVPixelBuffer? {
+        lock.lock()
+        defer { lock.unlock() }
+        return latestPixelBufferStorage
+    }
+
+    private var latestPixelBufferStorage: CVPixelBuffer?
     init() {}
     nonisolated func detachFromWebRTC() {}
     #endif
@@ -82,7 +82,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
         }
         #else
         lock.lock()
-        latestPixelBuffer = buffer
+        latestPixelBufferStorage = buffer
         lock.unlock()
         #endif
 

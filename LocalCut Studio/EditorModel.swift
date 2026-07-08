@@ -186,12 +186,13 @@ final class EditorModel {
     var recordingMicLevel: Float = 0
     var recordingLiveMonitorLatencyMs: Double = 0
     var recoveredCaptureSessions: [CaptureSessionResult] = []
-    /// Security-scoped URL for the recordings folder. Set once during recording
-    /// setup on `@MainActor`; stopped in `deinit`.
+    /// Security-scoped URL for the recordings folder. Owned by `EditorModel`;
+    /// updated on `@MainActor` recording setup/teardown and stopped in `deinit`.
     ///
-    /// **Isolation invariant:** Written on `@MainActor`, read in `deinit`
-    /// (nonisolated) for resource cleanup. The write-to-read race is benign
-    /// because `stopAccessingSecurityScopedResource` is idempotent.
+    /// **Isolation invariant:** Normal isolation cannot express this final
+    /// nonisolated cleanup read, but the model is no longer reachable by
+    /// main-actor workflows during `deinit`; the read only balances any
+    /// remaining security-scoped grant.
     @ObservationIgnored nonisolated(unsafe) var recordingsFolderAccessURL: URL?
     /// In-flight recording monitor task. Cancelled in `deinit` for cleanup.
     ///
@@ -243,8 +244,11 @@ final class EditorModel {
     /// thread-safe; `deinit` access is benign.
     @ObservationIgnored nonisolated(unsafe) private var endObserver: NSObjectProtocol?
     @ObservationIgnored let beatAnalyzer = BeatAnalyzer()
-    // `nonisolated(unsafe)` so the nonisolated `deinit` can cancel it, matching
-    // the other deinit-accessed observers (timeObserver/endObserver/accessedURLs).
+    /// In-flight beat-analysis task.
+    ///
+    /// **Isolation invariant:** Owned and mutated by `EditorModel` on
+    /// `@MainActor`; read in nonisolated `deinit` only to issue idempotent task
+    /// cancellation after the model has left normal main-actor workflows.
     @ObservationIgnored nonisolated(unsafe) var beatAnalysisTask: Task<Void, Never>?
     @ObservationIgnored var beatAnalysisKeys: [MediaItem.ID: String] = [:]
     @ObservationIgnored var cachedProjectedBeatTimes: [CMTime] = []
@@ -296,18 +300,17 @@ final class EditorModel {
     /// undo/redo (the bundle URL is never equal to any media item URL —
     /// item URLs point at files *inside* the bundle).
     ///
-    /// **Isolation invariant:** Mutated on `@MainActor`; iterated in `deinit`
-    /// (nonisolated) to stop security-scoped access. `stopAccessingSecurity-
-    /// ScopedResource` is idempotent, so the benign race is safe.
+    /// **Isolation invariant:** Mutated on `@MainActor`; iterated in nonisolated
+    /// `deinit` after the model has left normal main-actor workflows. The read
+    /// is only for balancing remaining security-scoped grants.
     @ObservationIgnored nonisolated(unsafe) var accessedURLs: Set<URL> = []
 
     /// Security-scoped access on the outer `.lcbundle` directory, when the
     /// current document is a bundle. Tracked separately from `accessedURLs`
     /// for the reason in that property's doc. Stopped on session teardown.
     ///
-    /// **Isolation invariant:** Mutated on `@MainActor`. `nonisolated(unsafe)`
-    /// allows the security-scoped grant to be stopped from nonisolated contexts
-    /// during document close.
+    /// **Isolation invariant:** Mutated on `@MainActor`; read from nonisolated
+    /// teardown only to balance a remaining bundle security-scoped grant.
     @ObservationIgnored nonisolated(unsafe) var bundleAccessURL: URL?
 
     /// Bumped on every session swap (New/Open). Async import/relink capture it
