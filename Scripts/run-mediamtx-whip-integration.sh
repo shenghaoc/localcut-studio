@@ -147,7 +147,12 @@ cleanup() {
     fi
     MEDIAMTX_PID=""
 }
-trap cleanup EXIT SIGTERM SIGINT
+handle_signal() {
+    cleanup
+    exit 130
+}
+trap cleanup EXIT
+trap handle_signal SIGTERM SIGINT
 
 start_mediamtx() {
     CONTAINER_CMD=""
@@ -222,8 +227,9 @@ if [ "${START_ONLY}" = true ]; then
     else
         echo "MediaMTX started (--start-only mode) in container: ${CONTAINER_NAME}"
     fi
-    # Reset the EXIT trap so the process keeps running after this script exits.
-    trap - EXIT
+    # Reset all traps so the process keeps running after this script exits.
+    # The CI 'Stop MediaMTX' step is responsible for cleanup.
+    trap - EXIT SIGTERM SIGINT
     exit 0
 fi
 

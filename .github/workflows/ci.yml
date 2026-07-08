@@ -131,10 +131,14 @@ jobs:
             echo "pid=$(cat .build/mediamtx/mediamtx.pid)" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build and test (with flake detection + MediaMTX)
-        run: |
-          export LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1
-          ./Scripts/run-xcode-tests-with-flake-detection.sh
+      - name: Build and test (with flake detection)
+        run: ./Scripts/run-xcode-tests-with-flake-detection.sh
+
+      # Run MediaMTX integration tests separately so they are not subject
+      # to the flake-detection retry loop (a real integration failure should
+      # not be masked by a retry pass).
+      - name: MediaMTX WHIP integration
+        run: LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh
 
       - name: Stop MediaMTX
         if: always()
