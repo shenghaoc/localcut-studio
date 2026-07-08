@@ -108,19 +108,39 @@ jobs:
           tar -xzf webrtc-xcframework.tgz -C Packages/LocalCutWebRTC
           ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
+      - name: Restore DerivedData cache
+        uses: actions/cache@v4
+        with:
+          path: DerivedData
+          key: deriveddata-${{ runner.os }}-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved') }}
+          restore-keys: |
+            deriveddata-${{ runner.os }}-
+
       - name: Validate Xcode project
         run: |
           xcodebuild -list -project "$PROJECT"
 
-      - name: Build and test (with flake detection)
+      - name: Start MediaMTX
+        run: ./Scripts/run-mediamtx-whip-integration.sh --start-only
+
+      - name: Build and test (with flake detection + MediaMTX)
         run: |
+          export LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1
           ./Scripts/run-xcode-tests-with-flake-detection.sh
+
+      - name: Stop MediaMTX
+        if: always()
+        run: |
+          pkill -f 'mediamtx' 2>/dev/null || true
+
+      - name: Restore OTIO validator venv
+        uses: actions/cache@v4
+        with:
+          path: /tmp/localcut-otio-validator-*
+          key: otio-validator-${{ runner.os }}-0.17.0
 
       - name: Validate OTIO goldens
         run: ./Scripts/validate-otio-goldens.sh
-
-      - name: MediaMTX WHIP integration
-        run: LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh
 
       - name: Upload failure diagnostics
         if: failure()
@@ -182,6 +202,14 @@ jobs:
           tar -xzf webrtc-xcframework.tgz -C Packages/LocalCutWebRTC
           ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
+      - name: Restore DerivedData cache
+        uses: actions/cache@v4
+        with:
+          path: DerivedData
+          key: deriveddata-${{ runner.os }}-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved') }}
+          restore-keys: |
+            deriveddata-${{ runner.os }}-
+
       - name: Validate Xcode project
         run: |
           xcodebuild -list -project "$PROJECT"
@@ -192,7 +220,7 @@ jobs:
       - name: Test without WebRTC
         run: |
           set -o pipefail
-          rm -rf "$RESULT_BUNDLE" "$DERIVED_DATA"
+          rm -rf "$RESULT_BUNDLE"
 
           # Strip LOCALCUT_ENABLE_WEBRTC from the project-level setting
           # so the #if !LOCALCUT_ENABLE_WEBRTC stub paths are compiled.

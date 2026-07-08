@@ -17,6 +17,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# --start-only: start MediaMTX and exit without running the test.  Used by CI
+# to include the integration tests in the main xcodebuild run instead of a
+# separate invocation.
+START_ONLY=false
+if [ "${1:-}" = "--start-only" ]; then
+    START_ONLY=true
+fi
 CONTAINER_NAME="localcut-mediamtx-test"
 CONFIG_FILE="${PROJECT_DIR}/Tests/Fixtures/MediaMTX/mediamtx.yml"
 IMAGE="bluenviron/mediamtx:latest"
@@ -192,6 +200,16 @@ done
 if [ "${MEDIAMTX_STARTED}" != true ]; then
     echo "ERROR: MediaMTX failed to start after ${MEDIAMTX_STARTUP_ATTEMPTS} attempt(s)."
     exit 1
+fi
+
+# In --start-only mode the caller runs the tests itself (e.g. as part of the
+# main xcodebuild invocation).  Keep MediaMTX alive; the caller is responsible
+# for stopping it.
+if [ "${START_ONLY}" = true ]; then
+    echo "MediaMTX started (--start-only mode). PID: ${MEDIAMTX_PID}"
+    # Reset the EXIT trap so the process keeps running after this script exits.
+    trap - EXIT
+    exit 0
 fi
 
 # Run the integration test via xcodebuild
