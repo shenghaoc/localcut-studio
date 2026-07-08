@@ -1373,6 +1373,7 @@ final class EditorModel {
     /// Rebuilds the preview composition from the current project state, keeping
     /// the playhead where it was and resuming playback if still active.
     func rebuild() async {
+        rebuildClipIndex()
         await previewRebuildCoordinator.rebuild(model: self)
     }
 

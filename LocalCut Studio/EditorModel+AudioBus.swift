@@ -133,7 +133,10 @@ extension EditorModel {
         loudnessTask = Task { [weak self] in
             guard let self else { return }
             do {
-                guard let built = try await CompositionBuilder.build(project: project, showSkinMask: showSkinMask) else {
+                guard let built = try await CompositionBuilder.build(
+                    project: project,
+                    showSkinMask: showSkinMask,
+                    includeLoudnessGainInAudioMix: false) else {
                     guard token == loudnessMeasurementToken else { return }
                     applyLoudnessAnalysis(LoudnessAnalysisResult(
                         measuredLUFS: -.infinity,

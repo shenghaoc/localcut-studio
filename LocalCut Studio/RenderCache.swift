@@ -431,14 +431,6 @@ final class RenderCache: Sendable {
         for (key, entry) in entries {
             if let diskEntry = writeDiskEntry(entry, for: key) {
                 recordDiskEntry(diskEntry, for: key)
-            } else {
-                // Disk write failed (disk full, permissions error). Re-insert
-                // the entry into memory so it's not silently lost. The budget
-                // will be exceeded temporarily, but the next eviction cycle
-                // will handle it.
-                lock.withLock { state in
-                    state.insertMemory(key, entry: entry)
-                }
             }
         }
     }

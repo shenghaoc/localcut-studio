@@ -1461,8 +1461,10 @@ public struct VoiceCleanupSettings: Hashable, Codable, Sendable {
     public static let insertOrder: [VoiceCleanupInsertID] = [.denoiser, .gate, .compressor, .limiter]
 
     /// Whether any DSP insert (denoiser, gate, compressor, limiter) is active.
-    /// Loudness normalisation is a linear gain stage applied through the live
-    /// engine's mixer node volume, so it does **not** require the offline pipeline.
+    /// Loudness normalisation is a linear gain stage. It does **not** require
+    /// the offline pipeline by itself: loudness-only preview/export can use the
+    /// audio mix path, while DSP-active preview/export applies the gain inside
+    /// the cleanup processor after the other inserts.
     public var requiresOfflineProcessing: Bool {
         !denoiser.bypass
             || !gate.bypass

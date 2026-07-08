@@ -20,6 +20,10 @@
   append/meter publication, with queue-local state for gate/compressor gain.
 - [x] **T1.6** Add current-project loudness measurement and apply the computed
   static makeup gain through undoable project mutation.
+- [x] **T1.6a** Ensure loudness gain is applied exactly once: loudness-only
+  compositions carry gain in `AVAudioMix`, DSP-active compositions leave it to
+  `VoiceCleanupDSP`, and loudness measurement builds exclude already-applied
+  gain.
 - [x] **T1.7** Route live preview audio through the master bus with the cleanup
   processing chain (denoise → gate → compressor → limiter). The live path
   decodes off the main actor, processes bounded buffers through

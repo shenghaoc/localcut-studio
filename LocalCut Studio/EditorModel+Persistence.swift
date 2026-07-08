@@ -250,6 +250,7 @@ extension EditorModel {
         selectedMarkerID = state.selectedMarkerID
         selectedOverlayID = state.selectedOverlayID
         selectedCalloutID = state.selectedCalloutID
+        rebuildClipIndex()
         restoreLUTDisplayNames(state.lutDisplayNames)
         reconcileAccessedURLs()
     }

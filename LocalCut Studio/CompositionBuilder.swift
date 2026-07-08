@@ -133,7 +133,8 @@ enum CompositionBuilder {
     // VisibleSegment, PlannedUnit, and planUnits() are defined in LocalCutCore.
 
     static func build(project: Project, showSkinMask: Bool = false,
-                      overlaySourceRegistryID: UUID? = nil) async throws -> BuiltComposition? {
+                      overlaySourceRegistryID: UUID? = nil,
+                      includeLoudnessGainInAudioMix: Bool = true) async throws -> BuiltComposition? {
         let composition = AVMutableComposition()
         let renderSize = project.renderSize
 
@@ -242,10 +243,16 @@ enum CompositionBuilder {
         var hasBusContribution = false
         var hasTimePitchContribution = false
         // Loudness normalisation gain is a linear multiplier applied to all
-        // audio tracks. When only loudness is enabled (no DSP inserts), this
-        // gain is applied through the audio mix parameters instead of the
-        // offline pipeline, ensuring export matches preview.
-        let loudnessGain = project.voiceCleanup.loudnessGainLinear
+        // audio tracks. Keep it in the audio mix only when no DSP insert owns
+        // the offline/live cleanup path; otherwise VoiceCleanupDSP applies it
+        // after denoise/gate/compression and before the limiter. Measurement
+        // builds also opt out so a previously-applied gain does not bias the
+        // next analysis pass.
+        let appliesLoudnessInAudioMix = includeLoudnessGainInAudioMix
+            && !project.voiceCleanup.requiresOfflineProcessing
+        let loudnessGain = appliesLoudnessInAudioMix
+            ? project.voiceCleanup.loudnessGainLinear
+            : 1.0
         for projectTrack in project.audioTracks where !projectTrack.isMuted {
             let trackInput = project.trackInputs.first(where: { $0.id == projectTrack.id })
             let baseline = AudioBusMixing.baselineVolume(masterGain: project.masterGain,

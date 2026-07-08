@@ -30,6 +30,33 @@ struct UndoRedoTests {
         model.project.videoTracks.first!.clips
     }
 
+    @Test("EditorModel: rebuild refreshes the clip lookup index after direct track replacement")
+    func rebuildRefreshesClipIndex() async {
+        let model = EditorModel()
+        let clip = Clip(mediaID: UUID(), sourceStart: .zero,
+                        duration: time(1), timelineStart: .zero)
+        model.project.videoTracks[0].clips = [clip]
+
+        await model.rebuild()
+
+        #expect(model.clip(for: clip.id)?.id == clip.id)
+        #expect(model.track(for: clip.id)?.id == model.project.videoTracks[0].id)
+    }
+
+    @Test("EditorModel: applyState refreshes the clip lookup index")
+    func applyStateRefreshesClipIndex() {
+        let (model, clipID) = makeModel()
+        let state = model.captureState()
+        model.project.videoTracks[0].clips.removeAll()
+        model.rebuildClipIndex()
+        #expect(model.clip(for: clipID) == nil)
+
+        model.applyState(state)
+
+        #expect(model.clip(for: clipID)?.id == clipID)
+        #expect(model.track(for: clipID)?.id == model.project.videoTracks[0].id)
+    }
+
     // MARK: - Discrete edits (R3.1, R3.3)
 
     @Test("Delete then undo restores the clip; redo removes it again")
