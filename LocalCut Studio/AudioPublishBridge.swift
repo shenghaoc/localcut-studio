@@ -278,14 +278,15 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
         let frameCount = samples.count / channels
         guard frameCount > 0 else { return }
 
-        stateLock.lock()
-        let active = isRecordingActive
-        let delegate = self.delegate
-        let currentSampleTime = sampleTime
-        if active, delegate != nil {
-            sampleTime += Double(frameCount)
+        let (active, delegate, currentSampleTime) = stateLock.withLockUnchecked { () -> (Bool, RTCAudioDeviceDelegate?, Double) in
+            let active = isRecordingActive
+            let delegate = self.delegate
+            let currentSampleTime = sampleTime
+            if active, delegate != nil {
+                sampleTime += Double(frameCount)
+            }
+            return (active, delegate, currentSampleTime)
         }
-        stateLock.unlock()
         guard active, let delegate else { return }
 
         // Convert float [-1.0, 1.0] to Int16
