@@ -595,6 +595,10 @@ struct InspectorView: View {
                     .controlSize(.small)
                     .disabled(!model.selectedClipHasLookEffects)
                 Spacer()
+                // Reset uses performUndoable (discrete action) while slider
+                // adjustments use performCoalescedUndoable (continuous gesture).
+                // This is intentional: reset is a one-shot action that should
+                // create a single undo step, not be coalesced with prior drags.
                 Button("Reset") { model.resetClipLooks() }
                     .controlSize(.small)
                     .disabled(!model.selectedClipHasLookEffects)
