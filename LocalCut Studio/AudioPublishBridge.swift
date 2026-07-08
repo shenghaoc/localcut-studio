@@ -2,7 +2,7 @@ import Foundation
 import os
 
 #if LOCALCUT_ENABLE_WEBRTC
-import WebRTC
+@preconcurrency import WebRTC
 #endif
 
 // MARK: - AudioPublishBridge

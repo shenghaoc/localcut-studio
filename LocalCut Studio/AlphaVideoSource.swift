@@ -3,7 +3,7 @@ import AVFoundation
 import CoreGraphics
 import CoreImage
 import CoreMedia
-import CoreVideo
+@preconcurrency import CoreVideo
 import os
 import LocalCutCore
 

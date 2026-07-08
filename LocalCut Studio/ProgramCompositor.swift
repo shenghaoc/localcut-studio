@@ -1,6 +1,6 @@
 import Foundation
 import CoreImage
-import CoreVideo
+@preconcurrency import CoreVideo
 import Metal
 import os
 import LocalCutCore
