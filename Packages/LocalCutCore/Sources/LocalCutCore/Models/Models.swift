@@ -1474,6 +1474,7 @@ public struct VoiceCleanupSettings: Hashable, Codable, Sendable {
     /// loudness is disabled or the applied gain is negligible.
     public var loudnessGainLinear: Float {
         guard loudness.enabled, abs(loudness.appliedGainDB) > 0.0001 else { return 1.0 }
+        guard loudness.appliedGainDB.isFinite else { return 1.0 }
         return pow(10, loudness.appliedGainDB / 20)
     }
 

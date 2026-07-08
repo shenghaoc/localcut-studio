@@ -64,6 +64,11 @@ final class SelectionState {
     /// Selects a callout, clearing other selections.
     func selectCallout(id: CalloutClip.ID?) {
         selectedCalloutID = id
+        selectedClipID = nil
+        selectedMediaID = nil
+        selectedMarkerID = nil
+        selectedOverlayID = nil
+        selectedTransitionClipID = nil
     }
 
     /// Selects a transition, clearing other selections.

@@ -1277,11 +1277,13 @@ final class RenderQueue {
         var active = 0.0
         for job in jobs {
             switch job.status {
-            case .completed:
+            case .completed, .cancelled, .failed:
+                // Terminal states count as "done" for progress monotonicity.
+                // The progress bar should never decrease when a job finishes.
                 completed += 1
             case .running:
                 active += max(0, min(1, job.progress))
-            case .queued, .cancelled, .failed:
+            case .queued:
                 break
             }
         }

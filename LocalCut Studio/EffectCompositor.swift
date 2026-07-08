@@ -79,7 +79,11 @@ struct OverlayRenderItem: Sendable {
     let opacityKeyframes: Keyframed<Float>
 
     /// Returns the effective transform at the given overlay-local time,
-    /// interpolating keyframes when animated.
+    /// interpolating keyframes when animated. This duplicates
+    /// `OverlayClip.transform(at:)` because the render item is a lightweight
+    /// Sendable struct that doesn't carry the full OverlayClip. Both must use
+    /// identical interpolation logic — changes to one must be mirrored in the
+    /// other to prevent preview/export divergence.
     func transform(at localTime: CMTime) -> OverlayTransform {
         OverlayTransform(
             positionX: positionXKeyframes.isAnimated
