@@ -1,5 +1,5 @@
 import Foundation
-import CoreVideo
+@preconcurrency import CoreVideo
 import os
 
 #if LOCALCUT_ENABLE_WEBRTC
