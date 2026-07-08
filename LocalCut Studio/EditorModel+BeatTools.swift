@@ -36,12 +36,17 @@ extension EditorModel {
         return hasProjectedBeats(excluding: id)
     }
 
+    /// Cached CMTime for `beatOffsetSeconds` to avoid repeated construction.
+    private var beatOffsetCMTime: CMTime {
+        CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
+    }
+
     /// Existence check for command enablement: returns `true` as soon as any clip
     /// other than `clipID` contributes an in-range projected beat. Unlike
     /// `projectedBeatTimes(excluding:)` it short-circuits and skips the cross-clip
     /// dedup/sort, so it's cheap to call on every inspector render.
     func hasProjectedBeats(excluding clipID: Clip.ID?) -> Bool {
-        let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
+        let offset = beatOffsetCMTime
         for track in project.videoTracks + project.audioTracks {
             for clip in track.clips where clip.id != clipID {
                 guard let media = project.media(for: clip.mediaID), media.hasAudio,
@@ -136,7 +141,7 @@ extension EditorModel {
             return cachedProjectedBeatTimes
         }
 
-        let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
+        let offset = beatOffsetCMTime
         var times: [CMTime] = []
 
         for track in project.videoTracks + project.audioTracks {
@@ -376,7 +381,7 @@ extension EditorModel {
         guard let media = project.media(for: clip.mediaID),
               let analysis = beatAnalyses[media.id] else { return [] }
         let oneFrame = CMTime(value: 1, timescale: CMTimeScale(max(1, project.frameRate)))
-        let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
+        let offset = beatOffsetCMTime
         let projected = projectedBeatTimes(for: clip, analysis: analysis, offset: offset)
         let inBounds = deduplicatedBeatTimes(projected).filter { cut in
             cut - clip.timelineStart >= oneFrame && clip.timelineEnd - cut >= oneFrame
