@@ -1351,6 +1351,12 @@ final class RenderQueue {
         pendingWriteToken = nil
     }
 
+    /// Lets tests observe the detached persistence chain without making
+    /// production callers wait for fire-and-forget writes.
+    func waitForPendingPersistenceForTesting() async {
+        await pendingWriteTask?.value
+    }
+
     /// Reads the on-disk queue and reconciles state. Called once at app
     /// launch from the editor model. The file read happens off the MainActor
     /// so `EditorModel.init()` doesn't block the main thread on disk I/O at

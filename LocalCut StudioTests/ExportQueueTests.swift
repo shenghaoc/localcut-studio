@@ -412,7 +412,7 @@ struct RenderQueueTests {
     }
 
     @Test("Persistence: atomic write failure surfaces a status message")
-    func persistWriteFailureReportsStatus() async throws {
+    func persistWriteFailureReportsStatus() async {
         struct WriteFailure: LocalizedError, Sendable {
             var errorDescription: String? { "Injected queue write failure" }
         }
@@ -430,7 +430,9 @@ struct RenderQueueTests {
 
         queue.enqueue(job, autoStart: false)
 
-        try await waitForStatusMessage(queue, containing: "Injected queue write failure")
+        await queue.waitForPendingPersistenceForTesting()
+
+        #expect(queue.statusMessage?.contains("Injected queue write failure") == true)
     }
 
     @Test("Runner cleanup restarts when a job is enqueued after drain")
@@ -472,18 +474,4 @@ struct RenderQueueTests {
         Issue.record("Render queue did not settle before timeout; count=\(queue.jobs.count), isRunning=\(queue.isRunning), statuses=[\(statuses)]")
     }
 
-    private func waitForStatusMessage(
-        _ queue: RenderQueue,
-        containing expected: String,
-        timeout: TimeInterval = 5
-    ) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if queue.statusMessage?.contains(expected) == true {
-                return
-            }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        Issue.record("Render queue did not publish expected status message before timeout; status=\(queue.statusMessage ?? "nil")")
-    }
 }
