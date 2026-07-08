@@ -15,8 +15,8 @@ nonisolated enum PaddedBackgroundRenderer {
 
     /// Cache for resolved background images, keyed by bookmark data.
     /// Avoids re-resolving security-scoped bookmarks and re-downsampling on
-    /// every video-composition request. LRU-evicted when the cache exceeds
-    /// `maxCacheEntries`.
+    /// every video-composition request. When the cache exceeds
+    /// `maxCacheEntries`, all entries are cleared to reclaim memory.
     private static let imageCache = OSAllocatedUnfairLock<
         [Data: (image: CGImage, width: Int, height: Int)]
     >(uncheckedState: [:])
@@ -143,11 +143,11 @@ nonisolated enum PaddedBackgroundRenderer {
             if let cgImage {
                 imageCache.withLock { cache in
                     cache[bookmark] = (cgImage, maxDimension, maxDimension)
-                    // Evict oldest entries if cache exceeds max size.
-                    while cache.count > maxCacheEntries {
-                        if let oldestKey = cache.keys.first {
-                            cache.removeValue(forKey: oldestKey)
-                        }
+                    // Clear cache if it exceeds max size to reclaim memory.
+                    // Simple eviction since Dictionary doesn't track access order.
+                    if cache.count > maxCacheEntries {
+                        cache.removeAll()
+                        cache[bookmark] = (cgImage, maxDimension, maxDimension)
                     }
                 }
             }

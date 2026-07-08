@@ -134,9 +134,9 @@ final class PublishPanelState {
         Task { [weak self] in
             defer { self?.isStarting = false }
             guard let self else {
-                // self deallocated before publish started — stop the session
-                // to avoid orphaned WHIP session with no observer.
-                await model.stopWhipPublish()
+                // self deallocated before publish started — just return.
+                // We don't stop the session here because startWhipPublish
+                // hasn't been called yet, so there's nothing to clean up.
                 return
             }
             do {

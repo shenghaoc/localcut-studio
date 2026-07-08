@@ -113,7 +113,12 @@ final class ProgramPanelState {
         statusMessage = "Starting Program Mode..."
         Task { [weak self] in
             defer { self?.isStarting = false }
-            guard let self else { return }
+            guard let self else {
+                // Panel was dismissed before session started — clean up the
+                // session reference so future panels don't see a stale session.
+                model.programSession = nil
+                return
+            }
             do {
                 try await programSession.start(
                     captureSources: captureSources,
