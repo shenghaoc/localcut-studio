@@ -239,6 +239,9 @@ final class RenderQueue {
     private var pendingWriteTask: Task<Void, Never>?
 
     @ObservationIgnored
+    private var pendingWriteToken: UUID?
+
+    @ObservationIgnored
     private var suppressAutoRestartAfterRunnerStops = false
 
     @ObservationIgnored
@@ -264,6 +267,12 @@ final class RenderQueue {
     /// rely on this so the suite never mutates the user container's
     /// `queue.json`.
     @ObservationIgnored private let persistsToDisk: Bool
+
+    @ObservationIgnored
+    private let queueFileURLProvider: @Sendable () -> URL?
+
+    @ObservationIgnored
+    private let queueDocumentWriter: @Sendable (Data, URL) throws -> Void
 
     @ObservationIgnored
     private let outputBookmarkResolver: @Sendable (Data) -> BookmarkResolution?
@@ -292,7 +301,9 @@ final class RenderQueue {
     init(
         jobs: [QueueJob] = [],
         persistsToDisk: Bool = true,
-        outputBookmarkResolver: (@Sendable (Data) -> BookmarkResolution?)? = nil
+        outputBookmarkResolver: (@Sendable (Data) -> BookmarkResolution?)? = nil,
+        queueFileURLProvider: (@Sendable () -> URL?)? = nil,
+        queueDocumentWriter: (@Sendable (Data, URL) throws -> Void)? = nil
     ) {
         self.jobs = jobs
         self.currentJobID = nil
@@ -300,6 +311,10 @@ final class RenderQueue {
         self.isRunning = false
         self.statusMessage = nil
         self.persistsToDisk = persistsToDisk
+        self.queueFileURLProvider = queueFileURLProvider ?? Self.queueFileURL
+        self.queueDocumentWriter = queueDocumentWriter ?? { data, url in
+            try data.write(to: url, options: .atomic)
+        }
         self.outputBookmarkResolver = outputBookmarkResolver ?? Self.resolveSecurityScopedBookmark
     }
 
@@ -1292,8 +1307,9 @@ final class RenderQueue {
     /// disk in the order `persist()` was called (Gemini review).
     private func persist() {
         guard persistsToDisk, !refusingPersist else { return }
-        guard let url = Self.queueFileURL() else {
+        guard let url = queueFileURLProvider() else {
             logger.error("queue persist skipped: Application Support directory unavailable")
+            statusMessage = "Render queue was not saved: Application Support directory unavailable."
             return
         }
         let doc = RenderQueueDoc(jobs: jobs)
@@ -1304,18 +1320,35 @@ final class RenderQueue {
             encoded = try encoder.encode(doc)
         } catch {
             logger.error("queue persist failed: \(error.localizedDescription, privacy: .public)")
+            statusMessage = "Render queue was not saved: \(error.localizedDescription)"
             return
         }
         let log = logger
+        let writer = queueDocumentWriter
         let previousTask = pendingWriteTask
-        pendingWriteTask = Task.detached(priority: .utility) {
+        let token = UUID()
+        pendingWriteToken = token
+        pendingWriteTask = Task.detached(priority: .utility) { [weak self] in
             _ = await previousTask?.value
             do {
-                try encoded.write(to: url, options: .atomic)
+                try writer(encoded, url)
             } catch {
+                let message = "Render queue was not saved: \(error.localizedDescription)"
                 log.error("queue persist failed: \(error.localizedDescription, privacy: .public)")
+                await self?.recordPersistenceFailure(message)
             }
+            await self?.clearPendingWriteTask(token: token)
         }
+    }
+
+    private func recordPersistenceFailure(_ message: String) {
+        statusMessage = message
+    }
+
+    private func clearPendingWriteTask(token: UUID) {
+        guard pendingWriteToken == token else { return }
+        pendingWriteTask = nil
+        pendingWriteToken = nil
     }
 
     /// Reads the on-disk queue and reconciles state. Called once at app

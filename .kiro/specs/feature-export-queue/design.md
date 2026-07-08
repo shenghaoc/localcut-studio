@@ -220,7 +220,11 @@ timing or parallel test load.
   security-scoped bookmark and remains queued.
 
 Save is triggered after every transition (atomic write); JSON is small enough
-that this isn't a perf concern.
+that this isn't a perf concern. Each write is chained behind the previous
+detached write task so rapid state transitions cannot land on disk out of
+order. If the queue-file location cannot be created or the atomic write fails,
+`RenderQueue` logs the error and updates `statusMessage` so the user sees that
+the current queue state was not saved.
 
 ## UI (`LocalCut Studio/RenderQueueInspectorView.swift`)
 

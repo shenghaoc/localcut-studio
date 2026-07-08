@@ -43,6 +43,8 @@
   resolved.
 - [x] **T3.4** Refresh stale-but-resolvable output and source-media bookmarks
   back into the queued job before persisting.
+- [x] **T3.5** Serialize detached queue-file writes and surface queue
+  persistence failures through `statusMessage` instead of log-only failure.
 
 ## UI
 
@@ -72,5 +74,7 @@
 - [x] **T5.7** Unit test: a job enqueued during runner drain is processed after
   cleanup using an injected deterministic output-bookmark resolver, so the
   assertion is not coupled to macOS security-scoped bookmark timing (R5.7).
-- [x] **T5.8** `xcodebuild` (Debug, macOS) green; no test count regression
-  (R5.8).
+- [x] **T5.8** Unit test: queue-file URL unavailability and atomic write
+  failure both update `RenderQueue.statusMessage` (R5.8).
+- [x] **T5.9** `xcodebuild` (Debug, macOS) green; no test count regression
+  (R5.9).
