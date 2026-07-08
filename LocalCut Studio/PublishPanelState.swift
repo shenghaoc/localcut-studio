@@ -206,6 +206,8 @@ final class PublishPanelState {
         isStopping = true
         publishState = .ended
         statusMessage = "Stopping..."
+        // model is captured strongly to guarantee the WHIP session is stopped
+        // even if the panel is dismissed. self is captured weakly for UI updates.
         Task { [weak self] in
             defer { self?.isStopping = false }
             await model.stopWhipPublish()

@@ -162,6 +162,9 @@ final class ProgramPanelState {
         ownsCurrentSession = false
         isRunning = false
         statusMessage = "Stopping Program Mode..."
+        // model and session are captured strongly to guarantee the critical
+        // stop/landing path completes even if the panel is dismissed.
+        // self is captured weakly for UI state updates only.
         Task { [weak self] in
             defer {
                 self?.isStopping = false
@@ -191,6 +194,9 @@ final class ProgramPanelState {
         guard isRunning, ownsCurrentSession, let session = model.programSession else { return }
         isRunning = false
         ownsCurrentSession = false
+        // model and session are captured strongly to guarantee teardown
+        // completes even if the panel is dismissed mid-operation.
+        // self is captured weakly for UI state updates only.
         Task { [weak self] in
             do {
                 await model.stopWhipPublish()
