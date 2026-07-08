@@ -9,9 +9,14 @@ import LocalCutCore
 /// the clip in the effect pipeline.
 nonisolated enum PaddedBackgroundRenderer {
 
+    /// Maximum number of cached background images. At 4K (~33 MB each),
+    /// 8 entries ≈ 264 MB — reasonable for a background cache.
+    private static let maxCacheEntries = 8
+
     /// Cache for resolved background images, keyed by bookmark data.
     /// Avoids re-resolving security-scoped bookmarks and re-downsampling on
-    /// every video-composition request.
+    /// every video-composition request. LRU-evicted when the cache exceeds
+    /// `maxCacheEntries`.
     private static let imageCache = OSAllocatedUnfairLock<
         [Data: (image: CGImage, width: Int, height: Int)]
     >(uncheckedState: [:])
@@ -136,7 +141,15 @@ nonisolated enum PaddedBackgroundRenderer {
             // Resolve and downsample.
             cgImage = Self.loadAndDownsample(bookmark: bookmark, maxDimension: maxDimension)
             if let cgImage {
-                imageCache.withLock { $0[bookmark] = (cgImage, maxDimension, maxDimension) }
+                imageCache.withLock { cache in
+                    cache[bookmark] = (cgImage, maxDimension, maxDimension)
+                    // Evict oldest entries if cache exceeds max size.
+                    while cache.count > maxCacheEntries {
+                        if let oldestKey = cache.keys.first {
+                            cache.removeValue(forKey: oldestKey)
+                        }
+                    }
+                }
             }
         }
 

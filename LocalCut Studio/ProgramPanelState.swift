@@ -139,7 +139,7 @@ final class ProgramPanelState {
                             } else {
                                 self.statusMessage = message
                             }
-                            Task { await self.publishEncoderBudget(model.encoderBudget) }
+                            Task { [weak self] in await self?.publishEncoderBudget(model.encoderBudget) }
                         }
                     })
                 await publishEncoderBudget(model.encoderBudget)
