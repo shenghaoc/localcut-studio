@@ -84,7 +84,7 @@ struct OverlayRenderItem: Sendable {
     /// Sendable struct that doesn't carry the full OverlayClip. Both must use
     /// identical interpolation logic — changes to one must be mirrored in the
     /// other to prevent preview/export divergence.
-    func transform(at localTime: CMTime) -> OverlayTransform {
+    nonisolated func transform(at localTime: CMTime) -> OverlayTransform {
         OverlayTransform(
             positionX: positionXKeyframes.isAnimated
                 ? positionXKeyframes.value(at: localTime)
