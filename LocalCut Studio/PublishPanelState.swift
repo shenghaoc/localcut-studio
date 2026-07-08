@@ -155,30 +155,30 @@ final class PublishPanelState {
     private func observeSessionState(model: EditorModel) {
         stateObservationTask?.cancel()
         stateObservationTask = Task { [weak self, weak model] in
-            guard let self, let model, let session = model.whipSession else { return }
+            guard let model, let session = model.whipSession else { return }
             for await state in await session.stateStream {
                 guard !Task.isCancelled else { break }
                 await MainActor.run {
                     switch state {
                     case .idle:
-                        self.publishState = .idle
-                        self.statusMessage = ""
+                        self?.publishState = .idle
+                        self?.statusMessage = ""
                     case .connecting:
-                        self.publishState = .connecting
-                        self.statusMessage = "Connecting..."
+                        self?.publishState = .connecting
+                        self?.statusMessage = "Connecting..."
                     case .live:
-                        self.publishState = .live
-                        self.statusMessage = "Live — streaming to \(self.endpointType.displayName)."
+                        self?.publishState = .live
+                        self?.statusMessage = "Live — streaming to \(self?.endpointType.displayName ?? "")."
                     case .reconnecting:
-                        self.publishState = .reconnecting
-                        self.statusMessage = "Reconnecting..."
+                        self?.publishState = .reconnecting
+                        self?.statusMessage = "Reconnecting..."
                     case .failed(let message):
-                        self.publishState = .failed
-                        self.statusMessage = message
+                        self?.publishState = .failed
+                        self?.statusMessage = message
                     case .ended:
-                        self.publishState = .idle
-                        self.statusMessage = "Publish ended."
-                        self.stats = nil
+                        self?.publishState = .idle
+                        self?.statusMessage = "Publish ended."
+                        self?.stats = nil
                     }
                 }
             }
@@ -188,13 +188,13 @@ final class PublishPanelState {
     private func startStatsPolling(model: EditorModel) {
         statsPollingTask?.cancel()
         statsPollingTask = Task { [weak self, weak model] in
-            guard let self, let model else { return }
+            guard let model else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, let session = model.whipSession else { break }
                 let sessionStats = await session.stats
                 await MainActor.run {
-                    self.stats = PublishStatsDisplay(
+                    self?.stats = PublishStatsDisplay(
                         bytesSent: sessionStats.bytesSent,
                         framesSent: sessionStats.framesSent,
                         bitrate: sessionStats.bitrate,

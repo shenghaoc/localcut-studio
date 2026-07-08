@@ -153,7 +153,11 @@ final class EditorModel {
 
     /// In-flight loudness measurement task. Cancelled on the next invocation
     /// to prevent concurrent full-composition decode + DSP operations.
-    @ObservationIgnored var loudnessTask: Task<Void, Never>?
+    ///
+    /// **Isolation invariant:** Mutated on `@MainActor`; read in `deinit`
+    /// after the model has left normal main-actor workflows. The read only
+    /// issues an idempotent `Task.cancel()`.
+    @ObservationIgnored nonisolated(unsafe) var loudnessTask: Task<Void, Never>?
 
     /// Session cache of imported LUT filenames keyed by their bookmark, so the
     /// inspector can show a LUT's name without resolving the security-scoped

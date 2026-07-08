@@ -86,7 +86,7 @@ struct RecorderCommands: Commands {
             .disabled(!model.canCollapseRecordingGaps)
 
             Button("Retake Last Recording") {
-                Task { await model.retakeRecording() }
+                Task { [weak model] in await model?.retakeRecording() }
             }
             .disabled(!model.canRetakeRecording)
         }
@@ -281,7 +281,7 @@ struct EditorView: View {
         .tint(.lcAccent)
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) { statusBar }
-        .onAppear { Task { await model.scanRecoveredRecordings() } }
+        .onAppear { Task { [weak model] in await model?.scanRecoveredRecordings() } }
         .onDisappear { model.teardownAudioMetering() }
         .sheet(isPresented: $model.isRecorderPresented) {
             RecorderSetupView(model: model)
@@ -342,14 +342,14 @@ struct EditorView: View {
             if model.isRecording || model.isPaused {
                 if model.isPaused {
                     Button {
-                        Task { await model.resumeRecording() }
+                        Task { [weak model] in await model?.resumeRecording() }
                     } label: {
                         Label("Resume", systemImage: "play.circle.fill")
                     }
                     .help("Resume recording")
                 } else {
                     Button {
-                        Task { await model.pauseRecording() }
+                        Task { [weak model] in await model?.pauseRecording() }
                     } label: {
                         Label("Pause", systemImage: "pause.circle.fill")
                     }
@@ -381,7 +381,7 @@ struct EditorView: View {
                     .help("Collapse pause gaps in the last recording")
 
                     Button {
-                        Task { await model.retakeRecording() }
+                        Task { [weak model] in await model?.retakeRecording() }
                     } label: {
                         Label("Retake Last Recording", systemImage: "arrow.counterclockwise")
                     }
@@ -496,7 +496,7 @@ struct EditorView: View {
                 .accessibilityHidden(true)
             Text("\(model.unresolvedMedia.count) media file(s) need relinking.")
                 .font(.caption)
-            Button("Relink…") { Task { await model.relinkNextMissingMedia() } }
+            Button("Relink…") { Task { [weak model] in await model?.relinkNextMissingMedia() } }
                 .controlSize(.small)
         }
     }

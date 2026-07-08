@@ -111,6 +111,7 @@ final class ReplayBufferManager {
     /// Updates the replay buffer configuration.
     func updateConfig(_ newConfig: ReplayBufferConfig) {
         self.config = newConfig
+        let ring = self.ring
         Task { await ring.updateConfig(newConfig) }
     }
 
@@ -118,6 +119,7 @@ final class ReplayBufferManager {
     /// writer's fragment tracking.
     func appendChunk(_ chunk: EncodedChunk) {
         guard isEnabled else { return }
+        let ring = self.ring
         Task {
             await ring.append(chunk)
         }

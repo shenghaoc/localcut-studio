@@ -323,15 +323,17 @@ func loudnessMeasurementProducesExpectedGain() {
     #expect(abs(result.gainDB - (-14 - result.measuredLUFS)) < 0.001)
 }
 
-@Test("VoiceCleanupDSP: zero sample rate does not crash")
+@Test("VoiceCleanupDSP: zero sample rate does not crash in DSP chain")
 func zeroSampleRateDoesNotCrash() {
     var settings = VoiceCleanupSettings()
     settings.limiter.bypass = false
     var state = VoiceCleanupProcessorState()
     var samples: [Float] = [0.1, -0.1, 0.2, -0.2]
-    // Zero sample rate should not cause a crash or undefined behavior.
-    // The DSP functions use sampleRate for timing calculations; a zero
-    // value would produce infinite/NaN durations but should not trap.
+    // Zero sample rate should not cause a crash or undefined behavior in the
+    // DSP functions. The smoothing coefficient uses max(1, ...) to absorb zero.
+    // Note: the CMTime crash guard in VoiceCleanupAudioProcessing.makeInt16SampleBuffer
+    // (which protects against timescale=0 from corrupted capture buffers) is
+    // exercised through VoiceCleanupAudioProcessing.process() integration tests.
     VoiceCleanupDSP.processInterleaved(
         &samples,
         channels: 2,

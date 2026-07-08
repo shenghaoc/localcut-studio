@@ -517,6 +517,9 @@ actor ProgramSession {
         let failureMessage = ProgramSessionError.captureFailed(error.localizedDescription).errorDescription
             ?? "Program capture failed: \(error.localizedDescription)"
         let handler = onCaptureFailure
+        // Intentionally captures self strongly — the stop/landing path must
+        // complete even if the session is being torn down (matches the strong
+        // model/session capture pattern in ProgramPanelState).
         Task {
             do {
                 let result = try await stop()

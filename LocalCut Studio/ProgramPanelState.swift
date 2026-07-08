@@ -126,6 +126,9 @@ final class ProgramPanelState {
                     renderSize: renderSize,
                     onCaptureFailure: { [weak self, weak model] result, message in
                         guard let self, let model else { return }
+                        // Strong captures from guard-let: critical cleanup
+                        // (stopWhipPublish, landing) must complete even if the
+                        // panel is dismissed during the failure path.
                         Task { @MainActor in
                             await model.stopWhipPublish()
                             self.isRunning = false
@@ -144,6 +147,8 @@ final class ProgramPanelState {
                             } else {
                                 self.statusMessage = message
                             }
+                            // model captured strongly from guard-let above —
+                            // encoderBudget requires the model reference.
                             Task { [weak self] in await self?.publishEncoderBudget(model.encoderBudget) }
                         }
                     })
