@@ -1184,7 +1184,11 @@ final class EditorModel {
         let ordered = context.track.clips.sorted { $0.timelineStart < $1.timelineStart }
         let overlaps = TransitionLayout.orderedOverlaps(ordered)
         guard let index = ordered.firstIndex(where: { $0.id == clipID }) else { return .zero }
-        let availableTail = CMTimeMaximum(context.previous.outputDuration - overlaps[index - 1], .zero)
+        // Subtract the predecessor's incoming overlap from its output duration
+        // to get the available tail. This matches the render-time clamp in
+        // TransitionLayout.orderedOverlaps.
+        let predecessorOverlap = index > 0 ? overlaps[index - 1] : .zero
+        let availableTail = CMTimeMaximum(context.previous.outputDuration - predecessorOverlap, .zero)
         return CMTimeMinimum(context.clip.outputDuration, availableTail)
     }
 
