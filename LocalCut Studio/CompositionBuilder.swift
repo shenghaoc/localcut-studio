@@ -241,10 +241,16 @@ enum CompositionBuilder {
         var hasAudioCrossfade = false
         var hasBusContribution = false
         var hasTimePitchContribution = false
+        // Loudness normalisation gain is a linear multiplier applied to all
+        // audio tracks. When only loudness is enabled (no DSP inserts), this
+        // gain is applied through the audio mix parameters instead of the
+        // offline pipeline, ensuring export matches preview.
+        let loudnessGain = project.voiceCleanup.loudnessGainLinear
         for projectTrack in project.audioTracks where !projectTrack.isMuted {
             let trackInput = project.trackInputs.first(where: { $0.id == projectTrack.id })
             let baseline = AudioBusMixing.baselineVolume(masterGain: project.masterGain,
-                                                         trackInput: trackInput)
+                                                         trackInput: trackInput,
+                                                         loudnessGain: loudnessGain)
             if baseline != 1 { hasBusContribution = true }
 
             var placed: [(track: AVMutableCompositionTrack, clip: Clip,

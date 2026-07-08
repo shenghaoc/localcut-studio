@@ -588,8 +588,9 @@ enum AudioBusMixing {
     /// Effective baseline volume (master × per-track gain). `1.0` for the
     /// default project, so transition crossfades stay bit-identical.
     nonisolated static func baselineVolume(masterGain: Float,
-                                           trackInput: TrackInput?) -> Float {
+                                           trackInput: TrackInput?,
+                                           loudnessGain: Float = 1.0) -> Float {
         let g = trackInput?.gain ?? 1
-        return max(0, masterGain * g)
+        return max(0, masterGain * g * loudnessGain)
     }
 }
