@@ -102,7 +102,7 @@ struct CaptionsInspectorView: View {
                     model.removeCaptionTrack(id: track.id)
                 } label: { Image(systemName: "trash") }
                     .help("Remove \(track.name)")
-                    .accessibilityLabel("Remove caption track")
+                    .accessibilityLabel("Remove caption track \(track.name)")
             }
 
             ForEach(track.lines) { line in
@@ -139,8 +139,8 @@ struct CaptionsInspectorView: View {
                     model.removeCaptionLine(line.id, in: track.id)
                 } label: { Image(systemName: "minus.circle") }
                     .buttonStyle(.borderless)
-                    .help("Remove line")
-                    .accessibilityLabel("Remove caption line")
+                    .help("Remove line\(line.text.isEmpty ? "" : ": \(line.text)")")
+                    .accessibilityLabel("Remove caption line\(line.text.isEmpty ? "" : ": \(line.text)")")
             }
             TextField("Caption text", text: Binding(
                 get: { line.text },

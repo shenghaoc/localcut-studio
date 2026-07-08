@@ -102,7 +102,7 @@ struct RecorderUITestHarnessView: View {
         model.isRecording = true
         model.isPaused = false
         model.recordingSourceCount = 1
-        model.statusMessage = "Recording..."
+        model.statusMessage = "Recording…"
         phase = .recording
     }
 
@@ -116,7 +116,7 @@ struct RecorderUITestHarnessView: View {
     private func resumeRecording() {
         model.isRecording = true
         model.isPaused = false
-        model.statusMessage = "Recording..."
+        model.statusMessage = "Recording…"
         phase = .recording
     }
 
