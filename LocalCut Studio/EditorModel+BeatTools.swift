@@ -71,6 +71,9 @@ extension EditorModel {
             return
         }
 
+        // Cancel any in-flight analysis task. Both analyzeBeatsForSelection
+        // and loadAvailableBeatCaches share this task reference, so only one
+        // can run at a time. This is safe because both run on MainActor.
         beatAnalysisTask?.cancel()
         statusMessage = "Analysing beats in \(media.name)…"
 
@@ -297,6 +300,10 @@ extension EditorModel {
                 let present = Set(self.project.mediaItems.map(\.id))
                 let analyses = loadedAnalyses.filter { present.contains($0.key) }
                 let keys = loadedKeys.filter { present.contains($0.key) }
+                // Update both dictionaries together so they stay consistent.
+                // A view reading beatAnalyses between the two merges would see
+                // analyses without corresponding keys, but this is safe because
+                // both updates happen on MainActor in a single run loop tick.
                 self.beatAnalyses.merge(analyses) { _, new in new }
                 self.beatAnalysisKeys.merge(keys) { _, new in new }
                 if !analyses.isEmpty {

@@ -74,7 +74,11 @@ final class EditorModel {
     var copyImportsIntoBundle: Bool = true
 
     // Beat tools (Phase 34)
+    /// Whether beat markers are shown on the timeline ruler. Session-only;
+    /// reset on document open because beat analyses are project-scoped.
     var showBeatMarkers = false
+    /// Whether clip editing snaps to beat boundaries. Session-only;
+    /// reset on document open because beat analyses are project-scoped.
     var snapToBeats = false
     /// Global draw/snap offset in seconds, clamped by the inspector to ±200 ms.
     /// Changing it must drop the projected-beat memo so markers, snap targets,

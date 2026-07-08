@@ -133,6 +133,16 @@ public enum BeatDetectionCore {
     /// retain before we treat it as the true fundamental tempo.
     public static let octaveEnergyFraction: Float = 0.5
 
+    /// Estimates the tempo in BPM from the onset envelope using autocorrelation.
+    ///
+    /// Returns 0 when:
+    /// - The envelope is empty or hopDuration is invalid
+    /// - The envelope is too short for the BPM range
+    /// - No positive autocorrelation score is found (silent or noise-only audio)
+    ///
+    /// The BPM range is clamped to `minBPM...maxBPM`. Tempos outside this range
+    /// are not detected — this is by design for music analysis, but callers
+    /// should be aware that very fast or very slow tempos will report 0.
     public static func estimateTempoBPM(envelope: [Float],
                                         hopDuration: Double,
                                         minBPM: Double = 60,

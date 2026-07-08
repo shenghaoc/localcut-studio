@@ -53,7 +53,10 @@ struct BeatAnalyzer {
             // otherwise trap on overflow or balloon allocation before the reader
             // has validated a single sample. One hour covers any realistic source.
             let cappedSeconds = min(duration.seconds, 3600)
-            let estimatedSamples = Int(cappedSeconds * targetSampleRate)
+            let estimatedSamplesDouble = cappedSeconds * targetSampleRate
+            // Guard against overflow: on macOS Int is 64-bit, so this is safe
+            // for any realistic duration, but we clamp defensively.
+            let estimatedSamples = Int(min(estimatedSamplesDouble, Double(Int.max / 2)))
             if estimatedSamples > 0 {
                 samples.reserveCapacity(estimatedSamples)
             }

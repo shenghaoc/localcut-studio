@@ -21,13 +21,13 @@ public enum BeatAnalysisCache {
         directory.appendingPathComponent(fileName(for: key))
     }
 
+    /// Reads a cached beat analysis from disk. Returns nil for cache misses,
+    /// corrupt files, version mismatches, or decode failures. All failure modes
+    /// are treated as cache misses so the caller re-analyses and overwrites.
     public static func read(key: String, in directory: URL) throws -> BeatAnalysis? {
         let fileURL = url(for: key, in: directory)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
         let data = try Data(contentsOf: fileURL)
-        // A truncated or otherwise corrupt payload is treated as a cache miss
-        // (returns nil) so the caller re-analyses and overwrites the bad blob,
-        // rather than surfacing a hard failure for a perfectly readable source.
         return try? decode(data)
     }
 
