@@ -109,10 +109,10 @@ ensure_mediamtx_binary() {
 
 start_container() {
     # Remove any existing container
-    ${CONTAINER_CMD} rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+    "${CONTAINER_CMD}" rm -f "${CONTAINER_NAME}" 2>/dev/null || true
 
     echo "Starting MediaMTX container..."
-    ${CONTAINER_CMD} run -d \
+    "${CONTAINER_CMD}" run -d \
         --name "${CONTAINER_NAME}" \
         -p 8889:8889 \
         -p 9997:9997 \
@@ -139,7 +139,7 @@ show_mediamtx_logs() {
 cleanup() {
     if [ -n "${CONTAINER_CMD}" ]; then
         echo "Stopping MediaMTX container..."
-        ${CONTAINER_CMD} rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+        "${CONTAINER_CMD}" rm -f "${CONTAINER_NAME}" 2>/dev/null || true
     elif [ -n "${MEDIAMTX_PID}" ]; then
         echo "Stopping MediaMTX process..."
         kill "${MEDIAMTX_PID}" 2>/dev/null || true
@@ -147,7 +147,7 @@ cleanup() {
     fi
     MEDIAMTX_PID=""
 }
-trap cleanup EXIT
+trap cleanup EXIT SIGTERM SIGINT
 
 start_mediamtx() {
     CONTAINER_CMD=""

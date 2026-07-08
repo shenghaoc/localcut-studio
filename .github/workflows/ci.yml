@@ -112,7 +112,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: DerivedData
-          key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved') }}
+          key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
           restore-keys: |
             deriveddata-${{ runner.os }}-webrtc-
 
@@ -124,8 +124,12 @@ jobs:
         id: mediamtx
         run: |
           ./Scripts/run-mediamtx-whip-integration.sh --start-only
-          # Read PID written by --start-only mode.
-          echo "pid=$(cat .build/mediamtx/mediamtx.pid)" >> "$GITHUB_OUTPUT"
+          # Read PID written by --start-only mode (binary fallback only).
+          # In container mode no PID file is written; the stop step handles
+          # both cases.
+          if [ -f .build/mediamtx/mediamtx.pid ]; then
+            echo "pid=$(cat .build/mediamtx/mediamtx.pid)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build and test (with flake detection + MediaMTX)
         run: |
@@ -139,6 +143,9 @@ jobs:
           if [ -n "$MEDIAMTX_PID" ] && kill -0 "$MEDIAMTX_PID" 2>/dev/null; then
             kill "$MEDIAMTX_PID" 2>/dev/null || true
           fi
+          # Container-mode fallback: stop by name if a container was used.
+          docker rm -f localcut-mediamtx-test 2>/dev/null || true
+          podman rm -f localcut-mediamtx-test 2>/dev/null || true
 
       - name: Restore OTIO validator venv
         uses: actions/cache@v4
@@ -215,7 +222,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: DerivedData
-          key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved') }}
+          key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
           restore-keys: |
             deriveddata-${{ runner.os }}-nonwebrtc-
 
