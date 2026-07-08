@@ -24,6 +24,9 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 START_ONLY=false
 if [ "${1:-}" = "--start-only" ]; then
     START_ONLY=true
+    # Prevent GitHub Actions runner from tracking and killing the background
+    # process when this step exits.
+    export RUNNER_TRACKING_ID=""
 fi
 CONTAINER_NAME="localcut-mediamtx-test"
 CONFIG_FILE="${PROJECT_DIR}/Tests/Fixtures/MediaMTX/mediamtx.yml"
@@ -212,9 +215,13 @@ fi
 # main xcodebuild invocation).  Keep MediaMTX alive; the caller is responsible
 # for stopping it.
 if [ "${START_ONLY}" = true ]; then
-    echo "MediaMTX started (--start-only mode). PID: ${MEDIAMTX_PID}"
-    # Write PID so the caller can stop the process precisely.
-    echo "${MEDIAMTX_PID}" > "${MEDIAMTX_DOWNLOAD_DIR}/mediamtx.pid"
+    if [ -n "${MEDIAMTX_PID}" ]; then
+        echo "MediaMTX started (--start-only mode). PID: ${MEDIAMTX_PID}"
+        # Write PID so the caller can stop the process precisely.
+        echo "${MEDIAMTX_PID}" > "${MEDIAMTX_DOWNLOAD_DIR}/mediamtx.pid"
+    else
+        echo "MediaMTX started (--start-only mode) in container: ${CONTAINER_NAME}"
+    fi
     # Reset the EXIT trap so the process keeps running after this script exits.
     trap - EXIT
     exit 0
