@@ -485,7 +485,7 @@ struct EditorView: View {
 
     private var recordingStatusColor: Color {
         if model.recordingDiskWarning != nil || model.recordingBackpressureCount > 0 {
-            return .yellow
+            return .orange
         }
         return .secondary
     }
@@ -724,7 +724,7 @@ private struct RecordingDiskSpaceView: View {
                 .accessibilityHidden(true)
             Text("\(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(model.recordingDiskWarning == .warn ? .yellow : .secondary)
+                .foregroundStyle(model.recordingDiskWarning == .warn ? .orange : .secondary)
                 .accessibilityLabel("Disk free: \(ByteCountFormatter.string(fromByteCount: free, countStyle: .file))")
         }
     }

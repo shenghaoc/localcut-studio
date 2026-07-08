@@ -270,7 +270,7 @@ struct PublishPanel: View {
         case .idle: .secondary
         case .connecting: .orange
         case .live: .red
-        case .reconnecting: .yellow
+        case .reconnecting: .orange
         case .failed: .red
         case .ended: .secondary
         }
