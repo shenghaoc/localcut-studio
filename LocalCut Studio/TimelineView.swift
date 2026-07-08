@@ -378,7 +378,11 @@ struct TimelineView: View {
             }
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
-            .accessibilityHidden(true)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Timeline scrub ruler")
+            .accessibilityValue(rulerAccessibilityValue)
+            .accessibilityHint("Adjust to scrub the playhead")
+            .accessibilityAdjustableAction(adjustRulerPlayhead)
             // Declarative resize cursor signals the ruler is scrubbable. Region-
             // based, so there's no shared NSCursor push/pop stack to unbalance
             // when the ruler Canvas rebuilds on zoom.
@@ -644,7 +648,6 @@ struct TimelineView: View {
                 model.selectClip(id: clip.id)
                 model.splitSelectedClipAtPlayhead()
             }
-            .disabled(model.selectedClipID == nil)
             // Transitions are video-only — hide the entry on audio clips
             // rather than showing it greyed out (canAddTransition would
             // disable it but the entry would still appear, which is
@@ -959,6 +962,25 @@ struct TimelineView: View {
         timelineScrollTargetSeconds = TimelineScrollMath.clampedTarget(
             seconds, totalDuration: model.totalDuration)
         timelineScrollRequest += 1
+    }
+
+    private var rulerAccessibilityValue: String {
+        "Playhead \(TimeFormatting.timecode(model.currentTime)) of \(TimeFormatting.timecode(model.totalDuration))"
+    }
+
+    private func adjustRulerPlayhead(_ direction: AccessibilityAdjustmentDirection) {
+        guard model.totalDuration > 0 else { return }
+        let step = min(max(tickStep(), 0.25), 5)
+        let target: Double
+        switch direction {
+        case .increment:
+            target = model.currentTime + step
+        case .decrement:
+            target = model.currentTime - step
+        @unknown default:
+            return
+        }
+        model.seek(toSeconds: min(max(target, 0), model.totalDuration))
     }
 }
 

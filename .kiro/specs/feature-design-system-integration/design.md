@@ -52,8 +52,9 @@ the VoiceOver rotor's Headings list without a title that would duplicate the tab
   scrub line itself stays `allowsHitTesting(false)` so clicks fall through to
   clips and the ruler. Both live in the isolated `PlayheadView` so they
   re-evaluate per `currentTime` tick without invalidating the rest of the
-  timeline. The head carries `accessibilityHidden(true)` because the
-  adjustable action and the ruler scrub gesture cover the assistive path.
+  timeline. The head carries `accessibilityHidden(true)` because assistive
+  scrubbing lives on the ruler Canvas, which exposes a timeline-scrub label,
+  live playhead value, hint, and adjustable action.
 
 ### Inspector media imagery — `InspectorPosterView`
 
@@ -84,6 +85,9 @@ The integration also closes the VoiceOver gaps the design pass surfaced:
   `count == 1 ? …` logic.
 - The preview exposes a localized `accessibilityValue` describing the empty vs.
   active state; the transport time reads "Playhead m:ss.ff of m:ss.ff".
+- The timeline ruler stays reachable to VoiceOver as the direct scrub target:
+  it reports the current playhead time, supports adjustable increment/decrement
+  scrubbing, and leaves only decorative tick/marker label drawing hidden.
 
 ## Visual identity pass
 
@@ -193,7 +197,8 @@ The medium-risk interaction items are done and manually verified with real media
   across a long body so the tail of a clip isn't an unlabeled slab.
 - **Draggable playhead head** — the head is a grab target at the ruler/lane
   boundary that scrubs by drag translation (origin-independent); the scrub line
-  stays non-interactive so clicks still fall through to clips and the ruler.
+  stays non-interactive so clicks still fall through to clips and the ruler,
+  and the ruler Canvas remains the VoiceOver-adjustable scrub target.
 - **Clip-body move cursor** — declarative `.pointerStyle(.grabIdle/.grabActive)`
   on the clip body: region-based, so there's no `NSCursor` stack to unbalance,
   and it coexists with the trim handles' resize cursor.

@@ -19,7 +19,8 @@
   trailing slot (R2.1).
 - [x] **T2.2** Add the `PlayheadHead` triangle shape and draw it at the
   ruler/lane boundary inside `PlayheadView`, alongside the scrub line, passing
-  `rulerHeight` through; non-interactive (R2.2, R2.3).
+  `rulerHeight` through; the head is the direct-manipulation grab target while
+  the ruler remains the assistive scrub target (R2.2, R2.3).
 
 ## Inspector imagery
 
@@ -101,7 +102,7 @@
   inline `Text` placeholder; Master Gain via `LabeledSliderRow`; scopes on
   `lcLane`; timeline fonts → text styles; Align-Window reset.
 - [x] **T9.5** Pointer feedback: ruler resize cursor + scrub tooltip; marker
-  pointing-hand cursor.
+  pointing-hand cursor; ruler VoiceOver label/value + adjustable scrub action.
 - [x] **T9.6** Unify list-row selection on the system selection colour (media
   bin + markers).
 - [x] **T9.7** Formerly-deferred interaction work, now complete:
@@ -142,6 +143,10 @@
   so `Color.accentColor` and system focus rings inherit the gold app-wide; the
   explicit `lcAccent` references in T10.4 are now equivalent (they could later be
   simplified back to `Color.accentColor`).
+- [x] **T10.6** Codex review follow-up: keep the scrub ruler reachable to
+  VoiceOver instead of marking it decorative, and keep the clip context-menu
+  Split command enabled for unselected clips because the command selects the
+  clicked clip before splitting.
 
 ## Verification
 

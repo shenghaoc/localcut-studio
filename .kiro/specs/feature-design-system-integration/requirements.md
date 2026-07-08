@@ -26,8 +26,9 @@
 - **R2.3** The playhead head is an interactive grab target with a `DragGesture`
   (tolerant seek while dragging, precise seek on end). The full-height scrub
   line stays non-interactive (`allowsHitTesting(false)`) so clicks fall
-  through to clips and the ruler; the head carries `accessibilityHidden(true)`
-  and assistive scrubbing happens via the keyboard / adjustable action.
+  through to clips and the ruler; the head carries `accessibilityHidden(true)`.
+  The ruler remains an accessible scrub target with a label, live playhead
+  value, and adjustable action for VoiceOver users.
 
 ## R3 — Inspector media imagery
 
