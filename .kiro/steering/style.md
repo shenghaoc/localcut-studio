@@ -4,6 +4,7 @@
 
 - **Swift 6 concurrency** — the target defaults to `MainActor` isolation. Keep UI/model types on the main actor; move heavy media work off it explicitly (`Task.detached` or a dedicated actor) only when it measurably blocks. Mark escaping closures' captures `[weak self]`.
 - **Observation, not Combine** — model state is `@Observable`; views use `@State`/`@Bindable`. Use `async`/`await` and `AsyncSequence` (e.g. `AVAssetExportSession.states(updateInterval:)`) instead of publishers.
+- **`@ObservationIgnored` requires a reason** — every `@ObservationIgnored` annotation on `EditorModel` must be justifiable (see the policy table in that file's header doc). Categories: static/constant, injected store, service objects, framework objects, task handles, caches/memoisation, undo coalescing plumbing, security-scoped access, session tokens, capture-internal plumbing. When adding a new ignored property, classify it in the header table.
 - **No force unwrap / force try** on anything derived from user media. Use `guard let`, `try?` with a user-visible fallback, or surface the error to `statusMessage`.
 - **Value types for data, reference types for identity/lifecycle** — `Clip` is a `struct`; `Track`/`Project`/`MediaItem`/`EditorModel` are `@Observable` classes.
 - **Immutability** — prefer `let`; mutate model arrays in place through the owning object so Observation fires.
