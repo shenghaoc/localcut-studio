@@ -154,7 +154,7 @@ struct RecorderSetupView: View {
     private var header: some View {
         HStack {
             Text("Recorder")
-                .font(.title3.weight(.semibold))
+                .font(.headline)
             Spacer()
             Button {
                 model.isRecorderPresented = false
@@ -165,7 +165,8 @@ struct RecorderSetupView: View {
             .help("Close")
             .accessibilityLabel("Close recorder")
         }
-        .padding(20)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     private var footer: some View {
@@ -184,12 +185,13 @@ struct RecorderSetupView: View {
             Button {
                 start()
             } label: {
-                Label("Start Recording", systemImage: "record.circle")
+                Label("Start Recording…", systemImage: "record.circle")
             }
             .buttonStyle(.borderedProminent)
             .disabled(!canStart)
         }
-        .padding(20)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     private var canStart: Bool {

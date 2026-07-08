@@ -56,7 +56,7 @@ struct DiagnosticsView: View {
             capabilitiesSection
         }
         .padding(12)
-        .frame(width: 280, alignment: .leading)
+        .frame(minWidth: 280, alignment: .leading)
         // Liquid Glass: a diagnostics HUD is a functional panel floating over the
         // editor content — the textbook case for the regular glass material,
         // which supplies its own blur, border, and luminosity adaptation (no
@@ -136,8 +136,8 @@ struct DiagnosticsView: View {
 
     private func tierTint(_ tier: CapabilityTier) -> Color {
         switch tier {
-        case .baseline: .gray
-        case .accelerated: .yellow
+        case .baseline: .secondary
+        case .accelerated: .orange
         case .pro: .green
         }
     }

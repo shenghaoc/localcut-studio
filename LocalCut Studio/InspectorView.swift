@@ -1297,7 +1297,7 @@ private struct InspectorPosterView: View {
                     .aspectRatio(contentMode: .fill)
             } else {
                 Image(systemName: media.hasVideo ? "film" : "waveform")
-                    .font(.system(size: 28))
+                    .font(.title2)
                     .foregroundStyle(.secondary)
             }
         }

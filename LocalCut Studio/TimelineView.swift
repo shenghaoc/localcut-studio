@@ -374,7 +374,7 @@ struct TimelineView: View {
                     beatPath.move(to: CGPoint(x: x, y: 0))
                     beatPath.addLine(to: CGPoint(x: x, y: rulerHeight))
                 }
-                context.stroke(beatPath, with: .color(.yellow.opacity(0.65)), lineWidth: 1)
+                context.stroke(beatPath, with: .color(.lcBeatMarker), lineWidth: 1)
             }
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
@@ -534,10 +534,10 @@ struct TimelineView: View {
         let label = line.text.isEmpty ? "Caption" : line.text
 
         return RoundedRectangle(cornerRadius: 5)
-            .fill(Color.indigo.opacity(captionDrag?.lineID == line.id ? 0.25 : 0.38))
+            .fill(Color.lcCaptionFill.opacity(captionDrag?.lineID == line.id ? 0.25 : 0.38))
             .overlay(
                 RoundedRectangle(cornerRadius: 5)
-                    .strokeBorder(Color.indigo.opacity(0.75), lineWidth: 1))
+                    .strokeBorder(Color.lcCaptionStroke, lineWidth: 1))
             .overlay(alignment: .leading) {
                 Text(label)
                     .font(.caption2)
@@ -574,15 +574,15 @@ struct TimelineView: View {
             let isSelected = model.selectedTransitionClipID == placement.clip.id
             let type = placement.clip.transition?.type ?? .crossDissolve
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color.orange.opacity(isSelected ? 0.5 : 0.3))
+                .fill(Color.lcTransitionFill.opacity(isSelected ? 0.5 : 0.3))
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(isSelected ? Color.lcAccent : Color.orange.opacity(0.8),
+                        .strokeBorder(isSelected ? Color.lcAccent : Color.lcTransitionFill.opacity(0.8),
                                       lineWidth: isSelected ? 2 : 1))
                 .overlay(
                     Image(systemName: type.symbolName)
                         .font(.caption2)
-                        .foregroundStyle(.white))
+                        .foregroundStyle(Color.lcTransitionIcon))
                 .frame(width: width, height: laneHeight - 16)
                 .offset(x: x, y: 8)
                 .contentShape(Rectangle())
@@ -694,7 +694,7 @@ struct TimelineView: View {
         let isHovered = hoverEdge == activeEdge
 
         return Rectangle()
-            .fill(isHovered ? Color.white.opacity(0.15) : Color.clear)
+            .fill(isHovered ? Color.lcTrimHover : Color.clear)
             .frame(width: edgeZoneWidth)
             .contentShape(Rectangle())
             // Region-based cursor: no NSCursor push/pop stack to unbalance.
