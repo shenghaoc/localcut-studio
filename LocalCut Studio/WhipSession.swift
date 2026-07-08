@@ -79,7 +79,7 @@ actor WhipSession {
     }
 
     var stateStream: AsyncStream<PublishState> {
-        cachedStateStream.withLock { existing in
+        cachedStateStream.withLockUnchecked { existing in
             if let existing { return existing }
             let (stream, continuation) = AsyncStream<PublishState>.makeStream(bufferingPolicy: .bufferingNewest(1))
             stateContinuation = continuation
