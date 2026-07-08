@@ -19,7 +19,9 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
     /// Cumulative start time for each frame.
     private let frameStarts: [TimeInterval]
     /// Sliding-window cache: index → CIImage. Protected by lock.
-    private struct CacheState: Sendable {
+    /// @unchecked Sendable because CIImage is a reference type not
+    /// annotated Sendable; the lock provides the necessary thread safety.
+    private struct CacheState: @unchecked Sendable {
         var cache: [Int: CIImage] = [:]
     }
     private let cacheState = OSAllocatedUnfairLock(initialState: CacheState())

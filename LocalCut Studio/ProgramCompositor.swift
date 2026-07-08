@@ -24,8 +24,10 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
     /// Pool for recycling output pixel buffers.
     private let pixelBufferPool: CVPixelBufferPool?
 
-    /// Mutable state protected by lock.
-    private struct State: Sendable {
+    /// Mutable state protected by lock. @unchecked Sendable because
+    /// CVPixelBuffer is a reference type not annotated Sendable; the lock
+    /// provides the necessary thread safety.
+    private struct State: @unchecked Sendable {
         var sourceBuffers: [UUID: CVPixelBuffer] = [:]
         var currentScene: SceneDefinition?
         var scenes: [SceneDefinition] = []

@@ -35,7 +35,9 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     nonisolated func detachFromWebRTC() {}
     #endif
 
-    private struct State: Sendable {
+    /// @unchecked Sendable because CVPixelBuffer is a reference type not
+    /// annotated Sendable; the lock provides the necessary thread safety.
+    private struct State: @unchecked Sendable {
         var isClosed = false
         var isInFlight = false
         var pendingBuffer: CVPixelBuffer?
