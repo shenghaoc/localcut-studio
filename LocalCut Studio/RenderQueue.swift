@@ -230,6 +230,17 @@ final class RenderQueue {
     @ObservationIgnored
     private var runnerToken: UUID?
 
+    /// Tracks the most recent `persist()` write task so the next persist can
+    /// await it, guaranteeing writes land on disk in call order even though
+    /// `Task.detached` does not inherit the MainActor's serial execution.
+    /// Without this chain, two successive `persist()` calls could spawn two
+    /// overlapping writes where the second finishes first.
+    @ObservationIgnored
+    private var pendingWriteTask: Task<Void, Never>?
+
+    @ObservationIgnored
+    private var pendingWriteToken: UUID?
+
     @ObservationIgnored
     private var suppressAutoRestartAfterRunnerStops = false
 
@@ -258,6 +269,12 @@ final class RenderQueue {
     @ObservationIgnored private let persistsToDisk: Bool
 
     @ObservationIgnored
+    private let queueFileURLProvider: @Sendable () -> URL?
+
+    @ObservationIgnored
+    private let queueDocumentWriter: @Sendable (Data, URL) throws -> Void
+
+    @ObservationIgnored
     private let outputBookmarkResolver: @Sendable (Data) -> BookmarkResolution?
 
     @ObservationIgnored
@@ -284,7 +301,9 @@ final class RenderQueue {
     init(
         jobs: [QueueJob] = [],
         persistsToDisk: Bool = true,
-        outputBookmarkResolver: (@Sendable (Data) -> BookmarkResolution?)? = nil
+        outputBookmarkResolver: (@Sendable (Data) -> BookmarkResolution?)? = nil,
+        queueFileURLProvider: (@Sendable () -> URL?)? = nil,
+        queueDocumentWriter: (@Sendable (Data, URL) throws -> Void)? = nil
     ) {
         self.jobs = jobs
         self.currentJobID = nil
@@ -292,6 +311,10 @@ final class RenderQueue {
         self.isRunning = false
         self.statusMessage = nil
         self.persistsToDisk = persistsToDisk
+        self.queueFileURLProvider = queueFileURLProvider ?? Self.queueFileURL
+        self.queueDocumentWriter = queueDocumentWriter ?? { data, url in
+            try data.write(to: url, options: .atomic)
+        }
         self.outputBookmarkResolver = outputBookmarkResolver ?? Self.resolveSecurityScopedBookmark
     }
 
@@ -1276,10 +1299,19 @@ final class RenderQueue {
 
     /// Writes the current queue to disk atomically. Called on every state
     /// transition; the encode happens on the MainActor (where `jobs` lives)
-    /// but the actual file write is hopped to a background queue so a slow
-    /// disk can't stall the UI (Gemini review).
+    /// but the actual file write is hopped to a detached task so a slow
+    /// disk can't stall the UI. Uses `Task.detached` rather than GCD to
+    /// match `load()` — no `self` is captured (only Sendable value types),
+    /// so there is no retain-cycle risk. Writes are serialized via
+    /// `pendingWriteTask` so the detached file-writes always complete on
+    /// disk in the order `persist()` was called (Gemini review).
     private func persist() {
-        guard persistsToDisk, !refusingPersist, let url = Self.queueFileURL() else { return }
+        guard persistsToDisk, !refusingPersist else { return }
+        guard let url = queueFileURLProvider() else {
+            logger.error("queue persist skipped: Application Support directory unavailable")
+            statusMessage = "Render queue was not saved: Application Support directory unavailable."
+            return
+        }
         let doc = RenderQueueDoc(jobs: jobs)
         let encoded: Data
         do {
@@ -1288,19 +1320,41 @@ final class RenderQueue {
             encoded = try encoder.encode(doc)
         } catch {
             logger.error("queue persist failed: \(error.localizedDescription, privacy: .public)")
+            statusMessage = "Render queue was not saved: \(error.localizedDescription)"
             return
         }
         let log = logger
-        // GCD → Task.detached: cancellation-safe because Data.write is atomic.
-        // If the task is cancelled before completion, the on-disk state may be
-        // stale; load() reconciles on next launch.
-        Task.detached(priority: .utility) {
+        let writer = queueDocumentWriter
+        let previousTask = pendingWriteTask
+        let token = UUID()
+        pendingWriteToken = token
+        pendingWriteTask = Task.detached(priority: .utility) { [weak self] in
+            _ = await previousTask?.value
             do {
-                try encoded.write(to: url, options: .atomic)
+                try writer(encoded, url)
             } catch {
+                let message = "Render queue was not saved: \(error.localizedDescription)"
                 log.error("queue persist failed: \(error.localizedDescription, privacy: .public)")
+                await self?.recordPersistenceFailure(message)
             }
+            await self?.clearPendingWriteTask(token: token)
         }
+    }
+
+    private func recordPersistenceFailure(_ message: String) {
+        statusMessage = message
+    }
+
+    private func clearPendingWriteTask(token: UUID) {
+        guard pendingWriteToken == token else { return }
+        pendingWriteTask = nil
+        pendingWriteToken = nil
+    }
+
+    /// Lets tests observe the detached persistence chain without making
+    /// production callers wait for fire-and-forget writes.
+    func waitForPendingPersistenceForTesting() async {
+        await pendingWriteTask?.value
     }
 
     /// Reads the on-disk queue and reconciles state. Called once at app

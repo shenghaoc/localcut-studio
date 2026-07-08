@@ -399,6 +399,42 @@ struct RenderQueueTests {
         #expect(abs(queue.totalProgress - 0.5) < 1e-6)
     }
 
+    @Test("Persistence: missing queue file URL surfaces a status message")
+    func persistMissingQueueURLReportsStatus() {
+        let queue = RenderQueue(
+            persistsToDisk: true,
+            queueFileURLProvider: { nil })
+        let job = makeJob(name: "A")
+
+        queue.enqueue(job, autoStart: false)
+
+        #expect(queue.statusMessage == "Render queue was not saved: Application Support directory unavailable.")
+    }
+
+    @Test("Persistence: atomic write failure surfaces a status message")
+    func persistWriteFailureReportsStatus() async {
+        struct WriteFailure: LocalizedError, Sendable {
+            var errorDescription: String? { "Injected queue write failure" }
+        }
+
+        let queue = RenderQueue(
+            persistsToDisk: true,
+            queueFileURLProvider: {
+                URL(fileURLWithPath: NSTemporaryDirectory())
+                    .appendingPathComponent("renderqueue-write-failure-\(UUID()).json")
+            },
+            queueDocumentWriter: { _, _ in
+                throw WriteFailure()
+            })
+        let job = makeJob(name: "A")
+
+        queue.enqueue(job, autoStart: false)
+
+        await queue.waitForPendingPersistenceForTesting()
+
+        #expect(queue.statusMessage?.contains("Injected queue write failure") == true)
+    }
+
     @Test("Runner cleanup restarts when a job is enqueued after drain")
     func runnerCleanupRestartsAfterDrainEnqueue() async throws {
         let queue = RenderQueue(persistsToDisk: false, outputBookmarkResolver: { _ in nil })
@@ -437,4 +473,5 @@ struct RenderQueueTests {
         let statuses = queue.jobs.map(\.status.rawValue).joined(separator: ",")
         Issue.record("Render queue did not settle before timeout; count=\(queue.jobs.count), isRunning=\(queue.isRunning), statuses=[\(statuses)]")
     }
+
 }

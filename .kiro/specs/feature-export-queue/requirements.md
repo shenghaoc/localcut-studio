@@ -75,6 +75,9 @@
 - **R3.7** Stale-but-resolvable output and source-media bookmarks are refreshed
   back into the queued job before the next persist, rather than being used once
   and left stale on disk.
+- **R3.8** If the queue file location cannot be created or an atomic queue write
+  fails, `RenderQueue` logs the failure and updates `statusMessage` so the user
+  is not left believing the queue state was saved.
 
 ## R4 — UI
 
@@ -110,5 +113,7 @@
   cleanup instead of remaining queued behind a false `isRunning` state. The
   regression test must avoid real security-scoped bookmark resolution by
   injecting a deterministic output-bookmark resolver.
-- **R5.8** `xcodebuild` (Debug, macOS) compiles cleanly; the existing test
+- **R5.8** Queue persistence failure tests cover both an unavailable queue-file
+  URL and an atomic-write failure, asserting that `statusMessage` is updated.
+- **R5.9** `xcodebuild` (Debug, macOS) compiles cleanly; the existing test
   count does not regress.
