@@ -603,10 +603,16 @@ extension CaptionTrackDoc {
 extension TrackDoc {
     @MainActor
     public init(track: Track) {
+        let kindString: String
+        switch track.kind {
+        case .video: kindString = "video"
+        case .audio: kindString = "audio"
+        case .layout: kindString = "layout"
+        }
         self.init(
             id: track.id,
             name: track.name,
-            kind: track.kind == .video ? "video" : "audio",
+            kind: kindString,
             isMuted: track.isMuted,
             clips: track.clips.map(ClipDoc.init(clip:)))
     }

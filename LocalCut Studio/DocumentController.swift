@@ -60,6 +60,9 @@ final class DocumentController {
         RenderCache.shared.purge()
         PaddedBackgroundRenderer.purgeCache()
         model.project.mediaItems.removeAll()
+        // Clear all tracks to prevent orphaned clips referencing deleted media.
+        model.project.videoTracks = [Track(name: "V1", kind: .video)]
+        model.project.audioTracks = [Track(name: "A1", kind: .audio)]
         model.project.captionTracks.removeAll()
         model.project.markers.removeAll()
         model.project.overlays.removeAll()
