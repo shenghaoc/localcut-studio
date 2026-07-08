@@ -44,6 +44,18 @@ API and uses `NSLock.withLock` for the read.
 - **Impact**: No product behavior change. The non-WebRTC stub path remains
   deterministic and synchronized.
 
+### B4 - Replay-buffer track pipes needed explicit queue confinement
+
+`TrackPipe` wraps non-`Sendable` `AVAssetReaderTrackOutput` and
+`AVAssetWriterInput` instances. Its safety boundary is not immutability alone;
+the reader/writer pair must stay on the serial `writerQueue` used by
+`requestMediaDataWhenReady`.
+
+- **Fix**: Document `TrackPipe` as queue-confined to the serial writer pump,
+  not as a standalone immutable synchronization boundary.
+- **Impact**: No replay-buffer behavior change. The comment preserves the
+  callback queue invariant future edits must keep.
+
 ## Non-goals
 
 - Do not broaden this PR into the separate `nonisolated(unsafe)` audit from

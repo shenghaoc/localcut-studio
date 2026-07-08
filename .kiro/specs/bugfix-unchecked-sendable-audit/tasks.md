@@ -15,6 +15,8 @@
 - [x] **T4** Update `ProgramCompositorTests` and `WhipPublishTests` to use the
   synchronized accessors after the rebase onto PR #78.
 - [x] **T5** Add this Kiro bugfix spec and link it from `AGENTS.md`.
+- [x] **T6** Clarify `TrackPipe` as queue-confined to the serial replay-buffer
+  `writerQueue` pump callback.
 
 ## Verification
 

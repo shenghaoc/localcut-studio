@@ -22,8 +22,8 @@ The production audit covers 30 conformances:
 | Category | Count | Examples |
 | --- | ---: | --- |
 | Lock-protected mutable state | 18 | `ScreenCaptureSession`, `RingBuffer`, `ReconnectController`, `VideoPublishTap`, `ProgramCompositor` |
-| Queue-confined framework state | 3 | `CaptureManifestFileWriter`, `VoiceCleanupStateBox`, `AVCaptureSampleSession` |
-| Immutable wrapper for non-Sendable framework object | 7 | `ProgramFrameBuffer`, `LiveAudioPCMBufferBox`, `TrackPipe`, `WriterBox`, `PendingVideoCompositionRequest` |
+| Queue-confined framework state | 4 | `CaptureManifestFileWriter`, `VoiceCleanupStateBox`, `AVCaptureSampleSession`, `TrackPipe` |
+| Immutable wrapper for non-Sendable framework object | 6 | `ProgramFrameBuffer`, `LiveAudioPCMBufferBox`, `WriterBox`, `PendingVideoCompositionRequest` |
 | Framework protocol requirement | 2 | `LocalCutAudioDevice`, `EffectCompositionInstruction` |
 
 ## Program Compositor Accessor
@@ -39,6 +39,14 @@ The non-WebRTC build path is a deterministic test seam, but it is still part of
 a `@unchecked Sendable` type. `latestPixelBuffer` remains the accessor used by
 tests, and its implementation now uses `lock.withLock` against private backing
 storage.
+
+## Replay Buffer Track Pipe
+
+`TrackPipe` wraps an `AVAssetReaderTrackOutput` and `AVAssetWriterInput`.
+Those framework objects are safe for this finalizer only because every pipe is
+used by `requestMediaDataWhenReady(on: writerQueue)` callbacks on the same
+serial `writerQueue`. The unchecked contract therefore names queue confinement
+as the boundary.
 
 ## Validation Strategy
 

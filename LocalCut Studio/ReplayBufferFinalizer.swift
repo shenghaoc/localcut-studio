@@ -209,9 +209,10 @@ enum ReplayBufferFinalizer {
         let timelineOffset: CMTime
     }
 
-    /// `@unchecked Sendable`: immutable wrapper for non-`Sendable`
-    /// `AVAssetReaderTrackOutput` + `AVAssetWriterInput` pair. Both objects
-    /// are used exclusively inside the serial `writerQueue` pump callback.
+    /// `@unchecked Sendable`: queue-confined wrapper for the non-`Sendable`
+    /// `AVAssetReaderTrackOutput` + `AVAssetWriterInput` pair. Each pipe is
+    /// accessed only from `requestMediaDataWhenReady(on: writerQueue)` pump
+    /// callbacks on the same serial `writerQueue`.
     nonisolated private final class TrackPipe: @unchecked Sendable {
         let readerOutput: AVAssetReaderTrackOutput
         let writerInput: AVAssetWriterInput
