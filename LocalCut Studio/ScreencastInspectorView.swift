@@ -98,9 +98,13 @@ struct ScreencastInspectorView: View {
 
     /// Creates a binding that dynamically fetches the latest callout from the
     /// model by ID, avoiding stale captures during rapid slider updates.
+    /// The binding is lightweight (no allocation beyond the closure captures)
+    /// and the getter performs an O(n) search through callouts, which is
+    /// acceptable for typical callout counts (< 20).
     private func calloutBinding(for callout: CalloutClip) -> Binding<CalloutClip> {
-        Binding(
-            get: { model.callout(for: callout.id) ?? callout },
+        let calloutID = callout.id
+        return Binding(
+            get: { model.callout(for: calloutID) ?? callout },
             set: { model.updateCallout($0) }
         )
     }
