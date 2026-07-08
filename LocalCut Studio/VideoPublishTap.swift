@@ -1,6 +1,5 @@
 import Foundation
-@preconcurrency import CoreVideo
-import os
+import CoreVideo
 
 #if LOCALCUT_ENABLE_WEBRTC
 import WebRTC
@@ -14,20 +13,20 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     init() {}
 
     nonisolated func attach(to factory: RTCPeerConnectionFactory) -> RTCVideoSource {
-        lock.withLock { state in
-            if let videoSource { return videoSource }
-            let source = factory.videoSource()
-            videoSource = source
-            capturer = TapCapturer(source: source)
-            return source
-        }
+        lock.lock()
+        defer { lock.unlock() }
+        if let videoSource { return videoSource }
+        let source = factory.videoSource()
+        videoSource = source
+        capturer = TapCapturer(source: source)
+        return source
     }
 
     nonisolated func detachFromWebRTC() {
-        lock.withLock { _ in
-            videoSource = nil
-            capturer = nil
-        }
+        lock.lock()
+        videoSource = nil
+        capturer = nil
+        lock.unlock()
     }
     #else
     nonisolated(unsafe) private(set) var latestPixelBuffer: CVPixelBuffer?
@@ -35,41 +34,38 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     nonisolated func detachFromWebRTC() {}
     #endif
 
-    /// @unchecked Sendable because CVPixelBuffer is a reference type not
-    /// annotated Sendable; the lock provides the necessary thread safety.
-    private struct State: @unchecked Sendable {
-        var isClosed = false
-        var isInFlight = false
-        var pendingBuffer: CVPixelBuffer?
-    }
-    private let lock = OSAllocatedUnfairLock(initialState: State())
+    private let lock = NSLock()
+    private var isClosed = false
+    private var isInFlight = false
+    private var pendingBuffer: CVPixelBuffer?
 
     nonisolated func capturePixelBuffer(_ buffer: CVPixelBuffer) {
-        let shouldDeliver = lock.withLock { state -> Bool in
-            guard !state.isClosed else { return false }
-            if state.isInFlight {
-                state.pendingBuffer = buffer
-                return false
-            }
-            state.isInFlight = true
-            return true
+        lock.lock()
+        guard !isClosed else { lock.unlock(); return }
+        if isInFlight {
+            pendingBuffer = buffer
+            lock.unlock()
+            return
         }
-        guard shouldDeliver else { return }
+        isInFlight = true
+        lock.unlock()
         deliverFrame(buffer)
     }
 
     nonisolated func close() {
-        lock.withLock { state in
-            guard !state.isClosed else { return }
-            state.isClosed = true
-            state.pendingBuffer = nil
-            state.isInFlight = false
-        }
+        lock.lock()
+        guard !isClosed else { lock.unlock(); return }
+        isClosed = true
+        pendingBuffer = nil
+        isInFlight = false
+        lock.unlock()
     }
 
     private nonisolated func deliverFrame(_ buffer: CVPixelBuffer) {
         #if LOCALCUT_ENABLE_WEBRTC
-        let activeCapturer = lock.withLock { _ in capturer }
+        lock.lock()
+        let activeCapturer = capturer
+        lock.unlock()
         if let activeCapturer {
             let frame = RTCVideoFrame(
                 buffer: RTCCVPixelBuffer(pixelBuffer: buffer),
@@ -79,16 +75,21 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
             activeCapturer.didCapture(frame)
         }
         #else
-        lock.withLock { _ in latestPixelBuffer = buffer }
+        lock.lock()
+        latestPixelBuffer = buffer
+        lock.unlock()
         #endif
 
-        let next = lock.withLock { state -> CVPixelBuffer? in
-            let pending = state.pendingBuffer
-            state.pendingBuffer = nil
-            if pending == nil { state.isInFlight = false }
-            return pending
+        lock.lock()
+        let next = pendingBuffer
+        pendingBuffer = nil
+        if let next {
+            lock.unlock()
+            deliverFrame(next)
+        } else {
+            isInFlight = false
+            lock.unlock()
         }
-        if let next { deliverFrame(next) }
     }
 }
 

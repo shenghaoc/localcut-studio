@@ -1,8 +1,7 @@
 import Foundation
 import CoreImage
-@preconcurrency import CoreVideo
+import CoreVideo
 import Metal
-import os
 import LocalCutCore
 
 // MARK: - ProgramCompositor
@@ -24,16 +23,18 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
     /// Pool for recycling output pixel buffers.
     private let pixelBufferPool: CVPixelBufferPool?
 
-    /// Mutable state protected by lock. @unchecked Sendable because
-    /// CVPixelBuffer is a reference type not annotated Sendable; the lock
-    /// provides the necessary thread safety.
-    private struct State: @unchecked Sendable {
-        var sourceBuffers: [UUID: CVPixelBuffer] = [:]
-        var currentScene: SceneDefinition?
-        var scenes: [SceneDefinition] = []
-        var transitionStartTime: Date?
-    }
-    private let lock = OSAllocatedUnfairLock(initialState: State())
+    /// Lock protecting all mutable state below.
+    private let lock = NSLock()
+
+    /// Per-source latest pixel buffer.
+    private var sourceBuffers: [UUID: CVPixelBuffer] = [:]
+
+    /// The current scene definition being composited.
+    private(set) var currentScene: SceneDefinition?
+    private var scenes: [SceneDefinition] = []
+
+    /// Transition state: when non-nil, we're lerping opacity over 200ms.
+    private var transitionStartTime: Date?
     private let transitionDuration: TimeInterval = 0.2
 
     nonisolated init(renderSize: CGSize) {
@@ -59,63 +60,63 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
 
     /// Updates the source buffer for a given source.
     func updateSource(_ sourceID: UUID, buffer: CVPixelBuffer) {
-        lock.withLock { $0.sourceBuffers[sourceID] = buffer }
+        lock.lock()
+        defer { lock.unlock() }
+        sourceBuffers[sourceID] = buffer
     }
 
     /// Removes a source's buffer (on source disconnect).
     func removeSource(_ sourceID: UUID) {
-        lock.withLock { $0.sourceBuffers.removeValue(forKey: sourceID) }
+        lock.lock()
+        defer { lock.unlock() }
+        sourceBuffers.removeValue(forKey: sourceID)
     }
 
     /// Sets the current scene. Called when the user switches scenes.
     func switchScene(to sceneId: UUID, enableTransitions: Bool = false) {
-        lock.withLock { state in
-            let newScene = state.scenes.first(where: { $0.id == sceneId })
-            let changed = state.currentScene?.id != sceneId
-            state.currentScene = newScene
-            if changed && enableTransitions {
-                state.transitionStartTime = Date()
-            } else if changed {
-                state.transitionStartTime = nil
-            }
+        lock.lock()
+        defer { lock.unlock() }
+        let newScene = scenes.first(where: { $0.id == sceneId })
+        let changed = currentScene?.id != sceneId
+        currentScene = newScene
+        if changed && enableTransitions {
+            transitionStartTime = Date()
+        } else if changed {
+            transitionStartTime = nil
         }
     }
 
     /// Updates the full scene list (called when scenes are edited).
     func updateScenes(_ scenes: [SceneDefinition]) {
-        lock.withLock { state in
-            state.scenes = scenes
-            if let currentId = state.currentScene?.id {
-                state.currentScene = scenes.first(where: { $0.id == currentId })
-            }
+        lock.lock()
+        defer { lock.unlock() }
+        self.scenes = scenes
+        if let currentId = currentScene?.id {
+            currentScene = scenes.first(where: { $0.id == currentId })
         }
-    }
-
-    /// The current scene definition being composited.
-    var currentScene: SceneDefinition? {
-        lock.withLock { $0.currentScene }
     }
 
     /// Composites one output frame from the current scene's layers.
     func compositeFrame() -> CIImage? {
         // Snapshot mutable state under lock; render outside lock.
-        let snapshot = lock.withLock { state -> (scene: SceneDefinition?, alpha: Float, buffers: [UUID: CVPixelBuffer]) in
-            let transitionAlpha: Float
-            if let start = state.transitionStartTime {
-                let elapsed = Date().timeIntervalSince(start)
-                let progress = min(elapsed / transitionDuration, 1.0)
-                let t = 1.0 - pow(1.0 - progress, 3)
-                transitionAlpha = Float(t)
-                if progress >= 1.0 {
-                    state.transitionStartTime = nil
-                }
-            } else {
-                transitionAlpha = 1.0
+        lock.lock()
+        let scene = currentScene
+        let transitionAlpha: Float
+        if let start = transitionStartTime {
+            let elapsed = Date().timeIntervalSince(start)
+            let progress = min(elapsed / transitionDuration, 1.0)
+            let t = 1.0 - pow(1.0 - progress, 3)
+            transitionAlpha = Float(t)
+            if progress >= 1.0 {
+                transitionStartTime = nil
             }
-            return (state.currentScene, transitionAlpha, state.sourceBuffers)
+        } else {
+            transitionAlpha = 1.0
         }
+        let buffers = sourceBuffers
+        lock.unlock()
 
-        guard let scene = snapshot.scene else { return nil }
+        guard let scene else { return nil }
 
         let layers = scene.layers
             .filter { $0.visible }
@@ -128,7 +129,7 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
             let ciImage: CIImage
             switch layer.sourceRef {
             case .captureSource(let id), .still(let id):
-                guard let buffer = snapshot.buffers[id] else { continue }
+                guard let buffer = buffers[id] else { continue }
                 ciImage = CIImage(cvPixelBuffer: buffer)
             case .colour(let hex):
                 ciImage = colourImage(hex: hex)
@@ -137,7 +138,7 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
                 ciImage: ciImage,
                 layer: layer,
                 canvasSize: renderSize,
-                transitionAlpha: snapshot.alpha)
+                transitionAlpha: transitionAlpha)
             if let existing = composite {
                 composite = transformed.composited(over: existing)
             } else {
