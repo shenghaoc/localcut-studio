@@ -112,16 +112,20 @@ jobs:
         uses: actions/cache@v4
         with:
           path: DerivedData
-          key: deriveddata-${{ runner.os }}-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved') }}
+          key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved') }}
           restore-keys: |
-            deriveddata-${{ runner.os }}-
+            deriveddata-${{ runner.os }}-webrtc-
 
       - name: Validate Xcode project
         run: |
           xcodebuild -list -project "$PROJECT"
 
       - name: Start MediaMTX
-        run: ./Scripts/run-mediamtx-whip-integration.sh --start-only
+        id: mediamtx
+        run: |
+          ./Scripts/run-mediamtx-whip-integration.sh --start-only
+          # Read PID written by --start-only mode.
+          echo "pid=$(cat .build/mediamtx/mediamtx.pid)" >> "$GITHUB_OUTPUT"
 
       - name: Build and test (with flake detection + MediaMTX)
         run: |
@@ -131,15 +135,20 @@ jobs:
       - name: Stop MediaMTX
         if: always()
         run: |
-          pkill -f 'mediamtx' 2>/dev/null || true
+          MEDIAMTX_PID="${{ steps.mediamtx.outputs.pid }}"
+          if [ -n "$MEDIAMTX_PID" ] && kill -0 "$MEDIAMTX_PID" 2>/dev/null; then
+            kill "$MEDIAMTX_PID" 2>/dev/null || true
+          fi
 
       - name: Restore OTIO validator venv
         uses: actions/cache@v4
         with:
-          path: /tmp/localcut-otio-validator-*
+          path: ${{ runner.temp }}/localcut-otio-validator-0.17.0
           key: otio-validator-${{ runner.os }}-0.17.0
 
       - name: Validate OTIO goldens
+        env:
+          OTIO_VALIDATOR_VENV: ${{ runner.temp }}/localcut-otio-validator-0.17.0
         run: ./Scripts/validate-otio-goldens.sh
 
       - name: Upload failure diagnostics
@@ -206,9 +215,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: DerivedData
-          key: deriveddata-${{ runner.os }}-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved') }}
+          key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved') }}
           restore-keys: |
-            deriveddata-${{ runner.os }}-
+            deriveddata-${{ runner.os }}-nonwebrtc-
 
       - name: Validate Xcode project
         run: |

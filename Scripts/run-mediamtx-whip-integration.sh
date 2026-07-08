@@ -170,6 +170,12 @@ wait_for_mediamtx() {
             echo "MediaMTX is ready."
             return 0
         fi
+        # Detect early crash instead of waiting for the full timeout.
+        if [ -n "${MEDIAMTX_PID:-}" ] && ! kill -0 "${MEDIAMTX_PID}" 2>/dev/null; then
+            echo "ERROR: MediaMTX process (PID ${MEDIAMTX_PID}) exited unexpectedly."
+            show_mediamtx_logs
+            return 1
+        fi
         if [ "$i" -eq "${MEDIAMTX_READY_TIMEOUT_SECONDS}" ]; then
             echo "ERROR: MediaMTX did not start within ${MEDIAMTX_READY_TIMEOUT_SECONDS} seconds."
             show_mediamtx_logs
@@ -207,6 +213,8 @@ fi
 # for stopping it.
 if [ "${START_ONLY}" = true ]; then
     echo "MediaMTX started (--start-only mode). PID: ${MEDIAMTX_PID}"
+    # Write PID so the caller can stop the process precisely.
+    echo "${MEDIAMTX_PID}" > "${MEDIAMTX_DOWNLOAD_DIR}/mediamtx.pid"
     # Reset the EXIT trap so the process keeps running after this script exits.
     trap - EXIT
     exit 0
