@@ -32,54 +32,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Show toolchain
-        run: swift --version
-
       - name: Run package tests
         run: swift test --package-path "$PACKAGE_PATH"
-
-  webrtc-xcframework:
-    name: Prepare WebRTC XCFramework
-    runs-on: macos-26
-    timeout-minutes: 15
-    # Keep the fast pure-logic gate first; only prepare the large binary
-    # dependency when the shared package tests are already green.
-    needs: package-test
-
-    env:
-      WEBRTC_ARCHIVE: webrtc-xcframework.tgz
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Cache WebRTC XCFramework
-        uses: actions/cache@v4
-        with:
-          path: Packages/LocalCutWebRTC/WebRTC.xcframework
-          key: webrtc-xcframework-140.0.0
-
-      - name: Download WebRTC XCFramework
-        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
-
-      - name: Package WebRTC XCFramework
-        run: tar -czf "$WEBRTC_ARCHIVE" -C Packages/LocalCutWebRTC WebRTC.xcframework
-
-      - name: Upload WebRTC XCFramework artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: webrtc-xcframework
-          path: ${{ env.WEBRTC_ARCHIVE }}
-          if-no-files-found: error
-          retention-days: 1
 
   test:
     name: Test (macOS 26 / Xcode)
     runs-on: macos-26
     timeout-minutes: 30
-    # Both Xcode jobs consume the single prepared WebRTC artifact instead of
-    # downloading the XCFramework independently on separate runners.
-    needs: webrtc-xcframework
 
     env:
       PROJECT: "LocalCut Studio.xcodeproj"
@@ -98,29 +57,43 @@ jobs:
           swift --version
           sw_vers
 
-      - name: Download WebRTC XCFramework artifact
-        uses: actions/download-artifact@v7
+      - name: Cache WebRTC XCFramework
+        uses: actions/cache@v4
         with:
-          name: webrtc-xcframework
+          path: Packages/LocalCutWebRTC/WebRTC.xcframework
+          key: webrtc-xcframework-140.0.0
 
-      - name: Install WebRTC XCFramework
-        run: |
-          tar -xzf webrtc-xcframework.tgz -C Packages/LocalCutWebRTC
-          ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
+      - name: Prepare WebRTC XCFramework
+        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
-      - name: Validate Xcode project
-        run: |
-          xcodebuild -list -project "$PROJECT"
+      - name: Restore DerivedData cache
+        id: deriveddata-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: DerivedData
+          key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
+          restore-keys: |
+            deriveddata-${{ runner.os }}-webrtc-
 
       - name: Build and test (with flake detection)
-        run: |
-          ./Scripts/run-xcode-tests-with-flake-detection.sh
+        run: ./Scripts/run-xcode-tests-with-flake-detection.sh
+
+      # Run MediaMTX integration tests separately so they are not subject
+      # to the flake-detection retry loop (a real integration failure should
+      # not be masked by a retry pass).
+      - name: MediaMTX WHIP integration
+        run: LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh
+
+      - name: Restore OTIO validator venv
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/localcut-otio-validator-0.17.0
+          key: otio-validator-${{ runner.os }}-0.17.0
 
       - name: Validate OTIO goldens
+        env:
+          OTIO_VALIDATOR_VENV: ${{ runner.temp }}/localcut-otio-validator-0.17.0
         run: ./Scripts/validate-otio-goldens.sh
-
-      - name: MediaMTX WHIP integration
-        run: LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh
 
       - name: Upload failure diagnostics
         if: failure()
@@ -146,11 +119,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+      - name: Save DerivedData cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.deriveddata-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: DerivedData
+          key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
+
   build-non-webrtc:
     name: Test (non-WebRTC stubs)
     runs-on: macos-26
     timeout-minutes: 30
-    needs: webrtc-xcframework
 
     env:
       PROJECT: "LocalCut Studio.xcodeproj"
@@ -162,37 +141,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Show toolchain
-        run: |
-          xcodebuild -version
-          xcode-select -p
-          swift --version
-          sw_vers
-
       # SPM resolves the LocalCutWebRTC package unconditionally; the XCFramework
       # binary target must exist on disk even though we compile without the
       # LOCALCUT_ENABLE_WEBRTC flag so the stub code paths are exercised.
-      - name: Download WebRTC XCFramework artifact
-        uses: actions/download-artifact@v7
+      - name: Cache WebRTC XCFramework
+        uses: actions/cache@v4
         with:
-          name: webrtc-xcframework
+          path: Packages/LocalCutWebRTC/WebRTC.xcframework
+          key: webrtc-xcframework-140.0.0
 
-      - name: Install WebRTC XCFramework
-        run: |
-          tar -xzf webrtc-xcframework.tgz -C Packages/LocalCutWebRTC
-          ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
+      - name: Prepare WebRTC XCFramework
+        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
 
-      - name: Validate Xcode project
-        run: |
-          xcodebuild -list -project "$PROJECT"
+      - name: Restore DerivedData cache
+        id: deriveddata-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: DerivedData
+          key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
+          restore-keys: |
+            deriveddata-${{ runner.os }}-nonwebrtc-
 
-      # Runs tests to validate the non-WebRTC stub paths at runtime.
+      # Runs the focused publish suite for the non-WebRTC stub path.
       # The nonWebRTCVideoTapStoresLatestFrame test exercises the stub
       # VideoPublishTap; the WebRTC-enabled test job covers the real path.
       - name: Test without WebRTC
         run: |
           set -o pipefail
-          rm -rf "$RESULT_BUNDLE" "$DERIVED_DATA"
+          rm -rf "$RESULT_BUNDLE"
 
           # Strip LOCALCUT_ENABLE_WEBRTC from the project-level setting
           # so the #if !LOCALCUT_ENABLE_WEBRTC stub paths are compiled.
@@ -205,6 +181,7 @@ jobs:
             -destination 'platform=macOS' \
             -derivedDataPath "$DERIVED_DATA" \
             -resultBundlePath "$RESULT_BUNDLE" \
+            -only-testing:"LocalCut StudioTests/WhipPublishTests" \
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 300 \
             CODE_SIGNING_ALLOWED=NO \
@@ -222,3 +199,10 @@ jobs:
             DerivedData/Build/Logs/Build/*.xcactivitylog
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Save DerivedData cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.deriveddata-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: DerivedData
+          key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}

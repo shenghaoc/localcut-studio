@@ -67,8 +67,8 @@ echo ""
 
 mkdir -p "$LOG_DIR"
 
-# Clean up previous results
-rm -rf "$RESULT_BUNDLE" "$DERIVED_DATA"
+# Clean up previous result bundle but preserve DerivedData for incremental builds.
+rm -rf "$RESULT_BUNDLE"
 
 # First run: full test suite
 echo "--- Running full test suite (attempt 1) ---"
