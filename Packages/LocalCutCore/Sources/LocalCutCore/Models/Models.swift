@@ -1756,10 +1756,18 @@ public struct OverlayClip: Identifiable, Hashable, Sendable {
 }
 
 /// Interpolated overlay transform values at a point in time.
-public struct OverlayTransform: Sendable {
+public nonisolated struct OverlayTransform: Sendable {
     public var positionX: Float
     public var positionY: Float
     public var scale: CGFloat
     public var rotation: CGFloat
     public var opacity: Float
+
+    public nonisolated init(positionX: Float, positionY: Float, scale: CGFloat, rotation: CGFloat, opacity: Float) {
+        self.positionX = positionX
+        self.positionY = positionY
+        self.scale = scale
+        self.rotation = rotation
+        self.opacity = opacity
+    }
 }

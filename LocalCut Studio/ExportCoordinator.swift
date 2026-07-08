@@ -1,4 +1,5 @@
 import Foundation
+import LocalCutCore
 
 @MainActor
 final class ExportCoordinator {
