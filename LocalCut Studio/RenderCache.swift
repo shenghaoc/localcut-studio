@@ -469,6 +469,11 @@ final class RenderCache: Sendable {
     }
 
     private nonisolated func recordDiskEntry(_ entry: DiskEntry, for key: RenderCacheKey) {
+        // Collect URLs to delete inside the lock, then delete outside.
+        // Between releasing the lock and deleting the files, another thread
+        // could read a disk entry that's about to be deleted — this causes a
+        // brief cache miss (the image loads as nil) which is acceptable since
+        // the entry will be regenerated on the next render pass.
         let toDelete = lock.withLock { state -> [URL] in
             var stale: [URL] = []
             if let previous = state.insertDisk(key, entry: entry),
