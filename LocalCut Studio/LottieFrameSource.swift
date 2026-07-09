@@ -19,9 +19,8 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
     private let frameCount: Int
     private let totalDuration: TimeInterval
 
-    /// @unchecked Sendable because CIImage is a reference type not
-    /// annotated Sendable; the lock provides the necessary thread safety.
-    private struct CacheState: @unchecked Sendable {
+    /// CIImage is Sendable in macOS 26+ SDK; the lock provides thread safety.
+    private struct CacheState: Sendable {
         var cache: [Int: CIImage] = [:]
         var cacheOrder: [Int] = []
     }
