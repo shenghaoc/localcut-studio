@@ -347,11 +347,15 @@ extension EditorModel {
         guard isSafeLookPresetLUTPath(reference.relativePath) else { return nil }
         let directoryURL = sourceURL.deletingLastPathComponent()
         let lutURL = directoryURL.appendingPathComponent(reference.relativePath)
-        // Accessing the parent directory grants access to children, so only
-        // the directory access is needed. The preset file and LUT are children.
+        // The sourceURL is the security-scoped bookmark from the file importer.
+        // Accessing it grants sandbox access to the file and its parent directory.
+        // directoryURL is derived (not itself security-scoped) but accessing the
+        // source covers its children.
+        let didAccessSource = sourceURL.startAccessingSecurityScopedResource()
         let didAccessDirectory = directoryURL.startAccessingSecurityScopedResource()
         defer {
             if didAccessDirectory { directoryURL.stopAccessingSecurityScopedResource() }
+            if didAccessSource { sourceURL.stopAccessingSecurityScopedResource() }
         }
         guard FileManager.default.isReadableFile(atPath: lutURL.path),
               let bookmark = try? lutURL.bookmarkData(options: .withSecurityScope,

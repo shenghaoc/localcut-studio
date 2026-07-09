@@ -87,10 +87,8 @@ extension EditorModel {
     /// Skip (dismiss) an auto-zoom proposal without modifying the timeline.
     @MainActor
     func skipAutoZoomProposal(_ proposal: ZoomPanProposal) {
-        performUndoable("Skip Auto-Zoom Proposal") {
-            autoZoomProposals.removeAll { $0.id == proposal.id }
-            statusMessage = "Skipped proposal."
-        }
+        autoZoomProposals.removeAll { $0.id == proposal.id }
+        statusMessage = "Skipped proposal."
     }
 
     /// Apply all auto-zoom proposals to the selected clip.
@@ -129,8 +127,8 @@ extension EditorModel {
         performUndoable("Apply All Auto-Zoom Proposals") {
             project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes =
                 Keyframed(keyframes: merged, defaultValue: .identity)
-            autoZoomProposals.removeAll()
         }
+        autoZoomProposals.removeAll()
         statusMessage = "Applied \(proposals.count) auto-zoom proposals."
         Task { [weak self] in await self?.rebuild() }
     }

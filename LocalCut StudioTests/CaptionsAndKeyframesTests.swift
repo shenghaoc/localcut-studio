@@ -577,29 +577,28 @@ func captionRetimeClampsWordsBeyondBoundary() {
 
     let model = EditorModel()
     let track = CaptionTrack(name: "T")
-    // Line at 5-7s with a word at 6-6.5s
+    // Line at 0-5s with words at 0-1s and 3-4s
     let line = CaptionLine(
-        range: CMTimeRange(start: time(5), duration: time(2)),
+        range: CMTimeRange(start: time(0), duration: time(5)),
         text: "hello world",
-        words: [WordTiming(range: CMTimeRange(start: time(6), duration: time(0.5)),
+        words: [WordTiming(range: CMTimeRange(start: time(0), duration: time(1)),
                            word: "hello"),
-                WordTiming(range: CMTimeRange(start: time(6.5), duration: time(0.5)),
+                WordTiming(range: CMTimeRange(start: time(3), duration: time(1)),
                            word: "world")])
     track.addLine(line)
     model.project.captionTracks = [track]
 
-    // Retime to 0-1s: words shift to 1-1.5 and 1.5-2, but line ends at 1s.
-    // Both words should be clamped or dropped.
-    model.retimeCaptionLine(line.id, in: track.id, start: time(0), duration: time(1))
+    // Retime to 0-3s: word 1 (0-1s) survives unchanged, word 2 (3-4s) is
+    // shifted to 3-4s but clamped to line end at 3s → dropped.
+    model.retimeCaptionLine(line.id, in: track.id, start: time(0), duration: time(3))
 
     let retimed = track.lines.first { $0.id == line.id }
     #expect(retimed?.range.start == time(0))
-    #expect(retimed?.range.duration == time(1))
-    // Words that shifted beyond the new line end should be clamped.
-    for word in retimed?.words ?? [] {
-        let wordEnd = word.range.start + word.range.duration
-        #expect(wordEnd <= time(1) + CMTime(value: 1, timescale: 600))
-    }
+    #expect(retimed?.range.duration == time(3))
+    // Word 1 survives (fully within new boundary)
+    #expect(retimed?.words?.count == 1)
+    #expect(retimed?.words?.first?.word == "hello")
+    #expect(retimed?.words?.first?.range.start == time(0))
 }
 
 @Test("setCaptionTrackMuted: routes through undo (Claude review #4)")
