@@ -404,11 +404,11 @@ public struct EBUR128LoudnessAnalyser: Sendable {
 
     public init(sampleRate: Double = 48_000, channels: Int = 2) {
         // The K-weighting biquad coefficients below are precomputed for 48 kHz.
-        // Feeding any other rate would silently produce wrong loudness; callers
+        // Feeding any other rate would silently produce wrong loudness. Callers
         // must guard before constructing this analyser (see
         // `measureIntegratedLoudness` for the upstream guard).
-        assert(sampleRate == 48_000,
-               "EBUR128LoudnessAnalyser currently only supports a 48 kHz sample rate.")
+        precondition(sampleRate == 48_000,
+                     "EBUR128LoudnessAnalyser currently only supports a 48 kHz sample rate.")
         self.sampleRate = sampleRate
         self.channels = max(1, channels)
         self.channelStates = Array(repeating: KWeightingFilter(), count: max(1, channels))

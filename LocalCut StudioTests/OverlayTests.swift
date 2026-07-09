@@ -470,6 +470,37 @@ func overlayKeyframeAddUpdateClear() {
     #expect(model.project.overlays.first!.scaleKeyframes.keyframes.isEmpty)
 }
 
+@Test("OverlayClip transform(at:) interpolates between keyframes and falls back to static")
+func overlayTransformInterpolation() {
+    let time1 = CMTime(seconds: 2, preferredTimescale: 600)
+    let time2 = CMTime(seconds: 6, preferredTimescale: 600)
+    var overlay = OverlayClip(
+        sourceType: .animatedImage,
+        timelineStart: .zero,
+        duration: CMTime(seconds: 10, preferredTimescale: 600))
+    overlay.positionOffset = CGSize(width: 100, height: 200)
+    overlay.scale = 1.5
+    overlay.rotation = 0.3
+    overlay.opacity = 0.9
+
+    // Non-animated: transform(at:) returns static values
+    let staticResult = overlay.transform(at: CMTime(seconds: 3, preferredTimescale: 600))
+    #expect(staticResult.positionX == Float(100))
+    #expect(staticResult.scale == Float(1.5))
+
+    // Add keyframes and verify interpolation
+    overlay.positionXKeyframes.addKeyframe(at: time1, value: 10)
+    overlay.positionXKeyframes.addKeyframe(at: time2, value: 50)
+    overlay.scaleKeyframes.addKeyframe(at: time1, value: 1.0)
+    overlay.scaleKeyframes.addKeyframe(at: time2, value: 3.0)
+
+    let midTime = CMTime(seconds: 4, preferredTimescale: 600)
+    let interpolated = overlay.transform(at: midTime)
+    // At t=4 (midpoint of 2..6), positionX should be ~30, scale ~2.0
+    #expect(interpolated.positionX > 10 && interpolated.positionX < 50)
+    #expect(interpolated.scale > 1.0 && interpolated.scale < 3.0)
+}
+
 private func makeOverlayTempDirectory(_ label: String) throws -> URL {
     let url = URL(fileURLWithPath: NSTemporaryDirectory())
         .appendingPathComponent("overlay-tests-\(label)-\(UUID().uuidString)")

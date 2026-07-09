@@ -315,7 +315,23 @@ final class RenderCache: Sendable {
     /// Creates a CIContext for disk writes that preserves the source color space.
     /// Wide-gamut content (Display P3, Rec. 2020) is written in its native space
     /// instead of being downconverted to sRGB.
+    /// Cached CIContext per WorkingColourSpace to avoid repeated Metal GPU
+    /// context initialization on every disk spill write.
+    nonisolated private static let srgbDiskContext = makeDiskContext(for: .sRGB)
+    nonisolated private static let displayP3DiskContext = makeDiskContext(for: .displayP3)
+    nonisolated private static let rec709DiskContext = makeDiskContext(for: .rec709)
+    nonisolated private static let rec2020DiskContext = makeDiskContext(for: .rec2020)
+
     nonisolated static func diskContext(for colorSpace: WorkingColourSpace) -> CIContext {
+        switch colorSpace {
+        case .sRGB: srgbDiskContext
+        case .displayP3: displayP3DiskContext
+        case .rec709: rec709DiskContext
+        case .rec2020: rec2020DiskContext
+        }
+    }
+
+    nonisolated private static func makeDiskContext(for colorSpace: WorkingColourSpace) -> CIContext {
         let cgSpace = colorSpace.cgColorSpace
         return CIContext(options: [
             .cacheIntermediates: false,

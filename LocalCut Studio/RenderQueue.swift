@@ -975,7 +975,7 @@ final class RenderQueue {
 
         if let timedChapterMetadata {
             do {
-                try appendTimedChapterMetadata(timedChapterMetadata, writer: writer)
+                try await appendTimedChapterMetadata(timedChapterMetadata, writer: writer)
             } catch {
                 logger.warning("Failed to append timed chapter metadata: \(error.localizedDescription). Falling back to sidecar-only.")
                 timedChapterMetadata.input.markAsFinished()
@@ -1060,13 +1060,14 @@ final class RenderQueue {
     private func appendTimedChapterMetadata(
         _ metadata: (input: AVAssetWriterInput, adaptor: AVAssetWriterInputMetadataAdaptor, groups: [AVTimedMetadataGroup]),
         writer: AVAssetWriter
-    ) throws {
+    ) async throws {
         for group in metadata.groups {
             // Wait briefly for the input to become ready if the writer's
-            // internal buffer is momentarily full.
+            // internal buffer is momentarily full. Use async sleep to avoid
+            // blocking the main thread.
             var waited = 0
             while !metadata.input.isReadyForMoreMediaData && waited < 10 {
-                Thread.sleep(forTimeInterval: 0.01)
+                try await Task.sleep(for: .milliseconds(10))
                 waited += 1
             }
             guard metadata.input.isReadyForMoreMediaData else {
