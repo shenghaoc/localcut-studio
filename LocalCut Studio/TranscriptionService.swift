@@ -112,18 +112,31 @@ nonisolated struct WindowingConfiguration: Sendable {
     )
 }
 
+// MARK: - Recognition State
+
+/// Thread-safe state for a single recognition task.
+private final class RecognitionState: @unchecked Sendable {
+    let lock = NSLock()
+    nonisolated(unsafe) var hasResumed = false
+    nonisolated(unsafe) var task: SFSpeechRecognitionTask?
+}
+
 // MARK: - Transcription Service
 
-/// Background actor that wraps `SFSpeechRecognizer` for on-device speech recognition.
+/// Service that wraps `SFSpeechRecognizer` for on-device speech recognition.
 ///
-/// All Speech framework calls are isolated to this actor to avoid blocking the main actor.
-actor TranscriptionService {
+/// Uses a shared instance to ensure Speech framework calls are properly serialized.
+/// All public methods are async and run off the main actor.
+final class TranscriptionService: @unchecked Sendable {
+    static let shared = TranscriptionService()
+
+    private init() {}
 
     // MARK: - Availability
 
     /// Checks whether on-device speech recognition is available for the given locale.
     /// This is the three-step gate: recognizer exists → supports on-device → authorization.
-    static func checkAvailability(locale: Locale) async -> TranscriptionAvailability {
+    func checkAvailability(locale: Locale) async -> TranscriptionAvailability {
         guard let recognizer = SFSpeechRecognizer(locale: locale) else {
             return .unavailableLocale
         }
@@ -150,7 +163,7 @@ actor TranscriptionService {
     /// 1. Explicit user override
     /// 2. Clip asset metadata
     /// 3. System locale fallback
-    static func selectLocale(
+    func selectLocale(
         userOverride: Locale?,
         assetMetadataLocale: Locale?
     ) -> TranscriptionLocaleChoice {
@@ -167,7 +180,7 @@ actor TranscriptionService {
 
     /// Extracts PCM audio from the given asset for the specified time range.
     /// Returns the audio buffer as AVAudioPCMBuffer in a format suitable for Speech recognition.
-    static func extractAudio(
+    func extractAudio(
         from asset: AVAsset,
         sourceStart: CMTime,
         duration: CMTime,
@@ -237,7 +250,7 @@ actor TranscriptionService {
 
     /// Runs energy-based voice activity detection with hysteresis.
     /// Returns segments containing speech.
-    static func detectVoiceActivity(
+    func detectVoiceActivity(
         in buffer: AVAudioPCMBuffer,
         config: VADConfiguration = .default
     ) -> [VADSegment] {
@@ -246,8 +259,8 @@ actor TranscriptionService {
         let sampleRate = buffer.format.sampleRate
         guard frameCount > 0, sampleRate > 0 else { return [] }
 
-        // Compute energy in ~20ms windows
-        let windowSamples = Int(sampleRate * 0.02)
+        // Compute energy in ~20ms windows, enforce minimum of 1 sample
+        let windowSamples = max(1, Int(sampleRate * 0.02))
         var energies: [Float] = []
         var index = 0
         while index < frameCount {
@@ -312,7 +325,7 @@ actor TranscriptionService {
     // MARK: - Windowed Recognition
 
     /// Splits audio into windows for recognition, respecting VAD boundaries.
-    static func createWindows(
+    func createWindows(
         vadSegments: [VADSegment],
         totalDuration: CMTime,
         clipTimelineStart: CMTime,
@@ -406,7 +419,7 @@ actor TranscriptionService {
     // MARK: - Recognition
 
     /// Runs speech recognition on a single audio buffer.
-    static func recognizeWindow(
+    func recognizeWindow(
         buffer: AVAudioPCMBuffer,
         locale: Locale,
         window: RecognitionWindow,
@@ -430,65 +443,77 @@ actor TranscriptionService {
         request.endAudio()
 
         return try await withCheckedThrowingContinuation { continuation in
-            var hasResumed = false
-            let lock = NSLock()
+            let state = RecognitionState()
 
-            recognizer.recognitionTask(with: request) { result, error in
-                lock.lock()
-                defer { lock.unlock() }
-                guard !hasResumed else { return }
+            let task = recognizer.recognitionTask(with: request) { result, error in
+                state.lock.lock()
+                defer { state.lock.unlock() }
+                guard !state.hasResumed else { return }
 
                 if let error {
-                    hasResumed = true
-                    continuation.resume(throwing: TranscriptionError.recognitionFailed(error.localizedDescription))
+                    state.hasResumed = true
+                    if cancellation.isCancelled {
+                        continuation.resume(throwing: TranscriptionError.cancelled)
+                    } else {
+                        continuation.resume(throwing: TranscriptionError.recognitionFailed(error.localizedDescription))
+                    }
                     return
                 }
 
                 guard let result else {
-                    if !hasResumed {
-                        hasResumed = true
+                    if !state.hasResumed {
+                        state.hasResumed = true
                         continuation.resume(returning: [])
                     }
                     return
                 }
 
                 if result.isFinal {
-                    hasResumed = true
+                    state.hasResumed = true
                     let segments = Self.extractSegments(from: result)
                     continuation.resume(returning: segments)
                 }
+            }
+
+            state.task = task
+            cancellation.register {
+                state.lock.lock()
+                defer { state.lock.unlock() }
+                guard !state.hasResumed else { return }
+                state.task?.cancel()
             }
         }
     }
 
     // MARK: - Stitcher
 
-    /// Stitches recognition results from multiple windows, deduplicating overlap regions.
-    static func stitchWindows(
+    /// Stitches recognition results from multiple windows.
+    /// Segments are adjusted to clip-relative timestamps during stitching
+    /// so deduplication operates on a consistent coordinate space.
+    func stitchWindows(
         _ windowResults: [(window: RecognitionWindow, segments: [RawTranscriptionSegment])],
         overlapStride: Double
     ) -> [RawTranscriptionSegment] {
         guard !windowResults.isEmpty else { return [] }
-        if windowResults.count == 1 {
-            return windowResults[0].segments
-        }
 
         var allSegments: [RawTranscriptionSegment] = []
 
         for (i, result) in windowResults.enumerated() {
-            var segments = result.segments
+            let offset = result.window.windowOffsetInClip
+            let adjustedSegments = result.segments.map { adjustSegment($0, by: offset) }
 
             if i > 0 {
-                // Deduplicate overlap with previous window
                 let overlapTime = CMTime(seconds: overlapStride, preferredTimescale: 600)
-                segments = deduplicateOverlap(
+                let deduplicated = deduplicateOverlap(
                     previousSegments: allSegments,
-                    currentSegments: segments,
-                    overlapDuration: overlapTime
+                    currentSegments: adjustedSegments,
+                    overlapDuration: overlapTime,
+                    currentWindowOffset: offset
                 )
+                allSegments.append(contentsOf: deduplicated)
+            } else {
+                allSegments.append(contentsOf: adjustedSegments)
             }
-
-            allSegments.append(contentsOf: segments)
         }
 
         return allSegments
@@ -498,7 +523,7 @@ actor TranscriptionService {
 
     /// Verifies the transcription language using NLLanguageRecognizer.
     /// Returns a warning if the detected language disagrees with the chosen locale.
-    static func verifyLanguage(
+    func verifyLanguage(
         text: String,
         chosenLocale: Locale
     ) -> TranscriptionWarning? {
@@ -519,23 +544,29 @@ actor TranscriptionService {
     // MARK: - Timeline Mapping
 
     /// Maps a raw transcription segment to timeline coordinates using the clip's time remapping.
-    static func mapToTimeline(
+    ///
+    /// Segment timestamps must be clip-relative (adjusted by the stitcher) before calling this.
+    /// The mapping goes through `clip.outputOffset(forSourceOffset:)` so Phase 35 speed ramps
+    /// are honoured:
+    /// ```
+    /// sourceTime  = clip.sourceStart + segment.timestamp
+    /// timelinePTS = clip.timelineStart + clip.outputOffset(forSourceOffset: ...)
+    /// ```
+    func mapToTimeline(
         segment: RawTranscriptionSegment,
-        window: RecognitionWindow,
         clip: Clip
     ) -> (line: CaptionLine, wordTimings: [WordTiming]) {
         // Map segment timestamp to source time
-        let sourceTime = clip.sourceStart + window.windowOffsetInClip + segment.timestamp
+        let sourceTime = clip.sourceStart + segment.timestamp
 
         // Map through speed evaluator to get clip-local output offset
-        let outputOffset = clip.outputOffset(forSourceOffset: sourceTime - clip.sourceStart)
+        let outputOffset = clip.outputOffset(forSourceOffset: segment.timestamp)
 
         // Convert to timeline position
         let timelineStart = clip.timelineStart + outputOffset
 
         // Map duration through speed evaluator
-        let sourceEnd = sourceTime + segment.duration
-        let outputEndOffset = clip.outputOffset(forSourceOffset: sourceEnd - clip.sourceStart)
+        let outputEndOffset = clip.outputOffset(forSourceOffset: segment.timestamp + segment.duration)
         let timelineEnd = clip.timelineStart + outputEndOffset
         let timelineDuration = timelineEnd - timelineStart
 
@@ -543,12 +574,10 @@ actor TranscriptionService {
 
         // Map word timings
         let wordTimings = segment.words.map { word in
-            let wordSourceTime = clip.sourceStart + window.windowOffsetInClip + word.timestamp
-            let wordOutputOffset = clip.outputOffset(forSourceOffset: wordSourceTime - clip.sourceStart)
+            let wordOutputOffset = clip.outputOffset(forSourceOffset: word.timestamp)
             let wordTimelineStart = clip.timelineStart + wordOutputOffset
 
-            let wordSourceEnd = wordSourceTime + word.duration
-            let wordOutputEndOffset = clip.outputOffset(forSourceOffset: wordSourceEnd - clip.sourceStart)
+            let wordOutputEndOffset = clip.outputOffset(forSourceOffset: word.timestamp + word.duration)
             let wordTimelineEnd = clip.timelineStart + wordOutputEndOffset
 
             return WordTiming(
@@ -569,7 +598,7 @@ actor TranscriptionService {
     // MARK: - Full Pipeline
 
     /// Runs the complete transcription pipeline for a clip.
-    static func transcribe(
+    func transcribe(
         request: CaptionTranscriptionRequest,
         asset: AVAsset,
         vadConfig: VADConfiguration = .default,
@@ -653,7 +682,7 @@ actor TranscriptionService {
             windowResults.append((window: window, segments: segments))
         }
 
-        // 5. Stitch windows
+        // 5. Stitch windows (adjusts to clip-relative timestamps)
         let stitchedSegments = stitchWindows(
             windowResults,
             overlapStride: windowingConfig.overlapStride
@@ -669,7 +698,6 @@ actor TranscriptionService {
 
             let (line, _) = mapToTimeline(
                 segment: segment,
-                window: windows[0],  // Use first window as reference; mapping uses clip directly
                 clip: clip
             )
 
@@ -741,22 +769,30 @@ actor TranscriptionService {
         return segments
     }
 
-    private static func mergeSampleBuffers(_ buffers: [CMSampleBuffer]) throws -> AVAudioPCMBuffer {
+    private func mergeSampleBuffers(_ buffers: [CMSampleBuffer]) throws -> AVAudioPCMBuffer {
         guard !buffers.isEmpty else {
             throw TranscriptionError.extractionFailed("No audio data")
         }
 
-        let format = CMSampleBufferGetFormatDescription(buffers[0])!
-        let audioStreamDesc = CMAudioFormatDescriptionGetStreamBasicDescription(format)!
+        guard let format = CMSampleBufferGetFormatDescription(buffers[0]),
+              let audioStreamDesc = CMAudioFormatDescriptionGetStreamBasicDescription(format) else {
+            throw TranscriptionError.extractionFailed("Invalid audio format description")
+        }
         let sampleRate = audioStreamDesc.pointee.mSampleRate
         let channels = audioStreamDesc.pointee.mChannelsPerFrame
 
-        let audioFormat = AVAudioFormat(
+        guard channels == 1 else {
+            throw TranscriptionError.extractionFailed("Only mono audio is supported for transcription")
+        }
+
+        guard let audioFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: sampleRate,
             channels: AVAudioChannelCount(channels),
             interleaved: false
-        )!
+        ) else {
+            throw TranscriptionError.extractionFailed("Unsupported audio format parameters")
+        }
 
         // Calculate total frames
         var totalFrames: AVAudioFrameCount = 0
@@ -777,26 +813,34 @@ actor TranscriptionService {
         for buffer in buffers {
             let numFrames = AVAudioFrameCount(CMSampleBufferGetNumSamples(buffer))
 
-            // Copy sample data
-            if let blockBuffer = CMSampleBufferGetDataBuffer(buffer) {
-                var dataPointer: UnsafeMutablePointer<Int8>?
-                var dataLength: Int = 0
-                CMBlockBufferGetDataPointer(
-                    blockBuffer,
-                    atOffset: 0,
-                    lengthAtOffsetOut: nil,
-                    totalLengthOut: &dataLength,
-                    dataPointerOut: &dataPointer
-                )
+            guard let blockBuffer = CMSampleBufferGetDataBuffer(buffer) else {
+                throw TranscriptionError.extractionFailed("Failed to get data buffer from sample buffer")
+            }
 
-                if let dataPointer {
-                    let sampleCount = Int(numFrames) * Int(channels)
-                    let int16Pointer = UnsafeRawPointer(dataPointer).bindMemory(to: Int16.self, capacity: sampleCount)
-                    for i in 0..<sampleCount {
-                        channelData[Int(frameOffset) * Int(channels) + (i % Int(channels))] =
-                            Float(int16Pointer[i]) / 32768.0
-                    }
-                }
+            var dataPointer: UnsafeMutablePointer<Int8>?
+            var dataLength: Int = 0
+            let status = CMBlockBufferGetDataPointer(
+                blockBuffer,
+                atOffset: 0,
+                lengthAtOffsetOut: nil,
+                totalLengthOut: &dataLength,
+                dataPointerOut: &dataPointer
+            )
+
+            guard status == noErr, let dataPointer else {
+                throw TranscriptionError.extractionFailed("Failed to get data pointer from block buffer")
+            }
+
+            let sampleCount = Int(numFrames) * Int(channels)
+            let expectedBytes = sampleCount * MemoryLayout<Int16>.size
+            guard dataLength >= expectedBytes else {
+                throw TranscriptionError.extractionFailed("Data buffer is smaller than expected")
+            }
+
+            let int16Pointer = UnsafeRawPointer(dataPointer).bindMemory(to: Int16.self, capacity: sampleCount)
+            for i in 0..<sampleCount {
+                channelData[Int(frameOffset) * Int(channels) + (i % Int(channels))] =
+                    Float(int16Pointer[i]) / 32768.0
             }
 
             frameOffset += numFrames
@@ -805,7 +849,7 @@ actor TranscriptionService {
         return mergedBuffer
     }
 
-    private static func mergeSegments(_ segments: [VADSegment], minimumSilence: Double) -> [VADSegment] {
+    private func mergeSegments(_ segments: [VADSegment], minimumSilence: Double) -> [VADSegment] {
         guard segments.count > 1 else { return segments }
 
         var merged: [VADSegment] = [segments[0]]
@@ -823,7 +867,7 @@ actor TranscriptionService {
         return merged
     }
 
-    private static func createFixedWindows(
+    private func createFixedWindows(
         totalDuration: CMTime,
         clipTimelineStart: CMTime,
         sourceStart: CMTime,
@@ -846,21 +890,44 @@ actor TranscriptionService {
                 clipTimelineStart: clipTimelineStart
             ))
 
+            // Break if this window reached or exceeded the total duration
+            if offset + windowDuration >= totalDuration {
+                break
+            }
+
             offset = offset + windowDuration - overlap
             if offset < .zero { offset = .zero }
             index += 1
-
-            // Prevent infinite loop
-            if windowDuration <= .zero { break }
         }
 
         return windows
     }
 
-    private static func deduplicateOverlap(
+    /// Adjusts a segment's timestamps by the given offset to make them clip-relative.
+    private func adjustSegment(
+        _ segment: RawTranscriptionSegment,
+        by offset: CMTime
+    ) -> RawTranscriptionSegment {
+        let adjustedWords = segment.words.map { word in
+            RawWordTiming(
+                timestamp: word.timestamp + offset,
+                duration: word.duration,
+                word: word.word
+            )
+        }
+        return RawTranscriptionSegment(
+            timestamp: segment.timestamp + offset,
+            duration: segment.duration,
+            substring: segment.substring,
+            words: adjustedWords
+        )
+    }
+
+    private func deduplicateOverlap(
         previousSegments: [RawTranscriptionSegment],
         currentSegments: [RawTranscriptionSegment],
-        overlapDuration: CMTime
+        overlapDuration: CMTime,
+        currentWindowOffset: CMTime
     ) -> [RawTranscriptionSegment] {
         guard let lastPrevious = previousSegments.last,
               !currentSegments.isEmpty else {
@@ -871,11 +938,10 @@ actor TranscriptionService {
         let previousEndTime = lastPrevious.timestamp + lastPrevious.duration
         let overlapStart = previousEndTime - overlapDuration
 
-        // Filter current segments that start within the overlap region
         var deduplicated: [RawTranscriptionSegment] = []
 
         for segment in currentSegments {
-            if segment.timestamp < overlapDuration {
+            if segment.timestamp < currentWindowOffset + overlapDuration {
                 // This segment is in the overlap region
                 // Check if a similar word exists in the previous window
                 let isDuplicate = previousSegments.contains { prev in
@@ -918,9 +984,11 @@ actor TranscriptionService {
 // MARK: - Cancellation Token
 
 /// Thread-safe cancellation token for long-running operations.
+/// Supports registering handlers that are called when the token is cancelled.
 final class CancellationToken: @unchecked Sendable {
     private let lock = NSLock()
     nonisolated(unsafe) private var _isCancelled = false
+    nonisolated(unsafe) private var handlers: [@Sendable () -> Void] = []
 
     nonisolated var isCancelled: Bool {
         lock.lock()
@@ -931,6 +999,25 @@ final class CancellationToken: @unchecked Sendable {
     nonisolated func cancel() {
         lock.lock()
         _isCancelled = true
+        let currentHandlers = handlers
+        handlers.removeAll()
         lock.unlock()
+
+        for handler in currentHandlers {
+            handler()
+        }
+    }
+
+    /// Registers a handler to be called when the token is cancelled.
+    /// If already cancelled, the handler is called immediately.
+    nonisolated func register(_ handler: @escaping @Sendable () -> Void) {
+        lock.lock()
+        if _isCancelled {
+            lock.unlock()
+            handler()
+        } else {
+            handlers.append(handler)
+            lock.unlock()
+        }
     }
 }

@@ -156,7 +156,7 @@ struct LocaleSelectionTests {
     func explicitOverrideWins() {
         let override = Locale(identifier: "ja_JP")
         let metadata = Locale(identifier: "zh_CN")
-        let choice = TranscriptionService.selectLocale(
+        let choice = TranscriptionService.shared.selectLocale(
             userOverride: override,
             assetMetadataLocale: metadata
         )
@@ -167,7 +167,7 @@ struct LocaleSelectionTests {
     @Test("Asset metadata wins when no override")
     func assetMetadataWins() {
         let metadata = Locale(identifier: "zh_CN")
-        let choice = TranscriptionService.selectLocale(
+        let choice = TranscriptionService.shared.selectLocale(
             userOverride: nil,
             assetMetadataLocale: metadata
         )
@@ -177,7 +177,7 @@ struct LocaleSelectionTests {
 
     @Test("System locale fallback works")
     func systemLocaleFallback() {
-        let choice = TranscriptionService.selectLocale(
+        let choice = TranscriptionService.shared.selectLocale(
             userOverride: nil,
             assetMetadataLocale: nil
         )
@@ -198,7 +198,7 @@ struct VADTests {
             durationSeconds: 1.0,
             amplitude: 0.5
         )
-        let segments = TranscriptionService.detectVoiceActivity(in: buffer)
+        let segments = TranscriptionService.shared.detectVoiceActivity(in: buffer)
         #expect(!segments.isEmpty)
     }
 
@@ -209,7 +209,7 @@ struct VADTests {
             durationSeconds: 1.0,
             amplitude: 0.001
         )
-        let segments = TranscriptionService.detectVoiceActivity(in: buffer)
+        let segments = TranscriptionService.shared.detectVoiceActivity(in: buffer)
         #expect(segments.isEmpty)
     }
 
@@ -221,7 +221,7 @@ struct VADTests {
             durationSeconds: 1.0,
             amplitude: 0.01
         )
-        let segments = TranscriptionService.detectVoiceActivity(in: buffer)
+        let segments = TranscriptionService.shared.detectVoiceActivity(in: buffer)
         // With default config, quiet speech should still be detected
         // (the default open threshold is -40 dBFS which is quite sensitive)
         // This test verifies the VAD doesn't remove everything
@@ -235,8 +235,8 @@ struct VADTests {
             durationSeconds: 2.0,
             amplitude: 0.3
         )
-        let segments1 = TranscriptionService.detectVoiceActivity(in: buffer)
-        let segments2 = TranscriptionService.detectVoiceActivity(in: buffer)
+        let segments1 = TranscriptionService.shared.detectVoiceActivity(in: buffer)
+        let segments2 = TranscriptionService.shared.detectVoiceActivity(in: buffer)
         #expect(segments1 == segments2)
     }
 
@@ -280,7 +280,7 @@ struct WindowingTests {
     @Test("49 second clip produces 1 window")
     func shortClipOneWindow() {
         let duration = CMTime(seconds: 49, preferredTimescale: 600)
-        let windows = TranscriptionService.createWindows(
+        let windows = TranscriptionService.shared.createWindows(
             vadSegments: [],
             totalDuration: duration,
             clipTimelineStart: .zero,
@@ -292,7 +292,7 @@ struct WindowingTests {
     @Test("50 second clip produces 1 window")
     func exactMaxDurationOneWindow() {
         let duration = CMTime(seconds: 50, preferredTimescale: 600)
-        let windows = TranscriptionService.createWindows(
+        let windows = TranscriptionService.shared.createWindows(
             vadSegments: [],
             totalDuration: duration,
             clipTimelineStart: .zero,
@@ -304,7 +304,7 @@ struct WindowingTests {
     @Test("120 second clip produces multiple windows")
     func longClipMultipleWindows() {
         let duration = CMTime(seconds: 120, preferredTimescale: 600)
-        let windows = TranscriptionService.createWindows(
+        let windows = TranscriptionService.shared.createWindows(
             vadSegments: [],
             totalDuration: duration,
             clipTimelineStart: .zero,
@@ -316,7 +316,7 @@ struct WindowingTests {
     @Test("Overlap is 2 seconds")
     func overlapStride() {
         let duration = CMTime(seconds: 100, preferredTimescale: 600)
-        let windows = TranscriptionService.createWindows(
+        let windows = TranscriptionService.shared.createWindows(
             vadSegments: [],
             totalDuration: duration,
             clipTimelineStart: .zero,
@@ -338,7 +338,7 @@ struct WindowingTests {
         let duration = CMTime(seconds: 30, preferredTimescale: 600)
         let timelineStart = CMTime(seconds: 10, preferredTimescale: 600)
         let sourceStart = CMTime(seconds: 5, preferredTimescale: 600)
-        let windows = TranscriptionService.createWindows(
+        let windows = TranscriptionService.shared.createWindows(
             vadSegments: [],
             totalDuration: duration,
             clipTimelineStart: timelineStart,
@@ -354,7 +354,7 @@ struct WindowingTests {
 
     @Test("Empty duration produces no windows")
     func emptyDuration() {
-        let windows = TranscriptionService.createWindows(
+        let windows = TranscriptionService.shared.createWindows(
             vadSegments: [],
             totalDuration: .zero,
             clipTimelineStart: .zero,
@@ -371,6 +371,7 @@ struct TimelineMappingTests {
 
     @Test("Unramped clip maps correctly")
     func unrampedClipMapping() {
+        let service = TranscriptionService.shared
         let clip = Clip(
             mediaID: UUID(),
             sourceStart: CMTime(seconds: 10, preferredTimescale: 600),
@@ -378,14 +379,7 @@ struct TimelineMappingTests {
             timelineStart: CMTime(seconds: 5, preferredTimescale: 600)
         )
 
-        let window = RecognitionWindow(
-            index: 0,
-            windowOffsetInClip: .zero,
-            windowDuration: CMTime(seconds: 30, preferredTimescale: 600),
-            sourceStart: clip.sourceStart,
-            clipTimelineStart: clip.timelineStart
-        )
-
+        // Segment timestamps are clip-relative (after stitcher adjustment)
         let segment = RawTranscriptionSegment(
             timestamp: CMTime(seconds: 5, preferredTimescale: 600),
             duration: CMTime(seconds: 2, preferredTimescale: 600),
@@ -393,33 +387,24 @@ struct TimelineMappingTests {
             words: []
         )
 
-        let (line, _) = TranscriptionService.mapToTimeline(
+        let (line, _) = service.mapToTimeline(
             segment: segment,
-            window: window,
             clip: clip
         )
 
-        // Expected: timelineStart + (sourceStart + windowOffset + segment.timestamp - sourceStart) * 1.0
-        // = 5 + (10 + 0 + 5 - 10) = 5 + 5 = 10
+        // Expected: timelineStart + segment.timestamp = 5 + 5 = 10
         #expect(abs(line.range.start.seconds - 10.0) < 0.02)
         #expect(abs(line.range.duration.seconds - 2.0) < 0.02)
     }
 
     @Test("Trimmed clip uses correct source range")
     func trimmedClipMapping() {
+        let service = TranscriptionService.shared
         let clip = Clip(
             mediaID: UUID(),
             sourceStart: CMTime(seconds: 20, preferredTimescale: 600),
             duration: CMTime(seconds: 10, preferredTimescale: 600),
             timelineStart: CMTime(seconds: 0, preferredTimescale: 600)
-        )
-
-        let window = RecognitionWindow(
-            index: 0,
-            windowOffsetInClip: .zero,
-            windowDuration: CMTime(seconds: 10, preferredTimescale: 600),
-            sourceStart: clip.sourceStart,
-            clipTimelineStart: clip.timelineStart
         )
 
         let segment = RawTranscriptionSegment(
@@ -429,25 +414,18 @@ struct TimelineMappingTests {
             words: []
         )
 
-        let (line, _) = TranscriptionService.mapToTimeline(
+        let (line, _) = service.mapToTimeline(
             segment: segment,
-            window: window,
             clip: clip
         )
 
-        // Expected: timelineStart + (sourceStart + 0 + 3 - sourceStart) = 0 + 3 = 3
+        // Expected: timelineStart + segment.timestamp = 0 + 3 = 3
         #expect(abs(line.range.start.seconds - 3.0) < 0.02)
     }
 
-    @Test("Window offset is included exactly once")
-    func windowOffsetIncludedOnce() {
-        let clip = Clip(
-            mediaID: UUID(),
-            sourceStart: CMTime(seconds: 0, preferredTimescale: 600),
-            duration: CMTime(seconds: 60, preferredTimescale: 600),
-            timelineStart: CMTime(seconds: 0, preferredTimescale: 600)
-        )
-
+    @Test("Window offset is applied during stitching")
+    func windowOffsetAppliedDuringStitching() {
+        let service = TranscriptionService.shared
         let window = RecognitionWindow(
             index: 1,
             windowOffsetInClip: CMTime(seconds: 25, preferredTimescale: 600),
@@ -463,32 +441,25 @@ struct TimelineMappingTests {
             words: []
         )
 
-        let (line, _) = TranscriptionService.mapToTimeline(
-            segment: segment,
-            window: window,
-            clip: clip
+        let stitched = service.stitchWindows(
+            [(window: window, segments: [segment])],
+            overlapStride: 2.0
         )
 
-        // Expected: 0 + (0 + 25 + 5 - 0) = 30
-        #expect(abs(line.range.start.seconds - 30.0) < 0.02)
+        #expect(stitched.count == 1)
+        // Expected: windowOffsetInClip + segment.timestamp = 25 + 5 = 30
+        #expect(abs(stitched[0].timestamp.seconds - 30.0) < 0.02)
     }
 
     @Test("No double application of timeline start")
     func noDoubleTimelineStart() {
+        let service = TranscriptionService.shared
         let timelineStart = CMTime(seconds: 100, preferredTimescale: 600)
         let clip = Clip(
             mediaID: UUID(),
             sourceStart: CMTime(seconds: 0, preferredTimescale: 600),
             duration: CMTime(seconds: 30, preferredTimescale: 600),
             timelineStart: timelineStart
-        )
-
-        let window = RecognitionWindow(
-            index: 0,
-            windowOffsetInClip: .zero,
-            windowDuration: CMTime(seconds: 30, preferredTimescale: 600),
-            sourceStart: .zero,
-            clipTimelineStart: timelineStart
         )
 
         let segment = RawTranscriptionSegment(
@@ -498,13 +469,12 @@ struct TimelineMappingTests {
             words: []
         )
 
-        let (line, _) = TranscriptionService.mapToTimeline(
+        let (line, _) = service.mapToTimeline(
             segment: segment,
-            window: window,
             clip: clip
         )
 
-        // Should be 100 + 5 = 105, NOT 100 + 100 + 5
+        // Should be 100 + 5 = 105
         #expect(abs(line.range.start.seconds - 105.0) < 0.02)
     }
 }
@@ -522,7 +492,7 @@ struct LanguageVerificationTests {
         // only exists after recognition.
         let text = "Hello, this is a test sentence in English."
         let locale = Locale(identifier: "en_US")
-        let warning = TranscriptionService.verifyLanguage(text: text, chosenLocale: locale)
+        let warning = TranscriptionService.shared.verifyLanguage(text: text, chosenLocale: locale)
         // English text with English locale should not produce a mismatch
         if let warning {
             // If it does produce a warning, it should be a language mismatch
@@ -539,7 +509,7 @@ struct LanguageVerificationTests {
         // Use clearly Chinese text with English locale
         let text = "这是一个测试句子，用于验证语言检测功能。"
         let locale = Locale(identifier: "en_US")
-        let warning = TranscriptionService.verifyLanguage(text: text, chosenLocale: locale)
+        let warning = TranscriptionService.shared.verifyLanguage(text: text, chosenLocale: locale)
         #expect(warning != nil)
         if case .languageMismatch(let detected, let chosen) = warning {
             #expect(detected != chosen)
@@ -571,7 +541,7 @@ struct StitcherTests {
                 words: []
             )
         ]
-        let result = TranscriptionService.stitchWindows(
+        let result = TranscriptionService.shared.stitchWindows(
             [(window: window, segments: segments)],
             overlapStride: 2.0
         )
@@ -617,8 +587,8 @@ struct StitcherTests {
             (window: window2, segments: segments2)
         ]
 
-        let result1 = TranscriptionService.stitchWindows(input, overlapStride: 2.0)
-        let result2 = TranscriptionService.stitchWindows(input, overlapStride: 2.0)
+        let result1 = TranscriptionService.shared.stitchWindows(input, overlapStride: 2.0)
+        let result2 = TranscriptionService.shared.stitchWindows(input, overlapStride: 2.0)
         #expect(result1.count == result2.count)
     }
 }

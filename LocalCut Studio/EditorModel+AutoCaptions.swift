@@ -47,7 +47,7 @@ extension EditorModel {
     func checkAutoCaptionAvailability() async {
         let locale = resolvedAutoCaptionLocale()
         autoCaptionState.chosenLocale = locale
-        autoCaptionState.availability = await TranscriptionService.checkAvailability(locale: locale.locale)
+        autoCaptionState.availability = await TranscriptionService.shared.checkAvailability(locale: locale.locale)
     }
 
     /// Resolves the locale using the priority chain.
@@ -117,7 +117,7 @@ extension EditorModel {
 
         Task {
             do {
-                let proposal = try await TranscriptionService.transcribe(
+                let proposal = try await TranscriptionService.shared.transcribe(
                     request: request,
                     asset: media.asset,
                     progressHandler: { [weak self] progress in
@@ -217,24 +217,19 @@ extension EditorModel {
             return
         }
 
-        // Find or create a caption track
-        let trackName = "Auto Captions"
-        let trackID: CaptionTrack.ID
-
-        if let existingTrack = project.captionTracks.first(where: { $0.name == trackName }) {
-            trackID = existingTrack.id
-        } else {
-            // Create a new track
-            let newTrack = CaptionTrack(name: trackName)
-            trackID = newTrack.id
-            performUndoable("Create Auto Caption Track") {
-                project.captionTracks.append(newTrack)
-            }
-        }
-
-        // Apply all accepted lines in one undoable transaction
+        // Apply all accepted lines in a single undoable transaction
         performUndoable("Apply Auto Captions") {
-            guard let track = project.captionTracks.first(where: { $0.id == trackID }) else { return }
+            let trackName = "Auto Captions"
+            let track: CaptionTrack
+
+            if let existingTrack = project.captionTracks.first(where: { $0.name == trackName }) {
+                track = existingTrack
+            } else {
+                let newTrack = CaptionTrack(name: trackName)
+                project.captionTracks.append(newTrack)
+                track = newTrack
+            }
+
             for line in acceptedLines {
                 track.addLine(line)
             }
