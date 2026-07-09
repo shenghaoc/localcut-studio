@@ -405,6 +405,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "LocalCut Studio";
 				INFOPLIST_KEY_NSCameraUsageDescription = "LocalCut Studio records webcam video when you add a camera source.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LocalCut Studio records microphone audio when you add a microphone source.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LocalCut Studio uses speech recognition to automatically generate captions from your clip audio. All processing happens on-device.";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
@@ -441,6 +442,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "LocalCut Studio";
 				INFOPLIST_KEY_NSCameraUsageDescription = "LocalCut Studio records webcam video when you add a camera source.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LocalCut Studio records microphone audio when you add a microphone source.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "LocalCut Studio uses speech recognition to automatically generate captions from your clip audio. All processing happens on-device.";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;

@@ -56,6 +56,9 @@ final class EditorModel {
     /// Incremented on each detection invocation to prevent stale results.
     var silenceDetectionGeneration: Int = 0
 
+    /// Phase 29 auto-caption state.
+    var autoCaptionState = AutoCaptionState()
+
     // Playback
     let player = AVPlayer()
     var isPlaying = false
