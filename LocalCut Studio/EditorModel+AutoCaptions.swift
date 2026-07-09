@@ -68,10 +68,7 @@ extension EditorModel {
         }
 
         // 2. Asset metadata — TODO: Extract language from AVAsset metadata when available
-        if let clip = selectedClip,
-           let media = project.media(for: clip.mediaID) {
-            _ = media // silence unused warning; metadata extraction not yet implemented
-        }
+        // (requires loading AVMetadataItem locale from the asset's commonMetadata)
 
         // 3. System locale fallback
         return TranscriptionLocaleChoice(locale: Locale.current, source: .systemFallback)
@@ -94,6 +91,10 @@ extension EditorModel {
 
     /// Starts the transcription workflow for the selected clip.
     func startAutoCaptionTranscription() {
+        guard !autoCaptionState.isTranscribing else {
+            statusMessage = "Transcription is already in progress."
+            return
+        }
         guard let clip = selectedClip else {
             statusMessage = "No clip selected for transcription."
             return
@@ -119,13 +120,11 @@ extension EditorModel {
 
         let request = CaptionTranscriptionRequest(
             clipID: clip.id,
-            sourceAssetURL: media.url,
             sourceStart: clip.sourceStart,
             duration: clip.duration,
             timelineStart: clip.timelineStart,
             locale: locale.locale,
-            speedCurve: clip.speedCurve,
-            sourceDuration: clip.duration
+            speedCurve: clip.speedCurve
         )
 
         let task = Task { [weak self] in

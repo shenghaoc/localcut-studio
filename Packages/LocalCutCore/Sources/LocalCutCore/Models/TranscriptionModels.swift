@@ -181,31 +181,24 @@ public struct CaptionTranscriptionProposal: Equatable, Sendable {
 /// Configuration for a transcription run.
 public struct CaptionTranscriptionRequest: Equatable, Sendable {
     public let clipID: UUID
-    public let sourceAssetURL: URL?
     public let sourceStart: CMTime
     public let duration: CMTime
     public let timelineStart: CMTime
     public let locale: Locale
     /// Speed curve for timeline mapping. Nil means identity (1.0x).
     public let speedCurve: Keyframed<Float>?
-    /// Clip's source duration for time remapping.
-    public let sourceDuration: CMTime
 
     public init(clipID: UUID,
-                sourceAssetURL: URL?,
                 sourceStart: CMTime,
                 duration: CMTime,
                 timelineStart: CMTime,
                 locale: Locale,
-                speedCurve: Keyframed<Float>? = nil,
-                sourceDuration: CMTime) {
+                speedCurve: Keyframed<Float>? = nil) {
         self.clipID = clipID
-        self.sourceAssetURL = sourceAssetURL
         self.sourceStart = sourceStart
         self.duration = duration
         self.timelineStart = timelineStart
         self.locale = locale
         self.speedCurve = speedCurve
-        self.sourceDuration = sourceDuration
     }
 }

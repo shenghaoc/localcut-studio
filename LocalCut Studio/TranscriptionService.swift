@@ -103,6 +103,7 @@ nonisolated struct VADConfiguration: Sendable {
             "VADConfiguration: closeThreshold (\(closeThreshold)) must be <= openThreshold (\(openThreshold)) for hysteresis"
         )
         precondition(minimumSpeechDuration > 0, "VADConfiguration: minimumSpeechDuration must be > 0")
+        precondition(minimumSilenceDuration >= 0, "VADConfiguration: minimumSilenceDuration must be >= 0")
         precondition(padding >= 0, "VADConfiguration: padding must be >= 0")
         self.openThreshold = openThreshold
         self.closeThreshold = closeThreshold
@@ -261,8 +262,11 @@ nonisolated final class TranscriptionService: @unchecked Sendable {
 
         guard reader.startReading() else {
             if let error = reader.error {
-                if (error as NSError).domain == AVFoundationErrorDomain {
-                    logger.error("DRM-protected audio failed to read")
+                let nsError = error as NSError
+                // AVErrorContentIsProtected (-11821) or AVErrorContentNotAuthorized (-11835)
+                if nsError.domain == AVFoundationErrorDomain,
+                   nsError.code == -11821 || nsError.code == -11835 {
+                    logger.error("DRM-protected audio failed to read (code \(nsError.code))")
                     throw TranscriptionError.drmProtected
                 }
                 logger.error("Audio extraction failed: \(error.localizedDescription)")
@@ -508,19 +512,25 @@ nonisolated final class TranscriptionService: @unchecked Sendable {
                 defer { state.lock.unlock() }
                 guard !state.hasResumed else { return }
 
+                // If cancelled, always throw .cancelled regardless of other state
+                if cancellation.isCancelled {
+                    state.hasResumed = true
+                    continuation.resume(throwing: TranscriptionError.cancelled)
+                    return
+                }
+
                 if let error {
                     state.hasResumed = true
-                    if cancellation.isCancelled {
-                        continuation.resume(throwing: TranscriptionError.cancelled)
-                    } else {
-                        continuation.resume(throwing: TranscriptionError.recognitionFailed(error.localizedDescription))
-                    }
+                    continuation.resume(throwing: TranscriptionError.recognitionFailed(error.localizedDescription))
                     return
                 }
 
                 guard let result else {
-                    if !state.hasResumed {
-                        state.hasResumed = true
+                    // nil result without error — if cancelled, throw; otherwise empty
+                    state.hasResumed = true
+                    if cancellation.isCancelled {
+                        continuation.resume(throwing: TranscriptionError.cancelled)
+                    } else {
                         continuation.resume(returning: [])
                     }
                     return
@@ -533,12 +543,19 @@ nonisolated final class TranscriptionService: @unchecked Sendable {
                 }
             }
 
+            // Assign task under lock so the cancellation handler sees it
+            state.lock.lock()
             state.task = task
+            state.lock.unlock()
+
             cancellation.register { [state] in
                 state.lock.lock()
-                defer { state.lock.unlock() }
-                guard !state.hasResumed else { return }
-                state.task?.cancel()
+                let alreadyResumed = state.hasResumed
+                let taskToCancel = state.task
+                state.lock.unlock()
+
+                guard !alreadyResumed else { return }
+                taskToCancel?.cancel()
             }
         }
     }
@@ -1043,7 +1060,8 @@ nonisolated final class TranscriptionService: @unchecked Sendable {
     ///
     /// Splits each input into words, filters to "significant" words (>2 characters, to exclude
     /// stop words like "a", "I", "is"), and checks whether more than half the significant words
-    /// in the smaller set appear in the larger set.
+    /// in the smaller set appear in the larger set. Requires at least 2 matching significant
+    /// words to prevent false positives when one phrase is a substring of another.
     private static func wordsAreSimilar(_ a: String, _ b: String) -> Bool {
         let aWords = a.lowercased().split(separator: " ").map(String.init)
         let bWords = b.lowercased().split(separator: " ").map(String.init)
@@ -1059,8 +1077,10 @@ nonisolated final class TranscriptionService: @unchecked Sendable {
         let setB = Set(significantB)
         let intersection = setA.intersection(setB)
 
-        // If more than half the words match, consider it a duplicate
-        let threshold = Double(min(setA.count, setB.count)) * 0.5
+        // Require at least 2 matching significant words AND more than half the smaller set
+        // This prevents false positives when one phrase is a substring of another
+        // (e.g., "Hello world" vs "Hello world how are you" — 2 matches but not enough context)
+        let threshold = max(2, Double(min(setA.count, setB.count)) * 0.5)
         return Double(intersection.count) >= threshold
     }
 }
@@ -1105,19 +1125,20 @@ final class CancellationToken: @unchecked Sendable {
     nonisolated func register(_ handler: @escaping @Sendable () -> Void) {
         lock.lock()
         if _isCancelled {
+            // Already cancelled — invoke immediately
             lock.unlock()
             handler()
         } else {
             handlers.append(handler)
-            // Double-check: if cancel() fired between append and here, invoke immediately
+            // Double-check: if cancel() fired between the append and here, the handler
+            // was already captured in cancel()'s snapshot and invoked. We must NOT invoke
+            // it again. Just clear our local state and return.
             if _isCancelled {
-                let justAdded = handlers
+                // cancel() already took the snapshot and invoked all handlers including
+                // the one we just appended. Clear the array to avoid double-invocation.
                 handlers.removeAll()
-                lock.unlock()
-                for h in justAdded { h() }
-            } else {
-                lock.unlock()
             }
+            lock.unlock()
         }
     }
 }
