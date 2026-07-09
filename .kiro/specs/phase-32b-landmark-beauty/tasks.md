@@ -1,6 +1,6 @@
 # Tasks: Phase 32b — Landmark-Driven Beauty
 
-> Status: **Proposed**. Depends on Phase 32a, keyframes, `feature-colour-grading`; blocked on macOS 27 leaving beta.
+> Status: **In progress on `next` branch**. Depends on Phase 32a, keyframes, `feature-colour-grading`. Targets macOS 27.
 
 ## Engine
 

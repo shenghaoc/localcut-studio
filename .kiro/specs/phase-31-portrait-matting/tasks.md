@@ -1,6 +1,6 @@
 # Tasks: Phase 31 — Portrait Video Matting
 
-> Status: **Proposed**. Depends on `feature-colour-grading`; blocked on macOS 27 leaving beta.
+> Status: **In progress on `next` branch**. Depends on `feature-colour-grading`. Targets macOS 27.
 
 ## Engine
 

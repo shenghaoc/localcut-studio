@@ -1,6 +1,6 @@
 # Design: Phase 31 — Portrait Video Matting
 
-> Status: **Proposed**. Target tag: **v0.2.2**. Blocked on macOS 27 leaving beta.
+> Status: **In progress on `next` branch**. Target tag: **v0.2.2**. Targets macOS 27.
 
 ## Goal
 

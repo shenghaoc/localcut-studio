@@ -1,7 +1,13 @@
 name: CI
 
 on:
+  # CI is disabled on the `next` branch — it contains macOS 27 / Xcode 27
+  # work that the GitHub Actions macos-26 runners cannot build.  Local CI
+  # (macOS 27 host) is the validation path for `next` until Actions ships
+  # a macOS 27 image.
   pull_request:
+    branches-ignore:
+      - next
     paths-ignore:
       - "**/*.md"
       - "docs/**"

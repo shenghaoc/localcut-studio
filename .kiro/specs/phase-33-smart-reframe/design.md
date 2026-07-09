@@ -1,6 +1,6 @@
 # Design: Phase 33 — Smart Reframe
 
-> Status: **Proposed**. Target tag: **v0.2.3**. Blocked on macOS 27 leaving beta. The Vision-framework face / saliency requests it needs work on macOS 26 today, but we hold this phase until macOS 27 so the ML tier shares one OS baseline.
+> Status: **In progress on `next` branch**. Target tag: **v0.2.3**. Targets macOS 27. The Vision-framework face / saliency requests it needs work on macOS 26 today; this phase proceeds on the `next` branch so the ML tier shares one OS baseline when merged.
 
 ## Goal
 

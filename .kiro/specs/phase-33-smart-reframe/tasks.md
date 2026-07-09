@@ -1,6 +1,6 @@
 # Tasks: Phase 33 — Smart Reframe
 
-> Status: **Proposed**. Depends on keyframes + Phase 39 aspect modes; blocked on macOS 27 leaving beta.
+> Status: **In progress on `next` branch**. Depends on keyframes + Phase 39 aspect modes. Targets macOS 27.
 
 ## Engine
 

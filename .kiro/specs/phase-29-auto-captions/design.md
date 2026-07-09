@@ -1,6 +1,6 @@
 # Design: Phase 29 — On-Device Auto Captions
 
-> Status: **Proposed**. Target tag: **v0.2.1**. Blocked on macOS 27 leaving beta.
+> Status: **In progress on `next` branch**. Target tag: **v0.2.1**. Targets macOS 27.
 
 ## Goal
 

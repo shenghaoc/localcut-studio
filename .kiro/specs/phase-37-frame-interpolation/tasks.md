@@ -1,9 +1,10 @@
 # Tasks: Phase 37 — Frame Interpolation (VTFrameProcessor)
 
 > Status: **Proposed**. Depends on Phase 35, Phase 33, render cache, capability tiers.
-> **Blocked on macOS 27 leaving beta** — the underlying `VTFrameProcessor` API
-> is available from macOS 15.4 onward, but this phase is held so every ML-tier
-> feature shares one minimum-OS baseline (see ROADMAP.md).
+> **In progress on `next` branch** — targets macOS 27. The underlying
+> `VTFrameProcessor` API is available from macOS 15.4 onward; this phase
+> proceeds on `next` so every ML-tier feature shares one minimum-OS baseline
+> when merged (see ROADMAP.md).
 
 ## Engine
 

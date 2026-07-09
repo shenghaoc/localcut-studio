@@ -2,7 +2,7 @@
 
 LocalCut Studio is the native macOS port of [browser-editor](https://github.com/shenghaoc/browser-editor), which has reached **v1.0.0**. This document plans the path from our current **v0.1.0** (Phase 1 foundation) to a parity **v1.0.0** native release.
 
-The plan splits the upstream roadmap by ML dependency. macOS 27 is still in beta at the time of writing, so [Apple's on-device Core AI stack](https://developer.apple.com/core-ai/) (Foundation Models, Translation, Speech, Vision) — which supersedes the older Core ML framework — is out of reach for now. We ship every feature that does **not** need on-device ML first, then resume with the ML-backed features once macOS 27 leaves beta.
+The plan splits the upstream roadmap by ML dependency. macOS 27 is still in beta at the time of writing, and [Apple's on-device Core AI stack](https://developer.apple.com/core-ai/) (Foundation Models, Translation, Speech, Vision) — which supersedes the older Core ML framework — requires macOS 27. The non-ML phases ship on **`main`** (CI on GitHub Actions' macOS-26 runners). The ML-backed phases proceed on the **`next`** branch targeting macOS 27, validated locally on a macOS 27 / Xcode 27 host until Actions ships a macOS 27 image, at which point `next` merges into `main`.
 
 > **Versioning note.** Apple jumped the marketing version from macOS 15 (Sequoia, 2024) to **macOS 26** (Tahoe, 2025), aligning every Apple OS marketing number with its calendar year (iOS 26, watchOS 26, etc.). macOS 27 is the 2026 release — currently in beta. The non-sequential gap between 15 and 26 is real, not a typo. `MACOSX_DEPLOYMENT_TARGET = 26.0` in `LocalCut Studio.xcodeproj` corresponds to Apple's 2025 marketing version, and `VTFrameProcessor` referenced in Phase 37 is the API introduced in macOS 15.4 (still the live API on macOS 26+).
 
@@ -30,9 +30,9 @@ Each completed phase bumps **MARKETING_VERSION** by `0.0.1`; the final phase shi
 | v0.1.14 | 47 | [phase-47-whip-publish](./phase-47-whip-publish/) | WHIP publish (RFC 9725) |
 | **v0.2.0** | 48 | [phase-48-otio-interchange](./phase-48-otio-interchange/) | OpenTimelineIO export + CMX3600 EDL |
 
-### v0.2.x → v1.0.0 — ML phases (Core AI on macOS 27)
+### v0.2.x → v1.0.0 — ML phases (Core AI on macOS 27, `next` branch)
 
-Each completed phase bumps **MARKETING_VERSION** by `0.0.1`; the final phase ships as `v1.0.0` — parity with browser-editor v1. These phases begin only after macOS 27 leaves beta.
+Each completed phase bumps **MARKETING_VERSION** by `0.0.1`; the final phase ships as `v1.0.0` — parity with browser-editor v1. These phases are developed on the **`next`** branch targeting macOS 27. CI is disabled for `next` (GitHub Actions runners are macOS-26-only); validation runs locally on a macOS 27 / Xcode 27 host. When macOS 27 leaves beta and Actions ships a macOS 27 image, `next` merges into `main`.
 
 Order follows the upstream recommendation (29 → 31 → 33 → 32b → 37, with 40 last so the v1.0.0 cut is the language pack).
 
@@ -83,7 +83,7 @@ The browser prompts assume "Phase 28": a worker-owned inference runtime over `tr
 | Origin trial token gating | OS version + chip family + Foundation Models availability check |
 | Model download size UX | Bundled or on-demand Core AI model with progress on first use |
 
-The ML phases (29, 31, 32b, 33, 37, 40) each name the specific Apple framework or Core AI model they target. Phase 40 is the only one that depends on **Foundation Models** (`com.apple.foundationmodels`) being publicly available; the others use Vision / Speech / Core AI / VideoToolbox which are mature on macOS 26 but get materially better APIs and on-device models on macOS 27. We wait for 27 to land everywhere so every ML feature shares one minimum-OS baseline.
+The ML phases (29, 31, 32b, 33, 37, 40) each name the specific Apple framework or Core AI model they target. Phase 40 is the only one that depends on **Foundation Models** (`com.apple.foundationmodels`) being publicly available; the others use Vision / Speech / Core AI / VideoToolbox which are mature on macOS 26 but get materially better APIs and on-device models on macOS 27. These phases proceed on the **`next`** branch so development can begin now; they will merge to `main` once macOS 27 is GA and every ML feature shares one minimum-OS baseline.
 
 Note on Phase 37: VideoToolbox's `VTFrameProcessor` (macOS 15.4+) ships native frame interpolation, frame-rate conversion, optical flow, and motion blur on the Neural Engine — Phase 37 uses it directly rather than vendoring a Core AI port of RIFE.
 

@@ -1,6 +1,6 @@
 # Design: Phase 37 — Frame Interpolation (VTFrameProcessor)
 
-> Status: **Proposed**. Target tag: **v0.2.5**. Blocked on macOS 27 leaving beta so the ML tier shares one OS baseline; the underlying API is available from macOS 15.4 Sequoia onward.
+> Status: **In progress on `next` branch**. Target tag: **v0.2.5**. Targets macOS 27 so the ML tier shares one OS baseline; the underlying API is available from macOS 15.4 Sequoia onward.
 
 ## Goal
 

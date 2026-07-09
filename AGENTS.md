@@ -35,8 +35,9 @@ Each spec has `design.md`, `requirements.md`, and `tasks.md` (bugfix specs use `
 > **Roadmap order is the target tag in each `design.md`, _not_ the phase number.** Phase
 > numbers track the browser-editor's history; the native port ships them in a different
 > order. The ML-tier phases (on-device ASR, Vision matting / reframe / beauty, frame
-> interpolation, language tools) are **held until macOS 27 leaves beta** so they share one
-> OS baseline — lower-numbered phases can therefore sit _behind_ higher-numbered ones.
+> interpolation, language tools) are developed on the **`next` branch** targeting macOS 27
+> — lower-numbered phases can therefore sit _behind_ higher-numbered ones. See the
+> "In progress on `next` branch" section below for the branch and CI policy.
 
 ### Completed
 
@@ -71,7 +72,13 @@ In ship order. **Phase 36 is next.**
 | v0.1.13 | [Phase 46 — Replay buffer + live audio chain](.kiro/specs/phase-46-replay-buffer/tasks.md) | Keyframe-aligned ring buffer "save last N seconds"; live monitor inserts. |
 | v0.1.14 | [Phase 47 — WHIP publish](.kiro/specs/phase-47-whip-publish/tasks.md) | Standards-compliant WHIP (RFC 9725) client streaming the program feed to a user endpoint. |
 
-### Proposed (blocked on macOS 27 leaving beta — ML tier)
+### In progress on `next` branch (macOS 27 / Xcode 27 — ML tier)
+
+> **Branch policy.** These phases are developed on the **`next`** branch, which
+> targets macOS 27.  GitHub Actions runners are macOS-26-only, so CI is disabled
+> for `next` (see `.github/workflows/ci.yml`).  Validation runs locally on a
+> macOS 27 / Xcode 27 host.  When macOS 27 leaves beta and Actions ships a
+> macOS 27 image, `next` merges into `main` and CI is re-enabled.
 
 | Tag | Spec | Scope |
 | --- | --- | --- |

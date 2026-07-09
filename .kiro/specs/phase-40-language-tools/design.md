@@ -1,6 +1,6 @@
 # Design: Phase 40 — On-Device Language Tools
 
-> Status: **Proposed**. Target tag: **v1.0.0** (parity with browser-editor v1). Blocked on macOS 27 leaving beta.
+> Status: **In progress on `next` branch**. Target tag: **v1.0.0** (parity with browser-editor v1). Targets macOS 27.
 
 ## Goal
 

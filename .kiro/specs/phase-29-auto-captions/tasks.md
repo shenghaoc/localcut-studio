@@ -1,6 +1,6 @@
 # Tasks: Phase 29 — On-Device Auto Captions
 
-> Status: **Proposed**. Depends on Phase 30 caption tracks + `feature-project-persistence`; blocked on macOS 27 leaving beta.
+> Status: **In progress on `next` branch**. Depends on Phase 30 caption tracks + `feature-project-persistence`. Targets macOS 27.
 
 ## Engine
 

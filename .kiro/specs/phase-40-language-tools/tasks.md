@@ -1,6 +1,6 @@
 # Tasks: Phase 40 — On-Device Language Tools
 
-> Status: **Proposed**. Depends on Phase 30, Phase 29, persistence; blocked on macOS 27 leaving beta.
+> Status: **In progress on `next` branch**. Depends on Phase 30, Phase 29, persistence. Targets macOS 27.
 
 ## Probes
 

@@ -1,6 +1,6 @@
 # Design: Phase 32b — Landmark-Driven Beauty
 
-> Status: **Proposed**. Target tag: **v0.2.4**. Blocked on macOS 27 leaving beta.
+> Status: **In progress on `next` branch**. Target tag: **v0.2.4**. Targets macOS 27.
 
 ## Goal
 
