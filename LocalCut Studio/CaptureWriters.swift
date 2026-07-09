@@ -163,6 +163,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         try await withCheckedThrowingContinuation { continuation in
             enum FinishAction {
                 case `throw`(Error)
+                case cancelAndThrow(Error)
                 case `return`(CaptureSourceEndedRecord)
                 case finishWriting(CaptureSourceEndedRecord)
             }
@@ -172,8 +173,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
 
                 guard didStartWriting else {
                     if let message = writeStartupError {
-                        writer.cancelWriting()
-                        return .throw(CaptureEngineError.writerStartFailed(message))
+                        return .cancelAndThrow(CaptureEngineError.writerStartFailed(message))
                     }
                     return .return(endedRecord(durationUs: 0))
                 }
@@ -184,6 +184,9 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
 
             switch action {
             case .throw(let error):
+                continuation.resume(throwing: error)
+            case .cancelAndThrow(let error):
+                writer.cancelWriting()
                 continuation.resume(throwing: error)
             case .return(let record):
                 continuation.resume(returning: record)

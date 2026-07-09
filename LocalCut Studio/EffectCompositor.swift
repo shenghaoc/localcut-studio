@@ -745,7 +745,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     /// Frame-source registries keyed by preview/export session. Sources are
     /// intentionally not shared globally by overlay ID: a preview rebuild and an
     /// export can overlap with different resolved files for the same overlay ID.
-    nonisolated(unsafe) private static var overlaySourceLock = OSAllocatedUnfairLock(initialState: ())
+    private static let overlaySourceLock = OSAllocatedUnfairLock(initialState: ())
     nonisolated(unsafe) private static var overlaySourceRegistries: [UUID: OverlaySourceRegistry] = [:]
 
     /// Registers one immutable source map for a preview/export session.
