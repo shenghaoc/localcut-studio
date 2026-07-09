@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import Speech
 import NaturalLanguage
+import OSLog
 import LocalCutCore
 
 // MARK: - Transcription Error
@@ -62,14 +63,14 @@ nonisolated struct RecognitionWindow: Equatable, Sendable {
 // MARK: - Raw Transcription Segment
 
 /// A segment returned by the Speech recognizer before timeline mapping.
-nonisolated struct RawTranscriptionSegment: Sendable {
+nonisolated struct RawTranscriptionSegment: Equatable, Sendable {
     let timestamp: CMTime
     let duration: CMTime
     let substring: String
     let words: [RawWordTiming]
 }
 
-nonisolated struct RawWordTiming: Sendable {
+nonisolated struct RawWordTiming: Equatable, Sendable {
     let timestamp: CMTime
     let duration: CMTime
     let word: String
@@ -81,7 +82,7 @@ nonisolated struct RawWordTiming: Sendable {
 nonisolated struct VADConfiguration: Sendable {
     /// Energy threshold to open a speech segment (dBFS). Lower = more sensitive.
     let openThreshold: Float
-    /// Energy threshold to close a speech segment (dBFS). Must be < openThreshold for hysteresis.
+    /// Energy threshold to close a speech segment (dBFS). Must be <= openThreshold for hysteresis.
     let closeThreshold: Float
     /// Minimum duration of a speech segment to keep (seconds).
     let minimumSpeechDuration: Double
@@ -89,6 +90,26 @@ nonisolated struct VADConfiguration: Sendable {
     let minimumSilenceDuration: Double
     /// Padding added before and after each speech segment (seconds).
     let padding: Double
+
+    nonisolated init(
+        openThreshold: Float,
+        closeThreshold: Float,
+        minimumSpeechDuration: Double,
+        minimumSilenceDuration: Double,
+        padding: Double
+    ) {
+        precondition(
+            closeThreshold <= openThreshold,
+            "VADConfiguration: closeThreshold (\(closeThreshold)) must be <= openThreshold (\(openThreshold)) for hysteresis"
+        )
+        precondition(minimumSpeechDuration > 0, "VADConfiguration: minimumSpeechDuration must be > 0")
+        precondition(padding >= 0, "VADConfiguration: padding must be >= 0")
+        self.openThreshold = openThreshold
+        self.closeThreshold = closeThreshold
+        self.minimumSpeechDuration = minimumSpeechDuration
+        self.minimumSilenceDuration = minimumSilenceDuration
+        self.padding = padding
+    }
 
     nonisolated static let `default` = VADConfiguration(
         openThreshold: -40.0,
@@ -106,6 +127,17 @@ nonisolated struct WindowingConfiguration: Sendable {
     /// Overlap stride between adjacent windows in seconds.
     let overlapStride: Double
 
+    nonisolated init(maxWindowDuration: Double, overlapStride: Double) {
+        precondition(maxWindowDuration > 0, "WindowingConfiguration: maxWindowDuration must be > 0")
+        precondition(overlapStride >= 0, "WindowingConfiguration: overlapStride must be >= 0")
+        precondition(
+            overlapStride < maxWindowDuration,
+            "WindowingConfiguration: overlapStride must be < maxWindowDuration"
+        )
+        self.maxWindowDuration = maxWindowDuration
+        self.overlapStride = overlapStride
+    }
+
     nonisolated static let `default` = WindowingConfiguration(
         maxWindowDuration: 50.0,
         overlapStride: 2.0
@@ -115,6 +147,7 @@ nonisolated struct WindowingConfiguration: Sendable {
 // MARK: - Recognition State
 
 /// Thread-safe state for a single recognition task.
+/// `hasResumed` and `task` are protected by `lock`. All access must go through the lock.
 private final class RecognitionState: @unchecked Sendable {
     let lock = NSLock()
     nonisolated(unsafe) var hasResumed = false
@@ -125,10 +158,15 @@ private final class RecognitionState: @unchecked Sendable {
 
 /// Service that wraps `SFSpeechRecognizer` for on-device speech recognition.
 ///
-/// Uses a shared instance to ensure Speech framework calls are properly serialized.
-/// All public methods are async and run off the main actor.
-final class TranscriptionService: @unchecked Sendable {
+/// **Threading contract:** This class is explicitly `nonisolated` — it does NOT inherit
+/// `@MainActor` from the file-level default. All methods are designed to run on a background
+/// thread. The `shared` singleton has no mutable state; Speech framework calls are serialized
+/// internally by the framework. Callers must `await` async methods from any actor context.
+nonisolated final class TranscriptionService: @unchecked Sendable {
     static let shared = TranscriptionService()
+
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "LocalCutStudio",
+                                category: "AutoCaptions")
 
     private init() {}
 
@@ -138,9 +176,11 @@ final class TranscriptionService: @unchecked Sendable {
     /// This is the three-step gate: recognizer exists → supports on-device → authorization.
     func checkAvailability(locale: Locale) async -> TranscriptionAvailability {
         guard let recognizer = SFSpeechRecognizer(locale: locale) else {
+            logger.warning("Speech recognizer unavailable for locale \(locale.identifier)")
             return .unavailableLocale
         }
         guard recognizer.supportsOnDeviceRecognition else {
+            logger.warning("On-device recognition unavailable for locale \(locale.identifier)")
             return .onDeviceUnavailable
         }
         let status = await withCheckedContinuation { continuation in
@@ -148,13 +188,16 @@ final class TranscriptionService: @unchecked Sendable {
                 continuation.resume(returning: status)
             }
         }
+        let result: TranscriptionAvailability
         switch status {
-        case .authorized: return .authorized
-        case .denied: return .denied
-        case .restricted: return .restricted
-        case .notDetermined: return .notDetermined
-        @unknown default: return .denied
+        case .authorized: result = .authorized
+        case .denied: result = .denied
+        case .restricted: result = .restricted
+        case .notDetermined: result = .notDetermined
+        @unknown default: result = .denied
         }
+        logger.info("Speech authorization for \(locale.identifier): \(String(describing: result))")
+        return result
     }
 
     // MARK: - Locale Selection
@@ -179,7 +222,10 @@ final class TranscriptionService: @unchecked Sendable {
     // MARK: - Audio Extraction
 
     /// Extracts PCM audio from the given asset for the specified time range.
-    /// Returns the audio buffer as AVAudioPCMBuffer in a format suitable for Speech recognition.
+    ///
+    /// Returns a mono Float32 `AVAudioPCMBuffer` at 16 kHz, converted from the asset's
+    /// native format via `AVAssetReader`. The conversion pipeline decodes to 16-bit
+    /// interleaved PCM and normalises to `[-1.0, 1.0]` Float32.
     func extractAudio(
         from asset: AVAsset,
         sourceStart: CMTime,
@@ -216,8 +262,10 @@ final class TranscriptionService: @unchecked Sendable {
         guard reader.startReading() else {
             if let error = reader.error {
                 if (error as NSError).domain == AVFoundationErrorDomain {
+                    logger.error("DRM-protected audio failed to read")
                     throw TranscriptionError.drmProtected
                 }
+                logger.error("Audio extraction failed: \(error.localizedDescription)")
                 throw TranscriptionError.extractionFailed(error.localizedDescription)
             }
             throw TranscriptionError.extractionFailed("Unknown error starting reader")
@@ -249,7 +297,16 @@ final class TranscriptionService: @unchecked Sendable {
     // MARK: - VAD Pre-Pass
 
     /// Runs energy-based voice activity detection with hysteresis.
-    /// Returns segments containing speech.
+    ///
+    /// The algorithm computes RMS energy in ~20ms windows (derived from the buffer's actual
+    /// sample rate), converts to dBFS, then applies a two-threshold hysteresis detector:
+    /// - Opens a speech segment when energy >= `openThreshold`
+    /// - Closes the segment when energy < `closeThreshold`
+    /// - `closeThreshold` must be <= `openThreshold` (enforced by `VADConfiguration.init`)
+    /// - Padding is added before/after each segment
+    /// - Segments closer than `minimumSilenceDuration` are merged
+    ///
+    /// Returns segments containing speech. Returns empty if the buffer has no channel data.
     func detectVoiceActivity(
         in buffer: AVAudioPCMBuffer,
         config: VADConfiguration = .default
@@ -261,6 +318,8 @@ final class TranscriptionService: @unchecked Sendable {
 
         // Compute energy in ~20ms windows, enforce minimum of 1 sample
         let windowSamples = max(1, Int(sampleRate * 0.02))
+        // Derive window duration from actual sample rate (not hardcoded)
+        let windowDuration = Double(windowSamples) / sampleRate
         var energies: [Float] = []
         var index = 0
         while index < frameCount {
@@ -280,7 +339,6 @@ final class TranscriptionService: @unchecked Sendable {
         var segments: [VADSegment] = []
         var inSpeech = false
         var speechStart: Double = 0
-        let windowDuration = 1.0 / 50.0  // 20ms windows
 
         for (i, energy) in energies.enumerated() {
             let time = Double(i) * windowDuration
@@ -476,7 +534,7 @@ final class TranscriptionService: @unchecked Sendable {
             }
 
             state.task = task
-            cancellation.register {
+            cancellation.register { [state] in
                 state.lock.lock()
                 defer { state.lock.unlock() }
                 guard !state.hasResumed else { return }
@@ -488,8 +546,13 @@ final class TranscriptionService: @unchecked Sendable {
     // MARK: - Stitcher
 
     /// Stitches recognition results from multiple windows.
-    /// Segments are adjusted to clip-relative timestamps during stitching
-    /// so deduplication operates on a consistent coordinate space.
+    ///
+    /// Each window's segments carry window-relative timestamps from the Speech framework.
+    /// This method adjusts them to clip-relative timestamps by adding the window's
+    /// `windowOffsetInClip`, then deduplicates words in the overlap region between
+    /// adjacent windows. The overlap region is the last `overlapStride` seconds of the
+    /// accumulated output; segments in that region are checked for textual similarity
+    /// against the previous window's tail segments.
     func stitchWindows(
         _ windowResults: [(window: RecognitionWindow, segments: [RawTranscriptionSegment])],
         overlapStride: Double
@@ -521,15 +584,19 @@ final class TranscriptionService: @unchecked Sendable {
 
     // MARK: - Language Verification
 
-    /// Verifies the transcription language using NLLanguageRecognizer.
-    /// Returns a warning if the detected language disagrees with the chosen locale.
+    /// Verifies the transcription language using `NLLanguageRecognizer`.
+    /// Runs only AFTER recognition completes — this is a verification flag, not the primary
+    /// language source. Returns a warning if the detected language disagrees with the chosen locale.
     func verifyLanguage(
         text: String,
         chosenLocale: Locale
     ) -> TranscriptionWarning? {
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(text)
-        guard let detected = recognizer.dominantLanguage else { return nil }
+        guard let detected = recognizer.dominantLanguage else {
+            logger.debug("NLLanguageRecognizer returned no dominant language for text of length \(text.count)")
+            return nil
+        }
 
         let detectedLocale = Locale(identifier: detected.rawValue)
         let chosenLanguage = chosenLocale.language.languageCode?.identifier ?? ""
@@ -538,6 +605,7 @@ final class TranscriptionService: @unchecked Sendable {
         guard !chosenLanguage.isEmpty, !detectedLanguage.isEmpty else { return nil }
         guard chosenLanguage != detectedLanguage else { return nil }
 
+        logger.info("Language mismatch: detected=\(detectedLanguage), chosen=\(chosenLanguage)")
         return .languageMismatch(detected: detectedLanguage, chosen: chosenLanguage)
     }
 
@@ -549,16 +617,16 @@ final class TranscriptionService: @unchecked Sendable {
     /// The mapping goes through `clip.outputOffset(forSourceOffset:)` so Phase 35 speed ramps
     /// are honoured:
     /// ```
-    /// sourceTime  = clip.sourceStart + segment.timestamp
-    /// timelinePTS = clip.timelineStart + clip.outputOffset(forSourceOffset: ...)
+    /// outputOffset = clip.outputOffset(forSourceOffset: segment.timestamp)
+    /// timelinePTS  = clip.timelineStart + outputOffset
     /// ```
+    ///
+    /// For unramped clips, `outputOffset(forSourceOffset:)` is identity, so this reduces to
+    /// `clip.timelineStart + segment.timestamp`.
     func mapToTimeline(
         segment: RawTranscriptionSegment,
         clip: Clip
-    ) -> (line: CaptionLine, wordTimings: [WordTiming]) {
-        // Map segment timestamp to source time
-        let sourceTime = clip.sourceStart + segment.timestamp
-
+    ) -> CaptionLine {
         // Map through speed evaluator to get clip-local output offset
         let outputOffset = clip.outputOffset(forSourceOffset: segment.timestamp)
 
@@ -586,13 +654,11 @@ final class TranscriptionService: @unchecked Sendable {
             )
         }
 
-        let line = CaptionLine(
+        return CaptionLine(
             range: lineRange,
             text: segment.substring,
             words: wordTimings.isEmpty ? nil : wordTimings
         )
-
-        return (line: line, wordTimings: wordTimings)
     }
 
     // MARK: - Full Pipeline
@@ -610,7 +676,9 @@ final class TranscriptionService: @unchecked Sendable {
             throw TranscriptionError.cancelled
         }
 
-        // 1. Extract audio
+        logger.info("Starting transcription for clip \(request.clipID), locale \(request.locale.identifier)")
+
+        // 1. Extract audio for VAD
         let audioBuffer = try await extractAudio(
             from: asset,
             sourceStart: request.sourceStart,
@@ -624,6 +692,7 @@ final class TranscriptionService: @unchecked Sendable {
 
         // 2. VAD pre-pass
         let vadSegments = detectVoiceActivity(in: audioBuffer, config: vadConfig)
+        logger.info("VAD found \(vadSegments.count) speech segments")
 
         // 3. Create windows
         let clip = Clip(
@@ -649,6 +718,8 @@ final class TranscriptionService: @unchecked Sendable {
                 sourceClipID: request.clipID
             )
         }
+
+        logger.info("Created \(windows.count) recognition window(s)")
 
         // 4. Recognize each window
         var windowResults: [(window: RecognitionWindow, segments: [RawTranscriptionSegment])] = []
@@ -696,10 +767,7 @@ final class TranscriptionService: @unchecked Sendable {
                 throw TranscriptionError.cancelled
             }
 
-            let (line, _) = mapToTimeline(
-                segment: segment,
-                clip: clip
-            )
+            let line = mapToTimeline(segment: segment, clip: clip)
 
             // Skip empty or zero-duration lines
             if line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -726,6 +794,7 @@ final class TranscriptionService: @unchecked Sendable {
             warnings.append(.noSpeechDetected)
         }
 
+        logger.info("Transcription complete: \(proposalLines.count) lines, \(warnings.count) warnings")
         return CaptionTranscriptionProposal(
             lines: proposalLines,
             warnings: warnings,
@@ -742,15 +811,17 @@ final class TranscriptionService: @unchecked Sendable {
         let transcription = result.bestTranscription
         var segments: [RawTranscriptionSegment] = []
 
-        // SFTranscriptionSegment provides segment-level timing
+        // SFTranscriptionSegment provides segment-level timing.
+        // Note: Apple Speech word-level timings via SFTranscriptionSegment.words are not
+        // used here because on-device recognition may not always provide them reliably.
+        // We use segment-level granularity for WordTiming, which means Phase 30 karaoke
+        // highlighting activates at segment granularity, not word granularity.
         for segment in transcription.segments {
             let timestamp = CMTime(seconds: segment.timestamp, preferredTimescale: 600)
             let duration = CMTime(seconds: segment.duration, preferredTimescale: 600)
 
-            // Extract word-level timings if available
             var words: [RawWordTiming] = []
             if segment.duration > 0 {
-                // Use the segment itself as a word-level timing
                 words.append(RawWordTiming(
                     timestamp: timestamp,
                     duration: duration,
@@ -837,6 +908,7 @@ final class TranscriptionService: @unchecked Sendable {
                 throw TranscriptionError.extractionFailed("Data buffer is smaller than expected")
             }
 
+            // Normalise Int16 samples to [-1.0, 1.0] Float32 range
             let int16Pointer = UnsafeRawPointer(dataPointer).bindMemory(to: Int16.self, capacity: sampleCount)
             for i in 0..<sampleCount {
                 channelData[Int(frameOffset) * Int(channels) + (i % Int(channels))] =
@@ -849,6 +921,7 @@ final class TranscriptionService: @unchecked Sendable {
         return mergedBuffer
     }
 
+    /// Merges adjacent VAD segments separated by less than `minimumSilence` seconds.
     private func mergeSegments(_ segments: [VADSegment], minimumSilence: Double) -> [VADSegment] {
         guard segments.count > 1 else { return segments }
 
@@ -923,6 +996,12 @@ final class TranscriptionService: @unchecked Sendable {
         )
     }
 
+    /// Deduplicates segments in the overlap region between two adjacent windows.
+    ///
+    /// The overlap region is the last `overlapDuration` seconds of the accumulated output.
+    /// Segments from the current window whose clip-relative timestamp falls within this region
+    /// are checked for textual similarity against the previous window's tail segments using
+    /// `wordsAreSimilar`. Duplicates are dropped; non-duplicates are preserved.
     private func deduplicateOverlap(
         previousSegments: [RawTranscriptionSegment],
         currentSegments: [RawTranscriptionSegment],
@@ -960,12 +1039,17 @@ final class TranscriptionService: @unchecked Sendable {
         return deduplicated
     }
 
+    /// Determines whether two text segments are similar enough to be considered duplicates.
+    ///
+    /// Splits each input into words, filters to "significant" words (>2 characters, to exclude
+    /// stop words like "a", "I", "is"), and checks whether more than half the significant words
+    /// in the smaller set appear in the larger set.
     private static func wordsAreSimilar(_ a: String, _ b: String) -> Bool {
         let aWords = a.lowercased().split(separator: " ").map(String.init)
         let bWords = b.lowercased().split(separator: " ").map(String.init)
         guard !aWords.isEmpty, !bWords.isEmpty else { return false }
 
-        // Check if any significant words match
+        // Exclude short stop words (<=2 chars like 'a', 'I', 'is') from similarity comparison
         let significantA = aWords.filter { $0.count > 2 }
         let significantB = bWords.filter { $0.count > 2 }
 
@@ -984,7 +1068,11 @@ final class TranscriptionService: @unchecked Sendable {
 // MARK: - Cancellation Token
 
 /// Thread-safe cancellation token for long-running operations.
-/// Supports registering handlers that are called when the token is cancelled.
+///
+/// **Threading contract:** `isCancelled`, `cancel()`, and `register(_:)` are all `nonisolated`
+/// and safe to call from any thread. `_isCancelled` and `handlers` are protected by `lock`.
+/// Registered handlers are invoked synchronously from the thread that calls `cancel()`.
+/// Dispatch to a specific actor or queue inside the handler if needed.
 final class CancellationToken: @unchecked Sendable {
     private let lock = NSLock()
     nonisolated(unsafe) private var _isCancelled = false
@@ -1009,7 +1097,11 @@ final class CancellationToken: @unchecked Sendable {
     }
 
     /// Registers a handler to be called when the token is cancelled.
-    /// If already cancelled, the handler is called immediately.
+    /// If already cancelled, the handler is called immediately (synchronously, under the lock).
+    ///
+    /// **Race safety:** Uses a double-check pattern — after appending the handler while holding
+    /// the lock, re-reads `_isCancelled`. If `cancel()` fired between the append and the unlock,
+    /// the handler is invoked immediately and the array is cleared.
     nonisolated func register(_ handler: @escaping @Sendable () -> Void) {
         lock.lock()
         if _isCancelled {
@@ -1017,7 +1109,15 @@ final class CancellationToken: @unchecked Sendable {
             handler()
         } else {
             handlers.append(handler)
-            lock.unlock()
+            // Double-check: if cancel() fired between append and here, invoke immediately
+            if _isCancelled {
+                let justAdded = handlers
+                handlers.removeAll()
+                lock.unlock()
+                for h in justAdded { h() }
+            } else {
+                lock.unlock()
+            }
         }
     }
 }

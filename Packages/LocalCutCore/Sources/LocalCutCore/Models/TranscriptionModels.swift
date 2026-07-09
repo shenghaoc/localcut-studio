@@ -75,6 +75,7 @@ public enum TranscriptionWarning: Equatable, Sendable {
     /// VAD found no speech in the audio.
     case noSpeechDetected
     /// Overlap region was ambiguous and could not be safely deduped.
+    /// TODO: Not yet produced by the stitcher — reserved for future use.
     case ambiguousOverlap(windowIndex: Int)
     /// NLLanguageRecognizer disagrees with the chosen locale.
     case languageMismatch(detected: String, chosen: String)
@@ -83,6 +84,7 @@ public enum TranscriptionWarning: Equatable, Sendable {
     /// A caption line was empty and was dropped.
     case emptyLineDropped
     /// DRM or format error during audio extraction.
+    /// TODO: Audio extraction failures are thrown as errors, not surfaced as warnings.
     case audioExtractionFailed(String)
 
     public var displayMessage: String {

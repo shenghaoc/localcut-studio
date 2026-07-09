@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Speech
+import OSLog
 import LocalCutCore
 
 // MARK: - Auto Caption State
@@ -25,11 +26,18 @@ struct AutoCaptionState {
     var warnings: [TranscriptionWarning] = []
     /// Cancellation token for the current transcription.
     var cancellationToken: CancellationToken?
+    /// Task handle for the current transcription (for cancellation tracking).
+    var transcriptionTask: Task<Void, Never>?
 }
 
 // MARK: - EditorModel Auto Captions Extension
 
 extension EditorModel {
+
+    private static let autoCaptionLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "LocalCutStudio",
+        category: "AutoCaptions"
+    )
 
     // MARK: - Availability
 
@@ -47,7 +55,9 @@ extension EditorModel {
     func checkAutoCaptionAvailability() async {
         let locale = resolvedAutoCaptionLocale()
         autoCaptionState.chosenLocale = locale
-        autoCaptionState.availability = await TranscriptionService.shared.checkAvailability(locale: locale.locale)
+        let availability = await TranscriptionService.shared.checkAvailability(locale: locale.locale)
+        autoCaptionState.availability = availability
+        Self.autoCaptionLogger.info("Availability for \(locale.locale.identifier): \(String(describing: availability))")
     }
 
     /// Resolves the locale using the priority chain.
@@ -57,12 +67,10 @@ extension EditorModel {
             return TranscriptionLocaleChoice(locale: override, source: .userOverride)
         }
 
-        // 2. Asset metadata (if available)
+        // 2. Asset metadata — TODO: Extract language from AVAsset metadata when available
         if let clip = selectedClip,
            let media = project.media(for: clip.mediaID) {
-            // Try to get language from asset metadata
-            // For now, fall through to system locale
-            _ = media
+            _ = media // silence unused warning; metadata extraction not yet implemented
         }
 
         // 3. System locale fallback
@@ -70,9 +78,14 @@ extension EditorModel {
     }
 
     /// Sets the user override locale and re-runs the availability probe.
+    /// Ignored if a transcription is currently in progress.
     func setAutoCaptionLocale(_ locale: Locale?) {
+        guard !autoCaptionState.isTranscribing else {
+            statusMessage = "Cannot change language while transcription is in progress."
+            return
+        }
         autoCaptionState.userOverrideLocale = locale
-        Task {
+        Task { @MainActor in
             await checkAutoCaptionAvailability()
         }
     }
@@ -115,58 +128,78 @@ extension EditorModel {
             sourceDuration: clip.duration
         )
 
-        Task {
+        let task = Task { [weak self] in
+            guard let self else { return }
             do {
                 let proposal = try await TranscriptionService.shared.transcribe(
                     request: request,
                     asset: media.asset,
                     progressHandler: { [weak self] progress in
-                        Task { @MainActor in
+                        Task { @MainActor [weak self] in
                             self?.autoCaptionState.progress = progress
                         }
                     },
                     cancellation: token
                 )
 
-                await MainActor.run {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
                     self.autoCaptionState.isTranscribing = false
                     self.autoCaptionState.progress = nil
                     self.autoCaptionState.cancellationToken = nil
+                    self.autoCaptionState.transcriptionTask = nil
 
                     if proposal.lines.isEmpty {
                         self.autoCaptionState.warnings = proposal.warnings
                         self.statusMessage = "No speech detected in the selected clip."
                     } else {
+                        // Set proposal and present review in one atomic update to avoid flicker
                         self.autoCaptionState.proposal = proposal
                         self.autoCaptionState.isReviewPresented = true
                         self.statusMessage = "Transcription complete. Review \(proposal.lines.count) proposed caption(s)."
                     }
                 }
-            } catch {
-                await MainActor.run {
+            } catch is CancellationError {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
                     self.autoCaptionState.isTranscribing = false
                     self.autoCaptionState.progress = nil
                     self.autoCaptionState.cancellationToken = nil
+                    self.autoCaptionState.transcriptionTask = nil
+                    self.statusMessage = "Transcription cancelled."
+                }
+            } catch {
+                Self.autoCaptionLogger.error("Transcription failed for clip \(clip.id): \(error.localizedDescription)")
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.autoCaptionState.isTranscribing = false
+                    self.autoCaptionState.progress = nil
+                    self.autoCaptionState.cancellationToken = nil
+                    self.autoCaptionState.transcriptionTask = nil
                     self.statusMessage = "Transcription failed: \(error.localizedDescription)"
                 }
             }
         }
+        autoCaptionState.transcriptionTask = task
     }
 
     /// Cancels the current transcription.
+    /// Only signals cancellation via the token; the Task's own completion handler manages state cleanup.
     func cancelAutoCaptionTranscription() {
         autoCaptionState.cancellationToken?.cancel()
-        autoCaptionState.isTranscribing = false
-        autoCaptionState.progress = nil
-        autoCaptionState.cancellationToken = nil
-        statusMessage = "Transcription cancelled."
+        autoCaptionState.transcriptionTask?.cancel()
+        // Do NOT clear isTranscribing/progress/cancellationToken here.
+        // The running Task's catch/cancel path handles cleanup to avoid race conditions.
     }
 
     // MARK: - Review
 
     /// Presents the review modal for the current proposal.
     func presentAutoCaptionReview() {
-        guard autoCaptionState.proposal != nil else { return }
+        guard autoCaptionState.proposal != nil else {
+            statusMessage = "No transcription proposal available to review."
+            return
+        }
         autoCaptionState.isReviewPresented = true
     }
 
