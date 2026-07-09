@@ -1024,8 +1024,9 @@ final class RenderQueue {
 
         await writer.finishWriting()
         if writer.status == .failed, let error = writer.error {
-            // Clean up partial output on writer failure.
-            writer.cancelWriting()
+            // cancelWriting() is a no-op after finishWriting(); remove the
+            // partial output file to avoid leaving a broken .mov on disk.
+            try? FileManager.default.removeItem(at: outputURL)
             throw error
         }
     }
