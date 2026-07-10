@@ -88,7 +88,7 @@ struct ScreencastInspectorView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .accessibilityAddTraits(callout.id == model.selectedCalloutID ? .isSelected : [])
+                    .accessibilitySelected(callout.id == model.selectedCalloutID)
                 }
             }
         }
