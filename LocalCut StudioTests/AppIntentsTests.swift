@@ -141,7 +141,9 @@ struct AppIntentsTests {
                 }
             }
             group.addTask {
-                try? await Task.sleep(for: .milliseconds(100))
+                // The predecessor sleeps for 60 seconds; one second still proves that
+                // cancellation does not wait for it without depending on CI scheduling.
+                try? await Task.sleep(for: .seconds(1))
                 return .timedOut
             }
             let result = await group.next()!

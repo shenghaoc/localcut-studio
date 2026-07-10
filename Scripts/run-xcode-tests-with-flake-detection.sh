@@ -121,8 +121,9 @@ if [ -d "$RESULT_BUNDLE" ]; then
     rm -f "$XCRESULTTOOL_STDERR"
 
     # Parse failed tests from the JSON output.
-    # xcresulttool schema v0.1.0: testFailures[].testIdentifierString
-    # contains the full "TargetName/testName()" format needed for -only-testing:.
+    # xcresulttool schema v0.1.0: testFailures[].testIdentifierString. Swift
+    # Testing records this as "SuiteName/testName()"; the result database
+    # below supplies the separate test-target component for -only-testing:.
     while IFS= read -r line; do
         if [ -n "$line" ]; then
             FAILED_TEST_IDS+=("$line")
@@ -159,16 +160,44 @@ if [ ${#FAILED_TEST_IDS[@]} -eq 0 ]; then
     done < <(grep -i "Test Case.*failed" "$XCODEBUILD_LOG" || true)
 fi
 
+if [ ${#FAILED_TEST_IDS[@]} -gt 0 ] && [ -f "$RESULT_BUNDLE/database.sqlite3" ] && command -v sqlite3 >/dev/null 2>&1; then
+    declare -a QUALIFIED_FAILED_TEST_IDS=()
+
+    # Xcode stores the test target separately from Swift Testing's suite/test
+    # identifier. Query the result bundle so isolated retries retain the target.
+    for test_id in "${FAILED_TEST_IDS[@]}"; do
+        escaped_test_id=${test_id//\'/\'\'}
+        test_target=$(sqlite3 -noheader "$RESULT_BUNDLE/database.sqlite3" "
+            SELECT Testables.name
+            FROM TestCases
+            JOIN TestSuites ON TestCases.testSuite_fk = TestSuites.rowid
+            JOIN Testables ON TestSuites.testable_fk = Testables.rowid
+            WHERE TestCases.identifier = '$escaped_test_id'
+            LIMIT 1;
+        " 2>/dev/null || true)
+
+        if [ -n "$test_target" ]; then
+            qualified_test_id="$test_target/$test_id"
+            echo "Resolved retry target: $qualified_test_id"
+            QUALIFIED_FAILED_TEST_IDS+=("$qualified_test_id")
+        else
+            QUALIFIED_FAILED_TEST_IDS+=("$test_id")
+        fi
+    done
+
+    FAILED_TEST_IDS=("${QUALIFIED_FAILED_TEST_IDS[@]}")
+fi
+
 if [ ${#FAILED_TEST_IDS[@]} -gt 0 ]; then
     declare -a RETRYABLE_FAILED_TEST_IDS=()
 
     for test_id in "${FAILED_TEST_IDS[@]}"; do
         # Xcode can report target/runner/bootstrap errors through
         # testIdentifierString. Those are not valid -only-testing identifiers.
-        if [[ "$test_id" == */* ]]; then
+        if [[ "$test_id" == */*/* ]]; then
             RETRYABLE_FAILED_TEST_IDS+=("$test_id")
         else
-            NON_RETRYABLE_FAILURES+=("$test_id")
+            NON_RETRYABLE_FAILURES+=("$test_id (could not resolve its test target for -only-testing:)")
         fi
     done
 

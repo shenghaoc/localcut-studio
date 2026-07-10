@@ -44,6 +44,13 @@ The final clean-build pass also removes a no-op `await`, explicitly matches the 
 dictionary-removal results explicit inside lock closures. These changes preserve action flow,
 task lifetime, and lock ownership while satisfying Swift 6 diagnostics.
 
+For CI failure recovery, the flake-detection wrapper treats the `.xcresult` database as the
+authoritative mapping between a Swift Testing `Suite/test` identifier and its Xcode test target.
+It retries the resulting `Target/Suite/test` selector and refuses an unresolved selector rather
+than reporting a test-runner configuration error as a deterministic test failure. The App Intents
+cancellation test retains its bounded non-waiting contract with a one-second deadline against a
+60-second predecessor so normal CI scheduler contention cannot produce a false timeout.
+
 ## Key technical decisions
 
 ### Core Image kernel migration (D1)

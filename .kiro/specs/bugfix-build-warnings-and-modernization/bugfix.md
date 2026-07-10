@@ -43,6 +43,11 @@ concurrency boundaries, and deprecated file-URL construction in tests and two so
   filler, nested SwiftUI action/`Task` capture-ownership diagnostics, and an intentionally
   discarded lock-closure result. These are corrected in the same hygiene pass; the weak captures
   still avoid retaining `EditorModel` for the lifetime of an asynchronous action.
+- **CI retry recovery:** Xcode records a Swift Testing failure's test target separately from its
+  suite/test identifier. The flake-detection wrapper now reads that target from the result bundle
+  before issuing `-only-testing:` retries. The App Intents cancellation assertion keeps its
+  one-second bound against a deliberately 60-second predecessor, avoiding scheduler-sensitive
+  false failures without weakening the cancellation guarantee.
 
 ---
 
