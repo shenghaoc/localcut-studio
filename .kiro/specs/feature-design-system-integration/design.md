@@ -155,7 +155,7 @@ are all standard SwiftUI/AppKit (no new paradigms):
   live/empty accessibility value.
 - **Standard controls & materials.** The status bar uses `.bar`; the Beauty
   toggles drop `.switch` for the Form-default checkbox; inspector timecodes use
-  `monospacedDigit`; the render-queue empty state uses `ContentUnavailableView`;
+  `monospacedDigit`; the render-queue empty state uses inline `Text` with `.foregroundStyle(.secondary)`;
   Master Gain uses the shared `LabeledSliderRow`; the scopes pane sits on the
   recessed content surface (`lcLane`) rather than a chrome material; timeline
   fonts use `caption2`/monospaced text styles instead of raw point sizes.
