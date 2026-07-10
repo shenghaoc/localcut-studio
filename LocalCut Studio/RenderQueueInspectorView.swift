@@ -89,6 +89,7 @@ struct RenderQueueInspectorView: View {
     private var queueList: some View {
         if model.renderQueue.jobs.isEmpty {
             Text("No renders queued. Add a preset above to queue a render.")
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         } else {
             VStack(alignment: .leading, spacing: 4) {
