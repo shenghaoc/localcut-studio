@@ -5,7 +5,7 @@ Target the same bar Apple sets for its own pro apps. The two relevant accessibil
 ## VoiceOver
 
 - Every icon-only control (toolbar buttons, transport, the bin "+", zoom glyphs) has a human-readable `accessibilityLabel`. `.help(...)` is not a substitute for a label.
-- Clip blocks expose a meaningful label (media name + start + duration), and selection state is reflected (`accessibilityAddTraits(.isSelected)` for custom-drawn elements; `.accessibilitySelected(_:)` for standard SwiftUI controls).
+- Clip blocks and selectable controls expose a meaningful label, and selection state is reflected by conditionally applying `accessibilityAddTraits(.isSelected)`.
 - The status line is an announced live region for background work and errors.
 - Custom controls (timeline ruler/playhead, clip blocks) are reachable and operable, not just decorative.
 

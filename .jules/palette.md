@@ -42,4 +42,4 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 ## 2026-07-10 — Add selection traits to custom checkmark lists
 
 **Learning:** List items using custom selection indicators (like `Image(systemName: "checkmark")`) are announced poorly by VoiceOver. Screen readers will read "checkmark" out of context and won't announce the button's selection state.
-**Action:** Apply `.accessibilitySelected(callout.id == model.selectedCalloutID)` to the button (the idiomatic SwiftUI modifier for selection state, passing a dynamic Bool) and apply `.accessibilityHidden(true)` to the checkmark image so that VoiceOver natively announces the selection state.
+**Action:** Conditionally apply `.accessibilityAddTraits(.isSelected)` to the button when its item is selected, and apply `.accessibilityHidden(true)` to the checkmark image so VoiceOver announces the selection state without reading the decorative symbol.
