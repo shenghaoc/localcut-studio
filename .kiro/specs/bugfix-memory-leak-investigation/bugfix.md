@@ -56,3 +56,34 @@ Users experience "Your system has run out of application memory" warnings during
 ### F10. PaddedBackgroundRenderer: Singleton CGImage cache not pressure-aware (MEDIUM)
 - **File**: `LocalCut Studio/PaddedBackgroundRenderer.swift`
 - Cached padded-background `CGImage` entries are purged on document close but previously survived memory-pressure eviction.
+
+### F11. Long-lived Task closures retain panel state (HIGH)
+- **Files**: `PublishPanelState.swift`, `ProgramPanelState.swift`, and Task-launching model/view call sites
+- Stored publish observation and polling tasks promoted weak captures to strong references for their full loops, creating `state -> Task -> state` cycles.
+- Fire-and-forget tasks also retained view/model owners longer than their UI lifetime unless the operation explicitly required a strong cleanup dependency.
+
+### F12. Owned tasks and event monitors miss teardown (HIGH)
+- **Files**: `EditorModel.swift`, `PublishPanelState.swift`, `RegionCapturePicker.swift`
+- Silence detection, coalesced undo commits, loudness analysis, publish observation, and publish polling tasks were not all cancelled by their owners.
+- The region picker removed its local key monitor on normal completion but lacked a deinitialization fallback.
+
+### F13. Recording monitor performs synchronous volume I/O on MainActor (HIGH)
+- **File**: `EditorModel+Capture.swift`
+- Five-second disk-capacity checks used synchronous URL resource-value reads from a main-actor task, which could stall recording UI on slow or network-mounted volumes.
+
+### F14. Invalid capture metadata can reach unsafe timing and geometry math (MEDIUM)
+- **Files**: `VoiceCleanupAudioProcessing.swift`, `FrameScaler.swift`
+- A zero, non-finite, or out-of-range audio sample rate could create an invalid `CMTime` fallback timescale.
+- Zero-sized pixel buffers could reach scale-factor division.
+
+### F15. Padded-background cache has no entry cap (MEDIUM)
+- **File**: `PaddedBackgroundRenderer.swift`
+- Memory-pressure purge bounds lifetime under pressure, but distinct image bookmarks could still accumulate between pressure events.
+
+## Expected Behavior
+
+- Long-lived stored tasks must not retain their UI state owner indefinitely and must be cancelled during teardown.
+- Critical stop, landing, replay cleanup, and session cleanup work must keep only the model/session/manager dependencies required to finish, even if the initiating panel disappears.
+- Recording disk-capacity reads must not block the main actor.
+- Malformed sample rates and pixel dimensions must fail safely without invalid CoreMedia timing or division by zero.
+- The padded-background image cache must remain bounded and must participate in coordinated memory-pressure purge.

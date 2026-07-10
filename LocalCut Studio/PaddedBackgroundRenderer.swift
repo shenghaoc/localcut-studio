@@ -26,6 +26,31 @@ nonisolated enum PaddedBackgroundRenderer {
         imageCache.withLock { $0.removeAll() }
     }
 
+    static var cacheEntryCount: Int {
+        imageCache.withLock { $0.count }
+    }
+
+    static func cachedImage(for bookmark: Data, maxDimension: Int) -> CGImage? {
+        imageCache.withLock { cache in
+            guard let cached = cache[bookmark],
+                  cached.width == maxDimension,
+                  cached.height == maxDimension else {
+                return nil
+            }
+            return cached.image
+        }
+    }
+
+    static func cacheImage(_ image: CGImage, for bookmark: Data, maxDimension: Int) {
+        imageCache.withLock { cache in
+            cache[bookmark] = (image, maxDimension, maxDimension)
+            if cache.count > maxCacheEntries {
+                cache.removeAll()
+                cache[bookmark] = (image, maxDimension, maxDimension)
+            }
+        }
+    }
+
     /// Render the padded background at the given canvas size.
     ///
     /// - Parameters:
@@ -133,23 +158,14 @@ nonisolated enum PaddedBackgroundRenderer {
         let maxDimension = Int(max(renderSize.width, renderSize.height))
 
         // Check cache first.
-        let cached = imageCache.withLock { $0[bookmark] }
         let cgImage: CGImage?
-        if let cached, cached.width == maxDimension, cached.height == maxDimension {
-            cgImage = cached.image
+        if let cached = cachedImage(for: bookmark, maxDimension: maxDimension) {
+            cgImage = cached
         } else {
             // Resolve and downsample.
             cgImage = Self.loadAndDownsample(bookmark: bookmark, maxDimension: maxDimension)
             if let cgImage {
-                imageCache.withLock { cache in
-                    cache[bookmark] = (cgImage, maxDimension, maxDimension)
-                    // Clear cache if it exceeds max size to reclaim memory.
-                    // Simple eviction since Dictionary doesn't track access order.
-                    if cache.count > maxCacheEntries {
-                        cache.removeAll()
-                        cache[bookmark] = (cgImage, maxDimension, maxDimension)
-                    }
-                }
+                cacheImage(cgImage, for: bookmark, maxDimension: maxDimension)
             }
         }
 

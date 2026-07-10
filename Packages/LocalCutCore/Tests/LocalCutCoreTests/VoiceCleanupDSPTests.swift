@@ -331,9 +331,8 @@ func zeroSampleRateDoesNotCrash() {
     var samples: [Float] = [0.1, -0.1, 0.2, -0.2]
     // Zero sample rate should not cause a crash or undefined behavior in the
     // DSP functions. The smoothing coefficient uses max(1, ...) to absorb zero.
-    // Note: the CMTime crash guard in VoiceCleanupAudioProcessing.makeInt16SampleBuffer
-    // (which protects against timescale=0 from corrupted capture buffers) is
-    // exercised through VoiceCleanupAudioProcessing.process() integration tests.
+    // The app target separately tests the CMTime fallback that consumes this
+    // sample rate after DSP processing.
     VoiceCleanupDSP.processInterleaved(
         &samples,
         channels: 2,
