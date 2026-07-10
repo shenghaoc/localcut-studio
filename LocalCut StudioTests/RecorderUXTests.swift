@@ -1110,3 +1110,77 @@ struct FloatingPanelFallbackTests {
         #expect(model.isRecording)
     }
 }
+
+// MARK: - Recorder flow (replaces RecorderFlowUITests)
+
+/// Pure-logic equivalent of the former `RecorderFlowUITests` XCTest UI test.
+/// The harness view set the same `EditorModel` flags; no window is needed.
+@Suite("Recorder flow (pause/resume/stop/collapse)")
+@MainActor
+struct RecorderFlowTests {
+    @Test("Full pause–resume–stop–collapse flow updates model state correctly")
+    func pauseResumeStopCollapseFlow() {
+        let model = EditorModel()
+
+        // Start recording
+        model.isRecording = true
+        model.isPaused = false
+        model.recordingSourceCount = 1
+        model.statusMessage = "Recording..."
+        #expect(model.isRecording)
+        #expect(!model.isPaused)
+        #expect(model.recordingSourceCount == 1)
+
+        // Pause
+        model.isRecording = false
+        model.isPaused = true
+        model.statusMessage = "Recording paused."
+        #expect(!model.isRecording)
+        #expect(model.isPaused)
+
+        // Resume
+        model.isRecording = true
+        model.isPaused = false
+        model.statusMessage = "Recording..."
+        #expect(model.isRecording)
+        #expect(!model.isPaused)
+
+        // Stop — seed a gapped recording (3-second gap)
+        model.isRecording = false
+        model.isPaused = false
+        model.recordingSourceCount = 0
+        let mediaID = UUID()
+        let duration = CMTime(seconds: 2, preferredTimescale: 600)
+        let first = Clip(mediaID: mediaID, sourceStart: .zero, duration: duration, timelineStart: .zero)
+        let second = Clip(
+            mediaID: mediaID, sourceStart: .zero, duration: duration,
+            timelineStart: CMTime(seconds: 5, preferredTimescale: 600))
+        let track = Track(name: "Screen", kind: .video)
+        track.clips = [first, second]
+        model.project.videoTracks = [track]
+        model.lastRecordingSlots = [
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .display, trackKind: .video, chunkIndex: 0),
+                trackID: track.id, trackIndex: 0, clipID: first.id,
+                mediaID: first.mediaID, timelineStart: first.timelineStart),
+            RecordingSlot(
+                key: RecordingSlotKey(sourceKind: .display, trackKind: .video, chunkIndex: 1),
+                trackID: track.id, trackIndex: 0, clipID: second.id,
+                mediaID: second.mediaID, timelineStart: second.timelineStart),
+        ]
+        model.statusMessage = "Recording stopped."
+        #expect(!model.isRecording)
+        #expect(!model.isPaused)
+
+        // Verify gap exists
+        let gapBefore = track.clips[1].timelineStart - track.clips[0].timelineEnd
+        #expect(gapBefore.seconds > 2.5)
+
+        // Collapse gaps
+        model.collapseRecordingGap()
+        #expect(model.statusMessage == "Recording gaps collapsed.")
+        let gapAfter = model.project.videoTracks.first!.clips[1].timelineStart
+            - model.project.videoTracks.first!.clips[0].timelineEnd
+        #expect(gapAfter.seconds < 0.05)
+    }
+}
