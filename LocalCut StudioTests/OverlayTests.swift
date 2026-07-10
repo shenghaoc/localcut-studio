@@ -168,7 +168,12 @@ func overlayRenderItemMetadata() {
         scale: 2.0,
         rotation: 1.57,
         opacity: 0.6,
-        endAction: .loop)
+        endAction: .loop,
+        positionXKeyframes: Keyframed<Float>(defaultValue: 0),
+        positionYKeyframes: Keyframed<Float>(defaultValue: 0),
+        scaleKeyframes: Keyframed<Float>(defaultValue: 1),
+        rotationKeyframes: Keyframed<Float>(defaultValue: 0),
+        opacityKeyframes: Keyframed<Float>(defaultValue: 1))
     #expect(item.sourceType == .alphaVideo)
     #expect(item.opacity == 0.6)
     #expect(item.endAction == .loop)
@@ -418,6 +423,82 @@ func renderQueueExportsAllOverlayKinds() async throws {
     let outputAsset = AVURLAsset(url: outputURL)
     let duration = try await outputAsset.load(.duration)
     #expect(duration.seconds > 0)
+}
+
+@MainActor
+@Test("Overlay keyframe add, update, and clear round-trip")
+func overlayKeyframeAddUpdateClear() {
+    let model = EditorModel()
+    let overlayID = UUID()
+    model.project.overlays = [
+        OverlayClip(
+            id: overlayID,
+            sourceType: .animatedImage,
+            timelineStart: .zero,
+            duration: CMTime(seconds: 10, preferredTimescale: 600)),
+    ]
+
+    let time1 = CMTime(seconds: 2, preferredTimescale: 600)
+    model.addOrUpdateOverlayKeyframe(
+        at: overlayID, localTime: time1,
+        positionX: 10, positionY: 20, scale: 1.5, rotation: 0.5, opacity: 0.8)
+    let overlay = model.project.overlays.first!
+    #expect(overlay.positionXKeyframes.keyframes.count == 1)
+    #expect(overlay.scaleKeyframes.keyframes.count == 1)
+    #expect(overlay.opacityKeyframes.keyframes.count == 1)
+
+    // Update at same time
+    model.addOrUpdateOverlayKeyframe(
+        at: overlayID, localTime: time1,
+        positionX: 30, positionY: 40, scale: 2.0, rotation: 1.0, opacity: 0.5)
+    #expect(model.project.overlays.first!.positionXKeyframes.keyframes.count == 1)
+
+    // Add a second keyframe
+    let time2 = CMTime(seconds: 5, preferredTimescale: 600)
+    model.addOrUpdateOverlayKeyframe(
+        at: overlayID, localTime: time2,
+        positionX: 50, positionY: 60, scale: 0.5, rotation: 0, opacity: 1.0)
+    #expect(model.project.overlays.first!.positionXKeyframes.keyframes.count == 2)
+
+    // Remove one keyframe
+    model.removeOverlayKeyframes(at: overlayID, localTime: time1)
+    #expect(model.project.overlays.first!.positionXKeyframes.keyframes.count == 1)
+
+    // Clear all
+    model.clearOverlayKeyframes(overlayID)
+    #expect(model.project.overlays.first!.positionXKeyframes.keyframes.isEmpty)
+    #expect(model.project.overlays.first!.scaleKeyframes.keyframes.isEmpty)
+}
+
+@Test("OverlayClip transform(at:) interpolates between keyframes and falls back to static")
+func overlayTransformInterpolation() {
+    let time1 = CMTime(seconds: 2, preferredTimescale: 600)
+    let time2 = CMTime(seconds: 6, preferredTimescale: 600)
+    var overlay = OverlayClip(
+        sourceType: .animatedImage,
+        timelineStart: .zero,
+        duration: CMTime(seconds: 10, preferredTimescale: 600))
+    overlay.positionOffset = CGSize(width: 100, height: 200)
+    overlay.scale = 1.5
+    overlay.rotation = 0.3
+    overlay.opacity = 0.9
+
+    // Non-animated: transform(at:) returns static values
+    let staticResult = overlay.transform(at: CMTime(seconds: 3, preferredTimescale: 600))
+    #expect(staticResult.positionX == Float(100))
+    #expect(staticResult.scale == CGFloat(1.5))
+
+    // Add keyframes and verify interpolation
+    overlay.positionXKeyframes.addKeyframe(at: time1, value: 10)
+    overlay.positionXKeyframes.addKeyframe(at: time2, value: 50)
+    overlay.scaleKeyframes.addKeyframe(at: time1, value: 1.0)
+    overlay.scaleKeyframes.addKeyframe(at: time2, value: 3.0)
+
+    let midTime = CMTime(seconds: 4, preferredTimescale: 600)
+    let interpolated = overlay.transform(at: midTime)
+    // At t=4 (midpoint of 2..6), positionX should be ~30, scale ~2.0
+    #expect(interpolated.positionX > 10 && interpolated.positionX < 50)
+    #expect(interpolated.scale > 1.0 && interpolated.scale < 3.0)
 }
 
 private func makeOverlayTempDirectory(_ label: String) throws -> URL {

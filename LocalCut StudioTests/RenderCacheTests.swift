@@ -301,6 +301,31 @@ func cacheDiskSpillRehydrates() throws {
     #expect(remaining.isEmpty)
 }
 
+@Test("RenderCache: failed disk spill keeps the in-memory byte budget bounded")
+func cacheDiskSpillFailureDoesNotReinsertEvictedFrames() throws {
+    let directory = try temporaryRenderCacheDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let blockedPath = directory.appendingPathComponent("not-a-directory")
+    FileManager.default.createFile(atPath: blockedPath.path(), contents: Data())
+
+    let perEntry = RenderCache.estimatedBytes(width: 16, height: 16)
+    let cache = RenderCache(byteBudget: perEntry,
+                            diskByteBudget: 1_000_000,
+                            cacheDirectory: blockedPath)
+    let size = CGSize(width: 16, height: 16)
+    let k1 = key(clipID: UUID(), renderSize: size)
+    let k2 = key(clipID: UUID(), renderSize: size)
+
+    cache.setImage(tinyImage(width: 16, height: 16), for: k1)
+    cache.setImage(tinyImage(width: 16, height: 16), for: k2)
+
+    #expect(cache.count == 1)
+    #expect(cache.currentBytes == perEntry)
+    #expect(cache.diskCount == 0)
+    #expect(cache.image(for: k1) == nil)
+    #expect(cache.image(for: k2) != nil)
+}
+
 @Test("RenderCache: byte cost reflects the stored image's extent, not the key's renderSize (Claude review)")
 func byteCostFromImageExtent() {
     // A 4K source frame rendered onto a 1080p canvas is stored at the source's

@@ -182,6 +182,14 @@ public enum VoiceCleanupDSP: Sendable {
                 durationSeconds: duration,
                 note: "Normalisation skipped: selection is shorter than 3 seconds.")
         }
+        guard sampleRate == 48_000 else {
+            return LoudnessAnalysisResult(
+                measuredLUFS: -.infinity,
+                targetLUFS: targetLUFS,
+                gainDB: 0,
+                durationSeconds: duration,
+                note: "Normalisation skipped: only 48 kHz audio is currently supported.")
+        }
 
         var analyser = EBUR128LoudnessAnalyser(sampleRate: sampleRate, channels: channels)
         analyser.feedInterleaved(samples, channels: channels)
@@ -396,9 +404,9 @@ public struct EBUR128LoudnessAnalyser: Sendable {
 
     public init(sampleRate: Double = 48_000, channels: Int = 2) {
         // The K-weighting biquad coefficients below are precomputed for 48 kHz.
-        // Feeding any other rate would silently produce wrong loudness, so make
-        // the unsupported case a hard programmer error (Gemini review). All
-        // current callers resample to 48 kHz before measuring.
+        // Feeding any other rate would silently produce wrong loudness. Callers
+        // must guard before constructing this analyser (see
+        // `measureIntegratedLoudness` for the upstream guard).
         precondition(sampleRate == 48_000,
                      "EBUR128LoudnessAnalyser currently only supports a 48 kHz sample rate.")
         self.sampleRate = sampleRate

@@ -36,7 +36,25 @@ Review all exit paths from `PreviewRebuildCoordinator.rebuild()`, cover generati
 
 Add a `purgeContextCache()` method to the `contextCache` lock that removes all cached contexts. Called by the memory pressure handler.
 
+### 5. Task and resource lifetime hardening (F11, F12)
+
+- Use weak captures for UI/model owners in escaping tasks that do not require ownership extension.
+- Keep critical cleanup dependencies such as `ProgramSession`, `EditorModel`, and `ReplayBufferManager` strongly captured until stop, landing, or cleanup completes.
+- Avoid promoting weak UI-state captures to strong references outside long-lived observation and polling loops.
+- Cancel stored tasks in owner `deinit` methods and remove the region picker event monitor on both normal completion and unexpected deallocation.
+
+### 6. Main-actor and invalid-input guards (F13, F14)
+
+- Run synchronous disk-capacity resource-value reads in a detached task, then publish the result on the main actor.
+- Derive fallback audio sample duration through a testable helper that clamps non-finite, non-positive, and out-of-range sample rates to a valid `CMTimeScale`.
+- Reject zero-sized source pixel buffers before computing scale factors.
+
+### 7. Bound the padded-background cache (F15)
+
+Keep at most eight distinct background-image entries. When insertion exceeds the cap, clear the old cache and retain the newly requested image so the current frame does not immediately reload it. Continue purging the cache on document close and coordinated memory pressure.
+
 ## Non-goals
 
 - Reducing `MediaItem` asset retention (F8) — these are user-imported media and must remain accessible
 - Changing the `ScopeSampler` sampling model — its samples are already bounded by the diagnostics ring-buffer model and need separate investigation before changing
+- Changing Program Mode, replay-buffer, publish, import, or export user-facing workflows beyond their task/resource lifetime behavior

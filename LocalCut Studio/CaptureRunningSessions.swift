@@ -47,6 +47,9 @@ nonisolated enum CapturePermissionAuthorizer {
     }
 }
 
+/// `@unchecked Sendable`: mutable state (`target`, `stream`, writers,
+/// `excludingWindowIDs`) is protected by `stateLock`; `dropNextScreenFrame`
+/// and delegate callbacks from ScreenCaptureKit are confined to `outputQueue`.
 nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     nonisolated var supportsSourceSwitching: Bool { true }
 
@@ -330,6 +333,8 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     }
 }
 
+/// `@unchecked Sendable`: mutable `processorState` and `lastAudioLevelEmission`
+/// are touched only inside AVFoundation delegate callbacks confined to `queue`.
 nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let deviceID: String
     private let mediaType: AVMediaType

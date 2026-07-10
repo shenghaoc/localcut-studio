@@ -9,6 +9,8 @@ import Metal
 /// Instances are owned by one `ScreenCaptureSession` and used only from that
 /// session's serial output queue; `CIContext` supports concurrent rendering, but
 /// queue affinity keeps the buffer-pool use ordered.
+/// `@unchecked Sendable`: all properties are immutable `let`s; `CIContext` is
+/// a non-`Sendable` framework object.
 nonisolated final class FrameScaler: @unchecked Sendable {
     private let ciContext: CIContext
     private let targetWidth: Int
@@ -56,6 +58,9 @@ nonisolated final class FrameScaler: @unchecked Sendable {
         guard sourceWidth != targetWidth || sourceHeight != targetHeight else {
             return sourceBuffer
         }
+
+        // Guard against zero dimensions from corrupted pixel buffers.
+        guard sourceWidth > 0, sourceHeight > 0 else { return nil }
 
         let sourceImage = CIImage(cvPixelBuffer: sourceBuffer)
 

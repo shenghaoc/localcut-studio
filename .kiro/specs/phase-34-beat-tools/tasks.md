@@ -122,6 +122,11 @@ Resolved from automated review of the implementation:
   `Float` array of `2N` elements, so the stride is in Floats (Apple's documented
   idiom) — `1` would read half the window and corrupt the spectrum. The real-WAV
   `deterministicFileAnalysis` (recovers 120 BPM) confirms the FFT is correct.
+- [x] **T7.11** A skipped zero-duration cut candidate does not advance
+  `segmentTimelineStart`, preserving timeline/source alignment for the active
+  segment.
+- [x] **T7.12** A one-piece cut result is treated as a no-op: no replacement,
+  success status, or undo step is created.
 
 ## Verification
 
@@ -139,6 +144,8 @@ Resolved from automated review of the implementation:
   `scheduleRebuild`.
 - [x] **T4.5** `swift test` (LocalCutCore) and `xcodebuild test` (Debug, macOS)
   green; no test-count regression.
+- [x] **T4.6** App regression verifies out-of-bounds/boundary-only beats leave
+  the clip unchanged and do not create an undo step.
 
 ## Defects fixed during bring-up (folded from `bugfix-phase-34-beat-ci`)
 

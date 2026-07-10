@@ -19,6 +19,33 @@ is macOS 27. All replacement APIs below are available on macOS 26.
 
 ---
 
+## Follow-up Swift 6 sweep (PR #93)
+
+PR #93 extends the original warning cleanup without changing product behaviour. The remaining
+modernization debt was spread across lock-protected media paths, namespace/value types crossing
+concurrency boundaries, and deprecated file-URL construction in tests and two source helpers.
+
+- **Root cause:** several components still used manual `NSLock` state alongside Swift 6
+  `@Sendable` closures, while otherwise-safe namespace/value types lacked explicit `Sendable`
+  conformance. Test fixtures and two source helpers still used `URL(fileURLWithPath:)`.
+- **Expected behaviour:** frame caches, capture writers, live/program compositors, and WebRTC
+  taps preserve their existing serialization and output. Non-`Sendable` Core Video, Core Media,
+  and WebRTC values use `withLockUnchecked`; callbacks and writer completion work stay outside
+  critical sections. No UI, persistence schema, render result, or user flow changes.
+- **Main-sync decision:** current `main` already actor-isolates `WhipSession.stateStream`, so the
+  PR's older extra stream-cache lock is intentionally superseded by that stronger actor-owned
+  implementation. Current `main` lifetime comments and the non-WebRTC `VideoPublishTap` storage
+  accessor are retained while their locks are modernized.
+- **Regression path:** the LocalCutCore package suite and full macOS Xcode suite cover the
+  affected model, capture, compositor, overlay-cache, replay-buffer, and publish paths. The
+  effective post-merge diff adds no user-facing UI.
+- **Final warning closure:** the post-merge build also surfaced a no-op `await` in the caption
+  filler, nested SwiftUI action/`Task` capture-ownership diagnostics, and an intentionally
+  discarded lock-closure result. These are corrected in the same hygiene pass; the weak captures
+  still avoid retaining `EditorModel` for the lifetime of an asynchronous action.
+
+---
+
 ## Deprecations
 
 ### D1 — `CIColorKernel(source:)` deprecated (Core Image Kernel Language)

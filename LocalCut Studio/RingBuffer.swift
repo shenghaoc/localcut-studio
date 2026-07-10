@@ -1,6 +1,8 @@
 import Foundation
 import os
 
+/// `@unchecked Sendable`: ring buffer state (`buffer`, `writePos`, `readPos`,
+/// `count`) is protected by `OSAllocatedUnfairLock`.
 final class RingBuffer: @unchecked Sendable {
     private struct State {
         var buffer: [Float]

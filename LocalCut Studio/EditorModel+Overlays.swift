@@ -105,7 +105,7 @@ extension EditorModel {
             project.overlayBundlePaths.removeValue(forKey: id)
         }
         statusMessage = "Removed overlay."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Updates an overlay clip's properties.
@@ -127,7 +127,7 @@ extension EditorModel {
             let overlay = project.overlays.remove(at: currentIndex)
             project.overlays.insert(overlay, at: clampedIndex)
         }
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Updates the overlay's timeline start time.
@@ -191,7 +191,63 @@ extension EditorModel {
         performUndoable("Overlay End Action") {
             project.overlays[index].endAction = action
         }
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
+    }
+
+    // MARK: - Overlay keyframes
+
+    /// Adds or updates keyframes for all animation tracks at the given
+    /// overlay-local time. If no keyframes exist at that time, new ones are
+    /// created with the supplied values; existing keyframes are updated in place.
+    @MainActor
+    func addOrUpdateOverlayKeyframe(at overlayID: UUID,
+                                     localTime: CMTime,
+                                     positionX: Float,
+                                     positionY: Float,
+                                     scale: Float,
+                                     rotation: Float,
+                                     opacity: Float) {
+        guard let index = project.overlays.firstIndex(where: { $0.id == overlayID }) else { return }
+        performUndoable("Add Overlay Keyframe") {
+            project.overlays[index].positionXKeyframes.addKeyframe(at: localTime, value: positionX)
+            project.overlays[index].positionYKeyframes.addKeyframe(at: localTime, value: positionY)
+            project.overlays[index].scaleKeyframes.addKeyframe(at: localTime, value: scale)
+            project.overlays[index].rotationKeyframes.addKeyframe(at: localTime, value: rotation)
+            project.overlays[index].opacityKeyframes.addKeyframe(at: localTime, value: opacity)
+            scheduleRebuild()
+        }
+        statusMessage = "Overlay keyframe set at \(TimeFormatting.timecode(localTime.seconds))."
+    }
+
+    /// Removes keyframes at the given overlay-local time from all animation tracks.
+    @MainActor
+    func removeOverlayKeyframes(at overlayID: UUID, localTime: CMTime?) {
+        guard let localTime, let index = project.overlays.firstIndex(where: { $0.id == overlayID }) else { return }
+        performUndoable("Remove Overlay Keyframe") {
+            project.overlays[index].positionXKeyframes.removeKeyframe(at: localTime)
+            project.overlays[index].positionYKeyframes.removeKeyframe(at: localTime)
+            project.overlays[index].scaleKeyframes.removeKeyframe(at: localTime)
+            project.overlays[index].rotationKeyframes.removeKeyframe(at: localTime)
+            project.overlays[index].opacityKeyframes.removeKeyframe(at: localTime)
+            scheduleRebuild()
+        }
+        statusMessage = "Removed overlay keyframe."
+    }
+
+    /// Clears all animation keyframes from an overlay, reverting to static values.
+    @MainActor
+    func clearOverlayKeyframes(_ overlayID: UUID) {
+        guard let index = project.overlays.firstIndex(where: { $0.id == overlayID }) else { return }
+        performUndoable("Clear Overlay Keyframes") {
+            let overlay = project.overlays[index]
+            project.overlays[index].positionXKeyframes = Keyframed(defaultValue: Float(overlay.positionOffset.width))
+            project.overlays[index].positionYKeyframes = Keyframed(defaultValue: Float(overlay.positionOffset.height))
+            project.overlays[index].scaleKeyframes = Keyframed(defaultValue: Float(overlay.scale))
+            project.overlays[index].rotationKeyframes = Keyframed(defaultValue: Float(overlay.rotation))
+            project.overlays[index].opacityKeyframes = Keyframed(defaultValue: overlay.opacity)
+            scheduleRebuild()
+        }
+        statusMessage = "Cleared overlay animation keyframes."
     }
 
     /// Resolves the source URL for an overlay from its bookmark or bundle path.

@@ -83,6 +83,26 @@ func keyframedAddKeyframeReplace() {
     #expect(keyframed.keyframes[0].value == 0.8)
 }
 
+@Test("Keyframed addKeyframe preserves existing handles when caller passes nil")
+func keyframedAddKeyframePreservesHandles() {
+    let time = CMTime(seconds: 3, preferredTimescale: 600)
+    let handleIn = KeyframeHandle(x: 0.3, y: 0.7)
+    let handleOut = KeyframeHandle(x: 0.6, y: 1.2)
+    let existing = Keyframe<Float>(
+        time: time, value: 1.0,
+        incomingHandle: handleIn, outgoingHandle: handleOut)
+    var keyframed = Keyframed<Float>(keyframes: [existing], defaultValue: 0.0)
+
+    // addKeyframe with nil handles at the same time should update value
+    // but preserve the existing bezier handles.
+    keyframed.addKeyframe(at: time, value: 2.0)
+
+    #expect(keyframed.keyframes.count == 1)
+    #expect(keyframed.keyframes[0].value == 2.0)
+    #expect(keyframed.keyframes[0].incomingHandle == handleIn)
+    #expect(keyframed.keyframes[0].outgoingHandle == handleOut)
+}
+
 @Test("Keyframed removeKeyframe works")
 func keyframedRemoveKeyframe() {
     let k1 = Keyframe<Float>(time: CMTime(seconds: 0, preferredTimescale: 600), value: 0.0)

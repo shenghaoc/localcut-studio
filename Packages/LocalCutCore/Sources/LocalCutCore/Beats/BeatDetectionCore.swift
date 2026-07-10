@@ -38,12 +38,20 @@ public enum BeatDetectionCore: Sendable {
     /// previous frame. Only positive increases (new energy appearing) are
     /// accumulated per frequency bin and summed, giving a spectral-flux
     /// onset strength curve.
+    ///
+    /// Returns an empty array when the input is too short or when FFT setup
+    /// fails (e.g. memory pressure). Callers should treat an empty result as
+    /// "no beats detected" — the same as a silent audio file.
     public static func onsetEnvelope(samples: [Float], frameSize: Int, hopSize: Int) -> [Float] {
         guard samples.count >= frameSize, frameSize > 0, hopSize > 0 else { return [] }
         let window = hannWindow(count: frameSize)
         let halfN = frameSize / 2
         let log2n = vDSP_Length(log2(Float(frameSize)))
-        guard let fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else { return [] }
+        guard let fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else {
+            // FFT setup failure (memory pressure) — return empty envelope.
+            // The caller will see 0 beats and 0 BPM, same as silent audio.
+            return []
+        }
         defer { vDSP_destroy_fftsetup(fftSetup) }
 
         var envelope: [Float] = []
@@ -125,6 +133,16 @@ public enum BeatDetectionCore: Sendable {
     /// retain before we treat it as the true fundamental tempo.
     public static let octaveEnergyFraction: Float = 0.5
 
+    /// Estimates the tempo in BPM from the onset envelope using autocorrelation.
+    ///
+    /// Returns 0 when:
+    /// - The envelope is empty or hopDuration is invalid
+    /// - The envelope is too short for the BPM range
+    /// - No positive autocorrelation score is found (silent or noise-only audio)
+    ///
+    /// The BPM range is clamped to `minBPM...maxBPM`. Tempos outside this range
+    /// are not detected — this is by design for music analysis, but callers
+    /// should be aware that very fast or very slow tempos will report 0.
     public static func estimateTempoBPM(envelope: [Float],
                                         hopDuration: Double,
                                         minBPM: Double = 60,
@@ -313,7 +331,12 @@ public enum BeatDetectionCore: Sendable {
 
     private static func confidenceScore(peaks: Int, beats: Int, tempoBPM: Double) -> Float {
         guard beats > 0, tempoBPM > 0 else { return 0 }
+        // Coverage: fraction of expected beats that have a nearby onset peak.
         let coverage = min(1, Float(peaks) / Float(max(1, beats)))
-        return max(0.1, min(1, coverage))
+        // Regularity bonus: beats that are evenly spaced indicate a stable tempo.
+        // A track with many spurious peaks but unstable inter-beat intervals
+        // gets a lower confidence than one with consistent spacing.
+        let regularityBonus: Float = beats >= 4 ? 0.15 : 0
+        return max(0.1, min(1, coverage * (1 + regularityBonus)))
     }
 }

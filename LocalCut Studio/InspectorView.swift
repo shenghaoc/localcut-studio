@@ -60,10 +60,10 @@ struct InspectorView: View {
             isPresented: $showLookImporter,
             allowedContentTypes: [.localCutLookPreset],
             allowsMultipleSelection: false
-        ) { result in
+        ) { [weak model] result in
             if case .success(let urls) = result, let url = urls.first {
-                Task {
-                    await model.importLookPreset(url: url)
+                Task { [weak model] in
+                    await model?.importLookPreset(url: url)
                 }
             }
         }
@@ -470,7 +470,7 @@ struct InspectorView: View {
             DisclosureGroup("Grain") {
                 LabeledSliderRow(
                     label: "Amount",
-                    display: "\(Int(model.selectedClipGrain.amount.defaultValue * 100))%",
+                    display: "\(Int(model.lookStrengthAtPlayhead(.grain) * 100))%",
                     value: grainBinding(\.amount.defaultValue),
                     range: 0...1,
                     step: 0.01,
@@ -495,7 +495,7 @@ struct InspectorView: View {
             DisclosureGroup("Halation") {
                 LabeledSliderRow(
                     label: "Strength",
-                    display: "\(Int(model.selectedClipHalation.strength.defaultValue * 100))%",
+                    display: "\(Int(model.lookStrengthAtPlayhead(.halation) * 100))%",
                     value: halationBinding(\.strength.defaultValue),
                     range: 0...1,
                     step: 0.01,
@@ -518,12 +518,22 @@ struct InspectorView: View {
                     step: 1,
                     onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
                     resetAction: resetHalation(\.radius, to: 16))
+                LabeledSliderRow(
+                    label: "Red Boost",
+                    spokenLabel: "Red Boost",
+                    display: String(format: "%.2f", model.selectedClipHalation.redBoost),
+                    value: halationBinding(\.redBoost),
+                    range: 0...2,
+                    step: 0.05,
+                    onEditingChanged: { if !$0 { model.commitCoalescedUndo() } },
+                    resetAction: resetHalation(\.redBoost, to: 0.85))
+                    .help("Red/orange colour bias of the halation glow.")
             }
 
             DisclosureGroup("Vignette") {
                 LabeledSliderRow(
                     label: "Amount",
-                    display: "\(Int(model.selectedClipVignette.amount.defaultValue * 100))%",
+                    display: "\(Int(model.lookStrengthAtPlayhead(.vignette) * 100))%",
                     value: vignetteBinding(\.amount.defaultValue),
                     range: -1...1,
                     step: 0.01,
@@ -555,6 +565,10 @@ struct InspectorView: View {
                     .controlSize(.small)
                     .disabled(!model.selectedClipHasLookEffects)
                 Spacer()
+                // Reset uses performUndoable (discrete action) while slider
+                // adjustments use performCoalescedUndoable (continuous gesture).
+                // This is intentional: reset is a one-shot action that should
+                // create a single undo step, not be coalesced with prior drags.
                 Button("Reset") { model.resetClipLooks() }
                     .controlSize(.small)
                     .disabled(!model.selectedClipHasLookEffects)
@@ -1034,6 +1048,7 @@ struct InspectorView: View {
                         to: CGSize(width: 0, height: overlay.positionOffset.height))
                     model.commitCoalescedUndo()
                 })
+                .help("Horizontal offset from centre. 0% = centred; ±100% = shifted by one full canvas width.")
 
             LabeledSliderRow(
                 label: "Position Y",
@@ -1054,6 +1069,7 @@ struct InspectorView: View {
                         to: CGSize(width: overlay.positionOffset.width, height: 0))
                     model.commitCoalescedUndo()
                 })
+                .help("Vertical offset from centre. 0% = centred; ±100% = shifted by one full canvas height.")
 
             LabeledSliderRow(
                 label: "Opacity",
@@ -1080,6 +1096,7 @@ struct InspectorView: View {
                     model.setOverlayScale(overlay.id, to: 1)
                     model.commitCoalescedUndo()
                 })
+                .help("Uniform scale factor. 1× = original size.")
 
             LabeledSliderRow(
                 label: "Rotation",
@@ -1093,6 +1110,7 @@ struct InspectorView: View {
                     model.setOverlayRotation(overlay.id, to: 0)
                     model.commitCoalescedUndo()
                 })
+                .help("Rotation in degrees. Positive = clockwise.")
 
             Picker("End Action", selection: Binding(
                 get: { overlay.endAction },
@@ -1101,11 +1119,82 @@ struct InspectorView: View {
                     Text(action.displayName).tag(action)
                 }
             }
+            .help("What happens when the overlay source reaches its end: Hide (stop), Freeze (hold last frame), or Loop.")
+
+            overlayKeyframeSection(overlay)
 
             Button("Remove Overlay", role: .destructive) {
                 model.removeOverlay(id: overlay.id)
             }
         }
+    }
+
+    @ViewBuilder
+    private func overlayKeyframeSection(_ overlay: OverlayClip) -> some View {
+        let localTime = overlayLocalPlayheadTime(overlay)
+        DisclosureGroup("Animation Keyframes") {
+            HStack {
+                Text(localTime.map { "At \(TimeFormatting.timecode($0.seconds))" } ?? "Move playhead over overlay")
+                    .font(.caption)
+                    .foregroundStyle(localTime == nil ? .orange : .secondary)
+                Spacer()
+                if overlay.isAnimated {
+                    Text("Animated")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .help(localTime == nil
+                  ? "Scrub the playhead to a position within this overlay to add animation keyframes."
+                  : "Add keyframes at the current time to animate the overlay.")
+
+            HStack(spacing: 8) {
+                Button {
+                    addOrUpdateOverlayKeyframe(overlay, localTime: localTime)
+                } label: {
+                    Label("Add Keyframe", systemImage: "plus.diamond.fill")
+                }
+                .disabled(localTime == nil)
+
+                Button(role: .destructive) {
+                    model.removeOverlayKeyframes(at: overlay.id, localTime: localTime)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .help("Remove keyframes at current time")
+                .accessibilityLabel("Remove overlay keyframes at current time")
+                .disabled(localTime == nil || !overlay.isAnimated)
+
+                if overlay.isAnimated {
+                    Button(role: .destructive) {
+                        model.clearOverlayKeyframes(overlay.id)
+                    } label: {
+                        Text("Clear All")
+                            .font(.caption)
+                    }
+                }
+            }
+            .controlSize(.small)
+        }
+        .help("Animate position, scale, rotation, and opacity over time using keyframes.")
+    }
+
+    private func overlayLocalPlayheadTime(_ overlay: OverlayClip) -> CMTime? {
+        let playhead = CMTime(seconds: model.currentTime, preferredTimescale: 600)
+        guard playhead >= overlay.timelineStart, playhead < overlay.timelineEnd else { return nil }
+        return playhead - overlay.timelineStart
+    }
+
+    private func addOrUpdateOverlayKeyframe(_ overlay: OverlayClip, localTime: CMTime?) {
+        guard let localTime else { return }
+        model.addOrUpdateOverlayKeyframe(
+            at: overlay.id,
+            localTime: localTime,
+            positionX: Float(overlay.positionOffset.width),
+            positionY: Float(overlay.positionOffset.height),
+            scale: Float(overlay.scale),
+            rotation: Float(overlay.rotation),
+            opacity: overlay.opacity)
     }
 
     // MARK: - Overlay list
@@ -1164,10 +1253,10 @@ struct InspectorView: View {
             isPresented: $showOverlayImporter,
             allowedContentTypes: pendingOverlayType.allowedContentTypes,
             allowsMultipleSelection: false
-        ) { result in
+        ) { [weak model] result in
             if case .success(let urls) = result, let url = urls.first {
-                Task {
-                    await model.importOverlay(from: url, sourceType: pendingOverlayType)
+                Task { [weak model] in
+                    await model?.importOverlay(from: url, sourceType: pendingOverlayType)
                 }
             }
         }
@@ -1399,6 +1488,6 @@ private struct CoverInspectorView: View {
         panel.nameFieldStringValue = "\(model.project.name)-cover.\(format.fileExtension)"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await model.exportCover(to: url) }
+        Task { [weak model] in await model?.exportCover(to: url) }
     }
 }

@@ -11,6 +11,7 @@
 #   MEDIAMTX_STARTUP_ATTEMPTS      — Startup/readiness attempts before failing (default: 2)
 #   MEDIAMTX_READY_TIMEOUT_SECONDS — Seconds to wait for readiness per attempt (default: 30)
 #   MEDIAMTX_RETRY_DELAY_SECONDS   — Delay between startup attempts (default: 2)
+#   DERIVED_DATA                   — Xcode DerivedData path (default: "DerivedData")
 #   XCODEBUILD_BIN                 — xcodebuild executable override for local harnesses (default: "xcodebuild")
 
 set -euo pipefail
@@ -24,11 +25,13 @@ MEDIAMTX_VERSION="1.19.2"
 MEDIAMTX_RELEASE_BASE="https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}"
 MEDIAMTX_DOWNLOAD_DIR="${PROJECT_DIR}/.build/mediamtx"
 MEDIAMTX_LOG="${MEDIAMTX_DOWNLOAD_DIR}/mediamtx.log"
+INTEGRATION_MARKER="${MEDIAMTX_DOWNLOAD_DIR}/integration-enabled"
 MEDIAMTX_PID=""
 CONTAINER_CMD=""
 MEDIAMTX_STARTUP_ATTEMPTS="${MEDIAMTX_STARTUP_ATTEMPTS:-2}"
 MEDIAMTX_READY_TIMEOUT_SECONDS="${MEDIAMTX_READY_TIMEOUT_SECONDS:-30}"
 MEDIAMTX_RETRY_DELAY_SECONDS="${MEDIAMTX_RETRY_DELAY_SECONDS:-2}"
+DERIVED_DATA="${DERIVED_DATA:-DerivedData}"
 XCODEBUILD_BIN="${XCODEBUILD_BIN:-xcodebuild}"
 
 echo "=== MediaMTX WHIP Integration Test ==="
@@ -98,10 +101,10 @@ ensure_mediamtx_binary() {
 
 start_container() {
     # Remove any existing container
-    ${CONTAINER_CMD} rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+    "${CONTAINER_CMD}" rm -f "${CONTAINER_NAME}" 2>/dev/null || true
 
     echo "Starting MediaMTX container..."
-    ${CONTAINER_CMD} run -d \
+    "${CONTAINER_CMD}" run -d \
         --name "${CONTAINER_NAME}" \
         -p 8889:8889 \
         -p 9997:9997 \
@@ -126,9 +129,10 @@ show_mediamtx_logs() {
 }
 
 cleanup() {
+    rm -f "${INTEGRATION_MARKER}"
     if [ -n "${CONTAINER_CMD}" ]; then
         echo "Stopping MediaMTX container..."
-        ${CONTAINER_CMD} rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+        "${CONTAINER_CMD}" rm -f "${CONTAINER_NAME}" 2>/dev/null || true
     elif [ -n "${MEDIAMTX_PID}" ]; then
         echo "Stopping MediaMTX process..."
         kill "${MEDIAMTX_PID}" 2>/dev/null || true
@@ -136,7 +140,12 @@ cleanup() {
     fi
     MEDIAMTX_PID=""
 }
+handle_signal() {
+    cleanup
+    exit 130
+}
 trap cleanup EXIT
+trap handle_signal SIGTERM SIGINT
 
 start_mediamtx() {
     CONTAINER_CMD=""
@@ -158,9 +167,15 @@ start_mediamtx() {
 wait_for_mediamtx() {
     echo "Waiting for MediaMTX to start..."
     for i in $(seq 1 "${MEDIAMTX_READY_TIMEOUT_SECONDS}"); do
-        if curl -s http://localhost:9997/v3/config/get >/dev/null 2>&1; then
+        if curl -fsS http://localhost:9997/v3/config/global/get >/dev/null 2>&1; then
             echo "MediaMTX is ready."
             return 0
+        fi
+        # Detect early crash instead of waiting for the full timeout.
+        if [ -n "${MEDIAMTX_PID:-}" ] && ! kill -0 "${MEDIAMTX_PID}" 2>/dev/null; then
+            echo "ERROR: MediaMTX process (PID ${MEDIAMTX_PID}) exited unexpectedly."
+            show_mediamtx_logs
+            return 1
         fi
         if [ "$i" -eq "${MEDIAMTX_READY_TIMEOUT_SECONDS}" ]; then
             echo "ERROR: MediaMTX did not start within ${MEDIAMTX_READY_TIMEOUT_SECONDS} seconds."
@@ -197,15 +212,16 @@ fi
 # Run the integration test via xcodebuild
 echo "Running integration test..."
 cd "${PROJECT_DIR}"
-LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 "${XCODEBUILD_BIN}" test \
+touch "${INTEGRATION_MARKER}"
+"${XCODEBUILD_BIN}" test \
     -project "LocalCut Studio.xcodeproj" \
     -scheme "LocalCut Studio" \
     -configuration Debug \
     -destination 'platform=macOS' \
+    -derivedDataPath "${DERIVED_DATA}" \
     -only-testing:"LocalCut StudioTests/WhipMediaMTXIntegrationTests" \
     -test-timeouts-enabled YES \
     -default-test-execution-time-allowance 300 \
-    CODE_SIGNING_ALLOWED=NO \
     2>&1 | tail -30
 
 echo "=== Done ==="

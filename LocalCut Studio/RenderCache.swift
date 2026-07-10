@@ -150,6 +150,8 @@ final class RenderCache: Sendable {
         let byteCost: Int
     }
 
+    /// `@unchecked Sendable`: linked-list `previous`/`next` pointers are only
+    /// mutated under the parent cache's lock.
     nonisolated private final class MemoryNode: @unchecked Sendable {
         let key: RenderCacheKey
         var previous: MemoryNode?
@@ -160,6 +162,8 @@ final class RenderCache: Sendable {
         }
     }
 
+    /// `@unchecked Sendable`: linked-list `previous`/`next` pointers are only
+    /// mutated under the parent cache's lock.
     nonisolated private final class DiskNode: @unchecked Sendable {
         let key: RenderCacheKey
         var previous: DiskNode?
@@ -308,14 +312,39 @@ final class RenderCache: Sendable {
     private let diskBudget: Int
     private let cacheDirectory: URL?
 
-    nonisolated private static let diskColorSpace: CGColorSpace = {
-        CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
-    }()
+    /// Creates a CIContext for disk writes that preserves the source color space.
+    /// Wide-gamut content (Display P3, Rec. 2020) is written in its native space
+    /// instead of being downconverted to sRGB.
+    /// Cached CIContext per WorkingColourSpace to avoid repeated Metal GPU
+    /// context initialization on every disk spill write.
+    nonisolated private static let srgbDiskContext = makeDiskContext(for: .sRGB)
+    nonisolated private static let displayP3DiskContext = makeDiskContext(for: .displayP3)
+    nonisolated private static let rec709DiskContext = makeDiskContext(for: .rec709)
+    nonisolated private static let rec2020DiskContext = makeDiskContext(for: .rec2020)
 
-    nonisolated private static let diskContext = CIContext(options: [
+    nonisolated static func diskContext(for colorSpace: WorkingColourSpace) -> CIContext {
+        switch colorSpace {
+        case .sRGB: srgbDiskContext
+        case .displayP3: displayP3DiskContext
+        case .rec709: rec709DiskContext
+        case .rec2020: rec2020DiskContext
+        }
+    }
+
+    nonisolated private static func makeDiskContext(for colorSpace: WorkingColourSpace) -> CIContext {
+        let cgSpace = colorSpace.cgColorSpace
+        return CIContext(options: [
+            .cacheIntermediates: false,
+            .workingColorSpace: cgSpace,
+            .outputColorSpace: cgSpace,
+        ])
+    }
+
+    /// Default sRGB context for fallback.
+    nonisolated private static let srgbContext = CIContext(options: [
         .cacheIntermediates: false,
-        .workingColorSpace: diskColorSpace,
-        .outputColorSpace: diskColorSpace,
+        .workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+        .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
     ])
 
     nonisolated init(byteBudget: Int = RenderCache.defaultByteBudget,
@@ -326,6 +355,29 @@ final class RenderCache: Sendable {
         self.budget = byteBudget
         self.diskBudget = diskByteBudget
         self.cacheDirectory = cacheDirectory
+        // Clean up orphaned disk cache files from previous sessions.
+        cleanUpOrphanedDiskFiles()
+    }
+
+    /// Removes disk cache files that are not tracked in the current cache state.
+    /// Called at init to prevent unbounded growth from crashed exports.
+    private nonisolated func cleanUpOrphanedDiskFiles() {
+        guard let cacheDirectory else { return }
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]) else { return }
+
+        let trackedFiles = lock.withLock { state in
+            Set(state.diskEntries.values.map { $0.url })
+        }
+
+        for file in files where file.pathExtension == "png" {
+            if !trackedFiles.contains(file) {
+                try? fm.removeItem(at: file)
+            }
+        }
     }
 
     nonisolated var byteBudget: Int { budget }
@@ -393,8 +445,9 @@ final class RenderCache: Sendable {
     private nonisolated func spillEvictedEntries(_ entries: [(RenderCacheKey, Entry)]) {
         guard diskBudget > 0, cacheDirectory != nil else { return }
         for (key, entry) in entries {
-            guard let diskEntry = writeDiskEntry(entry, for: key) else { continue }
-            recordDiskEntry(diskEntry, for: key)
+            if let diskEntry = writeDiskEntry(entry, for: key) {
+                recordDiskEntry(diskEntry, for: key)
+            }
         }
     }
 
@@ -406,11 +459,14 @@ final class RenderCache: Sendable {
             let url = cacheDirectory
                 .appendingPathComponent(Self.diskFilename(for: key))
                 .appendingPathExtension("png")
-            try Self.diskContext.writePNGRepresentation(
+            // Use a context that preserves the source color space for wide-gamut content.
+            let context = Self.diskContext(for: key.workingColourSpace)
+            let colorSpace = key.workingColourSpace.cgColorSpace
+            try context.writePNGRepresentation(
                 of: entry.image,
                 to: url,
                 format: .RGBA8,
-                colorSpace: Self.diskColorSpace)
+                colorSpace: colorSpace)
             let values = try url.resourceValues(forKeys: [.fileSizeKey])
             return DiskEntry(url: url, byteCost: max(0, values.fileSize ?? entry.byteCost))
         } catch {
@@ -421,6 +477,11 @@ final class RenderCache: Sendable {
     }
 
     private nonisolated func recordDiskEntry(_ entry: DiskEntry, for key: RenderCacheKey) {
+        // Collect URLs to delete inside the lock, then delete outside.
+        // Between releasing the lock and deleting the files, another thread
+        // could read a disk entry that's about to be deleted — this causes a
+        // brief cache miss (the image loads as nil) which is acceptable since
+        // the entry will be regenerated on the next render pass.
         let toDelete = lock.withLock { state -> [URL] in
             var stale: [URL] = []
             if let previous = state.insertDisk(key, entry: entry),
@@ -565,8 +626,12 @@ final class RenderCache: Sendable {
                               height: Int(extent.height.rounded()))
     }
 
-    /// Raw byte estimate for a `(width, height)` BGRA bitmap. Kept public so
-    /// tests can construct expected costs without a CIImage in hand.
+    /// Raw byte estimate for a `(width, height)` BGRA bitmap. This is an
+    /// upper bound — the actual `CIImage` may be backed by a compressed GPU
+    /// texture or use a different pixel format. The overestimate is safe for
+    /// budget purposes (premature eviction) but may cause the cache to hold
+    /// fewer entries than the budget allows. Kept public so tests can construct
+    /// expected costs without a CIImage in hand.
     nonisolated static func estimatedBytes(width: Int, height: Int) -> Int {
         max(0, width) * max(0, height) * 4
     }

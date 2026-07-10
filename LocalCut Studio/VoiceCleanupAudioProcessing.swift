@@ -207,16 +207,10 @@ enum VoiceCleanupAudioProcessing: Sendable {
         guard let formatDescription = CMSampleBufferGetFormatDescription(source) else {
             return nil
         }
-        let totalDuration = CMSampleBufferGetDuration(source)
-        let sampleDuration: CMTime
-        if totalDuration.isValid, totalDuration.isNumeric, frameCount > 0 {
-            sampleDuration = CMTimeMultiplyByRatio(
-                totalDuration,
-                multiplier: 1,
-                divisor: Int32(max(1, frameCount)))
-        } else {
-            sampleDuration = CMTime(value: 1, timescale: CMTimeScale(sampleRate))
-        }
+        let sampleDuration = Self.sampleDuration(
+            totalDuration: CMSampleBufferGetDuration(source),
+            frameCount: frameCount,
+            sampleRate: sampleRate)
 
         var timing = CMSampleTimingInfo(
             duration: sampleDuration,
@@ -239,6 +233,23 @@ enum VoiceCleanupAudioProcessing: Sendable {
             sampleBufferOut: &output)
         guard sampleStatus == noErr else { return nil }
         return output
+    }
+
+    nonisolated static func sampleDuration(totalDuration: CMTime,
+                                           frameCount: Int,
+                                           sampleRate: Double) -> CMTime {
+        if totalDuration.isValid, totalDuration.isNumeric, frameCount > 0 {
+            return CMTimeMultiplyByRatio(
+                totalDuration,
+                multiplier: 1,
+                divisor: Int32(clamping: frameCount))
+        }
+
+        let roundedRate = sampleRate.rounded()
+        let boundedRate = roundedRate.isFinite
+            ? min(max(roundedRate, 1), Double(Int32.max))
+            : 1
+        return CMTime(value: 1, timescale: CMTimeScale(Int32(boundedRate)))
     }
 }
 

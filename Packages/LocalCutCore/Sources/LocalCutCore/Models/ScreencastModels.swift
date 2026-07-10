@@ -213,7 +213,8 @@ public struct ZoomPanProposal: Hashable, Codable, Identifiable, Sendable {
         self.id = id
         self.timeRange = timeRange
         self.targetPoint = targetPoint
-        self.endScale = endScale
+        // Clamp endScale to the same range as ZoomPanPreset.
+        self.endScale = max(1.0, min(5.0, endScale))
         self.keyframes = keyframes
         self.clickCount = clickCount
     }
@@ -229,7 +230,7 @@ public struct ZoomPanProposal: Hashable, Codable, Identifiable, Sendable {
         let durationCode = try c.decode(CMTimeCode.self, forKey: .timeRangeDuration)
         timeRange = CMTimeRange(start: startCode.cmTime, duration: durationCode.cmTime)
         targetPoint = try c.decode(CGPoint.self, forKey: .targetPoint)
-        endScale = try c.decode(Float.self, forKey: .endScale)
+        endScale = max(1.0, min(5.0, try c.decode(Float.self, forKey: .endScale)))
         keyframes = try c.decode([Keyframe<Transform2D>].self, forKey: .keyframes)
         clickCount = try c.decode(Int.self, forKey: .clickCount)
     }
@@ -419,6 +420,10 @@ public struct CalloutClip: Hashable, Codable, Identifiable, Sendable {
         self.kind = kind
         self.timeRange = timeRange
         self.positionOffset = positionOffset
+        // Model allows up to 10× for backward compatibility (older projects
+        // may have values between 4 and 10). The inspector UI caps at 4× for
+        // usability — values above that are reachable only through presets or
+        // manual document editing.
         self.scale = max(0.1, min(10, scale))
         self.rotation = rotation
         self.transformKeyframes = transformKeyframes

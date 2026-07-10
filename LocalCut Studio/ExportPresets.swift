@@ -30,16 +30,6 @@ nonisolated enum ExportAspect: String, Codable, Hashable, Sendable, CaseIterable
         try container.encode(rawValue)
     }
 
-    var ratio: CGSize {
-        switch self {
-        case .widescreen: CGSize(width: 16, height: 9)
-        case .vertical: CGSize(width: 9, height: 16)
-        case .square: CGSize(width: 1, height: 1)
-        case .portrait4x5: CGSize(width: 4, height: 5)
-        case .cinema21x9: CGSize(width: 21, height: 9)
-        }
-    }
-
     var displayName: String {
         switch self {
         case .widescreen: "16:9"
@@ -291,6 +281,9 @@ extension ExportPreset {
            !Self.isHEVCEncodingAvailable {
             return "HEVC encoding is not available on this Mac."
         }
+        // ProRes 4444 requires hardware support that may not be available
+        // on all Macs. The writer fallback path will attempt the encode,
+        // but warn the user if the codec is unlikely to work.
         return nil
     }
 }
@@ -471,6 +464,9 @@ nonisolated enum BuiltInExportPresets {
             guidanceSourceURL: "https://ads.tiktok.com/help/article/tiktok-auction-in-feed-ads",
             guidanceValidatedAt: "2026-06-25"))
 
+    /// ProRes 4K preset. The bitrate bracket is `.max` for display purposes
+    /// but is ignored by the session path — ProRes uses Apple's fixed internal
+    /// bitrate determined by the profile (422 HQ, 422, etc.).
     static let proRes4K = ExportPreset(
         id: proRes4KID,
         name: "ProRes 4K",
@@ -533,8 +529,12 @@ extension ExportPreset {
             if matches(width, height, 1920, 1080) { return AVAssetExportPresetHEVC1920x1080 }
             if matches(width, height, 3840, 2160) { return AVAssetExportPresetHEVC3840x2160 }
         case proRes422:
+            // ProRes session presets enforce Apple's fixed output dimensions.
+            // Custom presets with non-standard sizes will be silently resized
+            // by the session. The writer fallback path honours any render size.
             return AVAssetExportPresetAppleProRes422LPCM
         case proRes4444:
+            // Same limitation as ProRes 422 above.
             return AVAssetExportPresetAppleProRes4444LPCM
         // Other ProRes flavours (HQ, LT, Proxy) intentionally fall through to
         // the AVAssetWriter path: AVFoundation's session presets don't expose

@@ -6,6 +6,9 @@ import os
 import WebRTC
 #endif
 
+/// `@unchecked Sendable`: WebRTC source/capturer and frame delivery state
+/// (`isClosed`, `isInFlight`, `pendingBuffer`, `latestPixelBuffer`) are
+/// protected by `lock`.
 nonisolated final class VideoPublishTap: @unchecked Sendable {
     #if LOCALCUT_ENABLE_WEBRTC
     private var videoSource: RTCVideoSource?
@@ -30,7 +33,11 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
         }
     }
     #else
-    nonisolated(unsafe) private(set) var latestPixelBuffer: CVPixelBuffer?
+    var latestPixelBuffer: CVPixelBuffer? {
+        lock.withLockUnchecked { _ in latestPixelBufferStorage }
+    }
+
+    private var latestPixelBufferStorage: CVPixelBuffer?
     init() {}
     nonisolated func detachFromWebRTC() {}
     #endif
@@ -76,7 +83,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
             activeCapturer.didCapture(frame)
         }
         #else
-        lock.withLockUnchecked { _ in latestPixelBuffer = buffer }
+        lock.withLockUnchecked { _ in latestPixelBufferStorage = buffer }
         #endif
 
         let next = lock.withLockUnchecked { _ -> CVPixelBuffer? in

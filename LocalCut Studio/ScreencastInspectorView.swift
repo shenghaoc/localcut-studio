@@ -98,9 +98,13 @@ struct ScreencastInspectorView: View {
 
     /// Creates a binding that dynamically fetches the latest callout from the
     /// model by ID, avoiding stale captures during rapid slider updates.
+    /// The binding is lightweight (no allocation beyond the closure captures)
+    /// and the getter performs an O(n) search through callouts, which is
+    /// acceptable for typical callout counts (< 20).
     private func calloutBinding(for callout: CalloutClip) -> Binding<CalloutClip> {
-        Binding(
-            get: { model.callout(for: callout.id) ?? callout },
+        let calloutID = callout.id
+        return Binding(
+            get: { model.callout(for: calloutID) ?? callout },
             set: { model.updateCallout($0) }
         )
     }
@@ -224,7 +228,7 @@ struct ScreencastInspectorView: View {
                 TextField("X", value: Binding(
                     get: { Double(binding.wrappedValue.positionOffset.width) },
                     set: { var c = binding.wrappedValue; c.positionOffset.width = CGFloat($0); binding.wrappedValue = c }),
-                          format: .number.precision(.fractionLength(0)))
+                          format: .number.precision(.fractionLength(3)))
                     .frame(width: 72)
                     .multilineTextAlignment(.trailing)
             }
@@ -232,7 +236,7 @@ struct ScreencastInspectorView: View {
                 TextField("Y", value: Binding(
                     get: { Double(binding.wrappedValue.positionOffset.height) },
                     set: { var c = binding.wrappedValue; c.positionOffset.height = CGFloat($0); binding.wrappedValue = c }),
-                          format: .number.precision(.fractionLength(0)))
+                          format: .number.precision(.fractionLength(3)))
                     .frame(width: 72)
                     .multilineTextAlignment(.trailing)
             }
@@ -242,7 +246,7 @@ struct ScreencastInspectorView: View {
                 Slider(value: Binding(
                     get: { binding.wrappedValue.scale },
                     set: { binding.wrappedValue.scale = $0 }),
-                       in: 0.1...4, step: 0.05)
+                       in: 0.25...4, step: 0.05)
                     .accessibilityLabel("Scale")
                     .accessibilityValue(String(format: "%.2fx", binding.wrappedValue.scale))
                 Text(String(format: "%.2fx", binding.wrappedValue.scale))
@@ -392,9 +396,12 @@ struct ScreencastInspectorView: View {
 
     @ViewBuilder
     private var paddedBackgroundControls: some View {
-        if let preset = model.project.paddedBackground {
+        // Always read from the model, not from a captured `preset` variable,
+        // so the bindings reflect the current state even if the preset changes
+        // during slider interaction.
+        if model.project.paddedBackground != nil {
             Picker("Source", selection: Binding(
-                get: { preset.source },
+                get: { model.project.paddedBackground?.source ?? .gradient },
                 set: { source in model.updatePaddedBackground { $0.source = source } })) {
                     Text("Gradient").tag(PaddedBackgroundSource.gradient)
                     Text("Image").tag(PaddedBackgroundSource.image)
@@ -404,12 +411,12 @@ struct ScreencastInspectorView: View {
                 Text("Inset")
                     .accessibilityHidden(true)
                 Slider(value: Binding(
-                    get: { Double(model.project.paddedBackground?.insetMargin ?? preset.insetMargin) },
+                    get: { Double(model.project.paddedBackground?.insetMargin ?? 0) },
                     set: { value in model.updatePaddedBackground { $0.insetMargin = Float(value) } }),
                        in: 0...240, step: 1)
                     .accessibilityLabel("Inset")
-                    .accessibilityValue("\(Int(model.project.paddedBackground?.insetMargin ?? preset.insetMargin))")
-                Text("\(Int(model.project.paddedBackground?.insetMargin ?? preset.insetMargin))")
+                    .accessibilityValue("\(Int(model.project.paddedBackground?.insetMargin ?? 0))")
+                Text("\(Int(model.project.paddedBackground?.insetMargin ?? 0))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
@@ -418,12 +425,12 @@ struct ScreencastInspectorView: View {
                 Text("Corners")
                     .accessibilityHidden(true)
                 Slider(value: Binding(
-                    get: { Double(model.project.paddedBackground?.cornerRadius ?? preset.cornerRadius) },
+                    get: { Double(model.project.paddedBackground?.cornerRadius ?? 0) },
                     set: { value in model.updatePaddedBackground { $0.cornerRadius = Float(value) } }),
                        in: 0...80, step: 1)
                     .accessibilityLabel("Corners")
-                    .accessibilityValue("\(Int(model.project.paddedBackground?.cornerRadius ?? preset.cornerRadius))")
-                Text("\(Int(model.project.paddedBackground?.cornerRadius ?? preset.cornerRadius))")
+                    .accessibilityValue("\(Int(model.project.paddedBackground?.cornerRadius ?? 0))")
+                Text("\(Int(model.project.paddedBackground?.cornerRadius ?? 0))")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
@@ -432,11 +439,11 @@ struct ScreencastInspectorView: View {
                 Text("Shadow")
                     .accessibilityHidden(true)
                 Slider(value: Binding(
-                    get: { Double(model.project.paddedBackground?.shadowOpacity ?? preset.shadowOpacity) },
+                    get: { Double(model.project.paddedBackground?.shadowOpacity ?? 0) },
                     set: { value in model.updatePaddedBackground { $0.shadowOpacity = Float(value) } }),
                        in: 0...1, step: 0.05)
                     .accessibilityLabel("Shadow")
-                    .accessibilityValue(String(format: "%.0f%%", (model.project.paddedBackground?.shadowOpacity ?? preset.shadowOpacity) * 100))
+                    .accessibilityValue(String(format: "%.0f%%", (model.project.paddedBackground?.shadowOpacity ?? 0) * 100))
             }
         }
     }
@@ -453,19 +460,6 @@ struct ScreencastInspectorView: View {
                 showAutoZoomReview = true
             }
         }
-    }
-}
-
-private extension Transform2D {
-    func replacing(translateX: Float? = nil,
-                   translateY: Float? = nil,
-                   scale: Float? = nil,
-                   rotationDegrees: Float? = nil) -> Transform2D {
-        Transform2D(
-            translateX: translateX ?? tx,
-            translateY: translateY ?? ty,
-            scale: scale ?? decomposedScale,
-            rotation: rotationDegrees.map { $0 * Float.pi / 180 } ?? decomposedRotation)
     }
 }
 

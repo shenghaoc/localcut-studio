@@ -52,7 +52,7 @@ extension EditorModel {
         }
         selectedClipID = clipID
         statusMessage = "Clip transform keyframe set at \(TimeFormatting.timecode(localTime.seconds))."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     @MainActor
@@ -67,7 +67,7 @@ extension EditorModel {
             project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes.removeKeyframe(id: keyframe.id)
         }
         statusMessage = "Removed clip transform keyframe."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     @MainActor
@@ -90,7 +90,7 @@ extension EditorModel {
                 Keyframed(defaultValue: .identity)
         }
         statusMessage = "Cleared clip transform keyframes."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     @MainActor
@@ -140,8 +140,18 @@ extension EditorModel {
         in keyframes: Keyframed<Transform2D>,
         to time: CMTime
     ) -> Keyframe<Transform2D>? {
-        let tolerance = clipTransformKeyframeHitToleranceSeconds
-        return keyframes.keyframes
+        Self.nearestTransformKeyframe(in: keyframes, to: time,
+                                      tolerance: clipTransformKeyframeHitToleranceSeconds)
+    }
+
+    /// Shared helper for finding the nearest transform keyframe within a
+    /// tolerance. Used by both clip and callout keyframe navigation.
+    static func nearestTransformKeyframe(
+        in keyframes: Keyframed<Transform2D>,
+        to time: CMTime,
+        tolerance: Double
+    ) -> Keyframe<Transform2D>? {
+        keyframes.keyframes
             .map { keyframe in (keyframe, abs((keyframe.time - time).seconds)) }
             .filter { $0.1 <= tolerance }
             .min { $0.1 < $1.1 }?

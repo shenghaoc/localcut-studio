@@ -9,6 +9,8 @@ extension EditorModel {
     // MARK: - Zoom-n-Pan Presets
 
     /// Apply a zoom-n-pan preset to the selected clip's transform keyframes.
+    /// Replaces any existing keyframes — the previous state is preserved in the
+    /// undo stack so the user can revert if the replacement was unintended.
     @MainActor
     func applyZoomPanPreset(kind: ZoomPanPresetKind) {
         guard let clipID = selectedClipID,
@@ -20,6 +22,7 @@ extension EditorModel {
         }
 
         let clip = project.videoTracks[trackIndex].clips[clipIndex]
+        let hadKeyframes = clip.transformKeyframes.isAnimated
         let preset = ZoomPanPreset(kind: kind, duration: clip.duration)
         let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clip.duration)
 
@@ -32,8 +35,9 @@ extension EditorModel {
             project.videoTracks[trackIndex].clips[clipIndex].transformKeyframes =
                 Keyframed(keyframes: keyframes, defaultValue: .identity)
         }
-        statusMessage = "Applied \(kind.displayName.lowercased()) preset."
-        Task { await rebuild() }
+        let replacedNote = hadKeyframes ? " (replaced existing keyframes — undo to restore)" : ""
+        statusMessage = "Applied \(kind.displayName.lowercased()) preset\(replacedNote)."
+        Task { [weak self] in await self?.rebuild() }
     }
 
     // MARK: - Auto-Zoom Proposals
@@ -77,7 +81,7 @@ extension EditorModel {
                 Keyframed(keyframes: merged, defaultValue: .identity)
         }
         statusMessage = "Applied auto-zoom proposal."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Skip (dismiss) an auto-zoom proposal without modifying the timeline.
@@ -126,7 +130,7 @@ extension EditorModel {
         }
         autoZoomProposals.removeAll()
         statusMessage = "Applied \(proposals.count) auto-zoom proposals."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Import a standalone Phase 43 `events.json` file and generate proposals.
@@ -169,7 +173,7 @@ extension EditorModel {
             project.paddedBackground = PaddedBackgroundPreset()
         }
         statusMessage = "Applied padded background."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Apply an image-backed padded background. The bookmark is persisted for
@@ -194,7 +198,7 @@ extension EditorModel {
             project.paddedBackground = preset
         }
         statusMessage = "Applied \(url.lastPathComponent) as padded background."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Mutate the padded background preset with one undo coalescing target.
@@ -215,6 +219,6 @@ extension EditorModel {
             project.paddedBackground = nil
         }
         statusMessage = "Removed padded background."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 }

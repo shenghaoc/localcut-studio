@@ -122,6 +122,35 @@ func voiceCleanupSettingsAreUndoable() {
     #expect(model.project.voiceCleanup.gate.bypass == true)
 }
 
+@MainActor
+@Test("VoiceCleanup: changing an active loudness gain invalidates composition-derived state")
+func activeLoudnessGainChangeSchedulesRebuild() {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    media.hasAudio = true
+    model.project.mediaItems = [media]
+    let clip = Clip(mediaID: media.id, sourceStart: .zero,
+                    duration: cm(3), timelineStart: .zero)
+    model.project.videoTracks[0].clips = [clip]
+    model.beatAnalyses[media.id] = BeatAnalysis(
+        tempoBPM: 60,
+        beatTimes: [cm(1)],
+        confidence: 1)
+    model.project.voiceCleanup.loudness.enabled = true
+    model.project.voiceCleanup.loudness.appliedGainDB = 3
+
+    #expect(model.projectedBeatTimes().map(\.seconds) == [1])
+    model.project.videoTracks[0].clips[0].timelineStart = cm(5)
+
+    model.updateVoiceCleanup {
+        $0.loudness.appliedGainDB = 6
+    }
+
+    // `scheduleRebuild()` invalidates the memo synchronously. Comparing only
+    // loudness enabled-state would leave the stale value at 1 second.
+    #expect(model.projectedBeatTimes().map(\.seconds) == [6])
+}
+
 // MARK: - R6.4 — VolumeEnvelope clamping
 
 @Test("VolumeEnvelope: fadeIn + fadeOut greater than clip duration each clamp to half (R6.4)")
@@ -361,6 +390,39 @@ func writerPathVoiceCleanupProcessAppliesLoudnessGain() throws {
     #expect(wet.rmsRight > dry.rmsRight * 1.8)
 }
 
+@Test("VoiceCleanup: fallback sample timing clamps invalid sample rates")
+func voiceCleanupFallbackTimingClampsInvalidSampleRates() {
+    for sampleRate in [0, -48_000, Double.nan, Double.infinity] {
+        let duration = VoiceCleanupAudioProcessing.sampleDuration(
+            totalDuration: .invalid,
+            frameCount: 4,
+            sampleRate: sampleRate)
+        #expect(duration == CMTime(value: 1, timescale: 1))
+    }
+
+    let validDuration = VoiceCleanupAudioProcessing.sampleDuration(
+        totalDuration: .invalid,
+        frameCount: 4,
+        sampleRate: 48_000)
+    #expect(validDuration == CMTime(value: 1, timescale: 48_000))
+
+    let clampedDuration = VoiceCleanupAudioProcessing.sampleDuration(
+        totalDuration: .invalid,
+        frameCount: 4,
+        sampleRate: Double.greatestFiniteMagnitude)
+    #expect(clampedDuration == CMTime(value: 1, timescale: Int32.max))
+}
+
+@Test("VoiceCleanup: source duration takes precedence over sample-rate fallback")
+func voiceCleanupSourceDurationTakesPrecedence() {
+    let totalDuration = CMTime(value: 1, timescale: 100)
+    let duration = VoiceCleanupAudioProcessing.sampleDuration(
+        totalDuration: totalDuration,
+        frameCount: 10,
+        sampleRate: 0)
+    #expect(duration == CMTime(value: 1, timescale: 1_000))
+}
+
 @Test("RenderQueue: offline meter ignores non-Int16 PCM sample buffers")
 func writerPathSampleBufferMeterRejectsUnsupportedPCM() throws {
     let sampleBuffer = try makePCMFloat32SampleBuffer(samples: [1, 0, -1, 0], channels: 2)
@@ -373,35 +435,81 @@ func writerPathSampleBufferMeterRejectsUnsupportedPCM() throws {
 @Suite("Audio bus: default-project regression (R6.5)")
 struct AudioBusRegressionTests {
 
-    @Test("CompositionBuilder: default project (no bus contribution) leaves the audio mix nil when there is no crossfade")
-    func defaultProjectNoMixWhenNoCrossfade() async throws {
+    private func makeProjectWithOneAudioClip(seconds: Double = 1) async throws -> (Project, URL) {
         let project = Project()
-        let url = try makeAudioFixture(seconds: 1)
-        defer { try? FileManager.default.removeItem(at: url) }
+        let url = try makeAudioFixture(seconds: seconds)
         let media = try await loadAudioMedia(from: url)
         project.mediaItems.append(media)
         project.audioTracks[0].clips = [
-            Clip(mediaID: media.id, sourceStart: .zero, duration: cm(1), timelineStart: .zero)
+            Clip(mediaID: media.id, sourceStart: .zero, duration: cm(seconds), timelineStart: .zero)
         ]
+        return (project, url)
+    }
+
+    @Test("CompositionBuilder: default project (no bus contribution) leaves the audio mix nil when there is no crossfade")
+    func defaultProjectNoMixWhenNoCrossfade() async throws {
+        let (project, url) = try await makeProjectWithOneAudioClip()
+        defer { try? FileManager.default.removeItem(at: url) }
+
         let built = try #require(try await CompositionBuilder.build(project: project))
         #expect(built.audioMix == nil)
     }
 
     @Test("CompositionBuilder: changing master gain makes the audio mix appear even without a crossfade")
     func busGainTriggersAudioMix() async throws {
-        let project = Project()
-        let url = try makeAudioFixture(seconds: 1)
+        let (project, url) = try await makeProjectWithOneAudioClip()
         defer { try? FileManager.default.removeItem(at: url) }
-        let media = try await loadAudioMedia(from: url)
-        project.mediaItems.append(media)
-        project.audioTracks[0].clips = [
-            Clip(mediaID: media.id, sourceStart: .zero, duration: cm(1), timelineStart: .zero)
-        ]
+
         project.masterGain = 0.5
         let built = try #require(try await CompositionBuilder.build(project: project))
         let mix = try #require(built.audioMix)
         // Exactly one input piece on the audio track ⇒ one set of input params.
         #expect(mix.inputParameters.count == 1)
+    }
+
+    @Test("CompositionBuilder: loudness-only gain is carried by the audio mix")
+    func loudnessOnlyGainTriggersAudioMix() async throws {
+        let (project, url) = try await makeProjectWithOneAudioClip()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        project.voiceCleanup.loudness.enabled = true
+        project.voiceCleanup.loudness.appliedGainDB = 6
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+        let mix = try #require(built.audioMix)
+        #expect(mix.inputParameters.count == 1)
+        #expect(built.audioCleanup.requiresOfflineProcessing == false)
+        #expect(built.audioCleanup.loudnessGainLinear > 1.9)
+    }
+
+    @Test("CompositionBuilder: DSP-active loudness is not also carried by the audio mix")
+    func dspActiveLoudnessStaysOutOfAudioMix() async throws {
+        let (project, url) = try await makeProjectWithOneAudioClip()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        project.voiceCleanup.denoiser.bypass = false
+        project.voiceCleanup.loudness.enabled = true
+        project.voiceCleanup.loudness.appliedGainDB = 6
+
+        let built = try #require(try await CompositionBuilder.build(project: project))
+        #expect(built.audioCleanup.requiresOfflineProcessing == true)
+        #expect(built.audioCleanup.loudnessGainLinear > 1.9)
+        #expect(built.audioMix == nil)
+    }
+
+    @Test("CompositionBuilder: loudness measurement builds can exclude applied gain")
+    func measurementBuildExcludesAppliedLoudnessGain() async throws {
+        let (project, url) = try await makeProjectWithOneAudioClip()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        project.voiceCleanup.loudness.enabled = true
+        project.voiceCleanup.loudness.appliedGainDB = 6
+
+        let built = try #require(try await CompositionBuilder.build(
+            project: project,
+            includeLoudnessGainInAudioMix: false))
+        #expect(built.audioMix == nil)
+        #expect(built.audioCleanup.loudnessGainLinear > 1.9)
     }
 
     @Test("AudioBusDoc: legacy document (no audioBus key) decodes to defaults")

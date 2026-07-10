@@ -85,8 +85,8 @@ struct RecorderCommands: Commands {
             }
             .disabled(!model.canCollapseRecordingGaps)
 
-            Button("Retake Last Recording") {
-                Task { await model.retakeRecording() }
+            Button("Retake Last Recording") { [weak model] in
+                Task { [weak model] in await model?.retakeRecording() }
             }
             .disabled(!model.canRetakeRecording)
         }
@@ -281,7 +281,9 @@ struct EditorView: View {
         .tint(.lcAccent)
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) { statusBar }
-        .onAppear { Task { await model.scanRecoveredRecordings() } }
+        .onAppear { [weak model] in
+            Task { [weak model] in await model?.scanRecoveredRecordings() }
+        }
         .onDisappear { model.teardownAudioMetering() }
         .sheet(isPresented: $model.isRecorderPresented) {
             RecorderSetupView(model: model)
@@ -341,15 +343,15 @@ struct EditorView: View {
 
             if model.isRecording || model.isPaused {
                 if model.isPaused {
-                    Button {
-                        Task { await model.resumeRecording() }
+                    Button { [weak model] in
+                        Task { [weak model] in await model?.resumeRecording() }
                     } label: {
                         Label("Resume", systemImage: "play.circle.fill")
                     }
                     .help("Resume recording")
                 } else {
-                    Button {
-                        Task { await model.pauseRecording() }
+                    Button { [weak model] in
+                        Task { [weak model] in await model?.pauseRecording() }
                     } label: {
                         Label("Pause", systemImage: "pause.circle.fill")
                     }
@@ -380,8 +382,8 @@ struct EditorView: View {
                     .disabled(!model.canCollapseRecordingGaps)
                     .help("Collapse pause gaps in the last recording")
 
-                    Button {
-                        Task { await model.retakeRecording() }
+                    Button { [weak model] in
+                        Task { [weak model] in await model?.retakeRecording() }
                     } label: {
                         Label("Retake Last Recording", systemImage: "arrow.counterclockwise")
                     }
@@ -496,7 +498,9 @@ struct EditorView: View {
                 .accessibilityHidden(true)
             Text("\(model.unresolvedMedia.count) media file(s) need relinking.")
                 .font(.caption)
-            Button("Relink…") { Task { await model.relinkNextMissingMedia() } }
+            Button("Relink…") { [weak model] in
+                Task { [weak model] in await model?.relinkNextMissingMedia() }
+            }
                 .controlSize(.small)
         }
     }
@@ -575,6 +579,13 @@ struct WindowConfigurator: NSViewRepresentable {
     final class Coordinator: NSObject, NSWindowDelegate {
         var model: EditorModel
         weak var window: NSWindow?
+        /// Previous window delegate, restored on detach.
+        ///
+        /// **Isolation invariant:** Set/read on `@MainActor` in `attach(to:)`;
+        /// also read from nonisolated `responds(to:)` and
+        /// `forwardingTarget(for:)` for AppKit delegate forwarding on the main
+        /// thread, which Swift's actor model cannot express for Objective-C
+        /// message forwarding.
         nonisolated(unsafe) weak var previousDelegate: NSWindowDelegate?
 
         init(model: EditorModel) {

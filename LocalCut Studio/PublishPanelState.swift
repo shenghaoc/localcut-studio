@@ -66,8 +66,14 @@ final class PublishPanelState {
     }
 
     /// Task that observes the WhipSession state stream.
-    private var stateObservationTask: Task<Void, Never>?
-    private var statsPollingTask: Task<Void, Never>?
+    /// nonisolated(unsafe) so deinit can cancel from any thread.
+    @ObservationIgnored nonisolated(unsafe) private var stateObservationTask: Task<Void, Never>?
+    @ObservationIgnored nonisolated(unsafe) private var statsPollingTask: Task<Void, Never>?
+
+    deinit {
+        stateObservationTask?.cancel()
+        statsPollingTask?.cancel()
+    }
 
     func loadSettings(from model: EditorModel) {
         endpointType = model.publishSettings.endpointType
@@ -125,8 +131,14 @@ final class PublishPanelState {
             model.publishSettings.rememberToken = false
         }
 
-        Task {
-            defer { isStarting = false }
+        Task { [weak self] in
+            defer { self?.isStarting = false }
+            guard let self else {
+                // self deallocated before publish started — just return.
+                // We don't stop the session here because startWhipPublish
+                // hasn't been called yet, so there's nothing to clean up.
+                return
+            }
             do {
                 try await model.startWhipPublish(config: config)
                 // Observe session state changes instead of assuming Live.
@@ -143,30 +155,30 @@ final class PublishPanelState {
     private func observeSessionState(model: EditorModel) {
         stateObservationTask?.cancel()
         stateObservationTask = Task { [weak self, weak model] in
-            guard let self, let model, let session = model.whipSession else { return }
+            guard let model, let session = model.whipSession else { return }
             for await state in await session.stateStream {
                 guard !Task.isCancelled else { break }
                 await MainActor.run {
                     switch state {
                     case .idle:
-                        self.publishState = .idle
-                        self.statusMessage = ""
+                        self?.publishState = .idle
+                        self?.statusMessage = ""
                     case .connecting:
-                        self.publishState = .connecting
-                        self.statusMessage = "Connecting..."
+                        self?.publishState = .connecting
+                        self?.statusMessage = "Connecting..."
                     case .live:
-                        self.publishState = .live
-                        self.statusMessage = "Live — streaming to \(self.endpointType.displayName)."
+                        self?.publishState = .live
+                        self?.statusMessage = "Live — streaming to \(self?.endpointType.displayName ?? "")."
                     case .reconnecting:
-                        self.publishState = .reconnecting
-                        self.statusMessage = "Reconnecting..."
+                        self?.publishState = .reconnecting
+                        self?.statusMessage = "Reconnecting..."
                     case .failed(let message):
-                        self.publishState = .failed
-                        self.statusMessage = message
+                        self?.publishState = .failed
+                        self?.statusMessage = message
                     case .ended:
-                        self.publishState = .idle
-                        self.statusMessage = "Publish ended."
-                        self.stats = nil
+                        self?.publishState = .idle
+                        self?.statusMessage = "Publish ended."
+                        self?.stats = nil
                     }
                 }
             }
@@ -176,13 +188,13 @@ final class PublishPanelState {
     private func startStatsPolling(model: EditorModel) {
         statsPollingTask?.cancel()
         statsPollingTask = Task { [weak self, weak model] in
-            guard let self, let model else { return }
+            guard let model else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, let session = model.whipSession else { break }
                 let sessionStats = await session.stats
                 await MainActor.run {
-                    self.stats = PublishStatsDisplay(
+                    self?.stats = PublishStatsDisplay(
                         bytesSent: sessionStats.bytesSent,
                         framesSent: sessionStats.framesSent,
                         bitrate: sessionStats.bitrate,
@@ -200,12 +212,14 @@ final class PublishPanelState {
         isStopping = true
         publishState = .ended
         statusMessage = "Stopping..."
-        Task {
-            defer { isStopping = false }
+        // model is captured strongly to guarantee the WHIP session is stopped
+        // even if the panel is dismissed. self is captured weakly for UI updates.
+        Task { [weak self] in
+            defer { self?.isStopping = false }
             await model.stopWhipPublish()
-            publishState = .idle
-            statusMessage = "Publish ended."
-            stats = nil
+            self?.publishState = .idle
+            self?.statusMessage = "Publish ended."
+            self?.stats = nil
         }
     }
 
@@ -216,7 +230,10 @@ final class PublishPanelState {
         isWebRTCAvailable = false
         #endif
         isProgramOutputAvailable = model.programSession != nil
-        Task { isBudgetAvailable = await model.encoderBudget.availableCount > 0 }
+        Task { [weak self, weak model] in
+            guard let self, let model else { return }
+            isBudgetAvailable = await model.encoderBudget.availableCount > 0
+        }
     }
 
     static func formattedBytes(_ bytes: Int64) -> String {

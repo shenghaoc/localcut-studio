@@ -155,8 +155,8 @@ struct ProgramPanel: View {
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button {
-                    Task { await programState.refreshSources() }
+                Button { [weak programState] in
+                    Task { await programState?.refreshSources() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.caption)

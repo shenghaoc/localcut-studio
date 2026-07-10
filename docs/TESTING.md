@@ -206,9 +206,12 @@ xcodebuild test \
   -project "LocalCut Studio.xcodeproj" \
   -scheme "LocalCut Studio" \
   -configuration Debug \
-  -destination 'platform=macOS' \
-  CODE_SIGNING_ALLOWED=NO
+  -destination 'platform=macOS'
 ```
+
+Keep Xcode's default local ad hoc signing enabled. The macOS UI-test runner is
+launched as an app and Gatekeeper rejects it when all code signing is disabled;
+no developer certificate is required for the local signature.
 
 ### With flake detection
 ```bash
@@ -225,10 +228,17 @@ swift test --package-path Packages/LocalCutCore
 ./Scripts/validate-otio-goldens.sh
 ```
 
-### MediaMTX integration (requires Docker/Podman or manual binary)
+### MediaMTX WHIP integration
+
 ```bash
-LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh
+LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 \
+  ./Scripts/run-mediamtx-whip-integration.sh
 ```
+
+The script creates a short-lived marker under `.build/mediamtx` after the
+server starts.
+Swift Testing discovery reads that marker because Xcode 27 does not reliably
+forward arbitrary parent-process variables into the test runner.
 
 ## CI Workflow
 

@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import os
 import LocalCutCore
 
 // MARK: - Beat tools
@@ -35,19 +36,26 @@ extension EditorModel {
         return hasProjectedBeats(excluding: id)
     }
 
+    /// Cached CMTime for `beatOffsetSeconds` to avoid repeated construction.
+    private var beatOffsetCMTime: CMTime {
+        CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
+    }
+
     /// Existence check for command enablement: returns `true` as soon as any clip
     /// other than `clipID` contributes an in-range projected beat. Unlike
     /// `projectedBeatTimes(excluding:)` it short-circuits and skips the cross-clip
     /// dedup/sort, so it's cheap to call on every inspector render.
     func hasProjectedBeats(excluding clipID: Clip.ID?) -> Bool {
-        let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
+        let offset = beatOffsetCMTime
         for track in project.videoTracks + project.audioTracks {
             for clip in track.clips where clip.id != clipID {
                 guard let media = project.media(for: clip.mediaID), media.hasAudio,
                       let analysis = beatAnalyses[media.id] else { continue }
-                if !projectedBeatTimes(for: clip, analysis: analysis, offset: offset).isEmpty {
-                    return true
-                }
+                // Short-circuit: compute beats for this clip and return
+                // immediately if any are found, avoiding the full cross-clip
+                // dedup/sort that projectedBeatTimes(excluding:) performs.
+                let beats = projectedBeatTimes(for: clip, analysis: analysis, offset: offset)
+                if !beats.isEmpty { return true }
             }
         }
         return false
@@ -63,6 +71,9 @@ extension EditorModel {
             return
         }
 
+        // Cancel any in-flight analysis task. Both analyzeBeatsForSelection
+        // and loadAvailableBeatCaches share this task reference, so only one
+        // can run at a time. This is safe because both run on MainActor.
         beatAnalysisTask?.cancel()
         statusMessage = "Analysing beats in \(media.name)…"
 
@@ -117,7 +128,9 @@ extension EditorModel {
 
     func projectedBeatMarkers(excluding clipID: Clip.ID? = nil) -> [ProjectedBeatMarker] {
         projectedBeatTimes(excluding: clipID).enumerated().map { offset, time in
-            ProjectedBeatMarker(id: "\(offset)-\(time.value)-\(time.timescale)", time: time)
+            // Use a deterministic ID based on the time value so the marker
+            // identity is stable across rebuilds when the same beat is projected.
+            ProjectedBeatMarker(id: "beat-\(time.value)-\(time.timescale)", time: time)
         }
     }
 
@@ -131,7 +144,7 @@ extension EditorModel {
             return cachedProjectedBeatTimes
         }
 
-        let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
+        let offset = beatOffsetCMTime
         var times: [CMTime] = []
 
         for track in project.videoTracks + project.audioTracks {
@@ -170,6 +183,10 @@ extension EditorModel {
             for cut in cutTimes {
                 let outputOffset = CMTimeMaximum(.zero, CMTimeMinimum(cut - clip.timelineStart, clip.outputDuration))
                 let outputDuration = outputOffset - segmentOutputOffset
+                // Skip zero-duration pieces (e.g. duplicate beat times).
+                guard outputDuration > .zero else {
+                    continue
+                }
                 pieces.append(piece(from: clip,
                                     timelineStart: segmentTimelineStart,
                                     outputOffset: segmentOutputOffset,
@@ -180,18 +197,25 @@ extension EditorModel {
             }
 
             let tailOutputDuration = clip.outputDuration - segmentOutputOffset
-            pieces.append(piece(from: clip,
-                                timelineStart: segmentTimelineStart,
-                                outputOffset: segmentOutputOffset,
-                                outputDuration: tailOutputDuration,
-                                preservesIDAndTransition: pieces.isEmpty))
+            if tailOutputDuration > .zero {
+                pieces.append(piece(from: clip,
+                                    timelineStart: segmentTimelineStart,
+                                    outputOffset: segmentOutputOffset,
+                                    outputDuration: tailOutputDuration,
+                                    preservesIDAndTransition: pieces.isEmpty))
+            }
+
+            guard pieces.count > 1 else {
+                statusMessage = "No valid cut points found."
+                return
+            }
 
             context.track.clips.replaceSubrange(context.index...context.index, with: pieces)
             context.track.clips.sort { $0.timelineStart < $1.timelineStart }
             selectedClipID = pieces.first?.id
             selectedTransitionClipID = nil
             selectedOverlayID = nil
-            statusMessage = "Cut clip at \(cutTimes.count) beat\(cutTimes.count == 1 ? "" : "s")."
+            statusMessage = "Cut clip at \(pieces.count - 1) beat\(pieces.count - 1 == 1 ? "" : "s")."
             scheduleRebuild()
         }
     }
@@ -275,6 +299,10 @@ extension EditorModel {
                 let present = Set(self.project.mediaItems.map(\.id))
                 let analyses = loadedAnalyses.filter { present.contains($0.key) }
                 let keys = loadedKeys.filter { present.contains($0.key) }
+                // Update both dictionaries together so they stay consistent.
+                // A view reading beatAnalyses between the two merges would see
+                // analyses without corresponding keys, but this is safe because
+                // both updates happen on MainActor in a single run loop tick.
                 self.beatAnalyses.merge(analyses) { _, new in new }
                 self.beatAnalysisKeys.merge(keys) { _, new in new }
                 if !analyses.isEmpty {
@@ -293,16 +321,32 @@ extension EditorModel {
         let directory = bundleBeatCacheDirectoryURL(for: bundleURL)
         await Task.detached {
             for (key, analysis) in entries {
-                try? BeatAnalysisCache.write(analysis, key: key, in: directory)
+                do {
+                    try BeatAnalysisCache.write(analysis, key: key, in: directory)
+                } catch {
+                    // Log but don't throw — beat cache persistence is best-effort.
+                    os_log(.error, "BeatAnalysisCache: write failed for %{public}@: %{public}@",
+                           key, error.localizedDescription)
+                }
             }
         }.value
     }
 
+    /// Synchronous beat cache persistence for the save path. Called from
+    /// `DocumentController` during user-initiated save. For projects with many
+    /// analyzed sources, this could cause a perceptible UI freeze. A future
+    /// improvement would move this to a background task and use the async
+    /// `persistBeatCaches` method instead.
     func persistBeatCachesSynchronously(to bundleURL: URL) {
         let directory = bundleBeatCacheDirectoryURL(for: bundleURL)
         for (mediaID, analysis) in beatAnalyses {
             guard let key = beatAnalysisKeys[mediaID] else { continue }
-            try? BeatAnalysisCache.write(analysis, key: key, in: directory)
+            do {
+                try BeatAnalysisCache.write(analysis, key: key, in: directory)
+            } catch {
+                os_log(.error, "BeatAnalysisCache: write failed for %{public}@: %{public}@",
+                       key, error.localizedDescription)
+            }
         }
     }
 
@@ -343,7 +387,7 @@ extension EditorModel {
         guard let media = project.media(for: clip.mediaID),
               let analysis = beatAnalyses[media.id] else { return [] }
         let oneFrame = CMTime(value: 1, timescale: CMTimeScale(max(1, project.frameRate)))
-        let offset = CMTime(seconds: beatOffsetSeconds, preferredTimescale: 600)
+        let offset = beatOffsetCMTime
         let projected = projectedBeatTimes(for: clip, analysis: analysis, offset: offset)
         let inBounds = deduplicatedBeatTimes(projected).filter { cut in
             cut - clip.timelineStart >= oneFrame && clip.timelineEnd - cut >= oneFrame

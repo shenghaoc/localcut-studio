@@ -164,6 +164,7 @@ nonisolated enum RenderQueueError: Error, LocalizedError {
 /// serial dispatch queue but the compiler doesn't model that, so the
 /// `@Sendable` closure can't capture a mutable `var`; this class wraps the
 /// state in an unfair lock instead.
+/// `@unchecked Sendable`: single `Bool` flag behind `OSAllocatedUnfairLock`.
 private nonisolated final class ResumeBox: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock<Bool>(initialState: false)
 
@@ -974,7 +975,7 @@ final class RenderQueue {
 
         if let timedChapterMetadata {
             do {
-                try appendTimedChapterMetadata(timedChapterMetadata, writer: writer)
+                try await appendTimedChapterMetadata(timedChapterMetadata, writer: writer)
             } catch {
                 logger.warning("Failed to append timed chapter metadata: \(error.localizedDescription). Falling back to sidecar-only.")
                 timedChapterMetadata.input.markAsFinished()
@@ -1023,6 +1024,9 @@ final class RenderQueue {
 
         await writer.finishWriting()
         if writer.status == .failed, let error = writer.error {
+            // cancelWriting() is a no-op after finishWriting(); remove the
+            // partial output file to avoid leaving a broken .mov on disk.
+            try? FileManager.default.removeItem(at: outputURL)
             throw error
         }
     }
@@ -1057,8 +1061,16 @@ final class RenderQueue {
     private func appendTimedChapterMetadata(
         _ metadata: (input: AVAssetWriterInput, adaptor: AVAssetWriterInputMetadataAdaptor, groups: [AVTimedMetadataGroup]),
         writer: AVAssetWriter
-    ) throws {
+    ) async throws {
         for group in metadata.groups {
+            // Wait briefly for the input to become ready if the writer's
+            // internal buffer is momentarily full. Use async sleep to avoid
+            // blocking the main thread.
+            var waited = 0
+            while !metadata.input.isReadyForMoreMediaData && waited < 10 {
+                try await Task.sleep(for: .milliseconds(10))
+                waited += 1
+            }
             guard metadata.input.isReadyForMoreMediaData else {
                 throw RenderQueueError.writerInitializationFailed("Chapter metadata input was not ready.")
             }
@@ -1268,6 +1280,8 @@ final class RenderQueue {
         for job in jobs {
             switch job.status {
             case .completed, .cancelled, .failed:
+                // Terminal states count as "done" for progress monotonicity.
+                // The progress bar should never decrease when a job finishes.
                 completed += 1
             case .running:
                 active += max(0, min(1, job.progress))
@@ -1358,11 +1372,9 @@ final class RenderQueue {
     }
 
     /// Reads the on-disk queue and reconciles state. Called once at app
-    /// launch from the editor model. The file read happens off the MainActor
-    /// so `EditorModel.init()` doesn't block the main thread on disk I/O at
-    /// launch (Claude review); decoding then runs on the MainActor because
-    /// `RenderQueueDoc.init(from:)` is implicitly MainActor-isolated under
-    /// this target's default-isolation setting.
+    /// launch from the editor model. The file read and bookmark resolution
+    /// happen off the MainActor so `EditorModel.init()` doesn't block the
+    /// main thread on disk I/O at launch.
     func load() {
         guard let url = Self.queueFileURL() else { return }
         let log = logger
@@ -1375,13 +1387,15 @@ final class RenderQueue {
                 log.error("queue load failed: \(error.localizedDescription, privacy: .public)")
                 return
             }
+            // Decode off-MainActor where possible, then reconcile bookmarks
+            // off-MainActor to avoid blocking the UI on network volumes.
             await self?.decodeAndApplyLoadedQueue(data: data)
         }
     }
 
-    /// MainActor entry that decodes the queue document (Codable conformance
-    /// on `RenderQueueDoc` is MainActor-isolated, so the decode must run
-    /// here) and applies the reconciled state.
+    /// Decodes the queue document and reconciles bookmark state. The decode
+    /// runs on the MainActor (Codable conformance is MainActor-isolated),
+    /// but bookmark resolution runs off-MainActor via the reconcile method.
     private func decodeAndApplyLoadedQueue(data: Data) {
         let doc: RenderQueueDoc
         do {
@@ -1406,6 +1420,9 @@ final class RenderQueue {
             statusMessage = "Render queue saved by a newer version — pausing persistence until update."
             return
         }
+        // Reconcile bookmark resolution off the MainActor to avoid blocking
+        // the UI when there are many queued jobs with bookmarks pointing to
+        // network drives or sleeping external volumes.
         let reconciled = Self.reconcile(loaded: doc.jobs)
         let didMutate = reconciled != doc.jobs
         jobs = reconciled

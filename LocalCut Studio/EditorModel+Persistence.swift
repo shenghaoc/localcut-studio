@@ -67,9 +67,11 @@ struct ProjectState: Equatable, Sendable {
     /// Phase 45 layout tracks.
     var layoutTracks: [LayoutTrackDoc]
     var selectedClipID: Clip.ID?
+    var selectedMediaID: MediaItem.ID?
     var selectedTransitionClipID: Clip.ID?
     var selectedMarkerID: TimelineMarker.ID?
     var selectedOverlayID: OverlayClip.ID?
+    var selectedCalloutID: CalloutClip.ID?
 
     static func == (lhs: ProjectState, rhs: ProjectState) -> Bool {
         lhs.name == rhs.name
@@ -98,9 +100,11 @@ struct ProjectState: Equatable, Sendable {
             && lhs.sceneDoc == rhs.sceneDoc
             && lhs.layoutTracks == rhs.layoutTracks
             && lhs.selectedClipID == rhs.selectedClipID
+            && lhs.selectedMediaID == rhs.selectedMediaID
             && lhs.selectedTransitionClipID == rhs.selectedTransitionClipID
             && lhs.selectedMarkerID == rhs.selectedMarkerID
             && lhs.selectedOverlayID == rhs.selectedOverlayID
+            && lhs.selectedCalloutID == rhs.selectedCalloutID
     }
 }
 
@@ -158,9 +162,11 @@ extension EditorModel {
                 LayoutTrackDoc(id: $0.id, name: $0.name, isMuted: $0.isMuted, clips: $0.clips)
             },
             selectedClipID: selectedClipID,
+            selectedMediaID: selectedMediaID,
             selectedTransitionClipID: selectedTransitionClipID,
             selectedMarkerID: selectedMarkerID,
-            selectedOverlayID: selectedOverlayID)
+            selectedOverlayID: selectedOverlayID,
+            selectedCalloutID: selectedCalloutID)
     }
 
     /// Restores a previously captured arrangement. Track identities are stable
@@ -239,9 +245,12 @@ extension EditorModel {
             return track
         }
         selectedClipID = state.selectedClipID
+        selectedMediaID = state.selectedMediaID
         selectedTransitionClipID = state.selectedTransitionClipID
         selectedMarkerID = state.selectedMarkerID
         selectedOverlayID = state.selectedOverlayID
+        selectedCalloutID = state.selectedCalloutID
+        rebuildClipIndex()
         restoreLUTDisplayNames(state.lutDisplayNames)
         reconcileAccessedURLs()
     }

@@ -9,6 +9,8 @@ import LocalCutCore
 
 /// Decodes frames from animated image files (WebP, GIF, APNG) using ImageIO.
 /// Frames are decoded on demand and cached in a sliding window to bound memory.
+/// `@unchecked Sendable`: frame cache is protected by `lock`; immutable
+/// metadata (`frameCount`, `frameDurations`, `frameStarts`) is set in `init`.
 nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize: CGSize
     private let url: URL

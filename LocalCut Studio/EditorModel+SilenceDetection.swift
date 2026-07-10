@@ -13,6 +13,12 @@ extension EditorModel {
         !silenceProposals.isEmpty
     }
 
+    /// Whether silence detection has an audio-bearing timeline clip to inspect.
+    @MainActor
+    var canRunSilenceDetection: Bool {
+        silenceDetectionTarget() != nil
+    }
+
     /// Runs silence detection on the selected audio clip's media, falling back
     /// to the first available audio clip when no audio clip is selected.
     @MainActor
@@ -221,16 +227,17 @@ extension EditorModel {
     }
 
     private func silenceDetectionTarget() -> (clip: Clip, media: MediaItem)? {
+        // Prefer the selected clip if it has audio (works for both audio-track
+        // clips and video clips whose media carries an audio stream).
         if let selectedClipID,
-           let track = track(for: selectedClipID),
-           track.kind == .audio,
-           let clip = track.clips.first(where: { $0.id == selectedClipID }),
+           let clip = self.clip(for: selectedClipID),
            let media = project.media(for: clip.mediaID),
            media.hasAudio {
             return (clip, media)
         }
 
-        for track in project.audioTracks {
+        // Fall back to the first clip on any track whose media has audio.
+        for track in project.audioTracks + project.videoTracks {
             for clip in track.clips {
                 guard let media = project.media(for: clip.mediaID),
                       media.hasAudio else { continue }

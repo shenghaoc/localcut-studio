@@ -37,13 +37,17 @@ extension EditorModel {
 
     /// File ▸ New — offers to save first, then resets to an empty project.
     func requestNew() {
-        Task { _ = await performNewProjectCommand() }
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await performNewProjectCommand()
+        }
     }
 
     /// File ▸ Open — offers to save first, then presents an open panel that
     /// accepts both `.lcstudio` (legacy single-file) and `.lcbundle` (package).
     func requestOpen() {
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             guard !blockDocumentCommandWhileRecording() else { return }
             guard await confirmSaveIfNeeded() else { return }
             let panel = NSOpenPanel()
@@ -67,7 +71,8 @@ extension EditorModel {
     }
 
     func requestOpenRecent(_ url: URL) {
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             guard !blockDocumentCommandWhileRecording() else { return }
             guard await confirmSaveIfNeeded() else { return }
             await open(url: url)
@@ -79,14 +84,20 @@ extension EditorModel {
     /// menu home and a standard ⌘I shortcut. Uses the Media bin's default of
     /// copying imports into the bundle.
     func requestImport() {
-        Task { _ = await performImportMediaCommand() }
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await performImportMediaCommand()
+        }
     }
 
     /// File ▸ Export… — presents the same save panel the toolbar Export button
     /// uses and queues a render with the default preset, so the app's primary
     /// output action has a menu home and a ⇧⌘E shortcut.
     func requestExport() {
-        Task { _ = await performExportProjectCommand() }
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await performExportProjectCommand()
+        }
     }
 
     @discardableResult
@@ -404,7 +415,8 @@ extension EditorModel {
 
     /// File ▸ Save — writes to the current URL, or prompts for one if unsaved.
     func requestSave() {
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             guard !blockDocumentCommandDuringCloseSave() else { return }
             if documentURL != nil {
                 await save()
@@ -416,7 +428,8 @@ extension EditorModel {
 
     /// File ▸ Save As — always prompts for a new location.
     func requestSaveAs() {
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             guard !blockDocumentCommandDuringCloseSave() else { return }
             if let url = runSavePanel() { await saveAs(url: url) }
         }
@@ -440,7 +453,8 @@ extension EditorModel {
     /// existing `.lcstudio`, leaving the original untouched (R4.2 / R4.3).
     func requestConvertToBundle() {
         guard canConvertToBundle else { return }
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             guard !blockDocumentCommandDuringCloseSave() else { return }
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.lcStudioProjectBundle]

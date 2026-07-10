@@ -22,7 +22,7 @@ Offline beat analysis of any audio source on a background actor, with results ca
    ```
    This handles trims (sourceStart ≠ 0), re-use (the same audio file placed twice on the timeline emits two separate sets of timeline markers), and Phase 35 retimes (the mapping is the identity when no ramp, the speed-curve evaluator when there is one). Beat markers don't render in export and re-project automatically when the underlying clip moves or is retimed.
 5. **Snap-to-beat.** Extend the existing snapping system with a beat-targets source; the snap radius and snap toggle reuse the UX from clip-edge snapping (in `feature-timeline-trim-and-drag`).
-6. **Auto-cut to beats.** A command that operates on the current selection — either `split` (cut clips at every in-range beat) or `align` (move clip start to the nearest beat within a configurable window). Fully undoable.
+6. **Auto-cut to beats.** A command that operates on the current selection — either `split` (cut clips at every in-range beat) or `align` (move clip start to the nearest beat within a configurable window). Zero-duration candidates do not advance segment state, and a result with no real split is rejected before timeline mutation or undo registration. Fully undoable.
 7. **Global offset.** A bus offset slider (±200 ms) applied at marker draw time and at snap time, without re-running analysis.
 
 ## Engine boundary (honours `feature-localcutcore-package` / PR #37)

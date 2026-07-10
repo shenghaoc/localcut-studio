@@ -1186,9 +1186,10 @@ private struct EditorKeyHandler: NSViewRepresentable {
         var onDelete: (() -> Bool)?
         var onTogglePlay: (() -> Void)?
         weak var view: NSView?
-        // `nonisolated(unsafe)` so `deinit` can clear it without hopping actors;
-        // mutation only happens via `install`, called on the main actor, so the
-        // unsafety here is a compiler-visible footnote rather than a real race.
+        // Owned by this coordinator. Installed on the main actor, then read
+        // from nonisolated `deinit` only to dispatch AppKit monitor removal back
+        // to the main thread; Objective-C monitor lifetimes cannot express that
+        // through Swift actor isolation.
         nonisolated(unsafe) private var monitor: Any?
 
         func install() {

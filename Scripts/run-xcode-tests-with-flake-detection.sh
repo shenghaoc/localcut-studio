@@ -67,8 +67,8 @@ echo ""
 
 mkdir -p "$LOG_DIR"
 
-# Clean up previous results
-rm -rf "$RESULT_BUNDLE" "$DERIVED_DATA"
+# Clean up previous result bundle but preserve DerivedData for incremental builds.
+rm -rf "$RESULT_BUNDLE"
 
 # First run: full test suite
 echo "--- Running full test suite (attempt 1) ---"
@@ -82,7 +82,6 @@ set +e
     -resultBundlePath "$RESULT_BUNDLE" \
     -test-timeouts-enabled "$TEST_TIMEOUTS_ENABLED" \
     -default-test-execution-time-allowance "$DEFAULT_TEST_EXECUTION_TIME_ALLOWANCE" \
-    CODE_SIGNING_ALLOWED=NO \
     2>&1 | tee "$XCODEBUILD_LOG"
 FIRST_RUN_EXIT=$?
 set -e
@@ -223,7 +222,6 @@ for test_id in "${FAILED_TEST_IDS[@]}"; do
             -only-testing:"$test_id" \
             -test-timeouts-enabled "$TEST_TIMEOUTS_ENABLED" \
             -default-test-execution-time-allowance "$DEFAULT_TEST_EXECUTION_TIME_ALLOWANCE" \
-            CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee "${LOG_DIR}/retry-${RETRIED_TESTS}-${attempt}.log"
         RETRY_EXIT=$?
         set -e
@@ -272,7 +270,6 @@ if [ ${#DETERMINISTIC_FAILURES[@]} -eq 0 ] && [ "$FLAKY_TESTS" -gt 0 ] && [ "$FL
             -resultBundlePath "$CONFIRMATION_RESULT" \
             -test-timeouts-enabled "$TEST_TIMEOUTS_ENABLED" \
             -default-test-execution-time-allowance "$DEFAULT_TEST_EXECUTION_TIME_ALLOWANCE" \
-            CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee "${LOG_DIR}/suite-confirmation-${attempt}.log"
         CONFIRMATION_EXIT=$?
         set -e

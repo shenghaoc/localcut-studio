@@ -30,6 +30,9 @@
 - [x] **T2.11** Support APNG/WebP delay metadata and `.lottie` package loading without main-actor file/decompression work.
 - [x] **T2.12** Expose overlay timing/position controls in the inspector and filter imports by selected source type.
 - [x] **T2.13** Preserve bundled overlay sources when saving bundle-backed projects as single-file `.lcstudio` documents.
+- [x] **T2.14** Persist and evaluate overlay position, scale, rotation, and
+  opacity keyframes in preview/export, with inspector add/update/remove/clear
+  controls and legacy static-value decoding.
 
 ## Verification
 
@@ -39,3 +42,5 @@
 - [x] **T3.4** Bundle/resource round-trip: preset resources, LUT sidecars, overlay sources, and Lottie files persist under `assets/` where applicable.
 - [x] **T3.5** Regression tests: source-local look keyframes, output-cadence grain, negative vignette, overlay transform, overlay-only/gap duration, path validation, overlay selection reset, import filtering, LUT-only exportability, decoded clamping, and single-file bundled-overlay preservation.
 - [x] **T3.6** `xcodebuild` (Debug, macOS) green; no test count regression.
+- [x] **T3.7** Regression tests cover overlay-keyframe interpolation, document
+  round-trip, undo, removal, and preview/export render-item evaluation.

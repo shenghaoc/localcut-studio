@@ -4,6 +4,8 @@ import CoreMedia
 import os
 import LocalCutCore
 
+/// `@unchecked Sendable`: `FileHandle` mutations are serialised on a private
+/// `DispatchQueue`.
 nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
     let url: URL
     private let queue = DispatchQueue(label: "com.localcutstudio.capture.manifest")
@@ -35,6 +37,9 @@ nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
     }
 }
 
+/// `@unchecked Sendable`: writer state (`didStartWriting`, `isFinished`,
+/// timing, sample counts) is protected by `lock`; `AVAssetWriter` and
+/// `AVAssetWriterInput` are non-`Sendable` framework objects.
 nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     let source: CaptureSourceDescriptor
     private let outputURL: URL
@@ -162,7 +167,6 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     func finish() async throws -> CaptureSourceEndedRecord {
         try await withCheckedThrowingContinuation { continuation in
             enum FinishAction {
-                case `throw`(Error)
                 case cancelAndThrow(Error)
                 case `return`(CaptureSourceEndedRecord)
                 case finishWriting(CaptureSourceEndedRecord)
@@ -183,8 +187,6 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
             }
 
             switch action {
-            case .throw(let error):
-                continuation.resume(throwing: error)
             case .cancelAndThrow(let error):
                 writer.cancelWriting()
                 continuation.resume(throwing: error)

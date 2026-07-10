@@ -1,6 +1,13 @@
 import SwiftUI
 import LocalCutCore
 
+/// Default values for beat tools parameters, used by both the model and the
+/// inspector reset actions to prevent drift.
+enum BeatToolsDefaults {
+    static let offsetSeconds: Double = 0
+    static let alignWindowSeconds: Double = 0.15
+}
+
 struct BeatToolsInspectorView: View {
     @Bindable var model: EditorModel
 
@@ -12,6 +19,7 @@ struct BeatToolsInspectorView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(source.name)
                 }
                 if let analysis = model.beatAnalyses[source.id] {
                     LabeledContent("Tempo", value: "\(Int(analysis.tempoBPM.rounded())) BPM")
@@ -45,19 +53,18 @@ struct BeatToolsInspectorView: View {
                 value: $model.beatOffsetSeconds,
                 range: -0.2...0.2,
                 step: 0.005,
-                resetAction: { model.beatOffsetSeconds = 0 })
+                resetAction: { model.beatOffsetSeconds = BeatToolsDefaults.offsetSeconds })
             .disabled(model.beatAnalyses.isEmpty)
 
             LabeledSliderRow(
                 label: "Align Window",
+                spokenLabel: "Beat Alignment Window",
                 display: "\(Int(model.beatAlignWindowSeconds * 1000)) ms",
                 spokenValue: "\(Int(model.beatAlignWindowSeconds * 1000)) milliseconds",
                 value: $model.beatAlignWindowSeconds,
                 range: 0.02...0.5,
                 step: 0.01,
-                // Restore the model's default window (EditorModel.swift), matching
-                // the right-click reset every other adjustable row offers.
-                resetAction: { model.beatAlignWindowSeconds = 0.15 })
+                resetAction: { model.beatAlignWindowSeconds = BeatToolsDefaults.alignWindowSeconds })
 
             HStack {
                 Button {

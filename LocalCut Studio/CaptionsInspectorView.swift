@@ -49,9 +49,9 @@ struct CaptionsInspectorView: View {
             isPresented: $showSRTImporter,
             allowedContentTypes: captionContentTypes,
             allowsMultipleSelection: false
-        ) { result in
+        ) { [weak model] result in
             if case .success(let urls) = result, let url = urls.first {
-                Task { await model.importCaptionTrack(from: url) }
+                Task { [weak model] in await model?.importCaptionTrack(from: url) }
             }
         }
         .fileImporter(
@@ -163,12 +163,15 @@ struct CaptionsInspectorView: View {
             HStack {
                 Text(localTime.map { "At \(TimeFormatting.timecode($0.seconds))" } ?? "Move playhead over this line")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(localTime == nil ? .orange : .secondary)
                 Spacer()
                 Text("\(model.captionStyleKeyframeCount(line.id, in: track.id)) keyframe(s)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .help(localTime == nil
+                  ? "Scrub the playhead to a position within this caption line to edit style keyframes at that moment."
+                  : "Editing keyframes at the displayed timecode.")
 
             ColorPicker("Fill", selection: captionStyleFillBinding(for: line, in: track),
                         supportsOpacity: true)

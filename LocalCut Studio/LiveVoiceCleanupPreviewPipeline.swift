@@ -4,6 +4,7 @@ import CoreMedia
 import os
 import LocalCutCore
 
+/// `@unchecked Sendable`: `VoiceCleanupSettings` behind `OSAllocatedUnfairLock`.
 nonisolated final class LiveVoiceCleanupSettingsStore: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock<VoiceCleanupSettings>(
         initialState: VoiceCleanupSettings())
@@ -20,6 +21,7 @@ nonisolated final class LiveVoiceCleanupSettingsStore: @unchecked Sendable {
     }
 }
 
+/// `@unchecked Sendable`: frame count behind `OSAllocatedUnfairLock`.
 nonisolated final class LiveQueuedFrameCounter: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock<Int>(initialState: 0)
 
@@ -40,6 +42,7 @@ nonisolated final class LiveQueuedFrameCounter: @unchecked Sendable {
     }
 }
 
+/// `@unchecked Sendable`: `LiveGainReduction` behind `OSAllocatedUnfairLock`.
 nonisolated final class LiveGainReductionStore: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock<LiveGainReduction>(
         initialState: LiveGainReduction())
@@ -60,6 +63,8 @@ struct LiveGainReduction: Sendable, Equatable {
     var limiterReductionDB: Float = 0
 }
 
+/// `@unchecked Sendable`: immutable wrapper for non-`Sendable`
+/// `AVAudioPCMBuffer`.
 nonisolated struct LiveAudioPCMBufferBox: @unchecked Sendable {
     let buffer: AVAudioPCMBuffer
 }

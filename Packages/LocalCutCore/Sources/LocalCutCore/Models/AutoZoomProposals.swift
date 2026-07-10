@@ -169,8 +169,6 @@ public enum AutoZoomProposalGenerator: Sendable {
         // Generate keyframes for the zoom animation.
         let zoomInTime = parameters.zoomInDuration
         let holdTime = parameters.holdDuration
-        let zoomOutTime = parameters.zoomOutDuration
-
         let endScale = parameters.defaultEndScale
         // Translation must point toward the centre (opposite sign of the target
         // offset) because the compositor applies the translation *before* the

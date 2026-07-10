@@ -55,6 +55,13 @@ struct MemoryPressureHandlerTests {
             workingColourSpace: .sRGB)
         RenderCache.shared.setImage(memoryPressureTestImage(), for: cacheKey)
         _ = EffectCompositor.context(for: .sRGB)
+        let paddedBackgroundImage = try #require(CIContext().createCGImage(
+            memoryPressureTestImage(),
+            from: CGRect(x: 0, y: 0, width: 16, height: 16)))
+        PaddedBackgroundRenderer.cacheImage(
+            paddedBackgroundImage,
+            for: Data("padded-background".utf8),
+            maxDimension: 16)
 
         let source = PurgeableOverlaySource(cachedFrames: 3)
         let transientSource = PurgeableOverlaySource(cachedFrames: 2)
@@ -69,12 +76,14 @@ struct MemoryPressureHandlerTests {
             EffectCompositor.releaseOverlaySources(for: transientRegistryID)
             RenderCache.shared.purge()
             EffectCompositor.purgeContextCache()
+            PaddedBackgroundRenderer.purgeCache()
         }
 
         #expect(RenderCache.shared.count > 0)
         #expect(EffectCompositor.contextCacheCount > 0)
         #expect(source.cachedFrameCount == 3)
         #expect(transientSource.cachedFrameCount == 2)
+        #expect(PaddedBackgroundRenderer.cacheEntryCount == 1)
 
         MemoryPressureHandler.shared.purgeCachesForMemoryPressure()
 
@@ -83,6 +92,28 @@ struct MemoryPressureHandlerTests {
         #expect(EffectCompositor.contextCacheCount == 0)
         #expect(source.cachedFrameCount == 0)
         #expect(transientSource.cachedFrameCount == 0)
+        #expect(PaddedBackgroundRenderer.cacheEntryCount == 0)
+    }
+
+    @Test("padded-background cache remains bounded and retains the newest entry")
+    func paddedBackgroundCacheRemainsBounded() throws {
+        PaddedBackgroundRenderer.purgeCache()
+        defer { PaddedBackgroundRenderer.purgeCache() }
+
+        let image = try #require(CIContext().createCGImage(
+            memoryPressureTestImage(),
+            from: CGRect(x: 0, y: 0, width: 16, height: 16)))
+        for index in 0..<9 {
+            PaddedBackgroundRenderer.cacheImage(
+                image,
+                for: Data([UInt8(index)]),
+                maxDimension: 16)
+        }
+
+        #expect(PaddedBackgroundRenderer.cacheEntryCount == 1)
+        #expect(PaddedBackgroundRenderer.cachedImage(
+            for: Data([8]),
+            maxDimension: 16) != nil)
     }
 
     @Test("preview registry cleanup preserves active, in-flight, and transient registries")

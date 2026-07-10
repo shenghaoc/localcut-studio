@@ -177,6 +177,13 @@ extension EditorModel {
     /// re-imported `.lclook` can relink the LUT. Returns the LUT bookmark to copy
     /// alongside the preset — resolved off the main actor at write time.
     private func lookExportPreset(for clip: Clip, to url: URL) -> (preset: LookPresetV1, lutBookmark: Data?) {
+        // Warn if non-look effects (colour grade, skin smooth) are present but
+        // will not be included in the preset.
+        let nonLookEffects = clip.effects.filter { !$0.isLookEffect && !$0.isLUT }
+        if !nonLookEffects.isEmpty {
+            let names = nonLookEffects.map { $0.displayName }.joined(separator: ", ")
+            statusMessage = "Note: \(names) effect(s) are not included in look presets."
+        }
         var preset = LookPresetV1(name: defaultLookPresetName(for: clip), effects: clip.effects)
         guard let lut = selectedClipLUT(clip) else { return (preset, nil) }
         let presetBase = url.deletingPathExtension().lastPathComponent
@@ -203,7 +210,8 @@ extension EditorModel {
             return
         }
         let withLUT = lutBookmark != nil && preset.lut != nil
-        Task {
+        let fileName = url.lastPathComponent
+        Task { [weak self] in
             do {
                 // Encode is cheap, but the disk writes can stall on a slow network
                 // share or iCloud Drive, so push them off the main actor. The .lclook
@@ -241,13 +249,17 @@ extension EditorModel {
                         return false
                     }
                 }.value
-                statusMessage = !withLUT
-                    ? "Exported look preset \(url.lastPathComponent)."
-                    : (copiedLUT
-                        ? "Exported look preset \(url.lastPathComponent) with LUT."
-                        : "Exported look preset \(url.lastPathComponent); LUT not copied.")
+                await MainActor.run { [weak self] in
+                    self?.statusMessage = !withLUT
+                        ? "Exported look preset \(fileName)."
+                        : (copiedLUT
+                            ? "Exported look preset \(fileName) with LUT."
+                            : "Exported look preset \(fileName); LUT not copied.")
+                }
             } catch {
-                statusMessage = "Could not export \(url.lastPathComponent)."
+                await MainActor.run { [weak self] in
+                    self?.statusMessage = "Could not export \(fileName)."
+                }
             }
         }
     }
@@ -298,7 +310,11 @@ extension EditorModel {
         let clipSeed = grainSeed(for: id)
         return effects.map { effect in
             guard case .grain(var grain) = effect else { return effect }
-            grain.seed ^= clipSeed
+            // Use addition instead of XOR to avoid the self-inverse property.
+            // XOR is its own inverse: applying the same preset twice toggles
+            // the seed back to the original. Addition ensures each application
+            // produces a distinct grain pattern.
+            grain.seed &+= clipSeed
             return .grain(grain)
         }
     }
@@ -331,13 +347,15 @@ extension EditorModel {
         guard isSafeLookPresetLUTPath(reference.relativePath) else { return nil }
         let directoryURL = sourceURL.deletingLastPathComponent()
         let lutURL = directoryURL.appendingPathComponent(reference.relativePath)
-        let didAccessPreset = sourceURL.startAccessingSecurityScopedResource()
+        // The sourceURL is the security-scoped bookmark from the file importer.
+        // Accessing it grants sandbox access to the file and its parent directory.
+        // directoryURL is derived (not itself security-scoped) but accessing the
+        // source covers its children.
+        let didAccessSource = sourceURL.startAccessingSecurityScopedResource()
         let didAccessDirectory = directoryURL.startAccessingSecurityScopedResource()
-        let didAccessLUT = lutURL.startAccessingSecurityScopedResource()
         defer {
-            if didAccessLUT { lutURL.stopAccessingSecurityScopedResource() }
             if didAccessDirectory { directoryURL.stopAccessingSecurityScopedResource() }
-            if didAccessPreset { sourceURL.stopAccessingSecurityScopedResource() }
+            if didAccessSource { sourceURL.stopAccessingSecurityScopedResource() }
         }
         guard FileManager.default.isReadableFile(atPath: lutURL.path),
               let bookmark = try? lutURL.bookmarkData(options: .withSecurityScope,
@@ -408,7 +426,9 @@ extension EditorModel {
             return
         }
         let existingID = lookStrengthKeyframeAtPlayhead(kind)?.id
-        let value = selectedClipLookStrength(kind).defaultValue
+        // Capture the interpolated value at the playhead, not the default.
+        // This prevents a visible jump when adding a keyframe mid-animation.
+        let value = lookStrengthAtPlayhead(kind)
         performUndoable(existingID == nil ? "Add \(kind.displayName) Keyframe"
                                           : "Update \(kind.displayName) Keyframe") {
             mutateLookStrength(kind, clipID: id) { track in

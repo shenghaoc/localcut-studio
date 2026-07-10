@@ -9,9 +9,14 @@ import LocalCutCore
 /// the clip in the effect pipeline.
 nonisolated enum PaddedBackgroundRenderer {
 
+    /// Maximum number of cached background images. At 4K (~33 MB each),
+    /// 8 entries ≈ 264 MB — reasonable for a background cache.
+    private static let maxCacheEntries = 8
+
     /// Cache for resolved background images, keyed by bookmark data.
     /// Avoids re-resolving security-scoped bookmarks and re-downsampling on
-    /// every video-composition request.
+    /// every video-composition request. When the cache exceeds
+    /// `maxCacheEntries`, all entries are cleared to reclaim memory.
     private static let imageCache = OSAllocatedUnfairLock<
         [Data: (image: CGImage, width: Int, height: Int)]
     >(uncheckedState: [:])
@@ -19,6 +24,31 @@ nonisolated enum PaddedBackgroundRenderer {
     /// Clear the cache (e.g. when the project is closed or the preset changes).
     static func purgeCache() {
         imageCache.withLock { $0.removeAll() }
+    }
+
+    static var cacheEntryCount: Int {
+        imageCache.withLock { $0.count }
+    }
+
+    static func cachedImage(for bookmark: Data, maxDimension: Int) -> CGImage? {
+        imageCache.withLock { cache in
+            guard let cached = cache[bookmark],
+                  cached.width == maxDimension,
+                  cached.height == maxDimension else {
+                return nil
+            }
+            return cached.image
+        }
+    }
+
+    static func cacheImage(_ image: CGImage, for bookmark: Data, maxDimension: Int) {
+        imageCache.withLock { cache in
+            cache[bookmark] = (image, maxDimension, maxDimension)
+            if cache.count > maxCacheEntries {
+                cache.removeAll()
+                cache[bookmark] = (image, maxDimension, maxDimension)
+            }
+        }
     }
 
     /// Render the padded background at the given canvas size.
@@ -128,15 +158,14 @@ nonisolated enum PaddedBackgroundRenderer {
         let maxDimension = Int(max(renderSize.width, renderSize.height))
 
         // Check cache first.
-        let cached = imageCache.withLock { $0[bookmark] }
         let cgImage: CGImage?
-        if let cached, cached.width == maxDimension, cached.height == maxDimension {
-            cgImage = cached.image
+        if let cached = cachedImage(for: bookmark, maxDimension: maxDimension) {
+            cgImage = cached
         } else {
             // Resolve and downsample.
             cgImage = Self.loadAndDownsample(bookmark: bookmark, maxDimension: maxDimension)
             if let cgImage {
-                imageCache.withLock { $0[bookmark] = (cgImage, maxDimension, maxDimension) }
+                cacheImage(cgImage, for: bookmark, maxDimension: maxDimension)
             }
         }
 

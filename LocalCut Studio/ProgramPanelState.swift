@@ -34,7 +34,8 @@ final class ProgramPanelState {
         if !capabilitySufficient {
             statusMessage = "Hardware insufficient: \(verdict.reason)"
         }
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             budgetMax = await budget.maxConcurrent
             updateBudgetReadout()
             await publishEncoderBudget(budget)
@@ -81,8 +82,8 @@ final class ProgramPanelState {
 
     func switchScene(to sceneId: UUID, model: EditorModel) {
         currentSceneId = sceneId
-        Task {
-            await model.programSession?.switchScene(to: sceneId)
+        Task { [weak model] in
+            await model?.programSession?.switchScene(to: sceneId)
         }
     }
 
@@ -110,8 +111,18 @@ final class ProgramPanelState {
         isStarting = true
         currentSceneId = first.id
         statusMessage = "Starting Program Mode..."
-        Task {
-            defer { isStarting = false }
+        Task { [weak self, weak model] in
+            defer { self?.isStarting = false }
+            guard let self else {
+                // Panel was dismissed before session started — clean up the
+                // session reference so future panels don't see a stale session.
+                model?.programSession = nil
+                return
+            }
+            guard let model else {
+                self.ownsCurrentSession = false
+                return
+            }
             do {
                 try await programSession.start(
                     captureSources: captureSources,
@@ -119,7 +130,10 @@ final class ProgramPanelState {
                     renderSize: renderSize,
                     onCaptureFailure: { [weak self, weak model] result, message in
                         guard let self, let model else { return }
-                        Task { @MainActor in
+                        // Strong captures from guard-let: critical cleanup
+                        // (stopWhipPublish, landing) must complete even if the
+                        // panel is dismissed during the failure path.
+                        Task { @MainActor [self, model] in
                             await model.stopWhipPublish()
                             self.isRunning = false
                             self.isStarting = false
@@ -137,7 +151,7 @@ final class ProgramPanelState {
                             } else {
                                 self.statusMessage = message
                             }
-                            Task { await self.publishEncoderBudget(model.encoderBudget) }
+                            await self.publishEncoderBudget(model.encoderBudget)
                         }
                     })
                 await publishEncoderBudget(model.encoderBudget)
@@ -160,25 +174,28 @@ final class ProgramPanelState {
         ownsCurrentSession = false
         isRunning = false
         statusMessage = "Stopping Program Mode..."
-        Task {
+        // model and session are captured strongly to guarantee the critical
+        // stop/landing path completes even if the panel is dismissed.
+        // self is captured weakly for UI state updates only.
+        Task { [weak self] in
             defer {
-                isStopping = false
+                self?.isStopping = false
                 model.programSession = nil
-                currentSceneId = nil
+                self?.currentSceneId = nil
             }
             do {
                 await model.stopWhipPublish()
                 let result = try await session.stop()
-                await publishEncoderBudget(model.encoderBudget)
+                await self?.publishEncoderBudget(model.encoderBudget)
                 ProgramLanding.land(result: result, model: model)
                 if result.writerWarnings.isEmpty {
-                    statusMessage = "Program session landed."
+                    self?.statusMessage = "Program session landed."
                 } else {
-                    statusMessage = "Landed with warnings: \(result.writerWarnings.joined(separator: "; "))"
+                    self?.statusMessage = "Landed with warnings: \(result.writerWarnings.joined(separator: "; "))"
                 }
             } catch {
-                await publishEncoderBudget(model.encoderBudget)
-                statusMessage = error.localizedDescription
+                await self?.publishEncoderBudget(model.encoderBudget)
+                self?.statusMessage = error.localizedDescription
             }
         }
     }
@@ -189,17 +206,21 @@ final class ProgramPanelState {
         guard isRunning, ownsCurrentSession, let session = model.programSession else { return }
         isRunning = false
         ownsCurrentSession = false
-        Task {
+        // model and session are captured strongly to guarantee teardown
+        // completes even if the panel is dismissed mid-operation.
+        // self is captured weakly for UI state updates only.
+        Task { [weak self] in
             do {
                 await model.stopWhipPublish()
                 let result = try await session.stop()
                 ProgramLanding.land(result: result, model: model)
             } catch {
                 NSLog("[ProgramPanelState] teardown stop failed: \(error)")
+                self?.statusMessage = "Teardown failed: \(error.localizedDescription)"
             }
-            await publishEncoderBudget(budget)
+            await self?.publishEncoderBudget(budget)
             model.programSession = nil
-            currentSceneId = nil
+            self?.currentSceneId = nil
         }
     }
 

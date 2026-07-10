@@ -375,6 +375,10 @@ public actor EncodedChunkRing {
             guard case .resident = entries[index].storage else { continue }
             let chunk = entries[index].chunk
             let recordBytes = writeSpillRecord(for: chunk)
+            // If the spill write failed (recordBytes == 0), keep the entry as
+            // .resident so crash recovery can still find it. Marking it as
+            // .spilled with no file would silently lose the chunk.
+            guard recordBytes > 0 else { continue }
             entries[index].storage = .spilled(
                 spillURL(for: chunk),
                 bytes: recordBytes)

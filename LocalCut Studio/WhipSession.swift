@@ -67,8 +67,7 @@ actor WhipSession {
     #endif
 
     private var stateContinuation: AsyncStream<PublishState>.Continuation?
-    /// Protected by lock to avoid data race on nonisolated access.
-    private let cachedStateStream = OSAllocatedUnfairLock<AsyncStream<PublishState>?>(initialState: nil)
+    private var _cachedStateStream: AsyncStream<PublishState>?
     private var statsTask: Task<Void, Never>?
 
     init(client: some WhipClient, budget: EncoderBudget, config: PublishConfig = PublishConfig(), reconnectController: ReconnectController = ReconnectController()) {
@@ -79,14 +78,12 @@ actor WhipSession {
     }
 
     var stateStream: AsyncStream<PublishState> {
-        cachedStateStream.withLockUnchecked { existing in
-            if let existing { return existing }
-            let (stream, continuation) = AsyncStream<PublishState>.makeStream(bufferingPolicy: .bufferingNewest(1))
-            stateContinuation = continuation
-            continuation.yield(state)
-            existing = stream
-            return stream
-        }
+        if let existing = _cachedStateStream { return existing }
+        let (stream, continuation) = AsyncStream<PublishState>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        stateContinuation = continuation
+        continuation.yield(state)
+        _cachedStateStream = stream
+        return stream
     }
 
     func start(endpointURL: URL, authToken: String? = nil, config: PublishConfig? = nil, videoTap: VideoPublishTap? = nil, audioBridge: AudioPublishBridge? = nil) async throws {

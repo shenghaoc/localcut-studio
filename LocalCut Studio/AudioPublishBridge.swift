@@ -169,6 +169,7 @@ actor AudioPublishBridge {
     }
 }
 
+/// `@unchecked Sendable`: single `Bool` flag behind `OSAllocatedUnfairLock`.
 private nonisolated final class AudioCaptureStopToken: @unchecked Sendable {
     private let stopped = OSAllocatedUnfairLock<Bool>(initialState: false)
 
@@ -189,12 +190,18 @@ private nonisolated final class AudioCaptureStopToken: @unchecked Sendable {
 /// Recording samples are delivered via `deliverSamples(_:)` from the
 /// capture thread, which calls the delegate's `deliverRecordedData`
 /// block to push PCM into WebRTC's native ADM.
+/// `@unchecked Sendable`: `RTCAudioDevice` requires `Sendable`; mutable state
+/// (`delegate`, playout/recording flags, `sampleTime`) is protected by `stateLock`.
 nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecked Sendable {
     private let sampleRate: Double
     private let channels: Int
     private let frameDurationSeconds: Double
 
     private let stateLock = OSAllocatedUnfairLock(initialState: ())
+    /// Strong reference — WebRTC's ADM retains the delegate for the session
+    /// lifetime. terminateDevice() clears it. Using weak here would let the
+    /// delegate disappear if the native ADM doesn't retain it, causing
+    /// isInitialized to flip false and deliverSamples to silently drop audio.
     private var delegate: RTCAudioDeviceDelegate?
     private var isRecordingActive = false
     private var isPlayoutActive = false
@@ -223,7 +230,7 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     var outputNumberOfChannels: Int { channels }
     var outputLatency: TimeInterval { 0 }
 
-    var isInitialized: Bool { stateLock.withLock { delegate != nil } }
+    var isInitialized: Bool { stateLock.withLockUnchecked { delegate != nil } }
     var isPlayoutInitialized: Bool { true }
     var isPlaying: Bool { stateLock.withLock { isPlayoutActive } }
     var isRecordingInitialized: Bool { true }
@@ -232,12 +239,12 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     // MARK: - Lifecycle
 
     func initialize(with delegate: RTCAudioDeviceDelegate) -> Bool {
-        stateLock.withLock { self.delegate = delegate }
+        stateLock.withLockUnchecked { self.delegate = delegate }
         return true
     }
 
     func terminateDevice() -> Bool {
-        stateLock.withLock { delegate = nil }
+        stateLock.withLockUnchecked { delegate = nil }
         return true
     }
 

@@ -13,6 +13,9 @@ import LocalCutCore
 ///
 /// Scene switches update only the current scene state; no pipeline rebuild,
 /// no texture reallocation, no encoder restart.
+/// `@unchecked Sendable`: per-source buffers, scene state, and transition
+/// timing are protected by `lock`; `CIContext` is a non-`Sendable` framework
+/// object.
 nonisolated final class ProgramCompositor: @unchecked Sendable {
 
     /// The render canvas size (matches the project's render size).
@@ -31,8 +34,13 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
     private var sourceBuffers: [UUID: CVPixelBuffer] = [:]
 
     /// The current scene definition being composited.
-    private(set) var currentScene: SceneDefinition?
+    private var currentScene: SceneDefinition?
     private var scenes: [SceneDefinition] = []
+
+    /// Thread-safe read-only access to the current scene.
+    nonisolated var activeScene: SceneDefinition? {
+        lock.withLock { currentScene }
+    }
 
     /// Transition state: when non-nil, we're lerping opacity over 200ms.
     private var transitionStartTime: Date?
@@ -66,7 +74,9 @@ nonisolated final class ProgramCompositor: @unchecked Sendable {
 
     /// Removes a source's buffer (on source disconnect).
     func removeSource(_ sourceID: UUID) {
-        lock.withLockUnchecked { _ in sourceBuffers.removeValue(forKey: sourceID) }
+        lock.withLockUnchecked { _ in
+            _ = sourceBuffers.removeValue(forKey: sourceID)
+        }
     }
 
     /// Sets the current scene. Called when the user switches scenes.

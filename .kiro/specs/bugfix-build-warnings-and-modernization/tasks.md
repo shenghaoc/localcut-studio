@@ -76,6 +76,28 @@
   `??`/`.contains` into a plain `Bool` local before `#expect` so the macro can't decompose
   those operators.
 
+## PR #93 follow-up Swift 6 sweep
+
+- [x] **F1** Replaced the remaining targeted `NSLock` instances in overlay frame caches,
+  capture sessions/writers, live/program compositors, publish taps, and test helpers with
+  immutable `OSAllocatedUnfairLock` instances.
+- [x] **F2** Kept non-`Sendable` Core Video/Core Media/WebRTC values behind
+  `withLockUnchecked`; preserved compiler-checked `withLock` for plain value state.
+- [x] **F3** Preserved framework and callback boundaries outside critical sections. Removed the
+  unreachable `FinishAction.throw` branch left by the capture-writer completion refactor.
+- [x] **F4** Added explicit `Sendable` conformance to the affected stateless namespace enums,
+  compatible error enums, and value-only state structs in the app and LocalCutCore.
+- [x] **F5** Replaced deprecated `URL(fileURLWithPath:)` construction in the two affected source
+  helpers and the touched app/package test fixtures, preserving directory hints where needed.
+- [x] **F6** Merged current `main` and resolved the four overlapping concurrency files by keeping
+  `main`'s actor isolation, lifetime documentation, and non-WebRTC storage accessor alongside
+  the PR's valid lock migrations.
+- [x] **F7** Cleared the post-merge Swift 6 diagnostics in `CaptionTailFiller`, `ContentView`,
+  and `ProgramCompositor` without changing asynchronous action, cancellation, or lock behaviour.
+- [x] **F8** Final local gate: `git diff --check`, LocalCutCore package build/tests (175 tests),
+  the full Debug/macOS suite (791 executed, 2 skipped, zero build warnings), the non-WebRTC
+  publish suite (9 tests), MediaMTX WHIP integration (2 tests), and 7 OTIO golden fixtures pass.
+
 ## Verification
 
 - [x] **V1** Build (Debug/macOS, app + tests via `buildForTesting`) — **zero warnings**, zero

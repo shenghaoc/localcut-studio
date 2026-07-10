@@ -209,6 +209,10 @@ public enum ZoomPanPresetGenerator: Sendable {
             }
         }
 
+        // Restore the last keyframe to identity when the original preset
+        // requested it. This is a design choice (e.g. snap zoom ends at
+        // identity), not a velocity violation. The velocity bounds are
+        // meant for intermediate keyframes, not the final identity.
         if keyframes.last?.value == .identity, let last = result.last {
             result[result.count - 1] = Keyframe<Transform2D>(
                 id: last.id,

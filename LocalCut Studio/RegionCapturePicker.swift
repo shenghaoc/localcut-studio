@@ -64,7 +64,7 @@ final class RegionCapturePicker {
 
 private final class RegionCaptureWindowController {
     private let panel: RegionCapturePanel
-    private var keyMonitor: Any?
+    nonisolated(unsafe) private var keyMonitor: Any?
     private var completion: ((CaptureRegion?) -> Void)?
 
     init(screen: NSScreen,
@@ -123,6 +123,18 @@ private final class RegionCaptureWindowController {
         }
         panel.close()
         completion(region)
+    }
+
+    deinit {
+        if let keyMonitor {
+            // NSEvent.removeMonitor must be called from the main thread,
+            // but deinit can run on any thread. Dispatch if needed.
+            if Thread.isMainThread {
+                NSEvent.removeMonitor(keyMonitor)
+            } else {
+                DispatchQueue.main.async { NSEvent.removeMonitor(keyMonitor) }
+            }
+        }
     }
 }
 

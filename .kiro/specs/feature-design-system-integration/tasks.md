@@ -98,7 +98,7 @@
   label; scopes `accessibilityValue`; secondary tool picker `.isHeader`.
 - [x] **T9.4** Standard controls/materials: status bar `.bar`; Beauty toggles →
   checkbox; inspector timecodes `monospacedDigit`; render-queue
-  `ContentUnavailableView`; Master Gain via `LabeledSliderRow`; scopes on
+  inline `Text` placeholder; Master Gain via `LabeledSliderRow`; scopes on
   `lcLane`; timeline fonts → text styles; Align-Window reset.
 - [x] **T9.5** Pointer feedback: ruler resize cursor + scrub tooltip; marker
   pointing-hand cursor.

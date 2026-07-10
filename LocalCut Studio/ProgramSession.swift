@@ -69,6 +69,7 @@ nonisolated struct ProgramCaptureSource: Identifiable, Hashable, Sendable {
     }
 }
 
+/// `@unchecked Sendable`: immutable wrapper for non-`Sendable` `CVPixelBuffer`.
 nonisolated struct ProgramFrameBuffer: @unchecked Sendable {
     let pixelBuffer: CVPixelBuffer
 
@@ -221,10 +222,20 @@ actor ProgramSession {
         }
         self.onCaptureFailure = onCaptureFailure
 
+        // Acquire all video leases before creating any session resources, and
+        // normalize the lower-level actor error into ProgramSession's public
+        // error surface.
+        let videoSources = sources.filter { $0.kind.isVideo }
+        switch await budget.acquireResult(.programIso, count: videoSources.count) {
+        case .success(let acquired):
+            leases = acquired
+        case .failure(let error):
+            isStarting = false
+            await cleanupFailedStart(removeDirectory: true)
+            throw ProgramSessionError.budgetExhausted(error)
+        }
+
         do {
-            // Acquire encoder leases up front. One per video source.
-            let videoSources = sources.filter { $0.kind.isVideo }
-            leases = try await budget.acquire(.programIso, count: videoSources.count)
             let sid = UUID()
             sessionID = sid
             let dir = rootURL.appendingPathComponent(sid.uuidString)
@@ -326,10 +337,6 @@ actor ProgramSession {
 
             isStarting = false
             isRunning = true
-        } catch let error as EncoderBudgetError {
-            isStarting = false
-            await cleanupFailedStart(removeDirectory: true)
-            throw ProgramSessionError.budgetExhausted(error)
         } catch {
             isStarting = false
             await cleanupFailedStart(removeDirectory: true)
@@ -516,6 +523,9 @@ actor ProgramSession {
         let failureMessage = ProgramSessionError.captureFailed(error.localizedDescription).errorDescription
             ?? "Program capture failed: \(error.localizedDescription)"
         let handler = onCaptureFailure
+        // Intentionally captures self strongly — the stop/landing path must
+        // complete even if the session is being torn down (matches the strong
+        // model/session capture pattern in ProgramPanelState).
         Task {
             do {
                 let result = try await stop()

@@ -65,13 +65,18 @@ extension EditorModel {
                             target: AnyHashable = AnyHashable("audio.voiceCleanup"),
                             mutate: (inout VoiceCleanupSettings) -> Void) {
         let apply: () -> Void = { [self] in
-            let wasPreviewActive = project.voiceCleanup.requiresOfflineProcessing
+            let wasDSPActive = project.voiceCleanup.requiresOfflineProcessing
+            let previousLoudnessGain = project.voiceCleanup.loudnessGainLinear
             var settings = project.voiceCleanup
             mutate(&settings)
             settings.clamp()
             project.voiceCleanup = settings
             audioBus.updateLiveCleanupSettings(settings)
-            if wasPreviewActive != settings.requiresOfflineProcessing {
+            // Loudness-only gain is baked into the composition audio mix, so
+            // every gain-value change needs a rebuild, not just enable/disable.
+            let isDSPActive = settings.requiresOfflineProcessing
+            if wasDSPActive != isDSPActive
+                || previousLoudnessGain != settings.loudnessGainLinear {
                 scheduleRebuild()
             }
         }
@@ -129,7 +134,10 @@ extension EditorModel {
         loudnessTask = Task { [weak self] in
             guard let self else { return }
             do {
-                guard let built = try await CompositionBuilder.build(project: project, showSkinMask: showSkinMask) else {
+                guard let built = try await CompositionBuilder.build(
+                    project: project,
+                    showSkinMask: showSkinMask,
+                    includeLoudnessGainInAudioMix: false) else {
                     guard token == loudnessMeasurementToken else { return }
                     applyLoudnessAnalysis(LoudnessAnalysisResult(
                         measuredLUFS: -.infinity,

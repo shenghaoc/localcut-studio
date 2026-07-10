@@ -603,10 +603,16 @@ extension CaptionTrackDoc {
 extension TrackDoc {
     @MainActor
     public init(track: Track) {
+        let kindString: String
+        switch track.kind {
+        case .video: kindString = "video"
+        case .audio: kindString = "audio"
+        case .layout: kindString = "layout"
+        }
         self.init(
             id: track.id,
             name: track.name,
-            kind: track.kind == .video ? "video" : "audio",
+            kind: kindString,
             isMuted: track.isMuted,
             clips: track.clips.map(ClipDoc.init(clip:)))
     }
@@ -654,6 +660,12 @@ public struct OverlayClipDoc: Codable, Equatable, Sendable {
     public var rotation: Double
     public var opacity: Float
     public var endAction: OverlayEndAction
+    /// Keyframed animation tracks. Absent in legacy documents.
+    public var positionXKeyframes: Keyframed<Float>?
+    public var positionYKeyframes: Keyframed<Float>?
+    public var scaleKeyframes: Keyframed<Float>?
+    public var rotationKeyframes: Keyframed<Float>?
+    public var opacityKeyframes: Keyframed<Float>?
 
     public init(id: UUID = UUID(),
                 sourceType: OverlaySourceType,
@@ -666,7 +678,12 @@ public struct OverlayClipDoc: Codable, Equatable, Sendable {
                 scale: Double = 1,
                 rotation: Double = 0,
                 opacity: Float = 1,
-                endAction: OverlayEndAction = .loop) {
+                endAction: OverlayEndAction = .loop,
+                positionXKeyframes: Keyframed<Float>? = nil,
+                positionYKeyframes: Keyframed<Float>? = nil,
+                scaleKeyframes: Keyframed<Float>? = nil,
+                rotationKeyframes: Keyframed<Float>? = nil,
+                opacityKeyframes: Keyframed<Float>? = nil) {
         self.id = id
         self.sourceType = sourceType
         self.bookmark = bookmark
@@ -679,11 +696,18 @@ public struct OverlayClipDoc: Codable, Equatable, Sendable {
         self.rotation = rotation
         self.opacity = opacity
         self.endAction = endAction
+        self.positionXKeyframes = positionXKeyframes
+        self.positionYKeyframes = positionYKeyframes
+        self.scaleKeyframes = scaleKeyframes
+        self.rotationKeyframes = rotationKeyframes
+        self.opacityKeyframes = opacityKeyframes
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, sourceType, bookmark, bundleRelativePath, timelineStart, duration,
-             positionOffsetX, positionOffsetY, scale, rotation, opacity, endAction
+             positionOffsetX, positionOffsetY, scale, rotation, opacity, endAction,
+             positionXKeyframes, positionYKeyframes, scaleKeyframes, rotationKeyframes,
+             opacityKeyframes
     }
 
     public init(from decoder: any Decoder) throws {
@@ -700,6 +724,11 @@ public struct OverlayClipDoc: Codable, Equatable, Sendable {
         rotation = try c.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
         opacity = try c.decodeIfPresent(Float.self, forKey: .opacity) ?? 1
         endAction = try c.decodeIfPresent(OverlayEndAction.self, forKey: .endAction) ?? .loop
+        positionXKeyframes = try c.decodeIfPresent(Keyframed<Float>.self, forKey: .positionXKeyframes)
+        positionYKeyframes = try c.decodeIfPresent(Keyframed<Float>.self, forKey: .positionYKeyframes)
+        scaleKeyframes = try c.decodeIfPresent(Keyframed<Float>.self, forKey: .scaleKeyframes)
+        rotationKeyframes = try c.decodeIfPresent(Keyframed<Float>.self, forKey: .rotationKeyframes)
+        opacityKeyframes = try c.decodeIfPresent(Keyframed<Float>.self, forKey: .opacityKeyframes)
     }
 
     public func makeOverlayClip() -> OverlayClip {
@@ -712,7 +741,12 @@ public struct OverlayClipDoc: Codable, Equatable, Sendable {
             scale: max(0.1, scale),
             rotation: rotation,
             opacity: max(0, min(1, opacity)),
-            endAction: endAction)
+            endAction: endAction,
+            positionXKeyframes: positionXKeyframes ?? Keyframed(defaultValue: Float(positionOffsetX)),
+            positionYKeyframes: positionYKeyframes ?? Keyframed(defaultValue: Float(positionOffsetY)),
+            scaleKeyframes: scaleKeyframes ?? Keyframed(defaultValue: Float(scale)),
+            rotationKeyframes: rotationKeyframes ?? Keyframed(defaultValue: Float(rotation)),
+            opacityKeyframes: opacityKeyframes ?? Keyframed(defaultValue: opacity))
     }
 }
 
@@ -730,6 +764,11 @@ extension OverlayClipDoc {
             scale: overlay.scale,
             rotation: overlay.rotation,
             opacity: overlay.opacity,
-            endAction: overlay.endAction)
+            endAction: overlay.endAction,
+            positionXKeyframes: overlay.positionXKeyframes,
+            positionYKeyframes: overlay.positionYKeyframes,
+            scaleKeyframes: overlay.scaleKeyframes,
+            rotationKeyframes: overlay.rotationKeyframes,
+            opacityKeyframes: overlay.opacityKeyframes)
     }
 }

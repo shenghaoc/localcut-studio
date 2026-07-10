@@ -12,6 +12,7 @@ import CoreMedia
 ///
 /// The encode path and compose path retain references to the same
 /// underlying `IOSurface`; no pixel copy is performed.
+/// `@unchecked Sendable`: disposed flag is protected by `lock`.
 nonisolated final class LiveComposeTap: @unchecked Sendable {
 
     /// The source ID this tap is attached to.

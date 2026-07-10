@@ -6,11 +6,14 @@ import LocalCutCore
 
 // MARK: - Analyzer
 
-/// Background actor that decodes an asset to mono `Float` samples and runs the
-/// pure, deterministic `BeatDetectionCore` analysis over them. The DSP, the
-/// `BeatAnalysis` model, and the `.beat` cache live in `LocalCutCore`; only the
-/// AVFoundation decode stays in the app target.
-actor BeatAnalyzer {
+/// Decodes an asset to mono `Float` samples and runs the pure, deterministic
+/// `BeatDetectionCore` analysis over them. The DSP, the `BeatAnalysis` model,
+/// and the `.beat` cache live in `LocalCutCore`; only the AVFoundation decode
+/// stays in the app target.
+///
+/// No mutable instance state — the actor isolation was unnecessary overhead.
+/// The `analyze` method is async because it performs AVFoundation I/O.
+struct BeatAnalyzer {
     private let targetSampleRate: Double = 22_050
 
     func analyze(url: URL) async throws -> BeatAnalysis {
@@ -50,7 +53,10 @@ actor BeatAnalyzer {
             // otherwise trap on overflow or balloon allocation before the reader
             // has validated a single sample. One hour covers any realistic source.
             let cappedSeconds = min(duration.seconds, 3600)
-            let estimatedSamples = Int(cappedSeconds * targetSampleRate)
+            let estimatedSamplesDouble = cappedSeconds * targetSampleRate
+            // Guard against overflow: on macOS Int is 64-bit, so this is safe
+            // for any realistic duration, but we clamp defensively.
+            let estimatedSamples = Int(min(estimatedSamplesDouble, Double(Int.max / 2)))
             if estimatedSamples > 0 {
                 samples.reserveCapacity(estimatedSamples)
             }
@@ -58,6 +64,17 @@ actor BeatAnalyzer {
         while reader.status == .reading {
             try Task.checkCancellation()
             guard let buffer = output.copyNextSampleBuffer() else { break }
+            // Validate the actual sample rate matches the requested rate.
+            // AVAssetReader may silently deliver audio at a different rate
+            // if the codec doesn't support the requested rate.
+            let format = CMSampleBufferGetFormatDescription(buffer)
+            if let streamDesc = format?.audioStreamBasicDescription {
+                let actualRate = streamDesc.mSampleRate
+                if actualRate > 0 && abs(actualRate - targetSampleRate) > 1 {
+                    throw BeatAnalysisError.readerFailed(
+                        "Audio sample rate mismatch: requested \(targetSampleRate) Hz, got \(actualRate) Hz")
+                }
+            }
             samples.append(contentsOf: floats(from: buffer))
         }
 
