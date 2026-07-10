@@ -1334,7 +1334,7 @@ struct GoldenFixtureTests {
             #expect(json.contains("captionTracks"))
             #expect(json.contains("Hello world"))
         default:
-            break
+            #expect(Bool(false), "Unhandled OTIO fixture: \(name)")
         }
     }
 

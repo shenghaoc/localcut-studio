@@ -5,6 +5,12 @@ import CoreMedia
 import LocalCutCore
 @testable import LocalCut_Studio
 
+/// Helper for static-let contexts where `try!` would crash with an opaque error.
+/// Returns `Never` so it can be used as the RHS of `??` on any type.
+nonisolated private func fatalErrorAs<T>(_ message: String) -> T {
+    fatalError(message)
+}
+
 // MARK: - State machine (T6.1 partial)
 
 @Suite("CaptureCoordinator state machine")
@@ -390,6 +396,8 @@ struct CaptureAlignmentTests {
             }
             let delta = abs(offsets[0] - offsets[1])
             #expect(delta < maxDelta)
+        } else {
+            Issue.record("AlignmentCase '\(_testCase.name)' has neither expectedOffsetUs nor maxDeltaUs set")
         }
     }
 }
@@ -429,7 +437,7 @@ struct CaptureManifestRecoveryTests {
                     sourceID: sourceID, atUs: 4_000_000, durationUs: 3_000_000,
                     timelineStartUs: 20_000, sampleCount: 90)),
             ])
-            var data = try! manifest.encodeNDJSON()
+            var data = (try? manifest.encodeNDJSON()) ?? fatalErrorAs("encodeNDJSON failed for truncated trailing line case")
             data.append(#"{"kind":"finalize","atUs":5000000,"dur"#.data(using: .utf8)!)
             cases.append(ManifestParseCase(
                 name: "truncated trailing line",
@@ -452,7 +460,7 @@ struct CaptureManifestRecoveryTests {
                     sessionStartHostTimeUs: 10, sources: [source], encoders: [:])),
                 .finalize(CaptureFinalizeRecord(atUs: 30, durationUs: 20)),
             ])
-            var data = try! manifest.encodeNDJSON()
+            var data = (try? manifest.encodeNDJSON()) ?? fatalErrorAs("encodeNDJSON failed for unknown record kind case")
             let insertion = #"{"kind":"scene-doc","sceneId":"intro","atUs":15}"#.data(using: .utf8)!
             if let finalizeStart = data.range(of: #"{"kind":"finalize""#.data(using: .utf8)!) {
                 data.insert(contentsOf: insertion, at: finalizeStart.lowerBound)

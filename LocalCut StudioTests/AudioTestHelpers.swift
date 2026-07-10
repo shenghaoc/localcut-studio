@@ -35,7 +35,8 @@ func makePCMSampleBuffer(
     fragmented: Bool = false
 ) throws -> CMSampleBuffer {
     guard channels > 0 else {
-        throw NSError(domain: "AudioTestHelpers", code: -2)
+        throw NSError(domain: "AudioTestHelpers", code: -2,
+                      userInfo: [NSLocalizedDescriptionKey: "channels must be > 0, got \(channels)"])
     }
 
     // -- Determine format flags and element size from the sample type --
@@ -85,7 +86,8 @@ func makePCMSampleBuffer(
         formatDescriptionOut: &formatDescription
     )
     guard fmtStatus == noErr, let formatDescription else {
-        throw NSError(domain: "AudioTestHelpers", code: Int(fmtStatus))
+        throw NSError(domain: "AudioTestHelpers", code: Int(fmtStatus),
+                      userInfo: [NSLocalizedDescriptionKey: "CMAudioFormatDescriptionCreate failed (\(fmtStatus))"])
     }
 
     // -- Raw sample bytes --
@@ -111,7 +113,8 @@ func makePCMSampleBuffer(
             blockBufferOut: &blockBuffer
         )
         guard emptyStatus == noErr, let blockBuffer else {
-            throw NSError(domain: "AudioTestHelpers", code: Int(emptyStatus))
+            throw NSError(domain: "AudioTestHelpers", code: Int(emptyStatus),
+                          userInfo: [NSLocalizedDescriptionKey: "CMBlockBufferCreateEmpty failed (\(emptyStatus))"])
         }
 
         let app1 = CMBlockBufferAppendMemoryBlock(
@@ -125,7 +128,8 @@ func makePCMSampleBuffer(
             flags: 0
         )
         guard app1 == noErr else {
-            throw NSError(domain: "AudioTestHelpers", code: Int(app1))
+            throw NSError(domain: "AudioTestHelpers", code: Int(app1),
+                          userInfo: [NSLocalizedDescriptionKey: "CMBlockBufferAppendMemoryBlock (first half) failed (\(app1))"])
         }
 
         let app2 = CMBlockBufferAppendMemoryBlock(
@@ -139,7 +143,8 @@ func makePCMSampleBuffer(
             flags: 0
         )
         guard app2 == noErr else {
-            throw NSError(domain: "AudioTestHelpers", code: Int(app2))
+            throw NSError(domain: "AudioTestHelpers", code: Int(app2),
+                          userInfo: [NSLocalizedDescriptionKey: "CMBlockBufferAppendMemoryBlock (second half) failed (\(app2))"])
         }
     } else {
         let createStatus = CMBlockBufferCreateWithMemoryBlock(
@@ -154,13 +159,15 @@ func makePCMSampleBuffer(
             blockBufferOut: &blockBuffer
         )
         guard createStatus == noErr, let blockBuffer else {
-            throw NSError(domain: "AudioTestHelpers", code: Int(createStatus))
+            throw NSError(domain: "AudioTestHelpers", code: Int(createStatus),
+                          userInfo: [NSLocalizedDescriptionKey: "CMBlockBufferCreateWithMemoryBlock failed (\(createStatus))"])
         }
     }
 
     // -- Copy sample bytes into the block buffer --
     guard let blockBuffer else {
-        throw NSError(domain: "AudioTestHelpers", code: -1)
+        throw NSError(domain: "AudioTestHelpers", code: -1,
+                      userInfo: [NSLocalizedDescriptionKey: "CMBlockBuffer is nil after creation"])
     }
     if byteCount > 0 {
         let replaceStatus = sampleData.withUnsafeBytes { bytes in
@@ -173,7 +180,8 @@ func makePCMSampleBuffer(
             )
         }
         guard replaceStatus == noErr else {
-            throw NSError(domain: "AudioTestHelpers", code: Int(replaceStatus))
+            throw NSError(domain: "AudioTestHelpers", code: Int(replaceStatus),
+                          userInfo: [NSLocalizedDescriptionKey: "CMBlockBufferReplaceDataBytes failed (\(replaceStatus))"])
         }
     }
 
@@ -200,7 +208,8 @@ func makePCMSampleBuffer(
         sampleBufferOut: &sampleBuffer
     )
     guard sampleStatus == noErr, let sampleBuffer else {
-        throw NSError(domain: "AudioTestHelpers", code: Int(sampleStatus))
+        throw NSError(domain: "AudioTestHelpers", code: Int(sampleStatus),
+                      userInfo: [NSLocalizedDescriptionKey: "CMSampleBufferCreate failed (\(sampleStatus))"])
     }
     return sampleBuffer
 }
@@ -289,5 +298,9 @@ func waitForRenderQueueToSettle(
         }
         try await Task.sleep(for: .milliseconds(20))
     }
-    Issue.record("Render queue did not settle before timeout")
+    throw NSError(
+        domain: "AudioTestHelpers",
+        code: -1,
+        userInfo: [NSLocalizedDescriptionKey:
+            "Render queue did not settle before timeout (\(expectedCount) jobs, \(timeout)s)"])
 }

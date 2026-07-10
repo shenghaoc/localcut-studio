@@ -1017,12 +1017,22 @@ struct RecordingTransportErrorHandlingTests {
 @MainActor
 struct RecordingDocumentCommandGuardTests {
 
-    enum CloseBlocker: CaseIterable, Sendable {
+    enum CloseBlocker: CaseIterable, Sendable, CustomTestStringConvertible {
         case paused
         case countdown
         case starting
         case pausing
         case stopping
+
+        var testDescription: String {
+            switch self {
+            case .paused: "paused"
+            case .countdown: "countdown"
+            case .starting: "starting"
+            case .pausing: "pausing"
+            case .stopping: "stopping"
+            }
+        }
 
         func setup(model: EditorModel) {
             switch self {

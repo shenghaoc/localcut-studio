@@ -14,11 +14,20 @@ import LocalCutCore
 
 // MARK: - R6.1 — master gain mutation undoable
 
-enum UndoMutation: CaseIterable, Sendable {
+enum UndoMutation: CaseIterable, Sendable, CustomTestStringConvertible {
     case masterGain
     case trackInput
     case clipVolumeEnvelope
     case voiceCleanup
+
+    var testDescription: String {
+        switch self {
+        case .masterGain: "masterGain"
+        case .trackInput: "trackInput"
+        case .clipVolumeEnvelope: "clipVolumeEnvelope"
+        case .voiceCleanup: "voiceCleanup"
+        }
+    }
 }
 
 @MainActor
@@ -152,13 +161,14 @@ func activeLoudnessGainChangeSchedulesRebuild() {
 
 // MARK: - R6.4 — VolumeEnvelope clamping
 
-struct FadeClampCase {
+struct FadeClampCase: CustomTestStringConvertible {
     let name: String
     let fadeIn: CMTime
     let fadeOut: CMTime
     let clipDuration: CMTime
     let expectedFadeIn: Double
     let expectedFadeOut: Double
+    var testDescription: String { name }
 }
 
 @Test(
@@ -187,10 +197,11 @@ func envelopeFadesClamp(_ cs: FadeClampCase) {
 
 // MARK: - R6.4 — VolumeEnvelope Ramp clamping
 
-struct RampClampCase {
+struct RampClampCase: CustomTestStringConvertible {
     let name: String
     let ramp: CMTimeRange
     let expectedResult: Bool  // true = non-nil (clamped), false = nil (dropped)
+    var testDescription: String { name }
 }
 
 @Test(
@@ -326,11 +337,12 @@ func renderOfflineBlockSucceedsWithScheduledBuffer() throws {
 
 // MARK: - R6.2 — computeMeter parameterised cases
 
-struct MeterCase {
+struct MeterCase: CustomTestStringConvertible {
     let name: String
     let frameCount: Int
     let fillValue: Float?
     let expectZero: Bool
+    var testDescription: String { name }
 }
 
 @Test(

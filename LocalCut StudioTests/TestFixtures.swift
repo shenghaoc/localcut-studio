@@ -50,25 +50,35 @@ func makeVideoFixture(
     writer.startSession(atSourceTime: .zero)
 
     guard let pool = adaptor.pixelBufferPool else {
-        throw NSError(domain: "TestFixtures", code: -2)
+        throw NSError(domain: "TestFixtures", code: -2,
+                      userInfo: [NSLocalizedDescriptionKey: "pixelBufferPool was nil"])
     }
 
     let frameCount = Int(seconds * Double(fps))
     for frame in 0..<frameCount {
+        var yieldCount = 0
         while !input.isReadyForMoreMediaData {
             guard writer.status == .writing else {
-                throw writer.error ?? NSError(domain: "TestFixtures", code: -1)
+                throw writer.error ?? NSError(domain: "TestFixtures", code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "AVAssetWriter not in .writing status"])
+            }
+            yieldCount += 1
+            guard yieldCount < 10_000 else {
+                throw NSError(domain: "TestFixtures", code: -4,
+                              userInfo: [NSLocalizedDescriptionKey: "AVAssetWriter input never became ready (hung after \(yieldCount) yields)"])
             }
             await Task.yield()
         }
         var pixelBuffer: CVPixelBuffer?
         let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
         guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
-            throw NSError(domain: "TestFixtures", code: Int(status))
+            throw NSError(domain: "TestFixtures", code: Int(status),
+                          userInfo: [NSLocalizedDescriptionKey: "CVPixelBufferPoolCreatePixelBuffer failed (\(status))"])
         }
         let lockStatus = CVPixelBufferLockBaseAddress(buffer, [])
         guard lockStatus == kCVReturnSuccess else {
-            throw NSError(domain: "TestFixtures", code: Int(lockStatus))
+            throw NSError(domain: "TestFixtures", code: Int(lockStatus),
+                          userInfo: [NSLocalizedDescriptionKey: "CVPixelBufferLockBaseAddress failed (\(lockStatus))"])
         }
         if let baseAddress = CVPixelBufferGetBaseAddress(buffer) {
             memset(baseAddress, Int32(color), CVPixelBufferGetBytesPerRow(buffer) * h)
@@ -78,7 +88,8 @@ func makeVideoFixture(
             buffer,
             withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)
         ) else {
-            throw writer.error ?? NSError(domain: "TestFixtures", code: -3)
+            throw writer.error ?? NSError(domain: "TestFixtures", code: -3,
+                        userInfo: [NSLocalizedDescriptionKey: "adaptor.append failed at frame \(frame)"])
         }
     }
 
@@ -113,17 +124,20 @@ func makePixelBuffer(
         &pixelBuffer
     )
     guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
-        throw NSError(domain: "TestFixtures", code: Int(status))
+        throw NSError(domain: "TestFixtures", code: Int(status),
+                      userInfo: [NSLocalizedDescriptionKey: "CVPixelBufferCreate failed (\(status))"])
     }
 
     let lockStatus = CVPixelBufferLockBaseAddress(buffer, [])
     guard lockStatus == kCVReturnSuccess else {
-        throw NSError(domain: "TestFixtures", code: Int(lockStatus))
+        throw NSError(domain: "TestFixtures", code: Int(lockStatus),
+                      userInfo: [NSLocalizedDescriptionKey: "CVPixelBufferLockBaseAddress failed (\(lockStatus))"])
     }
     defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
 
     guard let baseAddress = CVPixelBufferGetBaseAddress(buffer) else {
-        throw NSError(domain: "TestFixtures", code: -1)
+        throw NSError(domain: "TestFixtures", code: -1,
+                      userInfo: [NSLocalizedDescriptionKey: "CVPixelBufferGetBaseAddress returned nil"])
     }
     let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
 
