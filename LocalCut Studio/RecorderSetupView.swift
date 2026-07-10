@@ -185,7 +185,7 @@ struct RecorderSetupView: View {
             Button {
                 start()
             } label: {
-                Label("Start Recording…", systemImage: "record.circle")
+                Label("Start Recording", systemImage: "record.circle")
             }
             .buttonStyle(.borderedProminent)
             .disabled(!canStart)

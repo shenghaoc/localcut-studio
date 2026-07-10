@@ -30,6 +30,7 @@ struct TimelineView: View {
     /// last programmatic target (Codex P2 on d8c7ee2).
     @State private var timelineCurrentScrollSeconds: Double = 0
     @FocusState private var focusedClipID: Clip.ID?
+    @FocusState private var focusedTransitionClipID: Clip.ID?
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
 
@@ -114,8 +115,21 @@ struct TimelineView: View {
             model.selectClip(id: newValue)
             scrollTimelineToClip(id: newValue)
         }
+        .onChange(of: focusedTransitionClipID) { _, newValue in
+            guard let newValue, model.selectedTransitionClipID != newValue else { return }
+            model.selectTransition(clipID: newValue)
+        }
         .onChange(of: model.selectedClipID) { _, newValue in
             focusedClipID = newValue
+            if newValue != nil {
+                focusedTransitionClipID = nil
+            }
+        }
+        .onChange(of: model.selectedTransitionClipID) { _, newValue in
+            focusedTransitionClipID = newValue
+            if newValue != nil {
+                focusedClipID = nil
+            }
         }
     }
 
@@ -607,9 +621,13 @@ struct TimelineView: View {
                 .onTapGesture {
                     model.selectTransition(clipID: placement.clip.id)
                     focusedClipID = nil
+                    focusedTransitionClipID = placement.clip.id
                 }
+                .focusable()
+                .focused($focusedTransitionClipID, equals: placement.clip.id)
                 .accessibilityLabel("\(type.displayName) transition")
                 .accessibilityAddTraits(.isButton)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
     }
 
@@ -667,13 +685,13 @@ struct TimelineView: View {
             // disable it but the entry would still appear, which is
             // misleading UX for a concept that never applies to audio).
             if kind == .video {
-                Button("Add Transition at Selected Cut") {
+                Button("Add Transition Before This Clip") {
                     model.addTransition(toClipID: clip.id)
                 }
                 .disabled(!model.canAddTransition(toClipID: clip.id))
             }
             Divider()
-            Button("Delete Selected Clip", role: .destructive) {
+            Button("Delete Clip", role: .destructive) {
                 model.selectClip(id: clip.id)
                 model.deleteSelectedClip()
             }
@@ -983,18 +1001,18 @@ struct TimelineView: View {
     }
 
     private func adjustRulerPlayhead(_ direction: AccessibilityAdjustmentDirection) {
-        guard model.totalDuration > 0 else { return }
-        let step = min(max(tickStep(), 0.25), 5)
-        let target: Double
+        let increment: Bool
         switch direction {
-        case .increment:
-            target = model.currentTime + step
-        case .decrement:
-            target = model.currentTime - step
-        @unknown default:
-            return
+        case .increment: increment = true
+        case .decrement: increment = false
+        @unknown default: return
         }
-        model.seek(toSeconds: min(max(target, 0), model.totalDuration))
+        guard let target = TimelineScrollMath.rulerAdjustmentTarget(
+            currentTime: model.currentTime,
+            totalDuration: model.totalDuration,
+            tickStep: tickStep(),
+            increment: increment) else { return }
+        model.seek(toSeconds: target)
     }
 }
 
@@ -1028,6 +1046,18 @@ enum TimelineScrollMath: Sendable {
     /// no content yet).
     static func clampedTarget(_ seconds: Double, totalDuration: Double) -> Double {
         min(max(seconds, 0), max(totalDuration, 0))
+    }
+
+    /// Target for one VoiceOver ruler adjustment. Keep the step usable at
+    /// extreme zoom levels and never seek outside the project range.
+    static func rulerAdjustmentTarget(currentTime: Double,
+                                      totalDuration: Double,
+                                      tickStep: Double,
+                                      increment: Bool) -> Double? {
+        guard totalDuration > 0 else { return nil }
+        let step = min(max(tickStep, 0.25), 5)
+        let target = currentTime + (increment ? step : -step)
+        return clampedTarget(target, totalDuration: totalDuration)
     }
 }
 

@@ -87,8 +87,9 @@
   model; File ▸ Import… (⌘I) / Export… (⇧⌘E); Edit ▸ Delete Selected Clip /
   Add Marker (M); View ▸ Show Inspector (⌥⌘I) / Go to Start (⌘↑). Delete has no
   bare menu/toolbar key equivalent; clips/transitions use the timeline-scoped
-  `onDeleteCommand` so text editing keeps Backspace. Spacebar play/pause is
-  handled by the window-scoped `EditorKeyHandler` NSEvent local monitor (in
+  `onDeleteCommand` so text editing keeps Backspace; clip blocks and transition
+  glyphs are focusable so either selection can receive that command. Spacebar
+  play/pause is handled by the window-scoped `EditorKeyHandler` local monitor (in
   `TimelineView.swift`) rather than a menu key-equivalent — a bare `.space` menu
   shortcut is global in AppKit and would swallow spaces typed into text inputs.
   The monitor also exempts focused non-text first responders (NSControl +
@@ -151,18 +152,21 @@
   Split command enabled for unselected clips because the command selects the
   clicked clip before splitting.
 - [x] **T10.7** Live review follow-up: remove global bare-Delete key equivalents
-  from menu/toolbar actions; change the countdown Cancel button from `.bordered`
-  to `.borderedProminent` for contrast over the dark overlay; constrain the
-  Diagnostics HUD width; verify the callout list keeps `.isSelected` for
+  from menu/toolbar actions; keep countdown text white over its dark overlay;
+  constrain the Diagnostics HUD width; verify the callout list keeps `.isSelected` for
   VoiceOver; replace `.yellow` warning indicators with `.orange` for
   accessibility contrast; normalise status-message ellipsis from ASCII `...` to
   Unicode `…`; add semantic timeline colour tokens (`lcCaptionFill`,
   `lcCaptionStroke`, `lcTransitionFill`, `lcTransitionIcon`, `lcBeatMarker`,
-  `lcTrimHover`) to `Theme.swift`.
+  `lcTrimHover`) to `Theme.swift`; make transition glyphs focusable and expose
+  selected state so timeline-scoped Delete and VoiceOver work after selection.
 
 ## Verification
 
-- [x] **T6.1** `xcodebuild test` (Debug, macOS) compiles with zero warnings and
-  the full suite passes with no count regression (R6.1, R6.2).
+- [x] **T6.1** `xcodebuild test` (Debug, macOS) compiles the app without new
+  source diagnostics and the full suite passes with no count regression
+  (R6.1, R6.2).
+- [x] **T6.3** Add focused pure tests for ruler adjustment step limits, project
+  boundary clamping, and the empty-project case (R2.3, R6.2).
 - [x] **T6.2** Confirm no model/schema/composition change and that the
   standalone `app/` prototype is not merged (R6.3).

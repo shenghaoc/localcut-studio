@@ -31,7 +31,7 @@ struct RecordingCountdownView: View {
                     Button("Cancel") {
                         model.cancelCountdown()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .controlSize(.large)
                     .accessibilityLabel("Cancel countdown")
                 }

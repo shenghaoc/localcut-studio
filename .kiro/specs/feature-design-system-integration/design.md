@@ -142,8 +142,10 @@ are all standard SwiftUI/AppKit (no new paradigms):
   (⇧⌘E)**; **Edit ▸ Delete Selected Clip** and **Edit ▸ Add Marker (M)** mirror
   the timeline without a bare Delete key equivalent; clip/transition deletion
   is handled by the timeline-scoped `onDeleteCommand` so Backspace still belongs
-  to focused text fields. **View ▸ Show Inspector (⌥⌘I)** and **Go to Start
-  (⌘↑)** join Show Diagnostics. The **Space** shortcut for play/pause is
+  to focused text fields. Clip blocks and transition glyphs are focusable, so
+  selecting either timeline element routes Delete to that scoped command.
+  **View ▸ Show Inspector (⌥⌘I)** and **Go to Start (⌘↑)** join Show Diagnostics.
+  The **Space** shortcut for play/pause is
   intentionally not a menu key-equivalent (those fire globally, swallowing
   spaces typed into text fields) — it lives on a window-scoped `NSEvent` local monitor
   (`EditorKeyHandler` in `TimelineView.swift`) that yields to focused text
@@ -194,7 +196,8 @@ The medium-risk interaction items are done and manually verified with real media
 - **Media-bin arrow-key navigation** — focusable rows (`@FocusState`) with
   `onMoveCommand` / `onDeleteCommand` and a focus ring; timeline clips are
   likewise focusable with arrow-key movement that scrolls the focused clip into
-  view, plus Page-Left/Right and center-playhead buttons and an
+  view; transition glyphs are focusable so Delete removes the selected
+  transition. Page-Left/Right and center-playhead buttons complement an
   accessibility-adjustable timeline viewport.
 - **Long-clip identity** — `ClipIdentityOverlay` repeats the clip's glyph + name
   across a long body so the tail of a clip isn't an unlabeled slab.
