@@ -41,5 +41,5 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 
 ## 2026-07-10 — Add selection traits to custom checkmark lists
 
-**Learning:** List items using custom selection indicators (like `Image(systemName: "checkmark")`) are announced poorly by VoiceOver. Screen readers will read "checkmark" out of context and won't announce the button's selection state.
-**Action:** Conditionally apply `.accessibilityAddTraits(.isSelected)` to the button when its item is selected, and apply `.accessibilityHidden(true)` to the checkmark image so VoiceOver announces the selection state without reading the decorative symbol.
+**Learning:** List items using custom selection indicators (such as a checkmark or background highlight) are announced poorly by VoiceOver unless the row also exposes its selection state. Screen readers may read a checkmark out of context or miss a background-only highlight entirely.
+**Action:** Conditionally apply `.accessibilityAddTraits(.isSelected)` to the selectable control or row. For checkmark-based lists, also apply `.accessibilityHidden(true)` to the decorative checkmark so VoiceOver announces the selection state without reading the symbol.
