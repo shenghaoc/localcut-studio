@@ -34,6 +34,9 @@ func makePCMSampleBuffer(
     sampleRate: Int = 48_000,
     fragmented: Bool = false
 ) throws -> CMSampleBuffer {
+    guard channels > 0 else {
+        throw NSError(domain: "AudioTestHelpers", code: -2)
+    }
 
     // -- Determine format flags and element size from the sample type --
     let isFloat: Bool
@@ -159,16 +162,19 @@ func makePCMSampleBuffer(
     guard let blockBuffer else {
         throw NSError(domain: "AudioTestHelpers", code: -1)
     }
-    let replaceStatus = sampleData.withUnsafeBytes { bytes in
-        CMBlockBufferReplaceDataBytes(
-            with: bytes.baseAddress!,
-            blockBuffer: blockBuffer,
-            offsetIntoDestination: 0,
-            dataLength: byteCount
-        )
-    }
-    guard replaceStatus == noErr else {
-        throw NSError(domain: "AudioTestHelpers", code: Int(replaceStatus))
+    if byteCount > 0 {
+        let replaceStatus = sampleData.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return noErr }
+            return CMBlockBufferReplaceDataBytes(
+                with: baseAddress,
+                blockBuffer: blockBuffer,
+                offsetIntoDestination: 0,
+                dataLength: byteCount
+            )
+        }
+        guard replaceStatus == noErr else {
+            throw NSError(domain: "AudioTestHelpers", code: Int(replaceStatus))
+        }
     }
 
     // -- CMSampleBuffer --

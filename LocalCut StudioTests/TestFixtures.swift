@@ -49,6 +49,10 @@ func makeVideoFixture(
     try #require(writer.startWriting())
     writer.startSession(atSourceTime: .zero)
 
+    guard let pool = adaptor.pixelBufferPool else {
+        throw NSError(domain: "TestFixtures", code: -2)
+    }
+
     let frameCount = Int(seconds * Double(fps))
     for frame in 0..<frameCount {
         while !input.isReadyForMoreMediaData {
@@ -57,7 +61,19 @@ func makeVideoFixture(
             }
             await Task.yield()
         }
-        let buffer = try makePixelBuffer(width: w, height: h, r: color, g: color, b: color)
+        var pixelBuffer: CVPixelBuffer?
+        let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
+        guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
+            throw NSError(domain: "TestFixtures", code: Int(status))
+        }
+        let lockStatus = CVPixelBufferLockBaseAddress(buffer, [])
+        guard lockStatus == kCVReturnSuccess else {
+            throw NSError(domain: "TestFixtures", code: Int(lockStatus))
+        }
+        if let baseAddress = CVPixelBufferGetBaseAddress(buffer) {
+            memset(baseAddress, Int32(color), CVPixelBufferGetBytesPerRow(buffer) * h)
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
         guard adaptor.append(
             buffer,
             withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)
@@ -162,11 +178,10 @@ func makeAVFixture(
     in directory: URL = FileManager.default.temporaryDirectory
 ) async throws -> URL {
     let videoURL = try await makeVideoFixture(seconds: seconds, fps: fps, size: size, in: directory)
+    defer { try? FileManager.default.removeItem(at: videoURL) }
+
     let audioURL = try makeAudioFixture(seconds: seconds, in: directory)
-    defer {
-        try? FileManager.default.removeItem(at: videoURL)
-        try? FileManager.default.removeItem(at: audioURL)
-    }
+    defer { try? FileManager.default.removeItem(at: audioURL) }
 
     let outputURL = directory.appendingPathComponent("av-fixture-\(UUID().uuidString).mov")
     try? FileManager.default.removeItem(at: outputURL)
