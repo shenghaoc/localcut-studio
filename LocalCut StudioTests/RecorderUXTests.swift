@@ -58,9 +58,16 @@ nonisolated private final class RecorderSwitchingSession: CaptureRunningSession,
 @Suite("Recorder UX — Manifest pause/resume records")
 struct ManifestPauseResumeTests {
 
-    struct RecordRoundTripCase: Sendable {
+    struct RecordRoundTripCase: Sendable, CustomTestStringConvertible {
         let record: CaptureManifestRecord
         let expectedAtUs: Int64
+        var testDescription: String {
+            switch record {
+            case .pause: "pause at \(expectedAtUs)us"
+            case .resume: "resume at \(expectedAtUs)us"
+            default: "record at \(expectedAtUs)us"
+            }
+        }
     }
 
     @Test("Record round-trips through encode/parse", arguments: [
@@ -316,13 +323,14 @@ struct CoordinatorSourceSwitchRoutingTests {
 @Suite("PiP preset layout")
 struct PiPPresetLayoutTests {
 
-    struct PlacementCase: Sendable {
+    struct PlacementCase: Sendable, CustomTestStringConvertible {
         let preset: PiPPreset
         let canvas: CGSize
         let source: CGSize
         let expectedOriginX: CGFloat
         let expectedOriginY: CGFloat
         let expectedScale: CGFloat?
+        var testDescription: String { "\(preset) \(Int(source.width))x\(Int(source.height))" }
     }
 
     nonisolated(unsafe) static let placementCases: [PlacementCase] = {

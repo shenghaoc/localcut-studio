@@ -90,20 +90,25 @@ func makePCMSampleBuffer(
                       userInfo: [NSLocalizedDescriptionKey: "CMAudioFormatDescriptionCreate failed (\(fmtStatus))"])
     }
 
-    // -- Raw sample bytes --
-    let sampleData: [UInt8] = switch sampleType {
+    // -- Raw sample bytes (direct from source, no intermediate copy) --
+    let sampleBytes: [UInt8]
+    let byteCount: Int
+    switch sampleType {
     case .int16(let samples):
-        samples.withUnsafeBytes { Array($0) }
+        sampleBytes = samples.withUnsafeBytes { Array($0) }
+        byteCount = sampleBytes.count
     case .float32(let samples):
-        samples.withUnsafeBytes { Array($0) }
+        sampleBytes = samples.withUnsafeBytes { Array($0) }
+        byteCount = sampleBytes.count
     }
-
-    let byteCount = sampleData.count
 
     // -- CMBlockBuffer (contiguous or fragmented) --
     var blockBuffer: CMBlockBuffer?
     if fragmented {
-        let firstHalf = byteCount / 2
+        // Align split to sample-frame boundary so no frame straddles blocks.
+        let frameSize = bytesPerElement * channels
+        let firstHalfFrames = (byteCount / frameSize) / 2
+        let firstHalf = firstHalfFrames * frameSize
         let secondHalf = byteCount - firstHalf
 
         let emptyStatus = CMBlockBufferCreateEmpty(
@@ -170,8 +175,10 @@ func makePCMSampleBuffer(
                       userInfo: [NSLocalizedDescriptionKey: "CMBlockBuffer is nil after creation"])
     }
     if byteCount > 0 {
-        let replaceStatus = sampleData.withUnsafeBytes { bytes in
-            guard let baseAddress = bytes.baseAddress else { return noErr }
+        let replaceStatus = sampleBytes.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else {
+                return OSStatus(kCMBlockBufferStructureAllocationFailedErr)
+            }
             return CMBlockBufferReplaceDataBytes(
                 with: baseAddress,
                 blockBuffer: blockBuffer,

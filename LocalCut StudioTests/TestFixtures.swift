@@ -80,9 +80,13 @@ func makeVideoFixture(
             throw NSError(domain: "TestFixtures", code: Int(lockStatus),
                           userInfo: [NSLocalizedDescriptionKey: "CVPixelBufferLockBaseAddress failed (\(lockStatus))"])
         }
-        if let baseAddress = CVPixelBufferGetBaseAddress(buffer) {
-            memset(baseAddress, Int32(color), CVPixelBufferGetBytesPerRow(buffer) * h)
+        guard let baseAddress = CVPixelBufferGetBaseAddress(buffer) else {
+            CVPixelBufferUnlockBaseAddress(buffer, [])
+            throw NSError(domain: "TestFixtures", code: -5,
+                          userInfo: [NSLocalizedDescriptionKey: "CVPixelBufferGetBaseAddress returned nil at frame \(frame)"])
         }
+        let actualHeight = CVPixelBufferGetHeight(buffer)
+        memset(baseAddress, Int32(color), CVPixelBufferGetBytesPerRow(buffer) * actualHeight)
         CVPixelBufferUnlockBaseAddress(buffer, [])
         guard adaptor.append(
             buffer,
@@ -141,16 +145,16 @@ func makePixelBuffer(
     }
     let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
 
-    // Fill the buffer row by row with 32ARGB pixels (big-endian: ARGB).
-    let argb = [UInt8(0xFF), r, g, b]
+    // Build a 4-byte ARGB pattern and fill each row with memcpy.
+    // alpha is always 0xFF for opaque test fixtures.
+    var argb = UInt32(0xFF000000) | (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+    // On little-endian (Apple Silicon), reinterpret as 4 bytes in memory order.
+    let pattern = withUnsafeBytes(of: &argb) { Array($0) }
     for row in 0..<height {
         let rowStart = baseAddress.advanced(by: row * bytesPerRow)
         for col in 0..<width {
             let offset = col * 4
-            rowStart.advanced(by: offset).storeBytes(of: argb[0], as: UInt8.self)
-            rowStart.advanced(by: offset + 1).storeBytes(of: argb[1], as: UInt8.self)
-            rowStart.advanced(by: offset + 2).storeBytes(of: argb[2], as: UInt8.self)
-            rowStart.advanced(by: offset + 3).storeBytes(of: argb[3], as: UInt8.self)
+            rowStart.advanced(by: offset).copyMemory(from: pattern, byteCount: 4)
         }
     }
     return buffer
@@ -163,14 +167,22 @@ func makePixelBuffer(
 /// Populates `duration`, `hasVideo`, `naturalSize`, and `preferredTransform`.
 func loadedMedia(from url: URL) async throws -> MediaItem {
     let item = MediaItem(url: url)
-    item.duration = try await item.asset.load(.duration)
-    let videoTracks = try await item.asset.loadTracks(withMediaType: .video)
+    // Load duration and track lists in parallel — they are independent.
+    async let durationLoad = item.asset.load(.duration)
+    async let videoTrackLoad = item.asset.loadTracks(withMediaType: .video)
+    async let audioTrackLoad = item.asset.loadTracks(withMediaType: .audio)
+
+    item.duration = try await durationLoad.sanitized
+    let videoTracks = try await videoTrackLoad
+    let audioTracks = try await audioTrackLoad
     let track = try #require(videoTracks.first)
-    let audioTracks = try await item.asset.loadTracks(withMediaType: .audio)
-    item.hasVideo = true
+    item.hasVideo = !videoTracks.isEmpty
     item.hasAudio = !audioTracks.isEmpty
-    item.naturalSize = try await track.load(.naturalSize)
-    item.preferredTransform = try await track.load(.preferredTransform)
+
+    // naturalSize and preferredTransform are independent of each other.
+    let (size, transform) = try await (track.load(.naturalSize), track.load(.preferredTransform))
+    item.naturalSize = size.sanitized
+    item.preferredTransform = transform.sanitized
     return item
 }
 
@@ -191,11 +203,12 @@ func makeAVFixture(
     size: CGSize = CGSize(width: 64, height: 64),
     in directory: URL = FileManager.default.temporaryDirectory
 ) async throws -> URL {
-    let videoURL = try await makeVideoFixture(seconds: seconds, fps: fps, size: size, in: directory)
-    defer { try? FileManager.default.removeItem(at: videoURL) }
-
+    // Create video and audio fixtures in parallel — they are independent.
+    async let videoTask = makeVideoFixture(seconds: seconds, fps: fps, size: size, in: directory)
     let audioURL = try makeAudioFixture(seconds: seconds, in: directory)
     defer { try? FileManager.default.removeItem(at: audioURL) }
+    let videoURL = try await videoTask
+    defer { try? FileManager.default.removeItem(at: videoURL) }
 
     let outputURL = directory.appendingPathComponent("av-fixture-\(UUID().uuidString).mov")
     try? FileManager.default.removeItem(at: outputURL)
@@ -255,7 +268,8 @@ func makeAudioFixture(
         channels: 1,
         interleaved: false
     ) else {
-        throw NSError(domain: "TestFixtures", code: -1)
+        throw NSError(domain: "TestFixtures", code: -1,
+                      userInfo: [NSLocalizedDescriptionKey: "AVAudioFormat creation failed for \(sampleRate) Hz"])
     }
     let file = try AVAudioFile(
         forWriting: url,
@@ -265,7 +279,8 @@ func makeAudioFixture(
     )
     let frameCount = AVAudioFrameCount(sampleRate * seconds)
     guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-        throw NSError(domain: "TestFixtures", code: -2)
+        throw NSError(domain: "TestFixtures", code: -2,
+                      userInfo: [NSLocalizedDescriptionKey: "AVAudioPCMBuffer creation failed for \(frameCount) frames"])
     }
     buffer.frameLength = frameCount
     // Default-allocated channelData is zero — true silence.
