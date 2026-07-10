@@ -168,5 +168,8 @@
   (R6.1, R6.2).
 - [x] **T6.3** Add focused pure tests for ruler adjustment step limits, project
   boundary clamping, and the empty-project case (R2.3, R6.2).
+- [x] **T6.4** Stabilize the recorder UI flow test by activating its identified
+  buttons directly instead of relying on window-level synthetic key delivery;
+  keep every recorder-state and gap-collapse assertion unchanged.
 - [x] **T6.2** Confirm no model/schema/composition change and that the
   standalone `app/` prototype is not merged (R6.3).
