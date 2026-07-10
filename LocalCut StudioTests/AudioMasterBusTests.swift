@@ -869,7 +869,7 @@ func bypassRampStateAdvancesWithoutOvershoot() {
 /// Verifies that exporting a noisy clip with denoiser and R128 target produces
 /// audio within ±0.5 LUFS of the target loudness.
 @MainActor
-@Test("VoiceCleanup: export with denoiser and R128 produces correct loudness (T3.6)")
+@Test("VoiceCleanup: export with denoiser and R128 produces correct loudness (T3.6)", .timeLimit(.minutes(1)))
 func exportSmokeFixtureLoudness() async throws {
     // Create a noisy audio fixture.
     let sampleRate: Double = 48_000

@@ -313,7 +313,7 @@ func timeRemapCompositionBuilderScalesVideo() async throws {
 }
 
 @MainActor
-@Test("TimeRemapping: ramped A/V preview samples match exported samples")
+@Test("TimeRemapping: ramped A/V preview samples match exported samples", .timeLimit(.minutes(1)))
 func timeRemapPreviewExportAVParitySmoke() async throws {
     let url = try await makeAVFixture(seconds: 2)
     defer { try? FileManager.default.removeItem(at: url) }

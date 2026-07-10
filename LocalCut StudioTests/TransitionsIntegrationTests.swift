@@ -4,6 +4,10 @@ import CoreImage
 import LocalCutCore
 @testable import LocalCut_Studio
 
+extension Tag {
+    @Tag static var integration: Self
+}
+
 /// End-to-end transition tests that build a real `AVComposition` from a
 /// generated video fixture, exercising the AVFoundation insertion / ripple path
 /// (not just the pure layout math).

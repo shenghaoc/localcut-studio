@@ -339,7 +339,7 @@ func lottieUnsupportedFeatureWarning() throws {
     #expect(warning.contains("layer effects"))
 }
 
-@Test("Render queue smoke exports animated image, Lottie, and alpha-video overlays")
+@Test("Render queue smoke exports animated image, Lottie, and alpha-video overlays", .timeLimit(.minutes(1)))
 @MainActor
 func renderQueueExportsAllOverlayKinds() async throws {
     let tmp = try makeOverlayTempDirectory("export-smoke")
