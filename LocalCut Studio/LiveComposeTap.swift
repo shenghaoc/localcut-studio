@@ -1,4 +1,5 @@
 import Foundation
+import os
 @preconcurrency import CoreVideo
 import CoreMedia
 
@@ -18,14 +19,12 @@ nonisolated final class LiveComposeTap: @unchecked Sendable {
     let sourceID: UUID
 
     /// Lock protecting all mutable state.
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock(initialState: ())
 
     private var _isDisposed = false
 
     var isDisposed: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _isDisposed
+        lock.withLock { _ in _isDisposed }
     }
 
     /// Callback invoked when the tap is disposed (once).
@@ -38,23 +37,21 @@ nonisolated final class LiveComposeTap: @unchecked Sendable {
 
     /// Returns the frame when the tap is still active; nil after disposal.
     func feed(_ buffer: CVPixelBuffer) -> CVPixelBuffer? {
-        lock.lock()
-        guard !_isDisposed else {
-            lock.unlock()
-            return nil
+        lock.withLockUnchecked { _ -> CVPixelBuffer? in
+            guard !_isDisposed else { return nil }
+            return buffer
         }
-        lock.unlock()
-        return buffer
     }
 
     /// Disposes the tap. Safe to call multiple times — only the first call
     /// triggers the `onDispose` callback.
     func dispose() {
-        lock.lock()
-        guard !_isDisposed else { lock.unlock(); return }
-        _isDisposed = true
-        lock.unlock()
-        onDispose?()
+        let isFirstDispose = lock.withLock { _ -> Bool in
+            guard !_isDisposed else { return false }
+            _isDisposed = true
+            return true
+        }
+        if isFirstDispose { onDispose?() }
     }
 
     deinit {

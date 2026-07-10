@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreMedia
+import os
 import LocalCutCore
 
 /// `@unchecked Sendable`: `FileHandle` mutations are serialised on a private
@@ -50,7 +51,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private let onSustainedBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)?
     /// Called when a new sample boundary is available for the replay buffer.
     private let onEncodedChunk: (@Sendable (EncodedChunk) -> Void)?
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock(initialState: ())
 
     /// Roughly two seconds of drops at 30 fps before we warn the user; a single
     /// hiccup shouldn't raise an alarm, sustained loss should.
@@ -95,9 +96,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     }
 
     func append(_ sampleBuffer: CMSampleBuffer) {
-        lock.lock()
-        defer { lock.unlock() }
-        appendLocked(sampleBuffer)
+        lock.withLockUnchecked { _ in appendLocked(sampleBuffer) }
     }
 
     private func appendLocked(_ sampleBuffer: CMSampleBuffer) {
@@ -167,33 +166,41 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
 
     func finish() async throws -> CaptureSourceEndedRecord {
         try await withCheckedThrowingContinuation { continuation in
-            lock.lock()
-            // Block any concurrent late buffers before finalizing the input.
-            isFinished = true
+            enum FinishAction {
+                case cancelAndThrow(Error)
+                case `return`(CaptureSourceEndedRecord)
+                case finishWriting(CaptureSourceEndedRecord)
+            }
+            let action = lock.withLock { _ -> FinishAction in
+                // Block any concurrent late buffers before finalizing the input.
+                isFinished = true
 
-            guard didStartWriting else {
-                if let message = writeStartupError {
-                    writer.cancelWriting()
-                    lock.unlock()
-                    continuation.resume(throwing: CaptureEngineError.writerStartFailed(message))
-                    return
+                guard didStartWriting else {
+                    if let message = writeStartupError {
+                        return .cancelAndThrow(CaptureEngineError.writerStartFailed(message))
+                    }
+                    return .return(endedRecord(durationUs: 0))
                 }
-                let record = endedRecord(durationUs: 0)
-                lock.unlock()
-                continuation.resume(returning: record)
-                return
+
+                input.markAsFinished()
+                return .finishWriting(endedRecord(durationUs: durationUs()))
             }
 
-            input.markAsFinished()
-            let record = endedRecord(durationUs: durationUs())
-            lock.unlock()
-            writer.finishWriting {
-                if let error = self.writer.error {
-                    continuation.resume(throwing: CaptureEngineError.writerFinishFailed(error.localizedDescription))
-                } else if let manifestAppendError = self.manifestAppendError {
-                    continuation.resume(throwing: CaptureEngineError.manifestWriteFailed(manifestAppendError))
-                } else {
-                    continuation.resume(returning: record)
+            switch action {
+            case .cancelAndThrow(let error):
+                writer.cancelWriting()
+                continuation.resume(throwing: error)
+            case .return(let record):
+                continuation.resume(returning: record)
+            case .finishWriting(let record):
+                writer.finishWriting {
+                    if let error = self.writer.error {
+                        continuation.resume(throwing: CaptureEngineError.writerFinishFailed(error.localizedDescription))
+                    } else if let manifestAppendError = self.manifestAppendError {
+                        continuation.resume(throwing: CaptureEngineError.manifestWriteFailed(manifestAppendError))
+                    } else {
+                        continuation.resume(returning: record)
+                    }
                 }
             }
         }

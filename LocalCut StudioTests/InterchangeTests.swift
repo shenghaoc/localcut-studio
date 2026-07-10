@@ -1120,7 +1120,7 @@ struct InterchangeWarningTests {
 /// from this source file's path. Returns `nil` when running in a sandbox that
 /// relocates sources (e.g. CI SwiftPM builds).
 private func fixtureDir() -> String? {
-    var url = URL(fileURLWithPath: #filePath)
+    var url = URL(filePath: #filePath)
     for _ in 0..<10 {
         url = url.deletingLastPathComponent()
         let candidate = url.appendingPathComponent("Tests/Fixtures/Interchange").path

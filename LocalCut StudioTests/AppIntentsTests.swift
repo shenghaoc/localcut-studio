@@ -141,7 +141,9 @@ struct AppIntentsTests {
                 }
             }
             group.addTask {
-                try? await Task.sleep(for: .milliseconds(100))
+                // The predecessor sleeps for 60 seconds; one second still proves that
+                // cancellation does not wait for it without depending on CI scheduling.
+                try? await Task.sleep(for: .seconds(1))
                 return .timedOut
             }
             let result = await group.next()!
@@ -195,7 +197,7 @@ struct AppIntentsTests {
     @Test func exportProjectCommandPropagatesQueueFailure() async {
         let model = EditorModel()
         model.totalDuration = 1
-        let outputURL = URL(fileURLWithPath: "/private/tmp/app-intents-export-failure.mov")
+        let outputURL = URL(filePath: "/private/tmp/app-intents-export-failure.mov")
 
         let outcome = await model.performExportProjectCommand(
             presentPanel: {
@@ -212,7 +214,7 @@ struct AppIntentsTests {
 
     @Test func importMediaCommandPropagatesImportFailure() async {
         let model = EditorModel()
-        let inputURL = URL(fileURLWithPath: "/private/tmp/app-intents-import-failure.mov")
+        let inputURL = URL(filePath: "/private/tmp/app-intents-import-failure.mov")
 
         let outcome = await model.performImportMediaCommand(
             presentPanel: {
@@ -229,7 +231,7 @@ struct AppIntentsTests {
 
     @Test func exportCoordinatorPropagatesQueueRejection() async {
         let model = EditorModel()
-        let outputURL = URL(fileURLWithPath: "/private/tmp/app-intents-export-queue-rejection.mov")
+        let outputURL = URL(filePath: "/private/tmp/app-intents-export-queue-rejection.mov")
         let outcome = await ExportCoordinator().export(to: outputURL, model: model) { _ in
             .failed("Output destination unavailable.")
         }

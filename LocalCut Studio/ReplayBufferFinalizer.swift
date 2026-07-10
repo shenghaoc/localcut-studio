@@ -10,7 +10,7 @@ import LocalCutCore
 /// Each chunk records the source file URL and time range. The finalizer
 /// uses AVAssetReader to extract the correct time range from each source,
 /// producing output with proper ftyp/moov headers.
-enum ReplayBufferFinalizer {
+enum ReplayBufferFinalizer: Sendable {
 
     private static let log = Logger(
         subsystem: "com.localcutstudio.replay",
@@ -312,7 +312,7 @@ enum ReplayBufferFinalizer {
 
 // MARK: - Errors
 
-enum ReplayBufferError: LocalizedError {
+enum ReplayBufferError: LocalizedError, Sendable {
     case noChunks
     case chunkDataMissing(UUID)
     case readerStartFailed(String)

@@ -65,7 +65,7 @@ public struct VoiceCleanupInsertBypassRamp: Hashable, Sendable {
     }
 }
 
-public enum VoiceCleanupDSP {
+public enum VoiceCleanupDSP: Sendable {
     public static func linearGain(fromDB db: Float) -> Float {
         pow(10, db / 20)
     }

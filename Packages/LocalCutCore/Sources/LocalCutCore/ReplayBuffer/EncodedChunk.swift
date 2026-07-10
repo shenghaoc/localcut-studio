@@ -83,7 +83,7 @@ public struct EncodedChunk: Hashable, Sendable, Identifiable {
 // MARK: - Keyframe detection
 
 /// Utilities for detecting keyframes from `CMSampleBuffer` sample attachments.
-public enum KeyframeDetector {
+public enum KeyframeDetector: Sendable {
 
     /// Returns `true` if the given `CMSampleBuffer` is a keyframe / sync sample.
     ///

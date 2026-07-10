@@ -20,7 +20,7 @@ struct EncodedChunkRingTests {
             isKeyframe: isKeyframe,
             mediaType: mediaType,
             sourceID: UUID(),
-            sourceFileURL: sourceFile ?? URL(fileURLWithPath: "/tmp/test.mov"))
+            sourceFileURL: sourceFile ?? URL(filePath: "/tmp/test.mov"))
     }
 
     @Test("Append and count")
@@ -164,8 +164,8 @@ struct EncodedChunkRingTests {
     @Test("Source file URLs are tracked")
     func sourceFileURLs() async {
         let ring = EncodedChunkRing(config: .default)
-        let url1 = URL(fileURLWithPath: "/tmp/screen.mov")
-        let url2 = URL(fileURLWithPath: "/tmp/webcam.mov")
+        let url1 = URL(filePath: "/tmp/screen.mov")
+        let url2 = URL(filePath: "/tmp/webcam.mov")
 
         await ring.append(makeChunk(seconds: 0, isKeyframe: true, sourceFile: url1))
         await ring.append(makeChunk(seconds: 1, sourceFile: url2))
@@ -179,8 +179,8 @@ struct EncodedChunkRingTests {
     @Test("Select save span includes audio overlapping video keyframe")
     func selectSaveSpanIncludesAudio() async {
         let ring = EncodedChunkRing(config: .default)
-        let videoURL = URL(fileURLWithPath: "/tmp/screen.mov")
-        let audioURL = URL(fileURLWithPath: "/tmp/microphone.mov")
+        let videoURL = URL(filePath: "/tmp/screen.mov")
+        let audioURL = URL(filePath: "/tmp/microphone.mov")
 
         await ring.append(makeChunk(seconds: 0, isKeyframe: true, mediaType: .video, sourceFile: videoURL))
         await ring.append(makeChunk(seconds: 0.2, duration: 0.5, isKeyframe: true, mediaType: .audio, sourceFile: audioURL))

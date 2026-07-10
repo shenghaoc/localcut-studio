@@ -14,7 +14,7 @@ struct TrimAndDragTests {
 
     private func makeModel(clipDuration: Double = 10, sourceStart: Double = 0) -> (EditorModel, Clip.ID) {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = CMTime(seconds: clipDuration, preferredTimescale: 600)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -71,7 +71,7 @@ struct TrimAndDragTests {
     @Test("Trim left edge stops at previous clip boundary")
     func trimLeftClampsToNeighbour() throws {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = time(20)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -126,7 +126,7 @@ struct TrimAndDragTests {
     @Test("Trim right edge stops at next clip boundary")
     func trimRightClampsToNeighbour() throws {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = time(20)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -182,7 +182,7 @@ struct TrimAndDragTests {
     @Test("Move resolves overlap by snapping to nearest gap")
     func moveResolvesOverlap() throws {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = time(20)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -219,7 +219,7 @@ struct TrimAndDragTests {
     @Test("Snap targets exclude only the dragged clip, not shared boundaries")
     func snapTargetsPreserveSharedBoundaries() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = time(20)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -239,7 +239,7 @@ struct TrimAndDragTests {
     @Test("Snap targets convert the effective playhead through transition ripples")
     func snapTargetsConvertPlayheadThroughTransitions() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = time(20)
         media.hasVideo = true
         model.project.mediaItems.append(media)
@@ -295,7 +295,7 @@ struct TrimAndDragTests {
     @Test("Resolve snap considers trailing edge when offset provided")
     func resolveSnapTrailingEdge() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = time(20)
         media.hasVideo = true
         model.project.mediaItems.append(media)

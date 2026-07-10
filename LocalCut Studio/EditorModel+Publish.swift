@@ -2,7 +2,7 @@ import Foundation
 import AVFAudio
 import LocalCutCore
 
-enum WhipPublishStartError: LocalizedError {
+enum WhipPublishStartError: LocalizedError, Sendable {
     case invalidEndpoint
     case programOutputUnavailable
     case alreadyPublishing

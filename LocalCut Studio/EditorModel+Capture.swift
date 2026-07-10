@@ -98,7 +98,7 @@ nonisolated enum CaptureChunkResolver {
     }
 
     static func chunkURL(directoryURL: URL, baseRelativePath: String, chunkIndex: Int) -> URL {
-        let baseURL = URL(fileURLWithPath: baseRelativePath)
+        let baseURL = URL(filePath: baseRelativePath)
         let ext = baseURL.pathExtension
         let stem = baseURL.deletingPathExtension().lastPathComponent
         let filename = chunkIndex == 0 ? "\(stem).\(ext)" : "\(stem)-\(chunkIndex).\(ext)"

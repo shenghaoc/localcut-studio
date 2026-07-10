@@ -18,6 +18,39 @@ Three concentric rings, each gated on the previous staying green:
 3. **Modernize tests** (T1–T3) — adopt current Swift Testing idioms (`#require`,
    parameterized `@Test`) without dropping coverage.
 
+## PR #93 follow-up design
+
+The follow-up sweep keeps the same no-behaviour-change constraint and uses four narrow rules:
+
+1. Replace remaining manual `NSLock` ownership in the affected source and test helpers with
+   immutable `OSAllocatedUnfairLock` instances. Cache dictionaries and LRU order arrays move
+   into the lock's state value so mutation cannot escape the critical section.
+2. Use `withLock` for compiler-verifiable values and `withLockUnchecked` only where the closure
+   carries SDK types that are not consistently `Sendable` across the macOS 26 and 27 toolchains
+   (`CVPixelBuffer`, `CMSampleBuffer`, and WebRTC delegates/sources).
+3. Snapshot state under the lock, then invoke callbacks, render work, `cancelWriting`, and
+   `finishWriting` outside it. This preserves the existing serialization without extending
+   lock hold times around framework calls.
+4. Add `Sendable` only to stateless namespace enums, error enums with `Sendable` payloads, and
+   value types whose stored properties are already `Sendable`. Replace deprecated file-URL
+   initializers without changing path inputs or directory hints.
+
+After merging current `main`, actor-owned state remains actor-owned. In particular,
+`WhipSession.stateStream` keeps `main`'s actor-isolated cache rather than retaining the earlier
+lock workaround for a now-removed `nonisolated(unsafe)` access path.
+
+The final clean-build pass also removes a no-op `await`, explicitly matches the weak
+`EditorModel` capture at both the SwiftUI action and nested `Task` levels, and makes discarded
+dictionary-removal results explicit inside lock closures. These changes preserve action flow,
+task lifetime, and lock ownership while satisfying Swift 6 diagnostics.
+
+For CI failure recovery, the flake-detection wrapper treats the `.xcresult` database as the
+authoritative mapping between a Swift Testing `Suite/test` identifier and its Xcode test target.
+It retries the resulting `Target/Suite/test` selector and refuses an unresolved selector rather
+than reporting a test-runner configuration error as a deterministic test failure. The App Intents
+cancellation test retains its bounded non-waiting contract with a one-second deadline against a
+60-second predecessor so normal CI scheduler contention cannot produce a false timeout.
+
 ## Key technical decisions
 
 ### Core Image kernel migration (D1)

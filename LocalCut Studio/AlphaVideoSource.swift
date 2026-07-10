@@ -3,7 +3,8 @@ import AVFoundation
 import CoreGraphics
 import CoreImage
 import CoreMedia
-import CoreVideo
+@preconcurrency import CoreVideo
+import os
 import LocalCutCore
 
 /// Decodes frames from a video file with an alpha channel using AVFoundation.
@@ -20,9 +21,13 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
     private let generator: AVAssetImageGenerator
     private let frameStarts: [TimeInterval]
     private let duration: TimeInterval
-    private let lock = NSLock()
-    private var cache: [Int: CIImage] = [:]
-    private var cacheOrder: [Int] = []
+
+    /// CIImage is Sendable in macOS 26+ SDK; the lock provides thread safety.
+    private struct CacheState: Sendable {
+        var cache: [Int: CIImage] = [:]
+        var cacheOrder: [Int] = []
+    }
+    private let cacheState = OSAllocatedUnfairLock(initialState: CacheState())
     /// Maximum cached frames retained for smooth short overlay playback.
     private let maxCachedFrames = 4
 
@@ -124,9 +129,9 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
 
     private func cachedFrame(at index: Int) async -> CIImage? {
         // Check cache first.
-        if let cached = lock.withLock({ () -> CIImage? in
-            guard let cached = cache[index] else { return nil }
-            touchCachedFrame(at: index)
+        if let cached = cacheState.withLock({ state -> CIImage? in
+            guard let cached = state.cache[index] else { return nil }
+            touchCachedFrame(at: index, in: &state)
             return cached
         }) {
             return cached
@@ -142,12 +147,12 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
         }
         let image = CIImage(cgImage: result.image)
 
-        lock.withLock {
-            cache[index] = image
-            touchCachedFrame(at: index)
-            while cacheOrder.count > maxCachedFrames {
-                let evicted = cacheOrder.removeFirst()
-                cache.removeValue(forKey: evicted)
+        cacheState.withLock { state in
+            state.cache[index] = image
+            touchCachedFrame(at: index, in: &state)
+            while state.cacheOrder.count > maxCachedFrames {
+                let evicted = state.cacheOrder.removeFirst()
+                state.cache.removeValue(forKey: evicted)
             }
         }
 
@@ -155,18 +160,18 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
     }
 
     nonisolated var cachedFrameCount: Int {
-        lock.withLock { cache.count }
+        cacheState.withLock { $0.cache.count }
     }
 
     nonisolated func purgeCachedFrames() {
-        lock.withLock {
-            cache.removeAll()
-            cacheOrder.removeAll()
+        cacheState.withLock { state in
+            state.cache.removeAll()
+            state.cacheOrder.removeAll()
         }
     }
 
-    private func touchCachedFrame(at index: Int) {
-        cacheOrder.removeAll { $0 == index }
-        cacheOrder.append(index)
+    private func touchCachedFrame(at index: Int, in state: inout CacheState) {
+        state.cacheOrder.removeAll { $0 == index }
+        state.cacheOrder.append(index)
     }
 }

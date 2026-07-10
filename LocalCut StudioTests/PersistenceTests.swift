@@ -169,7 +169,7 @@ struct PersistenceTests {
         project.renderSize = CGSize(width: 1280, height: 720)
         project.frameRate = 24
 
-        let media = MediaItem(url: URL(fileURLWithPath: "/tmp/sample.mov"))
+        let media = MediaItem(url: URL(filePath: "/tmp/sample.mov"))
         media.bookmark = Data([0x09, 0x09])
         media.duration = time(8)
         media.hasVideo = true
@@ -251,7 +251,7 @@ struct PersistenceTests {
     @Test("Saving carries unresolved media refs so a save-before-relink keeps them")
     func saveKeepsUnresolvedMedia() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/tmp/a.mov"))
+        let media = MediaItem(url: URL(filePath: "/tmp/a.mov"))
         media.bookmark = Data([0x01])
         media.duration = time(5)
         media.hasVideo = true
@@ -272,7 +272,7 @@ struct PersistenceTests {
     @Test("Project snapshot survives a full JSON round trip")
     func projectSnapshotRoundTrip() throws {
         let project = Project()
-        let media = MediaItem(url: URL(fileURLWithPath: "/tmp/a.mov"))
+        let media = MediaItem(url: URL(filePath: "/tmp/a.mov"))
         media.bookmark = Data([0x05])
         media.duration = time(6)
         media.hasVideo = true

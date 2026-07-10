@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Caption layout for ``LabeledSliderRow``.
-enum SliderCaptionStyle {
+enum SliderCaptionStyle: Sendable {
     /// `Label  value` on one secondary line, hidden from VoiceOver (the slider
     /// carries the spoken label + value). Used by colour, beauty, transitions.
     case inline

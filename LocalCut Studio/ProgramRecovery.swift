@@ -7,7 +7,7 @@ import LocalCutCore
 /// Handles recovery of Program Mode sessions from crash-left manifests.
 /// Reuses the Phase 41 recovery surface (`CaptureCoordinator.scanRecoveredSessions`)
 /// and extends it with layout-track reconstruction from scene-switch records.
-enum ProgramRecovery {
+enum ProgramRecovery: Sendable {
 
     /// Checks whether a recovered manifest contains Program Mode data
     /// (scene-doc or scene-switch records).

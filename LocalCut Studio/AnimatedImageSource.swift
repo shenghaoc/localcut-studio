@@ -3,6 +3,7 @@ import CoreImage
 import CoreGraphics
 import CoreMedia
 import ImageIO
+import os
 import UniformTypeIdentifiers
 import LocalCutCore
 
@@ -20,8 +21,11 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
     /// Cumulative start time for each frame.
     private let frameStarts: [TimeInterval]
     /// Sliding-window cache: index → CIImage. Protected by lock.
-    private let lock = NSLock()
-    private var cache: [Int: CIImage] = [:]
+    /// CIImage is Sendable in macOS 26+ SDK; the lock provides thread safety.
+    private struct CacheState: Sendable {
+        var cache: [Int: CIImage] = [:]
+    }
+    private let cacheState = OSAllocatedUnfairLock(initialState: CacheState())
     private let maxCachedFrames = 8
 
     init?(url: URL) {
@@ -94,7 +98,7 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
         let index = frameStarts.lastIndex(where: { $0 <= effectiveTime }) ?? 0
 
         // Check cache first.
-        if let cached = lock.withLock({ cache[index] }) {
+        if let cached = cacheState.withLock({ $0.cache[index] }) {
             return cached
         }
 
@@ -111,13 +115,13 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
         let ciImage = CIImage(cgImage: cgImage)
 
         // Insert into cache under lock.
-        lock.withLock {
-            cache[index] = ciImage
-            if cache.count > maxCachedFrames {
+        cacheState.withLock { state in
+            state.cache[index] = ciImage
+            if state.cache.count > maxCachedFrames {
                 // Evict frames farthest from the current index.
-                let sorted = cache.keys.sorted { abs($0 - index) < abs($1 - index) }
+                let sorted = state.cache.keys.sorted { abs($0 - index) < abs($1 - index) }
                 for key in sorted.dropFirst(maxCachedFrames) {
-                    cache.removeValue(forKey: key)
+                    state.cache.removeValue(forKey: key)
                 }
             }
         }
@@ -126,10 +130,10 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
     }
 
     nonisolated var cachedFrameCount: Int {
-        lock.withLock { cache.count }
+        cacheState.withLock { $0.cache.count }
     }
 
     nonisolated func purgeCachedFrames() {
-        lock.withLock { cache.removeAll() }
+        cacheState.withLock { $0.cache.removeAll() }
     }
 }

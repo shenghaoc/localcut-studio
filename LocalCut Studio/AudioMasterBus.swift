@@ -583,7 +583,7 @@ final class AudioMasterBus {
 /// a panner node on the offline graph — both deferred until the bus actually
 /// owns the live audio rendering path. Until then, the UI does not
 /// expose a pan control, so a project's pan field stays at its default.
-enum AudioBusMixing {
+enum AudioBusMixing: Sendable {
 
     /// Effective baseline volume (master × per-track gain). `1.0` for the
     /// default project, so transition crossfades stay bit-identical.

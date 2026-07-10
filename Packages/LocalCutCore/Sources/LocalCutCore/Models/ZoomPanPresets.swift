@@ -4,7 +4,7 @@ import CoreGraphics
 
 /// Generates zoom-n-pan keyframe sets from presets, enforcing velocity and
 /// acceleration bounds to prevent jarring motion.
-public enum ZoomPanPresetGenerator {
+public enum ZoomPanPresetGenerator: Sendable {
     /// Tolerance for floating-point comparison of keyframe times.
     private static let timeTolerance: Double = 0.001
 

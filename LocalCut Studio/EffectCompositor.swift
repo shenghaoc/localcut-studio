@@ -41,7 +41,7 @@ struct CompositorLayer {
 }
 
 /// A synthetic solid-colour scene layer scheduled by Program Mode layout clips.
-struct ColourCompositorLayer {
+struct ColourCompositorLayer: Sendable {
     let hex: String
     let transform: CGAffineTransform
     let opacity: Float
@@ -783,7 +783,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     ///
     /// **Isolation invariant:** Always acquired before accessing
     /// `overlaySourceRegistries`.
-    private static let overlaySourceLock = NSLock()
+    private static let overlaySourceLock = OSAllocatedUnfairLock(initialState: ())
     /// Frame-source registries keyed by preview/export session. Sources are
     /// intentionally not shared globally by overlay ID: a preview rebuild and an
     /// export can overlap with different resolved files for the same overlay ID.

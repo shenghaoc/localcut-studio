@@ -10,7 +10,7 @@ struct EncodedChunkTests {
         let pts = CMTime(seconds: 1.5, preferredTimescale: 600)
         let dur = CMTime(seconds: 2.0, preferredTimescale: 600)
         let sourceID = UUID()
-        let fileURL = URL(fileURLWithPath: "/tmp/test.mov")
+        let fileURL = URL(filePath: "/tmp/test.mov")
 
         let chunk = EncodedChunk(
             presentationTimeStamp: pts,
@@ -37,7 +37,7 @@ struct EncodedChunkTests {
             byteSize: 512,
             isKeyframe: false,
             sourceID: UUID(),
-            sourceFileURL: URL(fileURLWithPath: "/tmp/test.mov"))
+            sourceFileURL: URL(filePath: "/tmp/test.mov"))
 
         #expect(chunk.decodeTimeStamp == pts)
     }
@@ -52,7 +52,7 @@ struct EncodedChunkTests {
             byteSize: 100,
             isKeyframe: true,
             sourceID: UUID(),
-            sourceFileURL: URL(fileURLWithPath: "/tmp/test.mov"))
+            sourceFileURL: URL(filePath: "/tmp/test.mov"))
 
         let expected = CMTime(seconds: 3.5, preferredTimescale: 600)
         #expect(chunk.endTime == expected)
@@ -66,14 +66,14 @@ struct EncodedChunkTests {
             byteSize: 4096,
             isKeyframe: true,
             sourceID: UUID(),
-            sourceFileURL: URL(fileURLWithPath: "/tmp/test.mov"))
+            sourceFileURL: URL(filePath: "/tmp/test.mov"))
 
         #expect(chunk.byteSize == 4096)
     }
 
     @Test("Keyframe flag is preserved")
     func keyframeFlag() {
-        let url = URL(fileURLWithPath: "/tmp/test.mov")
+        let url = URL(filePath: "/tmp/test.mov")
         let kf = EncodedChunk(
             presentationTimeStamp: .zero,
             duration: CMTime(seconds: 1.0, preferredTimescale: 600),
@@ -98,7 +98,7 @@ struct EncodedChunkTests {
         let t0 = CMTime(seconds: 0, preferredTimescale: 600)
         let t1 = CMTime(seconds: 1, preferredTimescale: 600)
         let t2 = CMTime(seconds: 2, preferredTimescale: 600)
-        let url = URL(fileURLWithPath: "/tmp/test.mov")
+        let url = URL(filePath: "/tmp/test.mov")
 
         let c0 = EncodedChunk(presentationTimeStamp: t0, duration: t1, byteSize: 100, isKeyframe: true, sourceID: UUID(), sourceFileURL: url)
         let c1 = EncodedChunk(presentationTimeStamp: t1, duration: t1, byteSize: 100, isKeyframe: false, sourceID: UUID(), sourceFileURL: url)

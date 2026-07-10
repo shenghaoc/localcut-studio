@@ -3,11 +3,12 @@ import Foundation
 import AppKit
 import AVFoundation
 import CoreMedia
+import os
 import LocalCutCore
 @testable import LocalCut_Studio
 
 nonisolated private final class RecorderSwitchingSession: CaptureRunningSession, @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock(initialState: ())
     private let switchable: Bool
     private let updateError: CaptureEngineError?
     private var _updatedTargets: [CaptureTarget] = []
@@ -48,9 +49,7 @@ nonisolated private final class RecorderSwitchingSession: CaptureRunningSession,
     }
 
     private func withLock<T>(_ body: () -> T) -> T {
-        lock.lock()
-        defer { lock.unlock() }
-        return body()
+        lock.withLockUnchecked { _ in body() }
     }
 }
 
@@ -175,7 +174,7 @@ struct ManifestPauseResumeTests {
             kind: .display,
             displayName: "Screen",
             relativePath: "screen.mov")
-        let directoryURL = URL(fileURLWithPath: "/tmp/LocalCutRecorderProbe", isDirectory: true)
+        let directoryURL = URL(filePath: "/tmp/LocalCutRecorderProbe", directoryHint: .isDirectory)
         let manifest = CaptureManifest(records: [
             .header(CaptureManifestHeader(
                 sessionID: UUID(),
@@ -217,8 +216,8 @@ struct ManifestPauseResumeTests {
     func sessionResultManifestFinalizationFailure() {
         var result = CaptureSessionResult(
             id: UUID(),
-            directoryURL: URL(fileURLWithPath: "/tmp/LocalCutRecorderProbe", isDirectory: true),
-            manifestURL: URL(fileURLWithPath: "/tmp/LocalCutRecorderProbe/manifest.ndjson"),
+            directoryURL: URL(filePath: "/tmp/LocalCutRecorderProbe", directoryHint: .isDirectory),
+            manifestURL: URL(filePath: "/tmp/LocalCutRecorderProbe/manifest.ndjson"),
             manifest: CaptureManifest(),
             wasRecovered: false)
 
@@ -851,7 +850,7 @@ struct RecordingGapCollapseTests {
             includeSystemAudio: true,
             webcamDeviceID: nil,
             microphoneDeviceID: nil,
-            rootURL: URL(fileURLWithPath: "/tmp/LocalCutRecorderProbe", isDirectory: true),
+            rootURL: URL(filePath: "/tmp/LocalCutRecorderProbe", directoryHint: .isDirectory),
             frameRate: 30,
             fragmentInterval: CMTime(seconds: 2, preferredTimescale: 600),
             capabilities: Capabilities.current)
@@ -914,7 +913,7 @@ struct RecordingGapCollapseTests {
         let model = EditorModel()
         let duration = CMTime(seconds: 1, preferredTimescale: 600)
         let previousStart = CMTime(seconds: 7, preferredTimescale: 600)
-        let previousMedia = MediaItem(url: URL(fileURLWithPath: "/tmp/previous-recording.mov"))
+        let previousMedia = MediaItem(url: URL(filePath: "/tmp/previous-recording.mov"))
         previousMedia.duration = duration
         previousMedia.hasVideo = true
         let previousClip = Clip(

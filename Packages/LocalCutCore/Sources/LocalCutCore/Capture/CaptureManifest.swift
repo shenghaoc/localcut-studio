@@ -498,7 +498,7 @@ public struct CaptureManifest: Hashable, Sendable {
     }
 }
 
-public enum CaptureManifestJSON {
+public enum CaptureManifestJSON: Sendable {
     // Configured once and shared: JSONEncoder/JSONDecoder hold no caller-visible
     // mutable state across encode/decode calls, so a single instance avoids
     // reallocating on every manifest line.

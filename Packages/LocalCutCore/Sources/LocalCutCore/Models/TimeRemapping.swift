@@ -54,7 +54,7 @@ public nonisolated struct TimeRemapSegment: Hashable, Sendable {
 // MARK: - Time Remapping
 
 /// Pure speed-ramp math shared by the model, timeline layout, and composition builder.
-public nonisolated enum TimeRemapping {
+public nonisolated enum TimeRemapping: Sendable {
     public static let minSpeed: Float = 0.25
     public static let maxSpeed: Float = 4.0
     public static let identitySpeed: Float = 1.0

@@ -163,7 +163,7 @@ struct Phase39Tests {
 
     @Test("Checked-in safe-zone JSON files decode and validate")
     func safeZoneJSONFilesValidate() throws {
-        let testURL = URL(fileURLWithPath: #filePath)
+        let testURL = URL(filePath: #filePath)
         let repoRoot = testURL.deletingLastPathComponent().deletingLastPathComponent()
         let directory = repoRoot
             .appendingPathComponent("LocalCut Studio")

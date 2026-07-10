@@ -3,7 +3,7 @@ import LocalCutCore
 
 // MARK: - Scene editor draft
 
-struct SceneEditorDraft: Identifiable {
+struct SceneEditorDraft: Identifiable, Sendable {
     let id = UUID()
     var scene: SceneDefinition
     var isNew: Bool

@@ -1,11 +1,11 @@
 import SwiftUI
 import LocalCutCore
 
-enum PublishStateDisplay: String {
+enum PublishStateDisplay: String, Sendable {
     case idle, connecting, live, reconnecting, failed, ended
 }
 
-struct PublishStatsDisplay {
+struct PublishStatsDisplay: Sendable {
     var bytesSent: Int64 = 0
     var framesSent: Int64 = 0
     var bitrate: Double = 0

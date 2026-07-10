@@ -101,7 +101,7 @@ func lutRemovePreservesOthers() {
 @Test("EditorModel prunes stale LUT display names after replace and remove")
 func lutDisplayNameCachePrunesStaleEntries() {
     let model = EditorModel()
-    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    let media = MediaItem(url: URL(filePath: "/dev/null"))
     model.project.mediaItems.append(media)
     let first = Data([0x01])
     let second = Data([0x02])
@@ -136,7 +136,7 @@ func lutDisplayNameCachePrunesStaleEntries() {
 @Test("EditorModel restores LUT display names across undo and redo")
 func lutDisplayNameCacheRestoresWithUndoRedo() {
     let model = EditorModel()
-    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    let media = MediaItem(url: URL(filePath: "/dev/null"))
     model.project.mediaItems.append(media)
     let first = Data([0x11])
     let second = Data([0x22])
@@ -185,7 +185,7 @@ func lutDisplayNameCacheRestoresWithUndoRedo() {
 @Test("LUT-only clips are treated as exportable look presets")
 func lutOnlyClipHasExportableLookPreset() {
     let model = EditorModel()
-    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    let media = MediaItem(url: URL(filePath: "/dev/null"))
     model.project.mediaItems.append(media)
     let lutBookmark = Data([0xC0, 0xDE])
     var clip = Clip(mediaID: media.id,
@@ -201,7 +201,7 @@ func lutOnlyClipHasExportableLookPreset() {
 
 @Test("Look preset LUT resolver rejects unsafe sidecar paths")
 func lookPresetLUTResolverRejectsUnsafePaths() throws {
-    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+    let tmp = URL(filePath: NSTemporaryDirectory())
         .appendingPathComponent("look-lut-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: tmp) }
     try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
@@ -386,7 +386,7 @@ func builtInLookPresetResourcesMatchLibrary() throws {
 @Test("Exported look presets copy LUTs under assets/luts")
 @MainActor
 func exportedLookPresetCopiesLUTUnderAssetsLuts() async throws {
-    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+    let tmp = URL(filePath: NSTemporaryDirectory())
         .appendingPathComponent("look-preset-export-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tmp) }

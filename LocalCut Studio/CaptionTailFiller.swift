@@ -213,7 +213,7 @@ nonisolated enum CaptionTailFiller {
             // doesn't hide behind the post-loop `.completed` check.
             guard adaptor.append(buffer, withPresentationTime: pts) else {
                 videoInput.markAsFinished()
-                await writer.cancelWriting()
+                writer.cancelWriting()
                 throw FillerError.writerFinishFailed
             }
         }

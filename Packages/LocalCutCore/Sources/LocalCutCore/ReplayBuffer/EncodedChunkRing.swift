@@ -408,7 +408,7 @@ public actor EncodedChunkRing {
             return spillDirectory.appendingPathComponent("\(chunk.id.uuidString).json")
         }
         spillCounter += 1
-        return URL(fileURLWithPath: "memory-spill-\(spillCounter).json")
+        return URL(filePath: "memory-spill-\(spillCounter).json")
     }
 
     private func removeEntry(at index: Int) {

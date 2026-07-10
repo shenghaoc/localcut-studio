@@ -2,7 +2,7 @@ import Foundation
 import os
 
 #if LOCALCUT_ENABLE_WEBRTC
-import WebRTC
+@preconcurrency import WebRTC
 #endif
 
 // MARK: - AudioPublishBridge
@@ -197,7 +197,7 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     private let channels: Int
     private let frameDurationSeconds: Double
 
-    private let stateLock = NSLock()
+    private let stateLock = OSAllocatedUnfairLock(initialState: ())
     /// Strong reference — WebRTC's ADM retains the delegate for the session
     /// lifetime. terminateDevice() clears it. Using weak here would let the
     /// delegate disappear if the native ADM doesn't retain it, causing
@@ -230,7 +230,7 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     var outputNumberOfChannels: Int { channels }
     var outputLatency: TimeInterval { 0 }
 
-    var isInitialized: Bool { stateLock.withLock { delegate != nil } }
+    var isInitialized: Bool { stateLock.withLockUnchecked { delegate != nil } }
     var isPlayoutInitialized: Bool { true }
     var isPlaying: Bool { stateLock.withLock { isPlayoutActive } }
     var isRecordingInitialized: Bool { true }
@@ -239,12 +239,12 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     // MARK: - Lifecycle
 
     func initialize(with delegate: RTCAudioDeviceDelegate) -> Bool {
-        stateLock.withLock { self.delegate = delegate }
+        stateLock.withLockUnchecked { self.delegate = delegate }
         return true
     }
 
     func terminateDevice() -> Bool {
-        stateLock.withLock { delegate = nil }
+        stateLock.withLockUnchecked { delegate = nil }
         return true
     }
 
@@ -285,14 +285,15 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
         let frameCount = samples.count / channels
         guard frameCount > 0 else { return }
 
-        stateLock.lock()
-        let active = isRecordingActive
-        let delegate = self.delegate
-        let currentSampleTime = sampleTime
-        if active, delegate != nil {
-            sampleTime += Double(frameCount)
+        let (active, delegate, currentSampleTime) = stateLock.withLockUnchecked { () -> (Bool, RTCAudioDeviceDelegate?, Double) in
+            let active = isRecordingActive
+            let delegate = self.delegate
+            let currentSampleTime = sampleTime
+            if active, delegate != nil {
+                sampleTime += Double(frameCount)
+            }
+            return (active, delegate, currentSampleTime)
         }
-        stateLock.unlock()
         guard active, let delegate else { return }
 
         // Convert float [-1.0, 1.0] to Int16
