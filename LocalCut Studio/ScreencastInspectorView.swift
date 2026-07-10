@@ -83,9 +83,14 @@ struct ScreencastInspectorView: View {
                                 .foregroundStyle(.secondary)
                             if callout.id == model.selectedCalloutID {
                                 Image(systemName: "checkmark")
+                                    .accessibilityHidden(true)
                             }
                         }
                     }
+                    .buttonStyle(.borderless)
+                    .accessibilityAddTraits(
+                        callout.id == model.selectedCalloutID ? .isSelected : []
+                    )
                 }
             }
         }

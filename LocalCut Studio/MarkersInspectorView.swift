@@ -71,5 +71,8 @@ struct MarkersInspectorView: View {
         // (review feedback on the original revision: a bare assignment here
         // would leave clip / transition / media selection stale).
         .onTapGesture { model.selectMarker(id: marker.id) }
+        .accessibilityAddTraits(
+            model.selectedMarkerID == marker.id ? .isSelected : []
+        )
     }
 }
