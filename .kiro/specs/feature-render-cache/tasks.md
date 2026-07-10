@@ -10,6 +10,8 @@
 - [x] **T1.4** `invalidate(clipID:)`, `invalidate(notMatchingRenderSize:)`, and `purge()` methods.
 - [x] **T1.5** `RenderCache.cacheDirectoryURL` resolves the on-disk cache directory (`~/Library/Caches/com.shenghaoc.LocalCutStudio/RenderCache/`).
 - [x] **T1.6** Disk spill tier: PNG-encode evicted memory entries, track a bounded disk LRU, rehydrate on memory miss, and delete files on invalidate/purge.
+- [x] **T1.7** Treat the memory byte budget as authoritative when disk spill
+  fails by dropping the evicted frame instead of reinserting it.
 
 ## Compositor
 
@@ -37,6 +39,8 @@
 - [x] **V9** Unit test: `updateSelectedClipCoalesced` invalidates the cache when `effects` changes but leaves it alone for opacity-only edits (codex review P2).
 - [x] **V10** Unit test: evicted frames spill to disk, rehydrate on lookup, and purge removes disk files.
 - [x] **V11** `xcodebuild` (Debug, macOS) green; no test count regression.
+- [x] **V12** Unit test: failed disk spill leaves in-memory byte usage within
+  the configured budget.
 
 ## ROADMAP
 

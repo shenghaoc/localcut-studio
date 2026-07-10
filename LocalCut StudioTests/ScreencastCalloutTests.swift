@@ -337,3 +337,32 @@ struct ScreencastCalloutTransformKeyframeTests {
         return item
     }
 }
+
+@MainActor
+@Suite("Callout selection boundary")
+struct CalloutSelectionBoundaryTests {
+    @Test("Playhead at exact callout end returns nil (exclusive boundary)")
+    func playheadAtExactEndReturnsNil() {
+        let model = EditorModel()
+        let start = CMTime(seconds: 2, preferredTimescale: 600)
+        let duration = CMTime(seconds: 4, preferredTimescale: 600)
+        let calloutID = UUID()
+        model.project.callouts = [
+            CalloutClip(
+                id: calloutID,
+                kind: .box,
+                timeRange: CMTimeRange(start: start, duration: duration)),
+        ]
+        model.selectedCalloutID = calloutID
+
+        // Playhead exactly at callout end (start + duration) should return nil
+        // because the boundary is exclusive (<).
+        model.currentTime = 6.0
+        #expect(model.selectedCalloutLocalPlayheadTime == nil)
+
+        // Playhead one tick before end should return a valid local time.
+        model.currentTime = 5.99
+        let localTime = model.selectedCalloutLocalPlayheadTime
+        #expect(localTime != nil)
+    }
+}

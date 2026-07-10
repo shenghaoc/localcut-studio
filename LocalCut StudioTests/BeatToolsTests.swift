@@ -233,6 +233,23 @@ struct BeatToolsEditorTests {
         #expect(clips.allSatisfy { $0.duration >= oneFrame })
     }
 
+    @Test("Cut at beats does not create an undo step when every beat is outside valid cut bounds")
+    func cutAtBeatsRejectsNoOp() {
+        let (model, media, _, videoClip) = makeModel()
+        model.project.audioTracks.first!.clips = []
+        model.selectedClipID = videoClip.id
+        model.beatAnalyses[media.id] = BeatAnalysis(
+            tempoBPM: 120,
+            beatTimes: [.zero, videoClip.duration],
+            confidence: 1)
+
+        model.cutSelectedClipAtBeats()
+
+        #expect(model.project.videoTracks.first!.clips == [videoClip])
+        #expect(!model.canUndo)
+        #expect(model.statusMessage == "No analysed beats fall inside the selected clip.")
+    }
+
     @Test("Cut at beats preserves retime fields and slices in source time")
     func cutAtBeatsPreservesRetimedPieces() {
         let (model, _, _, videoClip) = makeModel()

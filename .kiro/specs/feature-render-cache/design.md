@@ -81,7 +81,7 @@ private struct RenderCacheEntry: Sendable {
 }
 ```
 
-Lookup touches the matched memory node to the tail. Insert appends a memory node and pops the head until `totalBytes ≤ byteBudget`. Evicted entries are written outside the lock, then recorded in the disk LRU. A memory miss checks the disk index, loads the PNG via `CIImage(contentsOf:)`, and re-inserts into memory. `invalidate(clipID:)`, `invalidate(notMatchingRenderSize:)`, and `purge()` remove both memory entries and spill files.
+Lookup touches the matched memory node to the tail. Insert appends a memory node and pops the head until `totalBytes ≤ byteBudget`. Evicted entries are written outside the lock, then recorded in the disk LRU. If PNG encoding or the disk write fails, the evicted frame is dropped and regenerated on demand; it is never reinserted into memory because the byte budget is authoritative. A memory miss checks the disk index, loads the PNG via `CIImage(contentsOf:)`, and re-inserts into memory. `invalidate(clipID:)`, `invalidate(notMatchingRenderSize:)`, and `purge()` remove both memory entries and spill files.
 
 ### Storage tiers
 
@@ -158,7 +158,9 @@ The combination of explicit invalidation on the obvious paths *and* automatic ke
 ## Risks
 
 - A leaked `CIImage` whose backing buffer transitively retains a `CVPixelBuffer` could pin the source decoder's frame; in practice AVFoundation reissues source frames per request, so the cached `CIImage` only holds CPU-side filter graph metadata, not the buffer.
-- A pathological project (thousands of clips, all with chains) inserting into the cache faster than LRU can drop entries can briefly exceed the byte budget in the eviction window; we accept the overshoot because the cap is advisory, not a hard memory limit.
+- Concurrent inserts may briefly overlap encoding work outside the lock, but
+  committed in-memory entries remain within the byte budget. Failed spill
+  writes drop their evicted frames instead of weakening that contract.
 - Two clips that legitimately share `(effectChainHash, time, renderSize)` but differ only in `clipID` are kept as separate entries. This is correct (clipID is in the key) but loses a possible deduplication win — Phase 38's look packs may revisit this once shared LUTs become common.
 
 ## Non-goals

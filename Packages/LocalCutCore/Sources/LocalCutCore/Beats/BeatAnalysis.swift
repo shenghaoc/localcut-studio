@@ -22,9 +22,14 @@ public struct BeatAnalysis: Equatable, Codable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        tempoBPM = try c.decode(Double.self, forKey: .tempoBPM)
-        beatTimes = try c.decode([CMTimeCode].self, forKey: .beatTimes).map(\.cmTime)
-        confidence = try c.decode(Float.self, forKey: .confidence)
+        let rawTempo = try c.decode(Double.self, forKey: .tempoBPM)
+        // Validate decoded values to guard against corrupt cache files.
+        tempoBPM = rawTempo.isFinite && rawTempo >= 0 ? rawTempo : 0
+        beatTimes = try c.decode([CMTimeCode].self, forKey: .beatTimes)
+            .map(\.cmTime)
+            .filter { $0.isValid && $0.isNumeric && $0 >= .zero }
+        let rawConfidence = try c.decode(Float.self, forKey: .confidence)
+        confidence = rawConfidence.isFinite ? max(0, min(1, rawConfidence)) : 0
     }
 
     public func encode(to encoder: any Encoder) throws {

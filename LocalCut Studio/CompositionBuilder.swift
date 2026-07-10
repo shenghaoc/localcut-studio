@@ -133,7 +133,8 @@ enum CompositionBuilder {
     // VisibleSegment, PlannedUnit, and planUnits() are defined in LocalCutCore.
 
     static func build(project: Project, showSkinMask: Bool = false,
-                      overlaySourceRegistryID: UUID? = nil) async throws -> BuiltComposition? {
+                      overlaySourceRegistryID: UUID? = nil,
+                      includeLoudnessGainInAudioMix: Bool = true) async throws -> BuiltComposition? {
         let composition = AVMutableComposition()
         let renderSize = project.renderSize
 
@@ -241,10 +242,22 @@ enum CompositionBuilder {
         var hasAudioCrossfade = false
         var hasBusContribution = false
         var hasTimePitchContribution = false
+        // Loudness normalisation gain is a linear multiplier applied to all
+        // audio tracks. Keep it in the audio mix only when no DSP insert owns
+        // the offline/live cleanup path; otherwise VoiceCleanupDSP applies it
+        // after denoise/gate/compression and before the limiter. Measurement
+        // builds also opt out so a previously-applied gain does not bias the
+        // next analysis pass.
+        let appliesLoudnessInAudioMix = includeLoudnessGainInAudioMix
+            && !project.voiceCleanup.requiresOfflineProcessing
+        let loudnessGain = appliesLoudnessInAudioMix
+            ? project.voiceCleanup.loudnessGainLinear
+            : 1.0
         for projectTrack in project.audioTracks where !projectTrack.isMuted {
             let trackInput = project.trackInputs.first(where: { $0.id == projectTrack.id })
             let baseline = AudioBusMixing.baselineVolume(masterGain: project.masterGain,
-                                                         trackInput: trackInput)
+                                                         trackInput: trackInput,
+                                                         loudnessGain: loudnessGain)
             if baseline != 1 { hasBusContribution = true }
 
             var placed: [(track: AVMutableCompositionTrack, clip: Clip,
@@ -1185,7 +1198,12 @@ enum CompositionBuilder {
                 scale: overlay.scale,
                 rotation: overlay.rotation,
                 opacity: overlay.opacity,
-                endAction: overlay.endAction))
+                endAction: overlay.endAction,
+                positionXKeyframes: overlay.positionXKeyframes,
+                positionYKeyframes: overlay.positionYKeyframes,
+                scaleKeyframes: overlay.scaleKeyframes,
+                rotationKeyframes: overlay.rotationKeyframes,
+                opacityKeyframes: overlay.opacityKeyframes))
         }
         return items
     }

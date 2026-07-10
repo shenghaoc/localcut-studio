@@ -4,7 +4,12 @@
 # Xcode build artifacts
 build/
 DerivedData/
+DerivedData-*/
 *.app
+*.xcresult
+xcodebuild.log
+/auto.crt
+/auto.key
 
 # Xcode user-specific state
 xcuserdata/
@@ -17,6 +22,7 @@ xcuserdata/
 .swiftpm/
 .build/
 Packages/LocalCutWebRTC/WebRTC.xcframework/
+Packages/LocalCutWebRTC/LICENSE.WebRTC
 
 # Misc
 *.moved-aside

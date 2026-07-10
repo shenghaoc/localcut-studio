@@ -17,6 +17,9 @@
 - [x] **T1.3** `LiveComposeTap` per source; zero-copy pass-through plus
   dispose-time late-frame gating.
 - [x] **T1.4** `ProgramSession` orchestrator over the Phase 41 session model.
+- [x] **T1.5** Normalize up-front encoder acquisition failures to
+  `ProgramSessionError.budgetExhausted` before any writer/session resource is
+  created, using the actor's atomic typed-result acquisition API.
 
 ## Scene model
 
@@ -62,6 +65,8 @@
 
 - [x] **T6.1** Unit test: scene-switch tick invariant.
 - [x] **T6.2** Budget-exhaustion test.
+- [x] **T6.2a** Serialize `ProgramSessionTests` around the process-wide active
+  session invariant and assert the normalized budget error type.
 - [x] **T6.3** Recovery test.
 - [ ] **T6.4** Smoke: 2-cam + 1-screen + mic with 3 switches.
   - Requires physical capture hardware. Mocked coverage lives in

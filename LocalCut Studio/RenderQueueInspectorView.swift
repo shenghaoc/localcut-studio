@@ -61,7 +61,7 @@ struct RenderQueueInspectorView: View {
                         model.setProjectAspect(preset.projectAspect)
                     }
                     .controlSize(.mini)
-                    .help("Switch the project canvas before queueing this preset.")
+                    .help("Change the project's render canvas to \(preset.projectAspect.displayName). This affects preview and export — existing clip layout may shift.")
                 }
             }
         }
@@ -103,11 +103,12 @@ struct RenderQueueInspectorView: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Clear Completed") {
+                    Button("Clear Finished") {
                         model.renderQueue.clearCompleted()
                     }
                     .controlSize(.small)
                     .disabled(!model.renderQueue.jobs.contains(where: { $0.isTerminal }))
+                    .help("Remove completed, cancelled, and failed renders from the list.")
                 }
             }
         }
@@ -213,10 +214,18 @@ struct RenderQueueInspectorView: View {
         }
         panel.nameFieldStringValue = "\(model.project.name).\(preset.defaultFilenameExtension)"
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let response = panel.runModal()
+        guard response == .OK, let url = panel.url else {
+            if response == .cancel {
+                model.statusMessage = "Export cancelled."
+            }
+            return
+        }
 
+        // Show progress while resolving the bookmark (may be slow on network volumes).
+        model.statusMessage = "Preparing \(url.lastPathComponent)…"
         guard let bookmark = RenderQueue.outputBookmark(for: url) else {
-            model.statusMessage = "Could not access \(url.lastPathComponent)."
+            model.statusMessage = "Could not access \(url.lastPathComponent). Possible causes: destination deleted, disk ejected, or sandbox permission denied. Try choosing a different location."
             return
         }
 

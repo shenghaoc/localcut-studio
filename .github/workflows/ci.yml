@@ -82,7 +82,7 @@ jobs:
       # to the flake-detection retry loop (a real integration failure should
       # not be masked by a retry pass).
       - name: MediaMTX WHIP integration
-        run: LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh
+        run: ./Scripts/run-mediamtx-whip-integration.sh
 
       - name: Restore OTIO validator venv
         uses: actions/cache@v4
@@ -184,7 +184,6 @@ jobs:
             -only-testing:"LocalCut StudioTests/WhipPublishTests" \
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 300 \
-            CODE_SIGNING_ALLOWED=NO \
             SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG \
             | tee xcodebuild.log
 

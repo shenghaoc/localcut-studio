@@ -185,3 +185,20 @@ extension Transform2D: Interpolatable {
                     ty: lhs.ty + (rhs.ty - lhs.ty) * t)
     }
 }
+
+extension Transform2D {
+    /// Returns a copy with optional parameter overrides. Used by inspector
+    /// editors to update individual transform components without affecting others.
+    public func replacing(
+        translateX: Float? = nil,
+        translateY: Float? = nil,
+        scale: Float? = nil,
+        rotationDegrees: Float? = nil
+    ) -> Transform2D {
+        Transform2D(
+            translateX: translateX ?? tx,
+            translateY: translateY ?? ty,
+            scale: scale ?? decomposedScale,
+            rotation: rotationDegrees.map { $0 * Float.pi / 180 } ?? decomposedRotation)
+    }
+}

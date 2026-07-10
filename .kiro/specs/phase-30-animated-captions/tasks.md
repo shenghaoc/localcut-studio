@@ -8,6 +8,8 @@
 - [x] **T1.2** Add `CaptionStyle` value type with default + clamp; add line-level override and track default.
 - [x] **T1.3** SRT/VTT importer producing `CaptionLine`s; unit tests on cue parsing edge cases.
 - [x] **T1.4** Add line-local `CaptionStyleKeyframes` for R2.3: fill colour, scale, X/Y offset, opacity, and letter spacing.
+- [x] **T1.5** Keep optional word timings inside the line range after start or
+  duration retimes; drop words whose clamped duration becomes zero.
 
 ## Engine
 
@@ -39,3 +41,5 @@
 - [x] **T5.3** Unit tests for token-index word range mapping and typewriter mask geometry.
 - [x] **T5.4** Unit tests for caption style keyframe interpolation, Codable round-trip, authoring at playhead, and undo restoration.
 - [x] **T5.5** `xcodebuild` (Debug, macOS) green; no test count regression.
+- [x] **T5.6** Regression covers duration-only retiming that drops a word
+  starting at the new line boundary.

@@ -139,16 +139,25 @@ public struct Keyframed<T: Interpolatable>: Hashable, Codable, Sendable {
     public mutating func addKeyframe(at time: CMTime, value: T,
                                      incomingHandle: KeyframeHandle? = nil,
                                      outgoingHandle: KeyframeHandle? = nil) {
-        let kf = Keyframe(time: time, value: value,
-                          incomingHandle: incomingHandle,
-                          outgoingHandle: outgoingHandle)
         if let i = keyframes.firstIndex(where: { $0.time >= time }) {
             if keyframes[i].time == time {
-                keyframes[i] = kf
+                // Preserve existing bezier handles when updating value at the
+                // same time — the caller passes nil handles for a value-only
+                // update (e.g. "Update" button), and destroying user-authored
+                // ease curves would be data loss.
+                keyframes[i].value = value
+                if let incomingHandle { keyframes[i].incomingHandle = incomingHandle }
+                if let outgoingHandle { keyframes[i].outgoingHandle = outgoingHandle }
             } else {
+                let kf = Keyframe(time: time, value: value,
+                                  incomingHandle: incomingHandle,
+                                  outgoingHandle: outgoingHandle)
                 keyframes.insert(kf, at: i)
             }
         } else {
+            let kf = Keyframe(time: time, value: value,
+                              incomingHandle: incomingHandle,
+                              outgoingHandle: outgoingHandle)
             keyframes.append(kf)
         }
     }

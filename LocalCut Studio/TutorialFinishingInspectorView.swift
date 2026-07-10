@@ -97,7 +97,7 @@ struct TutorialFinishingInspectorView: View {
                     Button("Detect Silences") {
                         model.runSilenceDetection(parameters: silenceParams)
                     }
-                    .disabled(model.project.audioTracks.allSatisfy(\.clips.isEmpty))
+                    .disabled(!model.canRunSilenceDetection)
 
                     if model.hasSilenceProposals {
                         Button("Review (\(model.silenceProposals.count))") {

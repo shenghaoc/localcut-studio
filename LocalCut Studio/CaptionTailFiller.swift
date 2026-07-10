@@ -211,7 +211,11 @@ nonisolated enum CaptionTailFiller {
             let pts = CMTime(value: CMTimeValue(frame), timescale: fpsTimescale)
             // Surface a dropped append immediately so a partial encode
             // doesn't hide behind the post-loop `.completed` check.
-            guard adaptor.append(buffer, withPresentationTime: pts) else { break }
+            guard adaptor.append(buffer, withPresentationTime: pts) else {
+                videoInput.markAsFinished()
+                await writer.cancelWriting()
+                throw FillerError.writerFinishFailed
+            }
         }
         videoInput.markAsFinished()
 

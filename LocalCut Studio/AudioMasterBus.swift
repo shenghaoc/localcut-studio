@@ -328,6 +328,8 @@ final class AudioMasterBus {
         livePlayerNode?.stop()
         livePlayerNode?.reset()
         liveGainReductionStore.update(LiveGainReduction())
+        // Reset mixer volume when stopping the live preview.
+        liveEngine.mainMixerNode.outputVolume = 1.0
     }
 
     @MainActor
@@ -366,6 +368,22 @@ final class AudioMasterBus {
 
     func resumeLivePreview() {
         livePlayerNode?.play()
+    }
+
+    /// Applies loudness normalisation gain through the live engine's mixer node
+    /// output volume. This avoids routing through the full offline pipeline when
+    /// only loudness is enabled (no DSP inserts). The meter tap reads the
+    /// post-gain signal, which matches what the user hears.
+    func applyLoudnessGain(_ gainLinear: Float) {
+        guard isLiveRunning else { return }
+        let clampedGain = max(0, min(2, gainLinear))
+        liveEngine.mainMixerNode.outputVolume = clampedGain
+    }
+
+    /// Resets the mixer node output volume to unity.
+    func resetLoudnessGain() {
+        guard isLiveRunning else { return }
+        liveEngine.mainMixerNode.outputVolume = 1.0
     }
 
     func readLiveGainReduction() -> LiveGainReduction {
@@ -570,8 +588,9 @@ enum AudioBusMixing {
     /// Effective baseline volume (master × per-track gain). `1.0` for the
     /// default project, so transition crossfades stay bit-identical.
     nonisolated static func baselineVolume(masterGain: Float,
-                                           trackInput: TrackInput?) -> Float {
+                                           trackInput: TrackInput?,
+                                           loudnessGain: Float = 1.0) -> Float {
         let g = trackInput?.gain ?? 1
-        return max(0, masterGain * g)
+        return max(0, masterGain * g * loudnessGain)
     }
 }

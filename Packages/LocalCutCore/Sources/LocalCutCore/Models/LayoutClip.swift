@@ -82,7 +82,8 @@ public final class LayoutTrack: Identifiable {
     /// The first free time at the tail of the track.
     public var endTime: CMTimeCode {
         clips.reduce(CMTimeCode(CMTime(value: 0, timescale: 600))) { acc, clip in
-            clip.timelineEnd.cmTime > acc.cmTime ? clip.timelineEnd : acc
+            CMTimeMaximum(clip.timelineEnd.cmTime, acc.cmTime) == clip.timelineEnd.cmTime
+                ? clip.timelineEnd : acc
         }
     }
 }

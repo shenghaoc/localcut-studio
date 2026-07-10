@@ -66,7 +66,32 @@ struct SpeedCurveEditor: View {
         .frame(minHeight: 124, idealHeight: 136)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Speed curve editor")
-        .accessibilityValue("\(clip.speedCurve.keyframes.count) speed keyframes")
+        .accessibilityValue(accessibilitySpeedValue)
+        .accessibilityAdjustableAction { direction in
+            // Allow VoiceOver users to adjust the default speed with swipe up/down.
+            var curve = clip.speedCurve
+            let step: Float = 0.25
+            switch direction {
+            case .increment:
+                curve.defaultValue = TimeRemapping.clampedSpeed(curve.defaultValue + step)
+            case .decrement:
+                curve.defaultValue = TimeRemapping.clampedSpeed(curve.defaultValue - step)
+            @unknown default:
+                break
+            }
+            onChange(curve)
+            onCommit()
+        }
+    }
+
+    private var accessibilitySpeedValue: String {
+        let keyframeCount = clip.speedCurve.keyframes.count
+        let speed = String(format: "%.2f", clip.speedCurve.defaultValue)
+        if keyframeCount == 0 {
+            return "Constant speed \(speed)x"
+        } else {
+            return "\(keyframeCount) speed keyframes, base speed \(speed)x"
+        }
     }
 
     private var localSegmentPlan: [TimeRemapSegment] {

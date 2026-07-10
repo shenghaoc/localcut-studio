@@ -75,11 +75,17 @@ final class PreviewRebuildCoordinator {
                 DiagnosticsBridge.shared.clearRenderSamples()
                 return
             }
-            let cleanupPreviewActive = built.audioCleanup.requiresOfflineProcessing
-                && !built.composition.tracks(withMediaType: .audio).isEmpty
+            let hasAudio = !built.composition.tracks(withMediaType: .audio).isEmpty
+            let needsDSPPipeline = built.audioCleanup.requiresOfflineProcessing && hasAudio
+            let needsLoudnessGain = built.audioCleanup.loudnessGainLinear != 1.0 && hasAudio
             var cleanupPreviewRunning = false
-            if cleanupPreviewActive {
+            if needsDSPPipeline {
+                // DSP inserts (denoiser, gate, compressor, limiter) require the
+                // full offline pipeline to decode, process, and schedule audio.
                 do {
+                    // Cancel any previous scheduled audio and restore mixer
+                    // unity before VoiceCleanupDSP applies loudness itself.
+                    model.audioBus.stopLivePreviewAudio()
                     model.audioBus.updateLiveCleanupSettings(model.project.voiceCleanup)
                     try model.audioBus.prepareLiveForPreview()
                     model.audioBus.scheduleLiveComposition(
@@ -94,6 +100,15 @@ final class PreviewRebuildCoordinator {
                     model.statusMessage = "Live voice cleanup unavailable: \(error.localizedDescription)"
                     model.audioBus.stopLivePreviewAudio()
                 }
+            } else if needsLoudnessGain {
+                // Loudness-only: apply gain through the mixer node volume.
+                // No need for the full offline pipeline — just start the live
+                // engine for metering and set the mixer output volume.
+                // Stop a previous DSP player first so processed audio cannot
+                // overlap the unmuted AVPlayerItem path.
+                model.audioBus.stopLivePreviewAudio()
+                model.audioBus.prepareLive()
+                model.audioBus.applyLoudnessGain(built.audioCleanup.loudnessGainLinear)
             } else {
                 model.audioBus.stopLivePreviewAudio()
             }

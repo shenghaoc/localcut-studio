@@ -109,9 +109,9 @@ struct MediaBinView: View {
             isPresented: $showImporter,
             allowedContentTypes: [.movie, .video, .audiovisualContent, .audio, .mpeg4Movie, .quickTimeMovie],
             allowsMultipleSelection: true
-        ) { result in
+        ) { [weak model] result in
             if case .success(let urls) = result {
-                let wantsBundling = model.copyImportsIntoBundle
+                guard let wantsBundling = model?.copyImportsIntoBundle else { return }
                 Task { [weak model] in await model?.importMedia(urls: urls, wantsBundling: wantsBundling) }
             }
         }

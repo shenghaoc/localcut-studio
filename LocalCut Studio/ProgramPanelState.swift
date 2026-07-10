@@ -111,12 +111,16 @@ final class ProgramPanelState {
         isStarting = true
         currentSceneId = first.id
         statusMessage = "Starting Program Mode..."
-        Task { [weak self] in
+        Task { [weak self, weak model] in
             defer { self?.isStarting = false }
             guard let self else {
                 // Panel was dismissed before session started — clean up the
                 // session reference so future panels don't see a stale session.
-                model.programSession = nil
+                model?.programSession = nil
+                return
+            }
+            guard let model else {
+                self.ownsCurrentSession = false
                 return
             }
             do {
@@ -129,7 +133,7 @@ final class ProgramPanelState {
                         // Strong captures from guard-let: critical cleanup
                         // (stopWhipPublish, landing) must complete even if the
                         // panel is dismissed during the failure path.
-                        Task { @MainActor in
+                        Task { @MainActor [self, model] in
                             await model.stopWhipPublish()
                             self.isRunning = false
                             self.isStarting = false
@@ -147,9 +151,7 @@ final class ProgramPanelState {
                             } else {
                                 self.statusMessage = message
                             }
-                            // model captured strongly from guard-let above —
-                            // encoderBudget requires the model reference.
-                            Task { [weak self] in await self?.publishEncoderBudget(model.encoderBudget) }
+                            await self.publishEncoderBudget(model.encoderBudget)
                         }
                     })
                 await publishEncoderBudget(model.encoderBudget)

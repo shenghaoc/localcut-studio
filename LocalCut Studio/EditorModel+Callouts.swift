@@ -16,13 +16,14 @@ extension EditorModel {
             start: CMTime(seconds: currentTime, preferredTimescale: 600),
             duration: defaultDuration)
 
-        // Assign sequential step numbers for step-number callouts.
+        // Assign sequential step numbers for step-number callouts only.
+        // Non-step callouts use 0 (unused) to avoid carrying stale data.
         let stepNumber: Int
         if kind == .stepNumber {
             let existingSteps = project.callouts.filter { $0.kind == .stepNumber }
             stepNumber = (existingSteps.map(\.stepNumber).max() ?? 0) + 1
         } else {
-            stepNumber = 1
+            stepNumber = 0
         }
 
         let callout = CalloutClip(kind: kind, timeRange: timeRange, stepNumber: stepNumber)
@@ -65,8 +66,10 @@ extension EditorModel {
     var selectedCalloutLocalPlayheadTime: CMTime? {
         guard let callout = selectedCallout else { return nil }
         let playhead = CMTime(seconds: currentTime, preferredTimescale: 600)
+        let calloutEnd = callout.timeRange.start + callout.timeRange.duration
+        // Use exclusive end (<) matching the compositor's visibility check.
         guard playhead >= callout.timeRange.start,
-              playhead <= callout.timeRange.start + callout.timeRange.duration else { return nil }
+              playhead < calloutEnd else { return nil }
         return CMTimeMaximum(.zero, playhead - callout.timeRange.start)
     }
 
@@ -187,12 +190,8 @@ extension EditorModel {
 
     private func nearestCalloutTransformKeyframe(in keyframes: Keyframed<Transform2D>,
                                                  to time: CMTime) -> Keyframe<Transform2D>? {
-        let tolerance = calloutKeyframeHitToleranceSeconds
-        return keyframes.keyframes
-            .map { keyframe in (keyframe, abs((keyframe.time - time).seconds)) }
-            .filter { $0.1 <= tolerance }
-            .min { $0.1 < $1.1 }?
-            .0
+        EditorModel.nearestTransformKeyframe(in: keyframes, to: time,
+                                              tolerance: calloutKeyframeHitToleranceSeconds)
     }
 
     private func staticTransform(for callout: CalloutClip) -> Transform2D {

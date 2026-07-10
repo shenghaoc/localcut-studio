@@ -162,7 +162,9 @@ extension Capabilities {
         return 0
     }
 
-    private static func probeHardwareEncoderCount() -> Int {
+    /// Counts the number of hardware-accelerated video encoders available on
+    /// this machine. Shared by `Capabilities` and `EncoderBudget`.
+    package static func probeHardwareEncoderCount() -> Int {
         // VTCopyVideoEncoderList doesn't expose a "hardware only" options-key
         // — the hardware flag is a per-entry property
         // (`kVTVideoEncoderList_IsHardwareAccelerated`). Pull the whole list

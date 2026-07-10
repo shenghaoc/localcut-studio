@@ -5,7 +5,9 @@ import CoreMedia
 @testable import LocalCut_Studio
 import LocalCutCore
 
-@Suite("ProgramSession")
+// ProgramSession enforces one active process-wide session, so cases that start
+// sessions must not overlap each other in the same test process.
+@Suite("ProgramSession", .serialized)
 struct ProgramSessionTests {
 
     private nonisolated final class FrameCounter: @unchecked Sendable {

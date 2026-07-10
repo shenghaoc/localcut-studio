@@ -74,16 +74,20 @@ final class EditorModel {
     var copyImportsIntoBundle: Bool = true
 
     // Beat tools (Phase 34)
+    /// Whether beat markers are shown on the timeline ruler. Session-only;
+    /// reset on document open because beat analyses are project-scoped.
     var showBeatMarkers = false
+    /// Whether clip editing snaps to beat boundaries. Session-only;
+    /// reset on document open because beat analyses are project-scoped.
     var snapToBeats = false
     /// Global draw/snap offset in seconds, clamped by the inspector to ±200 ms.
     /// Changing it must drop the projected-beat memo so markers, snap targets,
     /// and cut/align reflect the new offset on the next read.
-    var beatOffsetSeconds: Double = 0 {
+    var beatOffsetSeconds: Double = BeatToolsDefaults.offsetSeconds {
         didSet { invalidateProjectedBeatTimesCache() }
     }
     /// Maximum distance for Align to Beat in seconds.
-    var beatAlignWindowSeconds: Double = 0.15
+    var beatAlignWindowSeconds: Double = BeatToolsDefaults.alignWindowSeconds
     /// Per-source beat analyses. Mutating this set (analysis completes, caches
     /// load, document reset) invalidates the projected-beat memo.
     var beatAnalyses: [MediaItem.ID: BeatAnalysis] = [:] {
@@ -264,6 +268,28 @@ final class EditorModel {
     /// **Isolation invariant:** Mutated on `@MainActor`; read in `deinit`
     /// (nonisolated) for resource cleanup via `EffectCompositor.releaseOverlaySources`.
     @ObservationIgnored nonisolated(unsafe) var activeOverlaySourceRegistryID: UUID?
+
+    // MARK: - Clip lookup index
+
+    /// O(1) clip lookup: maps clip ID to (trackKind, trackIndex, clipIndex).
+    /// Rebuilt on every project mutation via `rebuildClipIndex()`.
+    @ObservationIgnored private var clipIndex: [Clip.ID: (trackKind: TrackKind, trackIndex: Int, clipIndex: Int)] = [:]
+
+    /// Rebuilds the clip index from the current project state.
+    func rebuildClipIndex() {
+        var index: [Clip.ID: (trackKind: TrackKind, trackIndex: Int, clipIndex: Int)] = [:]
+        for (ti, track) in project.videoTracks.enumerated() {
+            for (ci, clip) in track.clips.enumerated() {
+                index[clip.id] = (.video, ti, ci)
+            }
+        }
+        for (ti, track) in project.audioTracks.enumerated() {
+            for (ci, clip) in track.clips.enumerated() {
+                index[clip.id] = (.audio, ti, ci)
+            }
+        }
+        clipIndex = index
+    }
 
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.
@@ -461,6 +487,7 @@ final class EditorModel {
     /// single chokepoint that drops the projected-beat memo when the timeline
     /// layout the beats project through changes.
     func scheduleRebuild() {
+        rebuildClipIndex()
         invalidateProjectedBeatTimesCache()
         previewRebuildCoordinator.scheduleRebuild(model: self)
     }
@@ -903,7 +930,7 @@ final class EditorModel {
         set {
             guard let id = selectedClipID else { return }
             performCoalescedUndoable("Adjust Skin Smooth", target: id, rebuild: .debounced) {
-                for track in allTracks {
+                for track in project.videoTracks {
                     guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                     var smooth = newValue
                     smooth.clamp()
@@ -925,7 +952,7 @@ final class EditorModel {
     func updateSelectedClipSkinSmooth(_ transform: @escaping (inout SkinSmoothEffect) -> Void) {
         guard let id = selectedClipID else { return }
         performCoalescedUndoable("Adjust Skin Smooth", target: id, rebuild: .debounced) {
-            for track in allTracks {
+            for track in project.videoTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 if let effectIndex = track.clips[index].effects.firstIndex(where: {
                     if case .skinSmooth = $0 { return true }; return false
@@ -1036,7 +1063,7 @@ final class EditorModel {
 
     private func mutateSelectedSkinSmooth(clipID: Clip.ID,
                                           _ transform: (inout SkinSmoothEffect) -> Void) {
-        for track in allTracks {
+        for track in project.videoTracks {
             guard let index = track.clips.firstIndex(where: { $0.id == clipID }) else { continue }
             if let effectIndex = track.clips[index].effects.firstIndex(where: {
                 if case .skinSmooth = $0 { return true }; return false
@@ -1062,7 +1089,7 @@ final class EditorModel {
     func resetClipSkinSmooth() {
         guard let id = selectedClipID else { return }
         performUndoable("Reset Skin Smooth") {
-            for track in allTracks {
+            for track in project.videoTracks {
                 guard let index = track.clips.firstIndex(where: { $0.id == id }) else { continue }
                 track.clips[index].effects.removeAll { if case .skinSmooth = $0 { return true }; return false }
                 RenderCache.shared.invalidate(clipID: id)
@@ -1074,10 +1101,7 @@ final class EditorModel {
 
     var selectedClip: Clip? {
         guard let id = selectedClipID else { return nil }
-        for track in allTracks {
-            if let clip = track.clips.first(where: { $0.id == id }) { return clip }
-        }
-        return nil
+        return clip(for: id)
     }
 
     var selectedMedia: MediaItem? {
@@ -1085,16 +1109,54 @@ final class EditorModel {
         return project.media(for: id)
     }
 
-    /// Finds the `Track` that contains the clip with the given ID.
+    /// Finds the `Track` that contains the clip with the given ID. O(1) via index.
     func track(for clipID: Clip.ID) -> Track? {
-        allTracks.first { $0.clips.contains(where: { $0.id == clipID }) }
+        if let entry = clipIndex[clipID] {
+            switch entry.trackKind {
+            case .video:
+                if entry.trackIndex < project.videoTracks.count {
+                    let track = project.videoTracks[entry.trackIndex]
+                    if entry.clipIndex < track.clips.count,
+                       track.clips[entry.clipIndex].id == clipID {
+                        return track
+                    }
+                }
+            case .audio:
+                if entry.trackIndex < project.audioTracks.count {
+                    let track = project.audioTracks[entry.trackIndex]
+                    if entry.clipIndex < track.clips.count,
+                       track.clips[entry.clipIndex].id == clipID {
+                        return track
+                    }
+                }
+            case .layout:
+                break
+            }
+        }
+        return allTracks.first { track in track.clips.contains { $0.id == clipID } }
     }
 
+    /// Returns the clip with the given ID. O(1) via index.
     func clip(for clipID: Clip.ID) -> Clip? {
-        for track in allTracks {
-            if let clip = track.clips.first(where: { $0.id == clipID }) { return clip }
+        if let entry = clipIndex[clipID] {
+            switch entry.trackKind {
+            case .video:
+                if entry.trackIndex < project.videoTracks.count,
+                   entry.clipIndex < project.videoTracks[entry.trackIndex].clips.count {
+                    let clip = project.videoTracks[entry.trackIndex].clips[entry.clipIndex]
+                    if clip.id == clipID { return clip }
+                }
+            case .audio:
+                if entry.trackIndex < project.audioTracks.count,
+                   entry.clipIndex < project.audioTracks[entry.trackIndex].clips.count {
+                    let clip = project.audioTracks[entry.trackIndex].clips[entry.clipIndex]
+                    if clip.id == clipID { return clip }
+                }
+            case .layout:
+                break
+            }
         }
-        return nil
+        return allTracks.lazy.flatMap(\.clips).first { $0.id == clipID }
     }
 
     // MARK: - Transitions
@@ -1144,7 +1206,11 @@ final class EditorModel {
         let ordered = context.track.clips.sorted { $0.timelineStart < $1.timelineStart }
         let overlaps = TransitionLayout.orderedOverlaps(ordered)
         guard let index = ordered.firstIndex(where: { $0.id == clipID }) else { return .zero }
-        let availableTail = CMTimeMaximum(context.previous.outputDuration - overlaps[index - 1], .zero)
+        // Subtract the predecessor's incoming overlap from its output duration
+        // to get the available tail. This matches the render-time clamp in
+        // TransitionLayout.orderedOverlaps.
+        let predecessorOverlap = index > 0 ? overlaps[index - 1] : .zero
+        let availableTail = CMTimeMaximum(context.previous.outputDuration - predecessorOverlap, .zero)
         return CMTimeMinimum(context.clip.outputDuration, availableTail)
     }
 
@@ -1325,6 +1391,7 @@ final class EditorModel {
     /// Rebuilds the preview composition from the current project state, keeping
     /// the playhead where it was and resuming playback if still active.
     func rebuild() async {
+        rebuildClipIndex()
         await previewRebuildCoordinator.rebuild(model: self)
     }
 

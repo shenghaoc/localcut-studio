@@ -10,6 +10,21 @@ import LocalCutCore
 @Suite("Phase 44 — tutorial finishing smoke", .serialized)
 struct Phase44TutorialFinishingTests {
 
+    @Test("Silence detection accepts an audio-bearing video clip")
+    func silenceDetectionAcceptsVideoClipAudio() {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        media.hasVideo = true
+        media.hasAudio = true
+        model.project.mediaItems = [media]
+        model.project.videoTracks[0].clips = [
+            Clip(mediaID: media.id, sourceStart: .zero,
+                 duration: time(2), timelineStart: .zero),
+        ]
+
+        #expect(model.canRunSilenceDetection)
+    }
+
     @Test("Silence review can apply, undo, reapply, and export chapters")
     func silenceReviewApplyUndoReapplyExportChaptersSmoke() async throws {
         let tmp = FileManager.default.temporaryDirectory

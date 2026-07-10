@@ -25,6 +25,21 @@ struct EncoderBudgetTests {
         #expect(await budget.activeCount == 2)
     }
 
+    @Test("Typed acquisition result preserves budget exhaustion details")
+    func acquireResultPreservesError() async throws {
+        let budget = EncoderBudget(maxConcurrent: 1)
+        _ = try await budget.acquire(.export)
+
+        let result = await budget.acquireResult(.programIso, count: 2)
+
+        guard case .failure(.budgetExhausted(let requested, let available)) = result else {
+            Issue.record("Expected typed budget-exhaustion result")
+            return
+        }
+        #expect(requested == 2)
+        #expect(available == 0)
+    }
+
     @Test("Partial failure releases already-acquired leases")
     func partialFailureReleases() async throws {
         let budget = EncoderBudget(maxConcurrent: 2)
