@@ -52,7 +52,8 @@ final class EditorModel {
     /// Phase 44 silence detection proposals for review-before-apply.
     var silenceProposals: [ProposedCut] = []
     /// Tracks the in-flight silence detection task for cancellation.
-    var silenceDetectionTask: Task<Void, Never>?
+    /// nonisolated(unsafe) so deinit can cancel from any thread.
+    @ObservationIgnored nonisolated(unsafe) var silenceDetectionTask: Task<Void, Never>?
     /// Incremented on each detection invocation to prevent stale results.
     var silenceDetectionGeneration: Int = 0
 
@@ -152,7 +153,11 @@ final class EditorModel {
 
     /// In-flight loudness measurement task. Cancelled on the next invocation
     /// to prevent concurrent full-composition decode + DSP operations.
-    @ObservationIgnored var loudnessTask: Task<Void, Never>?
+    ///
+    /// **Isolation invariant:** Mutated on `@MainActor`; read in `deinit`
+    /// after the model has left normal main-actor workflows. The read only
+    /// issues an idempotent `Task.cancel()`.
+    @ObservationIgnored nonisolated(unsafe) var loudnessTask: Task<Void, Never>?
 
     /// Session cache of imported LUT filenames keyed by their bookmark, so the
     /// inspector can show a LUT's name without resolving the security-scoped
@@ -283,7 +288,8 @@ final class EditorModel {
     @ObservationIgnored var coalescedUndoBefore: ProjectState?
     @ObservationIgnored var coalescedUndoName: String?
     @ObservationIgnored var coalescedUndoTarget: AnyHashable?
-    @ObservationIgnored var coalescedCommitTask: Task<Void, Never>?
+    /// nonisolated(unsafe) so deinit can cancel from any thread.
+    @ObservationIgnored nonisolated(unsafe) var coalescedCommitTask: Task<Void, Never>?
     /// `isDirty` at the start of the current coalesced gesture, restored if the
     /// gesture settles with no net change (so a no-op edit doesn't prompt to save).
     @ObservationIgnored var coalescedUndoWasDirty = false
@@ -386,6 +392,9 @@ final class EditorModel {
         previewRebuildCoordinator.cancelAll()
         beatAnalysisTask?.cancel()
         recordingMonitorTask?.cancel()
+        silenceDetectionTask?.cancel()
+        coalescedCommitTask?.cancel()
+        loudnessTask?.cancel()
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         EffectCompositor.releaseOverlaySources(for: activeOverlaySourceRegistryID)

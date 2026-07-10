@@ -252,8 +252,8 @@ struct RecorderSetupView: View {
         let pipPreset = target != nil && webcam != nil
             ? PiPPreset.standardPresets.first(where: { $0.id == selectedPiPPresetID })
             : nil
-        Task {
-            await model.startRecordingWithCountdown(
+        Task { [weak model] in
+            await model?.startRecordingWithCountdown(
                 countdownSeconds: countdownDuration,
                 target: target,
                 // Only capture system audio when a screen target actually

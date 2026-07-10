@@ -31,7 +31,7 @@ extension EditorModel {
         }
         selectedCalloutID = callout.id
         statusMessage = "Added \(kind.displayName.lowercased()) callout."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Removes a callout clip by ID.
@@ -45,7 +45,7 @@ extension EditorModel {
             }
         }
         statusMessage = "Removed callout."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Updates a callout clip's properties.

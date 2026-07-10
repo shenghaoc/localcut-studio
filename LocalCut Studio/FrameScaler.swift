@@ -59,6 +59,9 @@ nonisolated final class FrameScaler: @unchecked Sendable {
             return sourceBuffer
         }
 
+        // Guard against zero dimensions from corrupted pixel buffers.
+        guard sourceWidth > 0, sourceHeight > 0 else { return nil }
+
         let sourceImage = CIImage(cvPixelBuffer: sourceBuffer)
 
         // Compute the scale factor. We scale to fill the target, then center-crop.

@@ -105,7 +105,7 @@ extension EditorModel {
             project.overlayBundlePaths.removeValue(forKey: id)
         }
         statusMessage = "Removed overlay."
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Updates an overlay clip's properties.
@@ -127,7 +127,7 @@ extension EditorModel {
             let overlay = project.overlays.remove(at: currentIndex)
             project.overlays.insert(overlay, at: clampedIndex)
         }
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Updates the overlay's timeline start time.
@@ -191,7 +191,7 @@ extension EditorModel {
         performUndoable("Overlay End Action") {
             project.overlays[index].endAction = action
         }
-        Task { await rebuild() }
+        Task { [weak self] in await self?.rebuild() }
     }
 
     /// Resolves the source URL for an overlay from its bookmark or bundle path.

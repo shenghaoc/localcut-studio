@@ -345,13 +345,19 @@ extension EditorModel {
                 let now = Date()
                 if now.timeIntervalSince(lastDiskCheck) >= 5 {
                     lastDiskCheck = now
-                    if let available = try? rootURL.resourceValues(
-                        forKeys: [.volumeAvailableCapacityForImportantUsageKey,
-                                  .volumeTotalCapacityKey])
-                        .volumeAvailableCapacityForImportantUsage,
-                       let total = try? rootURL.resourceValues(
-                        forKeys: [.volumeTotalCapacityKey])
-                        .volumeTotalCapacity {
+                    // Move synchronous file I/O off the main actor to avoid
+                    // blocking the UI on slow or network-mounted volumes.
+                    let diskInfo = await Task.detached {
+                        let available = try? rootURL.resourceValues(
+                            forKeys: [.volumeAvailableCapacityForImportantUsageKey,
+                                      .volumeTotalCapacityKey])
+                            .volumeAvailableCapacityForImportantUsage
+                        let total = try? rootURL.resourceValues(
+                            forKeys: [.volumeTotalCapacityKey])
+                            .volumeTotalCapacity
+                        return (available, total)
+                    }.value
+                    if let available = diskInfo.0, let total = diskInfo.1 {
                         self.recordingDiskFreeBytes = available
                         let fraction = total > 0 ? Double(available) / Double(total) : 0
                         if fraction < 0.05 {
@@ -770,7 +776,8 @@ extension EditorModel {
     }
 
     func importRecoveredCaptureSession(_ result: CaptureSessionResult) {
-        Task {
+        Task { [weak self] in
+            guard let self else { return }
             // Keep the recovery row until landing actually succeeds, so a
             // temporarily unreadable source can be retried instead of vanishing.
             if ProgramRecovery.hasProgramData(manifest: result.manifest) {
@@ -1046,14 +1053,14 @@ extension EditorModel {
 
         replaySaveInProgress = true
 
-        Task {
+        Task { [weak self] in
             await manager.saveLast(seconds: saveSeconds)
-            replaySaveInProgress = false
+            self?.replaySaveInProgress = false
             if let error = manager.lastSaveError {
-                statusMessage = error
+                self?.statusMessage = error
             } else if let duration = manager.lastSavedDuration {
                 let clipCount = manager.lastSavedClipCount ?? 1
-                statusMessage = clipCount == 1
+                self?.statusMessage = clipCount == 1
                     ? String(format: "Saved %.1fs replay clip.", duration)
                     : String(format: "Saved %d replay clips spanning %.1fs.", clipCount, duration)
             }
@@ -1063,9 +1070,9 @@ extension EditorModel {
     /// Cleans up replay buffer resources on session end.
     func cleanupReplayBuffer() {
         guard let manager = replayBufferManager else { return }
+        replayBufferManager = nil
         Task {
             await manager.cleanup()
         }
-        replayBufferManager = nil
     }
 }

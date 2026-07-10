@@ -361,6 +361,39 @@ func writerPathVoiceCleanupProcessAppliesLoudnessGain() throws {
     #expect(wet.rmsRight > dry.rmsRight * 1.8)
 }
 
+@Test("VoiceCleanup: fallback sample timing clamps invalid sample rates")
+func voiceCleanupFallbackTimingClampsInvalidSampleRates() {
+    for sampleRate in [0, -48_000, Double.nan, Double.infinity] {
+        let duration = VoiceCleanupAudioProcessing.sampleDuration(
+            totalDuration: .invalid,
+            frameCount: 4,
+            sampleRate: sampleRate)
+        #expect(duration == CMTime(value: 1, timescale: 1))
+    }
+
+    let validDuration = VoiceCleanupAudioProcessing.sampleDuration(
+        totalDuration: .invalid,
+        frameCount: 4,
+        sampleRate: 48_000)
+    #expect(validDuration == CMTime(value: 1, timescale: 48_000))
+
+    let clampedDuration = VoiceCleanupAudioProcessing.sampleDuration(
+        totalDuration: .invalid,
+        frameCount: 4,
+        sampleRate: Double.greatestFiniteMagnitude)
+    #expect(clampedDuration == CMTime(value: 1, timescale: Int32.max))
+}
+
+@Test("VoiceCleanup: source duration takes precedence over sample-rate fallback")
+func voiceCleanupSourceDurationTakesPrecedence() {
+    let totalDuration = CMTime(value: 1, timescale: 100)
+    let duration = VoiceCleanupAudioProcessing.sampleDuration(
+        totalDuration: totalDuration,
+        frameCount: 10,
+        sampleRate: 0)
+    #expect(duration == CMTime(value: 1, timescale: 1_000))
+}
+
 @Test("RenderQueue: offline meter ignores non-Int16 PCM sample buffers")
 func writerPathSampleBufferMeterRejectsUnsupportedPCM() throws {
     let sampleBuffer = try makePCMFloat32SampleBuffer(samples: [1, 0, -1, 0], channels: 2)

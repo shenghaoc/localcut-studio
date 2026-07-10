@@ -51,7 +51,7 @@ struct CaptionsInspectorView: View {
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
-                Task { await model.importCaptionTrack(from: url) }
+                Task { [weak model] in await model?.importCaptionTrack(from: url) }
             }
         }
         .fileImporter(

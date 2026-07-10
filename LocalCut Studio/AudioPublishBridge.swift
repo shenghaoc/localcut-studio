@@ -198,6 +198,10 @@ nonisolated final class LocalCutAudioDevice: NSObject, RTCAudioDevice, @unchecke
     private let frameDurationSeconds: Double
 
     private let stateLock = NSLock()
+    /// Strong reference — WebRTC's ADM retains the delegate for the session
+    /// lifetime. terminateDevice() clears it. Using weak here would let the
+    /// delegate disappear if the native ADM doesn't retain it, causing
+    /// isInitialized to flip false and deliverSamples to silently drop audio.
     private var delegate: RTCAudioDeviceDelegate?
     private var isRecordingActive = false
     private var isPlayoutActive = false
