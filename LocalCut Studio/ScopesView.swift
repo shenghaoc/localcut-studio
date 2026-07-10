@@ -58,12 +58,27 @@ struct ScopesView: View {
             .padding(.horizontal, 8)
             .padding(.top, 6)
 
-            Canvas { context, size in
-                switch kind {
-                case .waveform:
-                    drawWaveform(into: context, size: size, sample: latest)
-                case .vectorscope:
-                    drawVectorscope(into: context, size: size, sample: latest)
+            ZStack {
+                // Static background grid and text labels. This Canvas doesn't capture `latest`,
+                // so it only renders once when the kind changes, avoiding per-frame text drawing.
+                Canvas { context, size in
+                    switch kind {
+                    case .waveform:
+                        drawWaveformBackground(into: context, size: size)
+                    case .vectorscope:
+                        drawVectorscopeBackground(into: context, size: size)
+                    }
+                }
+
+                // Live trace data and empty state placeholder. This Canvas captures `latest`
+                // and redraws at 30 fps.
+                Canvas { context, size in
+                    switch kind {
+                    case .waveform:
+                        drawWaveformTrace(into: context, size: size, sample: latest)
+                    case .vectorscope:
+                        drawVectorscopeTrace(into: context, size: size, sample: latest)
+                    }
                 }
             }
             .background(Color.black)
@@ -106,11 +121,15 @@ struct ScopesView: View {
 
     // MARK: - Waveform
 
-    private func drawWaveform(into context: GraphicsContext, size: CGSize, sample: ScopeSample?) {
+    private func drawWaveformBackground(into context: GraphicsContext, size: CGSize) {
         // Frame outline.
         let frameRect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
         context.stroke(Path(frameRect), with: .color(.white.opacity(0.15)), lineWidth: 0.5)
         drawWaveformGraticule(into: context, frameRect: frameRect)
+    }
+
+    private func drawWaveformTrace(into context: GraphicsContext, size: CGSize, sample: ScopeSample?) {
+        let frameRect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
 
         guard let sample, !sample.waveform.isEmpty else {
             placeholder(into: context, size: size, label: "No frames yet")
@@ -158,7 +177,7 @@ struct ScopesView: View {
 
     // MARK: - Vectorscope
 
-    private func drawVectorscope(into context: GraphicsContext, size: CGSize, sample: ScopeSample?) {
+    private func drawVectorscopeBackground(into context: GraphicsContext, size: CGSize) {
         let frameRect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
         let plotSide = min(frameRect.width, frameRect.height)
         let plot = CGRect(x: frameRect.midX - plotSide / 2,
@@ -177,6 +196,14 @@ struct ScopesView: View {
         crosshair.addLine(to: CGPoint(x: plot.maxX, y: plot.midY))
         context.stroke(crosshair, with: .color(.white.opacity(0.1)), lineWidth: 0.5)
         drawVectorscopeTargets(into: context, plot: plot)
+    }
+
+    private func drawVectorscopeTrace(into context: GraphicsContext, size: CGSize, sample: ScopeSample?) {
+        let frameRect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
+        let plotSide = min(frameRect.width, frameRect.height)
+        let plot = CGRect(x: frameRect.midX - plotSide / 2,
+                          y: frameRect.midY - plotSide / 2,
+                          width: plotSide, height: plotSide)
 
         guard let sample, !sample.vectorscope.isEmpty else {
             placeholder(into: context, size: size, label: "No frames yet")
