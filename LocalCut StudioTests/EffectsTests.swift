@@ -51,50 +51,97 @@ func noClampingWhenInRange() {
 
 // MARK: - LUT slot helpers (feature-colour-grading R1.2)
 
-@Test("replacingLUT appends a LUT when none is present")
-func lutAppendWhenAbsent() {
-    let effects: [Effect] = [.colourGrade(.neutral)]
-    let result = effects.replacingLUT(bookmark: Data([0x01]))
-    #expect(result.count == 2)
-    #expect(result.hasLUT)
+// Custom parameterisation type for the LUT operation tests.
+// We pre-build concrete cases so the test body can assert cleanly.
+struct LUTTestScenario: Sendable, CustomTestStringConvertible {
+    let scenarioDescription: String
+    let inputEffects: [Effect]
+    var testDescription: String { scenarioDescription }
+    var description: String { scenarioDescription }
+    let removeInstead: Bool
+    let bookmark: Data
+    let expectedLUTCount: Int
+    let expectedTotalCount: Int
+    let expectedFirstLUTBookmark: Data?
+    let expectedContainsColourGrade: Bool
+    let expectedContainsSkinSmooth: Bool
 }
 
-@Test("replacingLUT replaces the existing LUT in place rather than stacking a second cube")
-func lutReplaceInPlace() {
-    let effects: [Effect] = [.lut(bookmark: Data([0x01])), .colourGrade(.neutral)]
-    let result = effects.replacingLUT(bookmark: Data([0x02]))
-    let lutCount = result.filter { if case .lut = $0 { return true }; return false }.count
-    #expect(lutCount == 1)
-    if case .lut(let bookmark) = result[0] {
-        #expect(bookmark == Data([0x02]))
+@Test("LUT operations: replace and remove",
+      arguments: [
+        LUTTestScenario(
+            scenarioDescription: "appending LUT when none present",
+            inputEffects: [.colourGrade(.neutral)],
+            removeInstead: false,
+            bookmark: Data([0x01]),
+            expectedLUTCount: 1,
+            expectedTotalCount: 2,
+            expectedFirstLUTBookmark: nil,
+            expectedContainsColourGrade: true,
+            expectedContainsSkinSmooth: false
+        ),
+        LUTTestScenario(
+            scenarioDescription: "replacing existing LUT in place",
+            inputEffects: [.lut(bookmark: Data([0x01])), .colourGrade(.neutral)],
+            removeInstead: false,
+            bookmark: Data([0x02]),
+            expectedLUTCount: 1,
+            expectedTotalCount: 2,
+            expectedFirstLUTBookmark: Data([0x02]),
+            expectedContainsColourGrade: true,
+            expectedContainsSkinSmooth: false
+        ),
+        LUTTestScenario(
+            scenarioDescription: "collapsing stacked LUTs to single slot",
+            inputEffects: [.lut(bookmark: Data([0x01])), .colourGrade(.neutral), .lut(bookmark: Data([0x02]))],
+            removeInstead: false,
+            bookmark: Data([0x09]),
+            expectedLUTCount: 1,
+            expectedTotalCount: 2,
+            expectedFirstLUTBookmark: Data([0x09]),
+            expectedContainsColourGrade: true,
+            expectedContainsSkinSmooth: false
+        ),
+        LUTTestScenario(
+            scenarioDescription: "removing LUT preserves grade + skin-smooth",
+            inputEffects: [.colourGrade(.neutral), .lut(bookmark: Data([0x01])), .skinSmooth(.neutral)],
+            removeInstead: true,
+            bookmark: Data(), // unused for remove
+            expectedLUTCount: 0,
+            expectedTotalCount: 2,
+            expectedFirstLUTBookmark: nil,
+            expectedContainsColourGrade: true,
+            expectedContainsSkinSmooth: true
+        ),
+      ])
+func lutOperations(scenario: LUTTestScenario) {
+    let result: [Effect]
+    if scenario.removeInstead {
+        result = scenario.inputEffects.removingLUT()
     } else {
-        Issue.record("first effect should still be the replaced LUT")
+        result = scenario.inputEffects.replacingLUT(bookmark: scenario.bookmark)
     }
-}
 
-@Test("replacingLUT collapses pre-existing stacked LUTs to a single slot")
-func lutReplaceCollapsesDuplicates() {
-    // A project authored under the old append-stacking behaviour with two LUTs.
-    let effects: [Effect] = [.lut(bookmark: Data([0x01])), .colourGrade(.neutral), .lut(bookmark: Data([0x02]))]
-    let result = effects.replacingLUT(bookmark: Data([0x09]))
     let lutCount = result.filter { if case .lut = $0 { return true }; return false }.count
-    #expect(lutCount == 1, "replacing must leave exactly one LUT")
-    #expect(result.count == 2, "the grade is preserved, the duplicate LUT dropped")
-    if case .lut(let bookmark) = result[0] {
-        #expect(bookmark == Data([0x09]))
-    } else {
-        Issue.record("first effect should be the replaced LUT")
-    }
-}
+    #expect(lutCount == scenario.expectedLUTCount, "\(scenario.description): expected \(scenario.expectedLUTCount) LUTs, got \(lutCount)")
+    #expect(result.count == scenario.expectedTotalCount, "\(scenario.description): expected \(scenario.expectedTotalCount) effects total")
 
-@Test("removingLUT drops only the LUT, preserving grade + skin-smooth")
-func lutRemovePreservesOthers() {
-    let effects: [Effect] = [.colourGrade(.neutral), .lut(bookmark: Data([0x01])), .skinSmooth(.neutral)]
-    let result = effects.removingLUT()
-    #expect(!result.hasLUT)
-    #expect(result.count == 2)
-    #expect(result.contains { if case .colourGrade = $0 { return true }; return false })
-    #expect(result.contains { if case .skinSmooth = $0 { return true }; return false })
+    if let expectedBookmark = scenario.expectedFirstLUTBookmark {
+        if case .lut(let bookmark) = result.first {
+            #expect(bookmark == expectedBookmark, "\(scenario.description): first LUT bookmark mismatch")
+        } else {
+            Issue.record("\(scenario.description): first effect should be the LUT")
+        }
+    }
+
+    if scenario.expectedContainsColourGrade {
+        #expect(result.contains { if case .colourGrade = $0 { return true }; return false },
+                "\(scenario.description): colourGrade should be preserved")
+    }
+    if scenario.expectedContainsSkinSmooth {
+        #expect(result.contains { if case .skinSmooth = $0 { return true }; return false },
+                "\(scenario.description): skinSmooth should be preserved")
+    }
 }
 
 @MainActor
@@ -232,44 +279,51 @@ func colourGradeEffectIdentity() {
     #expect(grade.contrast == 1)
 }
 
-@Test("EffectCompositor.applyEffectChain: empty chain is byte-for-byte identity (T1.2 pass-through R5.1)")
-@MainActor
-func emptyEffectChainIsIdentity() {
-    let compositor = EffectCompositor()
-    let source = CIImage(color: CIColor(red: 0.4, green: 0.6, blue: 0.8, alpha: 1))
-        .cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16))
-    let result = compositor.applyEffectChain(source, effects: [], cacheKey: nil)
-    // The early-return contract: empty chain returns the *same* CIImage object,
-    // not a new one. CIImage is a value-like reference; comparing extent + a
-    // sampled pixel guarantees identity even if the CIImage wrapper is rewrapped.
-    #expect(result.extent == source.extent)
-    #expect(samplePixelEquals(result, source, at: CGPoint(x: 8, y: 8)))
+// MARK: - Identity pass-through tests
+
+struct IdentityPassThroughCase: Sendable, CustomTestStringConvertible {
+    let scenarioDescription: String
+    let effects: [Effect]
+    let size: CGSize
+    let samplePoint: CGPoint
+    let tolerance: Double
+    var testDescription: String { scenarioDescription }
+    var description: String { scenarioDescription }
 }
 
-@Test("EffectCompositor.applyEffectChain: neutral colour grade is also identity (R5.1)")
+@Test("EffectCompositor identity pass-through (R5.1)",
+      arguments: [
+        IdentityPassThroughCase(
+            scenarioDescription: "empty chain",
+            effects: [],
+            size: CGSize(width: 16, height: 16),
+            samplePoint: CGPoint(x: 8, y: 8),
+            tolerance: 0
+        ),
+        IdentityPassThroughCase(
+            scenarioDescription: "neutral colour grade",
+            effects: [.colourGrade(.neutral)],
+            size: CGSize(width: 16, height: 16),
+            samplePoint: CGPoint(x: 8, y: 8),
+            tolerance: 0.005
+        ),
+        IdentityPassThroughCase(
+            scenarioDescription: "neutral look effects (halation+vignette+grain)",
+            effects: [.halation(.neutral), .vignette(.neutral), .grain(.neutral)],
+            size: CGSize(width: 32, height: 32),
+            samplePoint: CGPoint(x: 16, y: 16),
+            tolerance: 0.005
+        ),
+      ])
 @MainActor
-func neutralColourGradeIsIdentity() {
+func identityPassThrough(testCase: IdentityPassThroughCase) {
     let compositor = EffectCompositor()
     let source = CIImage(color: CIColor(red: 0.4, green: 0.6, blue: 0.8, alpha: 1))
-        .cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16))
-    let result = compositor.applyEffectChain(
-        source, effects: [.colourGrade(.neutral)], cacheKey: nil)
-    #expect(result.extent == source.extent)
-    #expect(samplePixelEquals(result, source, at: CGPoint(x: 8, y: 8), tolerance: 0.005))
-}
-
-@Test("EffectCompositor.applyEffectChain: neutral look effects are identity")
-@MainActor
-func neutralLookEffectsAreIdentity() {
-    let compositor = EffectCompositor()
-    let source = CIImage(color: CIColor(red: 0.4, green: 0.6, blue: 0.8, alpha: 1))
-        .cropped(to: CGRect(x: 0, y: 0, width: 32, height: 32))
-    let result = compositor.applyEffectChain(
-        source,
-        effects: [.halation(.neutral), .vignette(.neutral), .grain(.neutral)],
-        cacheKey: nil)
-    #expect(result.extent == source.extent)
-    #expect(samplePixelEquals(result, source, at: CGPoint(x: 16, y: 16), tolerance: 0.005))
+        .cropped(to: CGRect(x: 0, y: 0, width: testCase.size.width, height: testCase.size.height))
+    let result = compositor.applyEffectChain(source, effects: testCase.effects, cacheKey: nil)
+    #expect(result.extent == source.extent, "\(testCase.description): extent mismatch")
+    #expect(samplePixelEquals(result, source, at: testCase.samplePoint, tolerance: testCase.tolerance),
+            "\(testCase.description): pixel mismatch")
 }
 
 @Test("EffectCompositor.applyEffectChain: grain cadence can advance independently of source time")
@@ -472,75 +526,111 @@ private func rgbaBytes(_ image: CIImage, width: Int, height: Int) -> [UInt8]? {
     return bytes
 }
 
-@Test("EditorModel.resetClipColourEffects preserves non-colour effects (audit fix)")
-@MainActor
-func resetColourPreservesNonColourEffects() {
-    let model = EditorModel()
-    let mediaID = UUID()
-    let clip = Clip(
-        mediaID: mediaID,
-        sourceStart: .zero,
-        duration: CMTime(seconds: 5, preferredTimescale: 600),
-        timelineStart: .zero)
-    var effected = clip
-    effected.effects = [
-        .colourGrade(ColourGrade()),
-        .skinSmooth(SkinSmoothEffect()),
-        .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
-        .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
-        .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))),
-        .lut(bookmark: Data([0x1])),
-    ]
-    model.project.videoTracks.first!.clips = [effected]
-    model.selectedClipID = effected.id
+// MARK: - Reset-preservation tests
 
-    model.resetClipColourEffects()
+struct ResetPreservationCase: Sendable, CustomTestStringConvertible {
+    let scenarioDescription: String
+    let initialEffects: [Effect]
+    let resetMethod: ResetMethod
+    let expectedPresent: [Effect]
+    let expectedAbsent: [Effect]
+    var testDescription: String { scenarioDescription }
+    var description: String { scenarioDescription }
 
-    let remaining = model.project.videoTracks.first!.clips.first!.effects
-    // Non-colour effects must survive; colour + lut must be gone.
-    #expect(remaining.contains { if case .skinSmooth = $0 { return true }; return false })
-    #expect(remaining.contains { if case .grain = $0 { return true }; return false })
-    #expect(remaining.contains { if case .halation = $0 { return true }; return false })
-    #expect(remaining.contains { if case .vignette = $0 { return true }; return false })
-    #expect(!remaining.contains { if case .colourGrade = $0 { return true }; return false })
-    #expect(!remaining.contains { if case .lut = $0 { return true }; return false })
+    enum ResetMethod: Sendable {
+        case colour
+        case looks
+    }
 }
 
-@Test("EditorModel.resetClipLooks removes only look effects")
+@Test("Reset preserves non-target effects",
+      arguments: [
+        ResetPreservationCase(
+            scenarioDescription: "resetClipColourEffects removes colour + LUT, keeps others",
+            initialEffects: [
+                .colourGrade(ColourGrade()),
+                .skinSmooth(SkinSmoothEffect()),
+                .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
+                .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
+                .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))),
+                .lut(bookmark: Data([0x1])),
+            ],
+            resetMethod: .colour,
+            expectedPresent: [
+                .skinSmooth(SkinSmoothEffect()),
+                .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
+                .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
+                .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))),
+            ],
+            expectedAbsent: [
+                .colourGrade(ColourGrade()),
+                .lut(bookmark: Data([0x1])),
+            ]
+        ),
+        ResetPreservationCase(
+            scenarioDescription: "resetClipLooks removes look effects, keeps colour + LUT + skin-smooth",
+            initialEffects: [
+                .colourGrade(ColourGrade(exposure: 0.2,
+                                         contrast: 1.1,
+                                         saturation: 0.9,
+                                         temperatureOffset: 50,
+                                         tintOffset: 5)),
+                .lut(bookmark: Data([0x1])),
+                .skinSmooth(SkinSmoothEffect()),
+                .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
+                .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
+                .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))),
+            ],
+            resetMethod: .looks,
+            expectedPresent: [
+                .colourGrade(ColourGrade(exposure: 0.2,
+                                         contrast: 1.1,
+                                         saturation: 0.9,
+                                         temperatureOffset: 50,
+                                         tintOffset: 5)),
+                .lut(bookmark: Data([0x1])),
+                .skinSmooth(SkinSmoothEffect()),
+            ],
+            expectedAbsent: [
+                .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
+                .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
+                .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))),
+            ]
+        ),
+      ])
 @MainActor
-func resetLooksPreservesOtherEffects() {
+func resetPreservesNonTargetEffects(scenario: ResetPreservationCase) {
     let model = EditorModel()
-    let mediaID = UUID()
     let clip = Clip(
-        mediaID: mediaID,
+        mediaID: UUID(),
         sourceStart: .zero,
         duration: CMTime(seconds: 5, preferredTimescale: 600),
         timelineStart: .zero)
     var effected = clip
-    effected.effects = [
-        .colourGrade(ColourGrade(exposure: 0.2,
-                                 contrast: 1.1,
-                                 saturation: 0.9,
-                                 temperatureOffset: 50,
-                                 tintOffset: 5)),
-        .lut(bookmark: Data([0x1])),
-        .skinSmooth(SkinSmoothEffect()),
-        .grain(GrainEffect(amount: Keyframed(defaultValue: 0.2))),
-        .halation(HalationEffect(strength: Keyframed(defaultValue: 0.2))),
-        .vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2))),
-    ]
+    effected.effects = scenario.initialEffects
     model.project.videoTracks.first!.clips = [effected]
     model.selectedClipID = effected.id
 
-    model.resetClipLooks()
+    switch scenario.resetMethod {
+    case .colour:
+        model.resetClipColourEffects()
+    case .looks:
+        model.resetClipLooks()
+    }
 
     let remaining = model.project.videoTracks.first!.clips.first!.effects
-    #expect(remaining.contains { if case .colourGrade = $0 { return true }; return false })
-    #expect(remaining.contains { if case .lut = $0 { return true }; return false })
-    #expect(remaining.contains { if case .skinSmooth = $0 { return true }; return false })
-    #expect(!remaining.contains { if case .grain = $0 { return true }; return false })
-    #expect(!remaining.contains { if case .halation = $0 { return true }; return false })
-    #expect(!remaining.contains { if case .vignette = $0 { return true }; return false })
+
+    // Effects that should survive the reset
+    for expected in scenario.expectedPresent {
+        let matches = remaining.contains { $0 == expected }
+        #expect(matches, "\(scenario.description): expected \(expected) to be preserved")
+    }
+
+    // Effects that should be removed by the reset
+    for absent in scenario.expectedAbsent {
+        let matches = remaining.contains { $0 == absent }
+        #expect(!matches, "\(scenario.description): expected \(absent) to be removed")
+    }
 }
 
 @Test("Effect.lut stores bookmark data")

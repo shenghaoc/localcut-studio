@@ -7,39 +7,49 @@ import LocalCutCore
 
 // MARK: - Keyframes (feature-keyframes V1–V4)
 
-@Test("Keyframed<Float>: empty returns defaultValue at every time")
-func keyframesEmptyReturnsDefault() {
-    let k = Keyframed<Float>(defaultValue: 0.42)
-    #expect(k.value(at: .zero) == 0.42)
-    #expect(k.value(at: CMTime(seconds: 5, preferredTimescale: 600)) == 0.42)
-    #expect(k.isAnimated == false)
+/// Parameterized test covering the four basic `Keyframed<Float>` invariants:
+/// empty returns default, single keyframe dominates everywhere, linear
+/// interpolation between two keyframes, and clamping outside the range.
+enum KeyframeBaselineCase: String, CaseIterable, Sendable {
+    case emptyReturnsDefault
+    case single
+    case interpolate
+    case clamp
+
+    func run() {
+        switch self {
+        case .emptyReturnsDefault:
+            let k = Keyframed<Float>(defaultValue: 0.42)
+            #expect(k.value(at: .zero) == 0.42)
+            #expect(k.value(at: CMTime(seconds: 5, preferredTimescale: 600)) == 0.42)
+            #expect(k.isAnimated == false)
+
+        case .single:
+            var k = Keyframed<Float>(defaultValue: 0)
+            k.addKeyframe(at: CMTime(seconds: 1, preferredTimescale: 600), value: 1)
+            #expect(k.value(at: .zero) == 1)
+            #expect(k.value(at: CMTime(seconds: 10, preferredTimescale: 600)) == 1)
+
+        case .interpolate:
+            var k = Keyframed<Float>(defaultValue: 0)
+            k.addKeyframe(at: CMTime(seconds: 0, preferredTimescale: 600), value: 0)
+            k.addKeyframe(at: CMTime(seconds: 2, preferredTimescale: 600), value: 1)
+            let mid = k.value(at: CMTime(seconds: 1, preferredTimescale: 600))
+            #expect(abs(mid - 0.5) < 1e-6)
+
+        case .clamp:
+            var k = Keyframed<Float>(defaultValue: -1)
+            k.addKeyframe(at: CMTime(seconds: 1, preferredTimescale: 600), value: 0)
+            k.addKeyframe(at: CMTime(seconds: 2, preferredTimescale: 600), value: 1)
+            #expect(k.value(at: .zero) == 0)
+            #expect(k.value(at: CMTime(seconds: 10, preferredTimescale: 600)) == 1)
+        }
+    }
 }
 
-@Test("Keyframed<Float>: single keyframe returns its value everywhere")
-func keyframesSingle() {
-    var k = Keyframed<Float>(defaultValue: 0)
-    k.addKeyframe(at: CMTime(seconds: 1, preferredTimescale: 600), value: 1)
-    #expect(k.value(at: .zero) == 1)
-    #expect(k.value(at: CMTime(seconds: 10, preferredTimescale: 600)) == 1)
-}
-
-@Test("Keyframed<Float>: linearly interpolates between two keyframes")
-func keyframesInterpolate() {
-    var k = Keyframed<Float>(defaultValue: 0)
-    k.addKeyframe(at: CMTime(seconds: 0, preferredTimescale: 600), value: 0)
-    k.addKeyframe(at: CMTime(seconds: 2, preferredTimescale: 600), value: 1)
-    // Midpoint at t=1s is 0.5.
-    let mid = k.value(at: CMTime(seconds: 1, preferredTimescale: 600))
-    #expect(abs(mid - 0.5) < 1e-6)
-}
-
-@Test("Keyframed<Float>: clamps to first / last beyond range")
-func keyframesClamp() {
-    var k = Keyframed<Float>(defaultValue: -1)
-    k.addKeyframe(at: CMTime(seconds: 1, preferredTimescale: 600), value: 0)
-    k.addKeyframe(at: CMTime(seconds: 2, preferredTimescale: 600), value: 1)
-    #expect(k.value(at: .zero) == 0)
-    #expect(k.value(at: CMTime(seconds: 10, preferredTimescale: 600)) == 1)
+@Test("Keyframed<Float>: baseline invariants", arguments: KeyframeBaselineCase.allCases)
+func keyframeBaselines(_ testCase: KeyframeBaselineCase) {
+    testCase.run()
 }
 
 @Test("Keyframed<Float>: addKeyframe replaces an exact-time entry instead of duplicating")
@@ -696,7 +706,7 @@ func projectDurationCaptionTail() {
                            duration: CMTime(seconds: 2, preferredTimescale: 600)),
         text: "Tail"))
     project.captionTracks = [track]
-    // No clips ⇒ duration is the latest caption end (7s).
+    // No clips => duration is the latest caption end (7s).
     #expect(abs(project.duration.seconds - 7) < 1e-6)
 }
 
@@ -735,142 +745,151 @@ func captionStyleRasterHashIgnoresAnimation() {
 
 // MARK: - Animation evaluator (Phase 30 R3.2)
 
-@Test("Animation: pop is identity outside the enter window")
-func animationPopIdentityPastEnter() {
-    var style = CaptionStyle()
-    style.enterAnimation = .pop
-    style.enterDuration = 0.2
-    let frame = CaptionAnimation.evaluate(
-        currentTime: CMTime(seconds: 1, preferredTimescale: 600),
-        lineStart: .zero,
-        lineEnd: CMTime(seconds: 5, preferredTimescale: 600),
-        style: style)
-    #expect(frame.scale == 1)
-    #expect(frame.opacity == 1)
-    #expect(frame.translation == .zero)
+/// Parameterized test covering the eight `CaptionAnimation.evaluate` invariants.
+enum AnimationEvalCase: String, CaseIterable, Sendable {
+    case popIdentityPastEnter
+    case popRamp
+    case typewriterRamp
+    case slideVerticalDirection
+    case durationsScaleToFitLine
+    case durationsScaleRatio
+    case durationsNoScalingWhenFits
+    case fadeExit
+
+    func run() {
+        func time(_ seconds: Double) -> CMTime {
+            CMTime(seconds: seconds, preferredTimescale: 600)
+        }
+
+        switch self {
+        case .popIdentityPastEnter:
+            var style = CaptionStyle()
+            style.enterAnimation = .pop
+            style.enterDuration = 0.2
+            let frame = CaptionAnimation.evaluate(
+                currentTime: time(1),
+                lineStart: .zero,
+                lineEnd: time(5),
+                style: style)
+            #expect(frame.scale == 1)
+            #expect(frame.opacity == 1)
+            #expect(frame.translation == .zero)
+
+        case .popRamp:
+            var style = CaptionStyle()
+            style.enterAnimation = .pop
+            style.enterDuration = 0.2
+            let start = CMTime.zero
+            let end = time(5)
+            let frame0 = CaptionAnimation.evaluate(currentTime: .zero, lineStart: start, lineEnd: end, style: style)
+            let frame1 = CaptionAnimation.evaluate(
+                currentTime: time(0.1),
+                lineStart: start, lineEnd: end, style: style)
+            #expect(frame0.scale < frame1.scale)
+            #expect(frame0.opacity < frame1.opacity)
+
+        case .typewriterRamp:
+            var style = CaptionStyle()
+            style.enterAnimation = .typewriter
+            style.enterDuration = 1
+            let start = CMTime.zero
+            let end = time(5)
+            let half = CaptionAnimation.evaluate(
+                currentTime: time(0.5),
+                lineStart: start, lineEnd: end, style: style)
+            #expect(abs(half.typewriterProgress - 0.5) < 0.01)
+
+        case .slideVerticalDirection:
+            var style = CaptionStyle()
+            style.enterAnimation = .slide
+            style.enterDuration = 0.2
+            let start = CMTime.zero
+            let end = time(5)
+
+            // fromBottom at t=0 should sit BELOW the rest position (negative y in y-up).
+            style.slideDirection = .fromBottom
+            let bottomAtStart = CaptionAnimation.evaluate(currentTime: .zero,
+                                                          lineStart: start, lineEnd: end, style: style)
+            #expect(bottomAtStart.translation.height < 0)
+
+            // fromTop at t=0 should sit ABOVE rest (positive y in y-up).
+            style.slideDirection = .fromTop
+            let topAtStart = CaptionAnimation.evaluate(currentTime: .zero,
+                                                       lineStart: start, lineEnd: end, style: style)
+            #expect(topAtStart.translation.height > 0)
+
+        case .durationsScaleToFitLine:
+            var style = CaptionStyle()
+            style.enterAnimation = .pop
+            style.exitAnimation = .fade
+            // Configured 2 s enter + 1 s exit on a 1.5 s line. Without scaling, the
+            // exit window would begin at end - 1.0 = 0.5 s (overlapping the enter,
+            // which doesn't finish until end of line). With scaling, total = 3 s,
+            // so each value halves to 1.0 s / 0.5 s respectively -- they meet exactly
+            // at t = 1.0 s with no overlap.
+            style.enterDuration = 2.0
+            style.exitDuration = 1.0
+
+            let start = CMTime.zero
+            let end = time(1.5)
+
+            // At t = 1.0 s: scaled enter has just completed (so pop scale ~= 1, opacity ~= 1)
+            // and scaled exit is just beginning (so fade opacity = 1). Without the
+            // scaling fix, exit would have eaten half the opacity already.
+            let atSeam = CaptionAnimation.evaluate(
+                currentTime: time(1.0),
+                lineStart: start, lineEnd: end, style: style)
+            #expect(atSeam.opacity > 0.95)
+            #expect(atSeam.scale > 0.95)
+
+        case .durationsScaleRatio:
+            var style = CaptionStyle()
+            style.enterAnimation = .pop
+            style.exitAnimation = .pop
+            style.enterDuration = 2.0
+            style.exitDuration = 1.0  // ratio 2:1, total 3
+            let start = CMTime.zero
+            let end = time(1.5)  // line 1.5, scale = 0.5
+
+            // After scaling: enter = 1.0, exit = 0.5. So exit begins at 1.0 (end - 0.5).
+            // Probe just before the exit boundary; only enter should be at full scale.
+            let beforeExit = CaptionAnimation.evaluate(
+                currentTime: CMTime(value: 999, timescale: 1000), // 0.999 s
+                lineStart: start, lineEnd: end, style: style)
+            #expect(beforeExit.opacity > 0.95)
+
+        case .durationsNoScalingWhenFits:
+            var style = CaptionStyle()
+            style.enterAnimation = .pop
+            style.exitAnimation = .fade
+            style.enterDuration = 0.25
+            style.exitDuration = 0.25  // total 0.5 vs 2 s line -- no scaling.
+            let start = CMTime.zero
+            let end = time(2)
+
+            // At t = 0.25 s the enter window has just finished -- pop sits at full scale.
+            let postEnter = CaptionAnimation.evaluate(
+                currentTime: time(0.25),
+                lineStart: start, lineEnd: end, style: style)
+            #expect(postEnter.scale > 0.95)
+
+        case .fadeExit:
+            var style = CaptionStyle()
+            style.exitAnimation = .fade
+            style.exitDuration = 0.5
+            let start = CMTime.zero
+            let end = time(2)
+            let atEnd = CaptionAnimation.evaluate(
+                currentTime: end,
+                lineStart: start, lineEnd: end, style: style)
+            #expect(atEnd.opacity == 0)
+        }
+    }
 }
 
-@Test("Animation: pop scales and fades up over enter window")
-func animationPopRamp() {
-    var style = CaptionStyle()
-    style.enterAnimation = .pop
-    style.enterDuration = 0.2
-    let start = CMTime.zero
-    let end = CMTime(seconds: 5, preferredTimescale: 600)
-    let frame0 = CaptionAnimation.evaluate(currentTime: .zero, lineStart: start, lineEnd: end, style: style)
-    let frame1 = CaptionAnimation.evaluate(
-        currentTime: CMTime(seconds: 0.1, preferredTimescale: 600),
-        lineStart: start, lineEnd: end, style: style)
-    #expect(frame0.scale < frame1.scale)
-    #expect(frame0.opacity < frame1.opacity)
-}
-
-@Test("Animation: typewriter progress ramps 0→1 across enter")
-func animationTypewriterRamp() {
-    var style = CaptionStyle()
-    style.enterAnimation = .typewriter
-    style.enterDuration = 1
-    let start = CMTime.zero
-    let end = CMTime(seconds: 5, preferredTimescale: 600)
-    let half = CaptionAnimation.evaluate(
-        currentTime: CMTime(seconds: 0.5, preferredTimescale: 600),
-        lineStart: start, lineEnd: end, style: style)
-    #expect(abs(half.typewriterProgress - 0.5) < 0.01)
-}
-
-@Test("Animation: vertical slide enter respects y-up coordinates (Claude review #1)")
-func animationSlideVerticalDirection() {
-    var style = CaptionStyle()
-    style.enterAnimation = .slide
-    style.enterDuration = 0.2
-    let start = CMTime.zero
-    let end = CMTime(seconds: 5, preferredTimescale: 600)
-
-    // fromBottom at t=0 should sit BELOW the rest position (negative y in y-up).
-    style.slideDirection = .fromBottom
-    let bottomAtStart = CaptionAnimation.evaluate(currentTime: .zero,
-                                                  lineStart: start, lineEnd: end, style: style)
-    #expect(bottomAtStart.translation.height < 0)
-
-    // fromTop at t=0 should sit ABOVE rest (positive y in y-up).
-    style.slideDirection = .fromTop
-    let topAtStart = CaptionAnimation.evaluate(currentTime: .zero,
-                                               lineStart: start, lineEnd: end, style: style)
-    #expect(topAtStart.translation.height > 0)
-}
-
-@Test("Animation: enter + exit longer than line scale to fit, preventing overlap (Claude bot final review)")
-func animationDurationsScaleToFitLine() {
-    var style = CaptionStyle()
-    style.enterAnimation = .pop
-    style.exitAnimation = .fade
-    // Configured 2 s enter + 1 s exit on a 1.5 s line. Without scaling, the
-    // exit window would begin at end - 1.0 = 0.5 s (overlapping the enter,
-    // which doesn't finish until end of line). With scaling, total = 3 s,
-    // so each value halves to 1.0 s / 0.5 s respectively — they meet exactly
-    // at t = 1.0 s with no overlap.
-    style.enterDuration = 2.0
-    style.exitDuration = 1.0
-
-    let start = CMTime.zero
-    let end = CMTime(seconds: 1.5, preferredTimescale: 600)
-
-    // At t = 1.0 s: scaled enter has just completed (so pop scale ≈ 1, opacity ≈ 1)
-    // and scaled exit is just beginning (so fade opacity = 1). Without the
-    // scaling fix, exit would have eaten half the opacity already.
-    let atSeam = CaptionAnimation.evaluate(
-        currentTime: CMTime(seconds: 1.0, preferredTimescale: 600),
-        lineStart: start, lineEnd: end, style: style)
-    #expect(atSeam.opacity > 0.95)
-    #expect(atSeam.scale > 0.95)
-}
-
-@Test("Animation: scaling preserves the enter / exit ratio")
-func animationDurationsScaleRatio() {
-    var style = CaptionStyle()
-    style.enterAnimation = .pop
-    style.exitAnimation = .pop
-    style.enterDuration = 2.0
-    style.exitDuration = 1.0  // ratio 2:1, total 3
-    let start = CMTime.zero
-    let end = CMTime(seconds: 1.5, preferredTimescale: 600)  // line 1.5, scale = 0.5
-
-    // After scaling: enter = 1.0, exit = 0.5. So exit begins at 1.0 (end - 0.5).
-    // Probe just before the exit boundary; only enter should be at full scale.
-    let beforeExit = CaptionAnimation.evaluate(
-        currentTime: CMTime(value: 999, timescale: 1000), // 0.999 s
-        lineStart: start, lineEnd: end, style: style)
-    #expect(beforeExit.opacity > 0.95)
-}
-
-@Test("Animation: durations that already fit are untouched")
-func animationDurationsNoScalingWhenFits() {
-    var style = CaptionStyle()
-    style.enterAnimation = .pop
-    style.exitAnimation = .fade
-    style.enterDuration = 0.25
-    style.exitDuration = 0.25  // total 0.5 vs 2 s line — no scaling.
-    let start = CMTime.zero
-    let end = CMTime(seconds: 2, preferredTimescale: 600)
-
-    // At t = 0.25 s the enter window has just finished — pop sits at full scale.
-    let postEnter = CaptionAnimation.evaluate(
-        currentTime: CMTime(seconds: 0.25, preferredTimescale: 600),
-        lineStart: start, lineEnd: end, style: style)
-    #expect(postEnter.scale > 0.95)
-}
-
-@Test("Animation: fade exit drives opacity to zero at line end")
-func animationFadeExit() {
-    var style = CaptionStyle()
-    style.exitAnimation = .fade
-    style.exitDuration = 0.5
-    let start = CMTime.zero
-    let end = CMTime(seconds: 2, preferredTimescale: 600)
-    let atEnd = CaptionAnimation.evaluate(
-        currentTime: end,
-        lineStart: start, lineEnd: end, style: style)
-    #expect(atEnd.opacity == 0)
+@Test("Animation evaluator invariants", arguments: AnimationEvalCase.allCases)
+func animationEvaluator(_ testCase: AnimationEvalCase) {
+    testCase.run()
 }
 
 // MARK: - Preset round-trip (Phase 30 R4.2)
@@ -906,7 +925,7 @@ func presetDecodeSurfacesUnderlyingError() {
     let detailIsNonEmpty = !detailText.isEmpty
     // The user-facing description should embed that detail rather than the
     // generic fallback message.
-    let describesDetail = (caught?.errorDescription ?? "").contains(detail ?? "💥")
+    let describesDetail = (caught?.errorDescription ?? "").contains(detail ?? "boom")
     #expect(hasDetail)
     #expect(detailIsNonEmpty)
     #expect(describesDetail)
@@ -922,7 +941,7 @@ func presetUnknownVersion() {
     }
 }
 
-@Test("BuiltInCaptionPresets: ships at least ten presets covering ≥3 families")
+@Test("BuiltInCaptionPresets: ships at least ten presets covering >=3 families")
 func presetLibraryShape() {
     let presets = BuiltInCaptionPresets.all
     #expect(presets.count >= 10)
@@ -930,7 +949,7 @@ func presetLibraryShape() {
     #expect(families.count >= 3)
 }
 
-// MARK: - Title rasterer (feature-title-raster T2.1–T2.5)
+// MARK: - Title rasterer (feature-title-raster T2.1-T2.5)
 
 @Test("TitleRasterer: identical requests hit the cache exactly once")
 func titleRastererCacheHit() {
@@ -1041,7 +1060,7 @@ func presetSnapshotShape() {
         let line = CaptionLine(
             range: CMTimeRange(start: .zero, duration: CMTime(seconds: 2, preferredTimescale: 600)),
             text: "Sample caption")
-        // A nil raster means the preset stopped rasterizing (font/layout failure) —
+        // A nil raster means the preset stopped rasterizing (font/layout failure) --
         // that's the regression this test guards, so record a failure rather than skip.
         guard let raster = rasterer.idleRaster(line: line, style: preset.style, renderSize: canvas) else {
             Issue.record("Preset \(preset.name) failed to rasterize")
@@ -1069,11 +1088,11 @@ func activeWordIndexHolds() {
     func idx(_ t: Double) -> Int? {
         EffectCompositor.activeWordIndex(words: words, at: CMTime(seconds: t, preferredTimescale: 600))
     }
-    #expect(idx(0.5) == nil)   // before the first word → idle, no highlight
+    #expect(idx(0.5) == nil)   // before the first word -> idle, no highlight
     #expect(idx(1.5) == 0)     // inside first word
-    #expect(idx(2.5) == 0)     // gap between words → hold first (no flicker)
+    #expect(idx(2.5) == 0)     // gap between words -> hold first (no flicker)
     #expect(idx(3.5) == 1)     // inside second word
-    #expect(idx(9.0) == 1)     // tail after last word → hold last
+    #expect(idx(9.0) == 1)     // tail after last word -> hold last
 }
 
 @Test("CaptionDrawing word range maps by token index, not substring scan")
@@ -1149,7 +1168,7 @@ func captionTrackRename() {
 /// project with a video clip + a caption track whose single line covers the
 /// midpoint, and asserts the built `AVVideoComposition` carries the caption
 /// render item on the instruction interval that contains the midpoint.
-/// This proves the SRT → model → compositor wiring end-to-end without needing
+/// This proves the SRT -> model -> compositor wiring end-to-end without needing
 /// committed binary fixtures.
 @MainActor
 @Suite("Phase 30 — smoke", .serialized)
@@ -1159,79 +1178,10 @@ struct PhaseThirtySmokeTests {
         CMTime(seconds: seconds, preferredTimescale: 600)
     }
 
-    /// Writes a short solid-colour H.264 movie to a temp file and returns its URL.
-    /// Same pattern `TransitionsIntegrationTests` uses.
-    private func makeVideoFixture(seconds: Double, fps: Int32 = 30,
-                                  size: CGSize = CGSize(width: 320, height: 180)) async throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("caption-fixture-\(UUID().uuidString).mov")
-        try? FileManager.default.removeItem(at: url)
-
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        // H.264 rejects odd dimensions; mask the low bit off after rounding.
-        let w = max(2, Int(size.width.rounded()) & ~1)
-        let h = max(2, Int(size.height.rounded()) & ~1)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: w,
-            AVVideoHeightKey: h,
-        ])
-        input.expectsMediaDataInRealTime = false
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-                kCVPixelBufferWidthKey as String: w,
-                kCVPixelBufferHeightKey as String: h,
-            ])
-        writer.add(input)
-
-        #expect(writer.startWriting())
-        writer.startSession(atSourceTime: .zero)
-
-        let frameCount = Int(seconds * Double(fps))
-        for frame in 0..<frameCount {
-            // Bail out if the writer entered a non-`.writing` status so a
-            // failure mid-loop surfaces as a clean test failure instead of
-            // hanging on `isReadyForMoreMediaData` forever (Claude bot P1 #2).
-            while !input.isReadyForMoreMediaData {
-                guard writer.status == .writing else { break }
-                await Task.yield()
-            }
-            guard writer.status == .writing,
-                  let pool = adaptor.pixelBufferPool else { break }
-            var pixelBuffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
-            guard let buffer = pixelBuffer else { break }
-            CVPixelBufferLockBaseAddress(buffer, [])
-            if let base = CVPixelBufferGetBaseAddress(buffer) {
-                memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * h)
-            }
-            CVPixelBufferUnlockBaseAddress(buffer, [])
-            guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else { break }
-        }
-
-        input.markAsFinished()
-        await writer.finishWriting()
-        #expect(writer.status == .completed)
-        return url
-    }
-
-    private func loadedMedia(from url: URL) async throws -> MediaItem {
-        let item = MediaItem(url: url)
-        item.duration = try await item.asset.load(.duration)
-        let videoTracks = try await item.asset.loadTracks(withMediaType: .video)
-        let track = try #require(videoTracks.first)
-        item.hasVideo = true
-        item.naturalSize = try await track.load(.naturalSize)
-        item.preferredTransform = try await track.load(.preferredTransform)
-        return item
-    }
-
-    @Test("SRT → model → built composition carries the caption at the midpoint")
+    @Test("SRT -> model -> built composition carries the caption at the midpoint")
     func captionRoundTripsThroughCompositor() async throws {
         // Generate a 2s clip and import it as a clip on the timeline.
-        let url = try await makeVideoFixture(seconds: 2)
+        let url = try await makeVideoFixture(seconds: 2, size: CGSize(width: 320, height: 180))
         defer { try? FileManager.default.removeItem(at: url) }
 
         let project = Project()
@@ -1282,7 +1232,7 @@ struct PhaseThirtySmokeTests {
     /// `phase-30-animated-captions/design.md` previously documented.
     @Test("Composition extends past the last AV clip when a caption tail runs longer")
     func compositionExtendsForCaptionTail() async throws {
-        let url = try await makeVideoFixture(seconds: 1)
+        let url = try await makeVideoFixture(seconds: 1, size: CGSize(width: 320, height: 180))
         defer { try? FileManager.default.removeItem(at: url) }
 
         let project = Project()
@@ -1327,7 +1277,7 @@ struct PhaseThirtySmokeTests {
     /// extension survives the full `AVAssetExportSession` pipeline.
     @Test("Exported file extends past the AV end for a caption tail")
     func exportedFileCarriesCaptionTail() async throws {
-        let url = try await makeVideoFixture(seconds: 1)
+        let url = try await makeVideoFixture(seconds: 1, size: CGSize(width: 320, height: 180))
         defer { try? FileManager.default.removeItem(at: url) }
 
         let project = Project()

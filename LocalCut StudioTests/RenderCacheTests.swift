@@ -129,53 +129,71 @@ func keyGuardsAgainstInvalidCMTime() {
 
 // MARK: - R1.2 / R7.6: Effect chain hash
 
-@Test("[Effect].renderCacheHash: empty chain has a deterministic value")
-func chainHashEmptyDeterministic() {
-    let a: [Effect] = []
-    let b: [Effect] = []
-    #expect(a.renderCacheHash == b.renderCacheHash)
+/// Covers: empty deterministic, identical-equal, grade change, reorder, LUT bytes, look parameters.
+enum ChainHashCase: CaseIterable, CustomTestStringConvertible {
+    case emptyDeterministic
+    case identicalEqual
+    case gradeChange
+    case reorder
+    case lutBytes
+    case lookParameters
+
+    var testDescription: String {
+        switch self {
+        case .emptyDeterministic: "empty chain has a deterministic value"
+        case .identicalEqual: "identical chains hash equal"
+        case .gradeChange: "differs when colour grade changes"
+        case .reorder: "differs when chain order changes"
+        case .lutBytes: "differs when LUT bookmark bytes change"
+        case .lookParameters: "differs when look parameters change"
+        }
+    }
+
+    func run() {
+        switch self {
+        case .emptyDeterministic:
+            let a: [Effect] = []
+            let b: [Effect] = []
+            #expect(a.renderCacheHash == b.renderCacheHash)
+
+        case .identicalEqual:
+            let chain: [Effect] = [.colourGrade(.neutral)]
+            #expect(chain.renderCacheHash == chain.renderCacheHash)
+
+        case .gradeChange:
+            var grade = ColourGrade()
+            grade.exposure = 0.5
+            let a: [Effect] = [.colourGrade(.neutral)]
+            let b: [Effect] = [.colourGrade(grade)]
+            #expect(a.renderCacheHash != b.renderCacheHash)
+
+        case .reorder:
+            let lut = Effect.lut(bookmark: Data([0x01, 0x02]))
+            let grade = Effect.colourGrade(.neutral)
+            let a: [Effect] = [lut, grade]
+            let b: [Effect] = [grade, lut]
+            #expect(a.renderCacheHash != b.renderCacheHash)
+
+        case .lutBytes:
+            let a: [Effect] = [.lut(bookmark: Data([0x01]))]
+            let b: [Effect] = [.lut(bookmark: Data([0x02]))]
+            #expect(a.renderCacheHash != b.renderCacheHash)
+
+        case .lookParameters:
+            let a: [Effect] = [.grain(GrainEffect(amount: Keyframed(defaultValue: 0.1)))]
+            let b: [Effect] = [.grain(GrainEffect(amount: Keyframed(defaultValue: 0.2)))]
+            let c: [Effect] = [.halation(HalationEffect(strength: Keyframed(defaultValue: 0.2)))]
+            let d: [Effect] = [.vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2)))]
+            #expect(a.renderCacheHash != b.renderCacheHash)
+            #expect(b.renderCacheHash != c.renderCacheHash)
+            #expect(c.renderCacheHash != d.renderCacheHash)
+        }
+    }
 }
 
-@Test("[Effect].renderCacheHash: identical chains hash equal")
-func chainHashIdenticalEqual() {
-    let chain: [Effect] = [.colourGrade(.neutral)]
-    #expect(chain.renderCacheHash == chain.renderCacheHash)
-}
-
-@Test("[Effect].renderCacheHash: differs when colour grade changes")
-func chainHashChangesOnGradeChange() {
-    var grade = ColourGrade()
-    grade.exposure = 0.5
-    let a: [Effect] = [.colourGrade(.neutral)]
-    let b: [Effect] = [.colourGrade(grade)]
-    #expect(a.renderCacheHash != b.renderCacheHash)
-}
-
-@Test("[Effect].renderCacheHash: differs when chain order changes")
-func chainHashChangesOnReorder() {
-    let lut = Effect.lut(bookmark: Data([0x01, 0x02]))
-    let grade = Effect.colourGrade(.neutral)
-    let a: [Effect] = [lut, grade]
-    let b: [Effect] = [grade, lut]
-    #expect(a.renderCacheHash != b.renderCacheHash)
-}
-
-@Test("[Effect].renderCacheHash: differs when LUT bookmark bytes change")
-func chainHashChangesOnLUTBytes() {
-    let a: [Effect] = [.lut(bookmark: Data([0x01]))]
-    let b: [Effect] = [.lut(bookmark: Data([0x02]))]
-    #expect(a.renderCacheHash != b.renderCacheHash)
-}
-
-@Test("[Effect].renderCacheHash: differs when look parameters change")
-func chainHashChangesOnLookParameters() {
-    let a: [Effect] = [.grain(GrainEffect(amount: Keyframed(defaultValue: 0.1)))]
-    let b: [Effect] = [.grain(GrainEffect(amount: Keyframed(defaultValue: 0.2)))]
-    let c: [Effect] = [.halation(HalationEffect(strength: Keyframed(defaultValue: 0.2)))]
-    let d: [Effect] = [.vignette(VignetteEffect(amount: Keyframed(defaultValue: 0.2)))]
-    #expect(a.renderCacheHash != b.renderCacheHash)
-    #expect(b.renderCacheHash != c.renderCacheHash)
-    #expect(c.renderCacheHash != d.renderCacheHash)
+@Test("[Effect].renderCacheHash: chain hash properties", arguments: ChainHashCase.allCases)
+func chainHashProperties(_ testCase: ChainHashCase) {
+    testCase.run()
 }
 
 // MARK: - R2 / R7.1: LRU cache hit / miss
@@ -190,48 +208,60 @@ func cacheHitOnIdentical() {
     #expect(hit === image)
 }
 
-@Test("RenderCache: miss when clipID differs")
-func cacheMissOnClipChange() {
-    let cache = RenderCache()
-    let original = key(clipID: UUID(), effectChainHash: 1)
-    cache.setImage(tinyImage(), for: original)
-    let probe = RenderCacheKey(clipID: UUID(), effectChainHash: 1,
-                               time: original.time, renderSize: original.renderSize)
-    #expect(cache.image(for: probe) == nil)
+/// Covers: clipID, effectChainHash, time, and renderSize miss scenarios.
+enum CacheMissCase: CaseIterable, CustomTestStringConvertible {
+    case clipID, chainHash, time, renderSize
+
+    var testDescription: String {
+        switch self {
+        case .clipID: "miss when clipID differs"
+        case .chainHash: "miss when effectChainHash differs"
+        case .time: "miss when time differs"
+        case .renderSize: "miss when renderSize differs"
+        }
+    }
+
+    func run() {
+        let cache = RenderCache()
+        switch self {
+        case .clipID:
+            let original = key(clipID: UUID(), effectChainHash: 1)
+            cache.setImage(tinyImage(), for: original)
+            let probe = RenderCacheKey(clipID: UUID(), effectChainHash: 1,
+                                       time: original.time, renderSize: original.renderSize)
+            #expect(cache.image(for: probe) == nil)
+
+        case .chainHash:
+            let original = key(effectChainHash: 1)
+            cache.setImage(tinyImage(), for: original)
+            let probe = RenderCacheKey(clipID: original.clipID, effectChainHash: 2,
+                                       time: original.time, renderSize: original.renderSize)
+            #expect(cache.image(for: probe) == nil)
+
+        case .time:
+            let original = key(time: CMTime(value: 30, timescale: 600))
+            cache.setImage(tinyImage(), for: original)
+            let probe = RenderCacheKey(clipID: original.clipID,
+                                       effectChainHash: original.effectChainHash,
+                                       time: CMTime(value: 31, timescale: 600),
+                                       renderSize: original.renderSize)
+            #expect(cache.image(for: probe) == nil)
+
+        case .renderSize:
+            let original = key(renderSize: CGSize(width: 1920, height: 1080))
+            cache.setImage(tinyImage(), for: original)
+            let probe = RenderCacheKey(clipID: original.clipID,
+                                       effectChainHash: original.effectChainHash,
+                                       time: original.time,
+                                       renderSize: CGSize(width: 1280, height: 720))
+            #expect(cache.image(for: probe) == nil)
+        }
+    }
 }
 
-@Test("RenderCache: miss when effectChainHash differs")
-func cacheMissOnChainChange() {
-    let cache = RenderCache()
-    let original = key(effectChainHash: 1)
-    cache.setImage(tinyImage(), for: original)
-    let probe = RenderCacheKey(clipID: original.clipID, effectChainHash: 2,
-                               time: original.time, renderSize: original.renderSize)
-    #expect(cache.image(for: probe) == nil)
-}
-
-@Test("RenderCache: miss when time differs")
-func cacheMissOnTimeChange() {
-    let cache = RenderCache()
-    let original = key(time: CMTime(value: 30, timescale: 600))
-    cache.setImage(tinyImage(), for: original)
-    let probe = RenderCacheKey(clipID: original.clipID,
-                               effectChainHash: original.effectChainHash,
-                               time: CMTime(value: 31, timescale: 600),
-                               renderSize: original.renderSize)
-    #expect(cache.image(for: probe) == nil)
-}
-
-@Test("RenderCache: miss when renderSize differs")
-func cacheMissOnSizeChange() {
-    let cache = RenderCache()
-    let original = key(renderSize: CGSize(width: 1920, height: 1080))
-    cache.setImage(tinyImage(), for: original)
-    let probe = RenderCacheKey(clipID: original.clipID,
-                               effectChainHash: original.effectChainHash,
-                               time: original.time,
-                               renderSize: CGSize(width: 1280, height: 720))
-    #expect(cache.image(for: probe) == nil)
+@Test("RenderCache: cache miss when key field differs", arguments: CacheMissCase.allCases)
+func cacheMiss(_ testCase: CacheMissCase) {
+    testCase.run()
 }
 
 @Test("RenderCache: re-insert at the same key replaces, doesn't stack bytes")
@@ -357,65 +387,79 @@ func cacheTracksBytes() {
 
 // MARK: - R4 / R7.4: Invalidation
 
-@Test("RenderCache: invalidate(clipID:) drops only matching entries")
-func invalidateClipID() {
-    let cache = RenderCache()
-    let editedClip = UUID()
-    let otherClip = UUID()
-    let editedKey1 = key(clipID: editedClip, effectChainHash: 1)
-    let editedKey2 = key(clipID: editedClip, effectChainHash: 2,
-                         time: CMTime(value: 30, timescale: 600))
-    let otherKey = key(clipID: otherClip, effectChainHash: 1)
+/// Covers: invalidate(clipID:), invalidate(clipID:timeRange:), invalidate(notMatchingRenderSize:).
+enum InvalidationCase: CaseIterable, CustomTestStringConvertible {
+    case clipID, clipIDTimeRange, renderSize
 
-    cache.setImage(tinyImage(), for: editedKey1)
-    cache.setImage(tinyImage(), for: editedKey2)
-    cache.setImage(tinyImage(), for: otherKey)
-    #expect(cache.count == 3)
+    var testDescription: String {
+        switch self {
+        case .clipID: "invalidate(clipID:) drops only matching entries"
+        case .clipIDTimeRange: "invalidate(clipID:timeRange:) drops only matching source times"
+        case .renderSize: "invalidate(notMatchingRenderSize:) drops stale-canvas entries"
+        }
+    }
 
-    cache.invalidate(clipID: editedClip)
+    func run() {
+        let cache = RenderCache()
+        switch self {
+        case .clipID:
+            let editedClip = UUID()
+            let otherClip = UUID()
+            let editedKey1 = key(clipID: editedClip, effectChainHash: 1)
+            let editedKey2 = key(clipID: editedClip, effectChainHash: 2,
+                                 time: CMTime(value: 30, timescale: 600))
+            let otherKey = key(clipID: otherClip, effectChainHash: 1)
 
-    #expect(cache.image(for: editedKey1) == nil)
-    #expect(cache.image(for: editedKey2) == nil)
-    #expect(cache.image(for: otherKey) != nil)
-    #expect(cache.count == 1)
-    // One 100×100 image remains; byte cost is image-extent driven.
-    #expect(cache.currentBytes == RenderCache.estimatedBytes(width: 100, height: 100))
+            cache.setImage(tinyImage(), for: editedKey1)
+            cache.setImage(tinyImage(), for: editedKey2)
+            cache.setImage(tinyImage(), for: otherKey)
+            #expect(cache.count == 3)
+
+            cache.invalidate(clipID: editedClip)
+
+            #expect(cache.image(for: editedKey1) == nil)
+            #expect(cache.image(for: editedKey2) == nil)
+            #expect(cache.image(for: otherKey) != nil)
+            #expect(cache.count == 1)
+            // One 100x100 image remains; byte cost is image-extent driven.
+            #expect(cache.currentBytes == RenderCache.estimatedBytes(width: 100, height: 100))
+
+        case .clipIDTimeRange:
+            let editedClip = UUID()
+            let inside = key(clipID: editedClip, time: CMTime(seconds: 2, preferredTimescale: 600))
+            let outside = key(clipID: editedClip, time: CMTime(seconds: 4, preferredTimescale: 600))
+            let otherClip = key(clipID: UUID(), time: CMTime(seconds: 2, preferredTimescale: 600))
+
+            cache.setImage(tinyImage(), for: inside)
+            cache.setImage(tinyImage(), for: outside)
+            cache.setImage(tinyImage(), for: otherClip)
+
+            cache.invalidate(
+                clipID: editedClip,
+                timeRange: CMTimeRange(start: CMTime(seconds: 1, preferredTimescale: 600),
+                                       duration: CMTime(seconds: 2, preferredTimescale: 600)))
+
+            #expect(cache.image(for: inside) == nil)
+            #expect(cache.image(for: outside) != nil)
+            #expect(cache.image(for: otherClip) != nil)
+
+        case .renderSize:
+            let smallKey = key(clipID: UUID(), renderSize: CGSize(width: 1280, height: 720))
+            let bigKey = key(clipID: UUID(), renderSize: CGSize(width: 1920, height: 1080))
+            cache.setImage(tinyImage(), for: smallKey)
+            cache.setImage(tinyImage(), for: bigKey)
+
+            cache.invalidate(notMatchingRenderSize: CGSize(width: 1920, height: 1080))
+
+            #expect(cache.image(for: smallKey) == nil)
+            #expect(cache.image(for: bigKey) != nil)
+        }
+    }
 }
 
-@Test("RenderCache: invalidate(clipID:timeRange:) drops only matching source times")
-func invalidateClipIDTimeRange() {
-    let cache = RenderCache()
-    let editedClip = UUID()
-    let inside = key(clipID: editedClip, time: CMTime(seconds: 2, preferredTimescale: 600))
-    let outside = key(clipID: editedClip, time: CMTime(seconds: 4, preferredTimescale: 600))
-    let otherClip = key(clipID: UUID(), time: CMTime(seconds: 2, preferredTimescale: 600))
-
-    cache.setImage(tinyImage(), for: inside)
-    cache.setImage(tinyImage(), for: outside)
-    cache.setImage(tinyImage(), for: otherClip)
-
-    cache.invalidate(
-        clipID: editedClip,
-        timeRange: CMTimeRange(start: CMTime(seconds: 1, preferredTimescale: 600),
-                               duration: CMTime(seconds: 2, preferredTimescale: 600)))
-
-    #expect(cache.image(for: inside) == nil)
-    #expect(cache.image(for: outside) != nil)
-    #expect(cache.image(for: otherClip) != nil)
-}
-
-@Test("RenderCache: invalidate(notMatchingRenderSize:) drops stale-canvas entries")
-func invalidateRenderSize() {
-    let cache = RenderCache()
-    let smallKey = key(clipID: UUID(), renderSize: CGSize(width: 1280, height: 720))
-    let bigKey = key(clipID: UUID(), renderSize: CGSize(width: 1920, height: 1080))
-    cache.setImage(tinyImage(), for: smallKey)
-    cache.setImage(tinyImage(), for: bigKey)
-
-    cache.invalidate(notMatchingRenderSize: CGSize(width: 1920, height: 1080))
-
-    #expect(cache.image(for: smallKey) == nil)
-    #expect(cache.image(for: bigKey) != nil)
+@Test("RenderCache: invalidation variants", arguments: InvalidationCase.allCases)
+func invalidationVariants(_ testCase: InvalidationCase) {
+    testCase.run()
 }
 
 @Test("RenderCache: cache survives a composition rebuild but not an effect-chain edit")

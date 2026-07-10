@@ -20,58 +20,29 @@ private func otioTracks(_ json: String) throws -> [[String: Any]] {
 @Suite("Interchange time model")
 struct InterchangeTimeTests {
 
-    @Test("project.frameRate wins when finite > 0")
-    func projectFrameRateWins() {
-        let doc = makeTestDoc(frameRate: 24)
-        let tb = interchangeTimebase(for: doc)
-        #expect(tb.rate == 24)
-        #expect(tb.frameDurationTimescale == 1)
+    // MARK: - Frame-rate parameter table
+
+    struct FrameRateCase: CustomTestStringConvertible {
+        let input: Double
+        let expectedRate: Int
+        let expectedTimescale: Int
+        var testDescription: String { "\(input)" }
     }
 
-    @Test("Fallback is 30 when frameRate is 0")
-    func fallbackTo30() {
-        let doc = makeTestDoc(frameRate: 0)
+    @Test("interchangeTimebase frame-rate conversion", arguments: [
+        FrameRateCase(input: 24, expectedRate: 24, expectedTimescale: 1),
+        FrameRateCase(input: 0, expectedRate: 30, expectedTimescale: 1),
+        FrameRateCase(input: -1, expectedRate: 30, expectedTimescale: 1),
+        FrameRateCase(input: 23.976, expectedRate: 24000, expectedTimescale: 1001),
+        FrameRateCase(input: 29.97, expectedRate: 30000, expectedTimescale: 1001),
+        FrameRateCase(input: 59.94, expectedRate: 60000, expectedTimescale: 1001),
+        FrameRateCase(input: 25, expectedRate: 25, expectedTimescale: 1),
+    ])
+    func interchangeTimebaseFrameRate(_ tc: FrameRateCase) {
+        let doc = makeTestDoc(frameRate: tc.input)
         let tb = interchangeTimebase(for: doc)
-        #expect(tb.rate == 30)
-    }
-
-    @Test("Fallback is 30 when frameRate is negative")
-    func fallbackNegative() {
-        let doc = makeTestDoc(frameRate: -1)
-        let tb = interchangeTimebase(for: doc)
-        #expect(tb.rate == 30)
-    }
-
-    @Test("23.976 rational representation preserved")
-    func rational23976() {
-        let doc = makeTestDoc(frameRate: 23.976)
-        let tb = interchangeTimebase(for: doc)
-        #expect(tb.rate == 24000)
-        #expect(tb.frameDurationTimescale == 1001)
-    }
-
-    @Test("29.97 rational representation preserved")
-    func rational2997() {
-        let doc = makeTestDoc(frameRate: 29.97)
-        let tb = interchangeTimebase(for: doc)
-        #expect(tb.rate == 30000)
-        #expect(tb.frameDurationTimescale == 1001)
-    }
-
-    @Test("59.94 rational representation preserved")
-    func rational5994() {
-        let doc = makeTestDoc(frameRate: 59.94)
-        let tb = interchangeTimebase(for: doc)
-        #expect(tb.rate == 60000)
-        #expect(tb.frameDurationTimescale == 1001)
-    }
-
-    @Test("Integer rate preserved")
-    func integerRate() {
-        let doc = makeTestDoc(frameRate: 25)
-        let tb = interchangeTimebase(for: doc)
-        #expect(tb.rate == 25)
-        #expect(tb.frameDurationTimescale == 1)
+        #expect(tb.rate == tc.expectedRate)
+        #expect(tb.frameDurationTimescale == tc.expectedTimescale)
     }
 
     @Test("Frame snapping at 24fps")
@@ -249,28 +220,27 @@ struct InterchangeTimeTests {
         #expect(tb.frames(time: CMTime(seconds: Double(Int.max), preferredTimescale: 600)) == Int.max)
     }
 
-    @Test("Timecode formatting starts at 00:00:00:00")
-    func timecodeFormatting() {
-        let doc = makeTestDoc(frameRate: 24)
-        let tb = interchangeTimebase(for: doc)
-        let tc = formatTimecode(CMTime.zero, timebase: tb)
-        #expect(tc == "00:00:00:00")
+    // MARK: - Timecode parameter table
+
+    struct TimecodeCase: CustomTestStringConvertible {
+        let timeValue: Int64
+        let timeTimescale: Int32
+        let expected: String
+        var testDescription: String { "\(timeValue)/\(timeTimescale) → \(expected)" }
+
+        var time: CMTime { CMTime(value: timeValue, timescale: timeTimescale) }
     }
 
-    @Test("Timecode formatting at 1 second")
-    func timecodeAt1Second() {
+    @Test("Timecode formatting", arguments: [
+        TimecodeCase(timeValue: 0, timeTimescale: 1, expected: "00:00:00:00"),
+        TimecodeCase(timeValue: 1, timeTimescale: 1, expected: "00:00:01:00"),
+        TimecodeCase(timeValue: 1, timeTimescale: 24, expected: "00:00:00:01"),
+    ])
+    func timecodeFormatting(_ tc: TimecodeCase) {
         let doc = makeTestDoc(frameRate: 24)
         let tb = interchangeTimebase(for: doc)
-        let tc = formatTimecode(CMTime(value: 1, timescale: 1), timebase: tb)
-        #expect(tc == "00:00:01:00")
-    }
-
-    @Test("Timecode formatting at 1 frame")
-    func timecodeAt1Frame() {
-        let doc = makeTestDoc(frameRate: 24)
-        let tb = interchangeTimebase(for: doc)
-        let tc = formatTimecode(CMTime(value: 1, timescale: 24), timebase: tb)
-        #expect(tc == "00:00:00:01")
+        let result = formatTimecode(tc.time, timebase: tb)
+        #expect(result == tc.expected)
     }
 }
 
@@ -1309,7 +1279,7 @@ struct GoldenFixtureTests {
 
     // MARK: - Byte-equality tests
 
-    private struct FixtureNotFoundError: Error, CustomStringConvertible {
+    struct FixtureNotFoundError: Error, CustomStringConvertible {
         let name: String
         var description: String { "Fixture '\(name)' not found — fixture directory unreachable (sandboxed?)" }
     }
@@ -1323,95 +1293,66 @@ struct GoldenFixtureTests {
         throw FixtureNotFoundError(name: name)
     }
 
-    @Test("basic.otio byte-equal + valid")
-    func basicOtio() throws {
-        let golden = try requireFixture("basic.otio")
-        let (json, warnings) = freshOtio("basic.otio")
+    // MARK: - Parameterized OTIO golden fixture test
+
+    @Test("OTIO golden fixture byte-equal + valid", arguments: [
+        "basic.otio",
+        "fractional.otio",
+        "transitions.otio",
+        "missing_media.otio",
+        "markers.otio",
+        "speed_ramp.otio",
+        "localcut_metadata.otio",
+    ])
+    func otioGoldenFixture(_ name: String) throws {
+        let golden = try requireFixture(name)
+        let (json, warnings) = freshOtio(name)
+        #expect(json == golden, "\(name) output differs from committed fixture")
+        #expect(validateOtioDocument(json).isEmpty, "\(name) failed validation")
+        switch name {
+        case "basic.otio":
+            #expect(warnings.isEmpty)
+        case "fractional.otio":
+            #expect(warnings.isEmpty)
+        case "transitions.otio":
+            #expect(warnings.isEmpty)
+            #expect(json.contains("SMPTE_Dissolve"))
+        case "missing_media.otio":
+            #expect(!warnings.isEmpty)
+            #expect(json.contains("MissingReference.1"))
+        case "markers.otio":
+            #expect(warnings.isEmpty)
+            #expect(json.contains("Marker.2"))
+            #expect(json.contains("Start"))
+            #expect(json.contains("Middle"))
+        case "speed_ramp.otio":
+            #expect(!warnings.isEmpty)
+            #expect(json.contains("speedCurve"))
+        case "localcut_metadata.otio":
+            #expect(warnings.isEmpty)
+            #expect(json.contains("colourGrade"))
+            #expect(json.contains("captionTracks"))
+            #expect(json.contains("Hello world"))
+        default:
+            break
+        }
+    }
+
+    // MARK: - Parameterized EDL golden fixture test
+
+    @Test("EDL golden fixture byte-equal + valid", arguments: [
+        "basic.edl",
+        "fractional.edl",
+    ])
+    func edlGoldenFixture(_ name: String) throws {
+        let golden = try requireFixture(name)
+        let (edl, warnings) = freshEdl(name)
         #expect(warnings.isEmpty)
-        #expect(json == golden, "basic.otio output differs from committed fixture")
-        #expect(validateOtioDocument(json).isEmpty)
-    }
-
-    @Test("basic.edl byte-equal + valid")
-    func basicEdl() throws {
-        let golden = try requireFixture("basic.edl")
-        let (edl, warnings) = freshEdl("basic.edl")
-        #expect(warnings.isEmpty)
-        #expect(edl == golden, "basic.edl output differs from committed fixture")
-        #expect(validateEdl(edl).isEmpty)
-    }
-
-    @Test("fractional.otio byte-equal + valid")
-    func fractionalOtio() throws {
-        let golden = try requireFixture("fractional.otio")
-        let (json, warnings) = freshOtio("fractional.otio")
-        #expect(warnings.isEmpty)
-        #expect(json == golden, "fractional.otio output differs from committed fixture")
-        #expect(validateOtioDocument(json).isEmpty)
-    }
-
-    @Test("fractional.edl byte-equal + valid")
-    func fractionalEdl() throws {
-        let golden = try requireFixture("fractional.edl")
-        let (edl, warnings) = freshEdl("fractional.edl")
-        #expect(warnings.isEmpty)
-        #expect(edl == golden, "fractional.edl output differs from committed fixture")
-        #expect(validateEdl(edl).isEmpty)
-        #expect(edl.contains("LOCALCUT: RATE"))
-    }
-
-    @Test("transitions.otio byte-equal + valid")
-    func transitionsOtio() throws {
-        let golden = try requireFixture("transitions.otio")
-        let (json, warnings) = freshOtio("transitions.otio")
-        #expect(warnings.isEmpty)
-        #expect(json == golden, "transitions.otio output differs from committed fixture")
-        #expect(validateOtioDocument(json).isEmpty)
-        #expect(json.contains("SMPTE_Dissolve"))
-    }
-
-    @Test("missing_media.otio byte-equal + valid")
-    func missingMediaOtio() throws {
-        let golden = try requireFixture("missing_media.otio")
-        let (json, warnings) = freshOtio("missing_media.otio")
-        #expect(!warnings.isEmpty) // Should have missing-source warnings
-        #expect(json == golden, "missing_media.otio output differs from committed fixture")
-        #expect(validateOtioDocument(json).isEmpty)
-        #expect(json.contains("MissingReference.1"))
-    }
-
-    @Test("markers.otio byte-equal + valid")
-    func markersOtio() throws {
-        let golden = try requireFixture("markers.otio")
-        let (json, warnings) = freshOtio("markers.otio")
-        #expect(warnings.isEmpty)
-        #expect(json == golden, "markers.otio output differs from committed fixture")
-        #expect(validateOtioDocument(json).isEmpty)
-        #expect(json.contains("Marker.2"))
-        #expect(json.contains("Start"))
-        #expect(json.contains("Middle"))
-    }
-
-    @Test("speed_ramp.otio byte-equal + valid")
-    func speedRampOtio() throws {
-        let golden = try requireFixture("speed_ramp.otio")
-        let (json, warnings) = freshOtio("speed_ramp.otio")
-        #expect(!warnings.isEmpty) // Non-uniform speed curve warning
-        #expect(json == golden, "speed_ramp.otio output differs from committed fixture")
-        #expect(validateOtioDocument(json).isEmpty)
-        #expect(json.contains("speedCurve"))
-    }
-
-    @Test("localcut_metadata.otio byte-equal + valid")
-    func localcutMetadataOtio() throws {
-        let golden = try requireFixture("localcut_metadata.otio")
-        let (json, warnings) = freshOtio("localcut_metadata.otio")
-        #expect(warnings.isEmpty)
-        #expect(json == golden, "localcut_metadata.otio output differs from committed fixture")
-        #expect(validateOtioDocument(json).isEmpty)
-        #expect(json.contains("colourGrade"))
-        #expect(json.contains("captionTracks"))
-        #expect(json.contains("Hello world"))
+        #expect(edl == golden, "\(name) output differs from committed fixture")
+        #expect(validateEdl(edl).isEmpty, "\(name) failed validation")
+        if name == "fractional.edl" {
+            #expect(edl.contains("LOCALCUT: RATE"))
+        }
     }
 }
 

@@ -68,29 +68,31 @@ func overlaySelectionClearsForOtherTargets() {
     #expect(model.project.overlayBundlePaths.isEmpty)
 }
 
-// MARK: - AnimatedImageSource tests
+// MARK: - Source nil-for-missing-file tests
 
-@Test("AnimatedImageSource returns nil for nonexistent file")
-func animatedImageSourceMissingFile() {
-    let url = URL(filePath: "/nonexistent/file.webp")
-    let source = AnimatedImageSource(url: url)
-    #expect(source == nil)
-}
-
-// MARK: - AlphaVideoSource tests
-
-@Test("AlphaVideoSource returns nil for nonexistent file")
-func alphaVideoSourceMissingFile() async {
-    let url = URL(filePath: "/nonexistent/file.mov")
-    let source = await AlphaVideoSource.make(url: url)
-    #expect(source == nil)
+@Test(
+    "Source returns nil for nonexistent file",
+    arguments: [
+        ("animated", URL(filePath: "/nonexistent/file.webp")),
+        ("alpha-video", URL(filePath: "/nonexistent/file.mov")),
+    ]
+)
+func sourceReturnsNilForNonexistentFile(name: String, url: URL) async {
+    switch name {
+    case "animated":
+        #expect(AnimatedImageSource(url: url) == nil)
+    case "alpha-video":
+        #expect(await AlphaVideoSource.make(url: url) == nil)
+    default:
+        #expect(Bool(false), "Unknown argument: \(name)")
+    }
 }
 
 @Test("AlphaVideoSource purges decoded frame cache")
 func alphaVideoSourcePurgesDecodedFrames() async throws {
     let tmp = try makeOverlayTempDirectory("alpha-purge")
     defer { try? FileManager.default.removeItem(at: tmp) }
-    let url = try await makeOverlayVideoFixture(seconds: 1, in: tmp)
+    let url = try await makeVideoFixture(seconds: 1, in: tmp)
     let source = try #require(await AlphaVideoSource.make(url: url))
 
     _ = await source.frame(at: .zero, endAction: .freeze)
@@ -265,8 +267,8 @@ func compositionOverlayOnlyDuration() async throws {
 func compositionOverlayGapBetweenVideoClipsUsesFiller() async throws {
     let tmp = try makeOverlayTempDirectory("overlay-gap")
     defer { try? FileManager.default.removeItem(at: tmp) }
-    let videoURL = try await makeOverlayVideoFixture(seconds: 1, in: tmp)
-    let media = try await loadedOverlayMedia(from: videoURL)
+    let videoURL = try await makeVideoFixture(seconds: 1, in: tmp)
+    let media = try await loadedMedia(from: videoURL)
 
     let project = Project()
     project.renderSize = CGSize(width: 32, height: 32)
@@ -343,8 +345,8 @@ func renderQueueExportsAllOverlayKinds() async throws {
     let tmp = try makeOverlayTempDirectory("export-smoke")
     defer { try? FileManager.default.removeItem(at: tmp) }
 
-    let videoURL = try await makeOverlayVideoFixture(seconds: 1, in: tmp)
-    let media = try await loadedOverlayMedia(from: videoURL)
+    let videoURL = try await makeVideoFixture(seconds: 1, in: tmp)
+    let media = try await loadedMedia(from: videoURL)
     media.bookmark = try videoURL.bookmarkData(options: .withSecurityScope,
                                                includingResourceValuesForKeys: nil,
                                                relativeTo: nil)
@@ -359,7 +361,7 @@ func renderQueueExportsAllOverlayKinds() async throws {
     let lottieURL = tmp.appendingPathComponent("sticker.json")
     try minimalLottieJSON.data(using: .utf8)!.write(to: lottieURL, options: .atomic)
 
-    let alphaURL = try await makeOverlayVideoFixture(seconds: 1, in: tmp)
+    let alphaURL = try await makeVideoFixture(seconds: 1, in: tmp)
 
     let project = Project()
     project.renderSize = CGSize(width: 64, height: 64)
@@ -513,7 +515,7 @@ private func approximately(_ lhs: CGFloat, _ rhs: CGFloat, tolerance: CGFloat = 
 }
 
 private func waitForFinishedOverlayJob(_ queue: RenderQueue) async throws -> QueueJob {
-    for _ in 0..<600 {
+    for _ in 0..<300 {
         if let job = queue.jobs.first, job.isTerminal {
             return job
         }
@@ -524,84 +526,6 @@ private func waitForFinishedOverlayJob(_ queue: RenderQueue) async throws -> Que
                   userInfo: [
                       NSLocalizedDescriptionKey: "Timed out waiting for overlay export (\(jobDescription))",
                   ])
-}
-
-private func makeOverlayVideoFixture(seconds: Double,
-                                     fps: Int32 = 30,
-                                     in directory: URL) async throws -> URL {
-    let url = directory.appendingPathComponent("overlay-video-\(UUID().uuidString).mov")
-    let size = CGSize(width: 64, height: 64)
-    let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-    let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-        AVVideoCodecKey: AVVideoCodecType.h264,
-        AVVideoWidthKey: Int(size.width),
-        AVVideoHeightKey: Int(size.height),
-    ])
-    input.expectsMediaDataInRealTime = false
-    let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-        assetWriterInput: input,
-        sourcePixelBufferAttributes: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-            kCVPixelBufferWidthKey as String: Int(size.width),
-            kCVPixelBufferHeightKey as String: Int(size.height),
-        ])
-    writer.add(input)
-    try #require(writer.startWriting())
-    writer.startSession(atSourceTime: .zero)
-
-    let frameCount = Int(seconds * Double(fps))
-    for frame in 0..<frameCount {
-        while !input.isReadyForMoreMediaData {
-            guard writer.status == .writing else {
-                throw writer.error ?? NSError(domain: "OverlayTests", code: -1)
-            }
-            await Task.yield()
-        }
-        let buffer = try makeOverlayPixelBuffer(size: size, adaptor: adaptor, frame: frame)
-        guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else {
-            throw writer.error ?? NSError(domain: "OverlayTests", code: -2)
-        }
-    }
-
-    input.markAsFinished()
-    await writer.finishWriting()
-    try #require(writer.status == .completed)
-    return url
-}
-
-private func makeOverlayPixelBuffer(size: CGSize,
-                                    adaptor: AVAssetWriterInputPixelBufferAdaptor,
-                                    frame: Int) throws -> CVPixelBuffer {
-    var pixelBuffer: CVPixelBuffer?
-    if let pool = adaptor.pixelBufferPool {
-        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
-    }
-    guard let pixelBuffer else {
-        throw NSError(domain: "OverlayTests", code: -3)
-    }
-    let status = CVPixelBufferLockBaseAddress(pixelBuffer, [])
-    guard status == kCVReturnSuccess else {
-        throw NSError(domain: "OverlayTests", code: Int(status))
-    }
-    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
-
-    guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
-        throw NSError(domain: "OverlayTests", code: -4)
-    }
-    let byte = UInt8(0x50 + (frame % 32))
-    memset(base, Int32(byte), CVPixelBufferGetBytesPerRow(pixelBuffer) * Int(size.height))
-    return pixelBuffer
-}
-
-private func loadedOverlayMedia(from url: URL) async throws -> MediaItem {
-    let item = MediaItem(url: url)
-    item.duration = try await item.asset.load(.duration).sanitized
-    let videoTracks = try await item.asset.loadTracks(withMediaType: .video)
-    let track = try #require(videoTracks.first)
-    item.hasVideo = true
-    item.naturalSize = try await track.load(.naturalSize).sanitized
-    item.preferredTransform = try await track.load(.preferredTransform).sanitized
-    return item
 }
 
 @MainActor
