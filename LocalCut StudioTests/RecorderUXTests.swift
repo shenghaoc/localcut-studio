@@ -890,9 +890,24 @@ struct RecordingGapCollapseTests {
             .appendingPathComponent("RetakeUndoRedo-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directoryURL) }
-        _ = try await makeVideoFixture(
-            seconds: duration.seconds,
-            in: directoryURL)
+
+        // Create fixture at the path the resolver expects (screen.mov).
+        // Retry on transient AVFoundation resource contention under parallel load.
+        let fixtureURL = directoryURL.appendingPathComponent("screen.mov")
+        var fixtureCreated = false
+        for attempt in 0..<3 {
+            do {
+                let url = try await makeVideoFixture(seconds: duration.seconds, in: directoryURL)
+                // Rename to the path CaptureChunkResolver expects.
+                try FileManager.default.moveItem(at: url, to: fixtureURL)
+                fixtureCreated = true
+                break
+            } catch {
+                if attempt == 2 { throw error }
+                try await Task.sleep(for: .milliseconds(200 * (attempt + 1)))
+            }
+        }
+        try #require(fixtureCreated, "Failed to create video fixture after 3 attempts")
         let sourceID = UUID()
         let source = CaptureSourceDescriptor(
             id: sourceID,

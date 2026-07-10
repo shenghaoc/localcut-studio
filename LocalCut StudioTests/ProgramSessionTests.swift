@@ -67,6 +67,7 @@ struct ProgramSessionTests {
     func secondSessionFails() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
         let source = testSource()
         let scene = testScene(sourceId: source.id)
@@ -99,6 +100,7 @@ struct ProgramSessionTests {
         // Pre-exhaust the budget.
         let preLease = try await budget.acquire(.export)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
         let source = testSource()
         let scene = testScene(sourceId: source.id)
@@ -118,6 +120,7 @@ struct ProgramSessionTests {
     func partialFailureCleansUp() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
 
         // Empty sources should fail.
@@ -135,6 +138,7 @@ struct ProgramSessionTests {
     func stopClosesCleanly() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
         let source = testSource()
         let scene = testScene(sourceId: source.id)
@@ -155,6 +159,7 @@ struct ProgramSessionTests {
     func sceneSwitchRecordsEvent() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
         let source = testSource()
         let sceneA = SceneDefinition(name: "A", layers: [
@@ -184,6 +189,7 @@ struct ProgramSessionTests {
     func feedFrameEmitsProgramFrame() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
         let source = testSource()
         let scene = testScene(sourceId: source.id)
@@ -205,6 +211,7 @@ struct ProgramSessionTests {
     func dynamicFrameSinkCanBeRemoved() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
         let source = testSource()
         let scene = testScene(sourceId: source.id)
@@ -230,6 +237,7 @@ struct ProgramSessionTests {
     func sourceListSupportsMultipleTypes() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
 
         let screen = testSource(kind: .display)
@@ -257,6 +265,7 @@ struct ProgramSessionTests {
     func noSourcesThrows() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
 
         await #expect(throws: ProgramSessionError.noSources) {
@@ -272,6 +281,7 @@ struct ProgramSessionTests {
     func noScenesThrows() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
 
         await #expect(throws: ProgramSessionError.noScenes) {
@@ -287,6 +297,7 @@ struct ProgramSessionTests {
     func hotkeyConflictThrows() async throws {
         let budget = EncoderBudget(maxConcurrent: 4)
         let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let session = ProgramSession(budget: budget, rootURL: dir)
         let sourceId = UUID()
         let scenes = [
