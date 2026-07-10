@@ -185,7 +185,6 @@ extension EditorModel {
                 let outputDuration = outputOffset - segmentOutputOffset
                 // Skip zero-duration pieces (e.g. duplicate beat times).
                 guard outputDuration > .zero else {
-                    segmentTimelineStart = cut
                     continue
                 }
                 pieces.append(piece(from: clip,
@@ -206,7 +205,7 @@ extension EditorModel {
                                     preservesIDAndTransition: pieces.isEmpty))
             }
 
-            guard !pieces.isEmpty else {
+            guard pieces.count > 1 else {
                 statusMessage = "No valid cut points found."
                 return
             }

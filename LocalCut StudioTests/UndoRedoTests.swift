@@ -57,6 +57,26 @@ struct UndoRedoTests {
         #expect(model.track(for: clipID)?.id == model.project.videoTracks[0].id)
     }
 
+    @Test("EditorModel: stale clip-index offsets validate IDs and fall back to a scan")
+    func staleClipIndexFallsBackToScan() {
+        let model = EditorModel()
+        let first = Clip(mediaID: UUID(), sourceStart: .zero,
+                         duration: time(1), timelineStart: .zero)
+        let target = Clip(mediaID: UUID(), sourceStart: .zero,
+                          duration: time(1), timelineStart: time(1))
+        let third = Clip(mediaID: UUID(), sourceStart: .zero,
+                         duration: time(1), timelineStart: time(2))
+        model.project.videoTracks[0].clips = [first, target, third]
+        model.rebuildClipIndex()
+
+        // Direct mutation shifts `target` to index 0 while its cached entry
+        // still points at index 1, which now contains a different clip.
+        model.project.videoTracks[0].clips.removeFirst()
+
+        #expect(model.clip(for: target.id)?.id == target.id)
+        #expect(model.track(for: target.id)?.id == model.project.videoTracks[0].id)
+    }
+
     // MARK: - Discrete edits (R3.1, R3.3)
 
     @Test("Delete then undo restores the clip; redo removes it again")

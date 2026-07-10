@@ -99,7 +99,7 @@ extension EditorModel {
 
         updated.range = CMTimeRange(start: newStart, duration: newDuration)
         let newEnd = newStart + newDuration
-        if let words = updated.words, newStart != oldStart {
+        if let words = updated.words {
             let delta = newStart - oldStart
             updated.words = words.compactMap { word -> WordTiming? in
                 let shiftedStart = CMTimeMaximum(word.range.start + delta, .zero)

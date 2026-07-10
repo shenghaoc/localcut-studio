@@ -486,7 +486,7 @@ func overlayTransformInterpolation() {
     // Non-animated: transform(at:) returns static values
     let staticResult = overlay.transform(at: CMTime(seconds: 3, preferredTimescale: 600))
     #expect(staticResult.positionX == Float(100))
-    #expect(staticResult.scale == Float(1.5))
+    #expect(staticResult.scale == CGFloat(1.5))
 
     // Add keyframes and verify interpolation
     overlay.positionXKeyframes.addKeyframe(at: time1, value: 10)

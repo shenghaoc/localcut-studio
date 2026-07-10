@@ -43,12 +43,8 @@ struct InspectorView: View {
             CoverInspectorView(model: model)
             projectSection
             overlayListSection
-            if hasScreencastContent {
-                ScreencastInspectorView(model: model)
-            }
-            if hasTutorialContent {
-                TutorialFinishingInspectorView(model: model)
-            }
+            ScreencastInspectorView(model: model)
+            TutorialFinishingInspectorView(model: model)
         }
         .formStyle(.grouped)
         .fileImporter(
@@ -64,7 +60,7 @@ struct InspectorView: View {
             isPresented: $showLookImporter,
             allowedContentTypes: [.localCutLookPreset],
             allowsMultipleSelection: false
-        ) { result in
+        ) { [weak model] result in
             if case .success(let urls) = result, let url = urls.first {
                 Task { [weak model] in
                     await model?.importLookPreset(url: url)
@@ -75,32 +71,6 @@ struct InspectorView: View {
 
     private func clipIsVideo(_ clip: Clip) -> Bool {
         model.track(for: clip.id)?.kind == .video
-    }
-
-    /// Whether the project has screencast-related content that warrants showing
-    /// the Screencast Tools section: a selected video clip (for zoom-n-pan),
-    /// existing callouts, overlays, or screencast event logs.
-    private var hasScreencastContent: Bool {
-        (model.selectedClipID != nil && selectedClipIsVideo)
-            || !model.project.callouts.isEmpty
-            || !model.project.overlays.isEmpty
-            || !model.project.screencastEventLogs.isEmpty
-    }
-
-    private var selectedClipIsVideo: Bool {
-        guard let id = model.selectedClipID else { return false }
-        return model.track(for: id)?.kind == .video
-    }
-
-    /// Whether the project has tutorial-related content that warrants showing
-    /// the Tutorial Finishing section: audio tracks with clips (for silence
-    /// detection), screencast event logs (for keystroke overlay), chapter
-    /// markers, or keystroke overlay clips.
-    private var hasTutorialContent: Bool {
-        model.project.audioTracks.contains { !$0.clips.isEmpty }
-            || !model.project.screencastEventLogs.isEmpty
-            || model.hasChapterMarkers
-            || !model.project.keystrokeOverlayClips.isEmpty
     }
 
     @ViewBuilder
@@ -1283,7 +1253,7 @@ struct InspectorView: View {
             isPresented: $showOverlayImporter,
             allowedContentTypes: pendingOverlayType.allowedContentTypes,
             allowsMultipleSelection: false
-        ) { result in
+        ) { [weak model] result in
             if case .success(let urls) = result, let url = urls.first {
                 Task { [weak model] in
                     await model?.importOverlay(from: url, sourceType: pendingOverlayType)

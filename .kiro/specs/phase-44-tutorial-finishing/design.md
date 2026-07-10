@@ -15,13 +15,17 @@ Four tutorial-finishing tools: (a) silence / dead-air detection over a selected 
 
 ## Approach
 
-1. **Silence detection.** Offline pass on a selected audio track: short-time RMS energy with hysteresis thresholds (open + close). Output is a `[CMTimeRange]` of detected silences and a `[ProposedCut]` list with `(range, suggested action: trim or split)`. Tuning parameters: open threshold (default –40 dBFS), close threshold (default –35 dBFS), minimum silence duration (default 600 ms), padding (default 150 ms).
+1. **Silence detection.** Offline pass on the selected audio-bearing clip (audio or video track), falling back to the first audio-bearing timeline clip: short-time RMS energy with hysteresis thresholds (open + close). Output is a `[CMTimeRange]` of detected silences and a `[ProposedCut]` list with `(range, suggested action: trim or split)`. Tuning parameters: open threshold (default –40 dBFS), close threshold (default –35 dBFS), minimum silence duration (default 600 ms), padding (default 150 ms).
 2. **Review-before-apply.** A modal lists proposed cuts. Per-region apply / skip; full preview by scrubbing. Apply runs as a single undoable transaction.
 3. **Keystroke overlay.** A new clip kind sourced from a Phase 43 event log. Renders typed text + modifier-key chips at the bottom of the canvas; configurable font, position, fade-in / out per keystroke.
 4. **Chapter export.** Reads timeline markers (`kind: .chapter`) and emits two artefacts:
    - **YouTube chapter text** to a `.txt` sidecar with `MM:SS Title` lines (validated against YouTube's format rules: first chapter at 00:00, ≥3 chapters, monotonic times, **each chapter span ≥ 10 s**). YouTube silently degrades a sidecar with sub-10-second chapters to "plain timestamps in the description", so the validator rejects them with a clear error and the export dialog offers to merge / drop the offending markers.
    - **MP4 chapter metadata** via `AVAssetWriter` chapter track on the export. Some container / codec combinations cannot carry chapter tracks — we fall back to the sidecar in that case and surface a note.
 5. **Screencast caption preset.** A Phase 30 preset tailored for tutorials (sans-serif, high-contrast fill on dark pill, larger font, no animation). Ships in the built-in preset library.
+6. **Inspector reachability.** Tutorial Finishing remains mounted so first-step
+   workflows are discoverable. Individual controls disable or show explanatory
+   empty text when their input is absent; generic markers can be converted to
+   chapters and audio-bearing video clips can feed silence detection.
 
 ## Trade-offs
 

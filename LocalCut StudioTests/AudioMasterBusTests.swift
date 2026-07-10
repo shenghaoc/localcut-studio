@@ -122,6 +122,35 @@ func voiceCleanupSettingsAreUndoable() {
     #expect(model.project.voiceCleanup.gate.bypass == true)
 }
 
+@MainActor
+@Test("VoiceCleanup: changing an active loudness gain invalidates composition-derived state")
+func activeLoudnessGainChangeSchedulesRebuild() {
+    let model = EditorModel()
+    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    media.hasAudio = true
+    model.project.mediaItems = [media]
+    let clip = Clip(mediaID: media.id, sourceStart: .zero,
+                    duration: cm(3), timelineStart: .zero)
+    model.project.videoTracks[0].clips = [clip]
+    model.beatAnalyses[media.id] = BeatAnalysis(
+        tempoBPM: 60,
+        beatTimes: [cm(1)],
+        confidence: 1)
+    model.project.voiceCleanup.loudness.enabled = true
+    model.project.voiceCleanup.loudness.appliedGainDB = 3
+
+    #expect(model.projectedBeatTimes().map(\.seconds) == [1])
+    model.project.videoTracks[0].clips[0].timelineStart = cm(5)
+
+    model.updateVoiceCleanup {
+        $0.loudness.appliedGainDB = 6
+    }
+
+    // `scheduleRebuild()` invalidates the memo synchronously. Comparing only
+    // loudness enabled-state would leave the stale value at 1 second.
+    #expect(model.projectedBeatTimes().map(\.seconds) == [6])
+}
+
 // MARK: - R6.4 — VolumeEnvelope clamping
 
 @Test("VolumeEnvelope: fadeIn + fadeOut greater than clip duration each clamp to half (R6.4)")

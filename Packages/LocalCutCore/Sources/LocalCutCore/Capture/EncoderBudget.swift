@@ -113,18 +113,15 @@ public actor EncoderBudget {
         leases.map { (consumer: $0.value, leaseID: $0.key) }
     }
 
-    /// Attempts to acquire `count` leases for the given consumer. Returns
-    /// an array of leases on success, or throws `EncoderBudgetError` if
-    /// the budget would be exceeded. On partial failure (should not happen
-    /// with the atomic check, but provided for safety), already-acquired
-    /// leases are released.
-    public func acquire(_ consumer: EncoderConsumer,
-                        count: Int = 1) throws -> [EncoderLease] {
-        guard count > 0 else { return [] }
+    /// Atomically attempts to acquire `count` leases without crossing the
+    /// actor boundary through an untyped thrown error.
+    public func acquireResult(_ consumer: EncoderConsumer,
+                              count: Int = 1) -> Result<[EncoderLease], EncoderBudgetError> {
+        guard count > 0 else { return .success([]) }
         guard leases.count + count <= maxConcurrent else {
-            throw EncoderBudgetError.budgetExhausted(
+            return .failure(.budgetExhausted(
                 requested: count,
-                available: maxConcurrent - leases.count)
+                available: maxConcurrent - leases.count))
         }
         var acquired: [EncoderLease] = []
         for _ in 0..<count {
@@ -137,7 +134,15 @@ public actor EncoderBudget {
             leases[leaseID] = consumer
             acquired.append(lease)
         }
-        return acquired
+        return .success(acquired)
+    }
+
+    /// Attempts to acquire `count` leases for the given consumer. Returns
+    /// an array of leases on success, or throws `EncoderBudgetError` if
+    /// the budget would be exceeded.
+    public func acquire(_ consumer: EncoderConsumer,
+                        count: Int = 1) throws -> [EncoderLease] {
+        try acquireResult(consumer, count: count).get()
     }
 
     /// Convenience: acquires a single lease.

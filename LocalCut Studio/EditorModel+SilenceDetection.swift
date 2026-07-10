@@ -13,6 +13,12 @@ extension EditorModel {
         !silenceProposals.isEmpty
     }
 
+    /// Whether silence detection has an audio-bearing timeline clip to inspect.
+    @MainActor
+    var canRunSilenceDetection: Bool {
+        silenceDetectionTarget() != nil
+    }
+
     /// Runs silence detection on the selected audio clip's media, falling back
     /// to the first available audio clip when no audio clip is selected.
     @MainActor

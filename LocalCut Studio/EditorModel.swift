@@ -1111,34 +1111,52 @@ final class EditorModel {
 
     /// Finds the `Track` that contains the clip with the given ID. O(1) via index.
     func track(for clipID: Clip.ID) -> Track? {
-        guard let entry = clipIndex[clipID] else { return nil }
-        switch entry.trackKind {
-        case .video:
-            guard entry.trackIndex < project.videoTracks.count else { return nil }
-            return project.videoTracks[entry.trackIndex]
-        case .audio:
-            guard entry.trackIndex < project.audioTracks.count else { return nil }
-            return project.audioTracks[entry.trackIndex]
-        case .layout:
-            return nil
+        if let entry = clipIndex[clipID] {
+            switch entry.trackKind {
+            case .video:
+                if entry.trackIndex < project.videoTracks.count {
+                    let track = project.videoTracks[entry.trackIndex]
+                    if entry.clipIndex < track.clips.count,
+                       track.clips[entry.clipIndex].id == clipID {
+                        return track
+                    }
+                }
+            case .audio:
+                if entry.trackIndex < project.audioTracks.count {
+                    let track = project.audioTracks[entry.trackIndex]
+                    if entry.clipIndex < track.clips.count,
+                       track.clips[entry.clipIndex].id == clipID {
+                        return track
+                    }
+                }
+            case .layout:
+                break
+            }
         }
+        return allTracks.first { track in track.clips.contains { $0.id == clipID } }
     }
 
     /// Returns the clip with the given ID. O(1) via index.
     func clip(for clipID: Clip.ID) -> Clip? {
-        guard let entry = clipIndex[clipID] else { return nil }
-        switch entry.trackKind {
-        case .video:
-            guard entry.trackIndex < project.videoTracks.count,
-                  entry.clipIndex < project.videoTracks[entry.trackIndex].clips.count else { return nil }
-            return project.videoTracks[entry.trackIndex].clips[entry.clipIndex]
-        case .audio:
-            guard entry.trackIndex < project.audioTracks.count,
-                  entry.clipIndex < project.audioTracks[entry.trackIndex].clips.count else { return nil }
-            return project.audioTracks[entry.trackIndex].clips[entry.clipIndex]
-        case .layout:
-            return nil
+        if let entry = clipIndex[clipID] {
+            switch entry.trackKind {
+            case .video:
+                if entry.trackIndex < project.videoTracks.count,
+                   entry.clipIndex < project.videoTracks[entry.trackIndex].clips.count {
+                    let clip = project.videoTracks[entry.trackIndex].clips[entry.clipIndex]
+                    if clip.id == clipID { return clip }
+                }
+            case .audio:
+                if entry.trackIndex < project.audioTracks.count,
+                   entry.clipIndex < project.audioTracks[entry.trackIndex].clips.count {
+                    let clip = project.audioTracks[entry.trackIndex].clips[entry.clipIndex]
+                    if clip.id == clipID { return clip }
+                }
+            case .layout:
+                break
+            }
         }
+        return allTracks.lazy.flatMap(\.clips).first { $0.id == clipID }
     }
 
     // MARK: - Transitions

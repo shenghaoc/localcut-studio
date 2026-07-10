@@ -25,6 +25,7 @@ MEDIAMTX_VERSION="1.19.2"
 MEDIAMTX_RELEASE_BASE="https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}"
 MEDIAMTX_DOWNLOAD_DIR="${PROJECT_DIR}/.build/mediamtx"
 MEDIAMTX_LOG="${MEDIAMTX_DOWNLOAD_DIR}/mediamtx.log"
+INTEGRATION_MARKER="${MEDIAMTX_DOWNLOAD_DIR}/integration-enabled"
 MEDIAMTX_PID=""
 CONTAINER_CMD=""
 MEDIAMTX_STARTUP_ATTEMPTS="${MEDIAMTX_STARTUP_ATTEMPTS:-2}"
@@ -128,6 +129,7 @@ show_mediamtx_logs() {
 }
 
 cleanup() {
+    rm -f "${INTEGRATION_MARKER}"
     if [ -n "${CONTAINER_CMD}" ]; then
         echo "Stopping MediaMTX container..."
         "${CONTAINER_CMD}" rm -f "${CONTAINER_NAME}" 2>/dev/null || true
@@ -165,7 +167,7 @@ start_mediamtx() {
 wait_for_mediamtx() {
     echo "Waiting for MediaMTX to start..."
     for i in $(seq 1 "${MEDIAMTX_READY_TIMEOUT_SECONDS}"); do
-        if curl -s http://localhost:9997/v3/config/get >/dev/null 2>&1; then
+        if curl -fsS http://localhost:9997/v3/config/global/get >/dev/null 2>&1; then
             echo "MediaMTX is ready."
             return 0
         fi
@@ -210,7 +212,8 @@ fi
 # Run the integration test via xcodebuild
 echo "Running integration test..."
 cd "${PROJECT_DIR}"
-LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 "${XCODEBUILD_BIN}" test \
+touch "${INTEGRATION_MARKER}"
+"${XCODEBUILD_BIN}" test \
     -project "LocalCut Studio.xcodeproj" \
     -scheme "LocalCut Studio" \
     -configuration Debug \
@@ -219,7 +222,6 @@ LOCALCUT_RUN_MEDIAMTX_INTEGRATION=1 "${XCODEBUILD_BIN}" test \
     -only-testing:"LocalCut StudioTests/WhipMediaMTXIntegrationTests" \
     -test-timeouts-enabled YES \
     -default-test-execution-time-allowance 300 \
-    CODE_SIGNING_ALLOWED=NO \
     2>&1 | tail -30
 
 echo "=== Done ==="

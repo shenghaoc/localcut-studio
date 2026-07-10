@@ -49,7 +49,7 @@ struct CaptionsInspectorView: View {
             isPresented: $showSRTImporter,
             allowedContentTypes: captionContentTypes,
             allowsMultipleSelection: false
-        ) { result in
+        ) { [weak model] result in
             if case .success(let urls) = result, let url = urls.first {
                 Task { [weak model] in await model?.importCaptionTrack(from: url) }
             }

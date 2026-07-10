@@ -25,17 +25,6 @@ struct TutorialFinishingInspectorView: View {
         }
     }
 
-    /// Whether the project has any clips whose media carries audio —
-    /// including video-track clips whose source file has an audio stream.
-    private var hasAudioMedia: Bool {
-        let allTracks = model.project.audioTracks + model.project.videoTracks
-        return allTracks.contains { track in
-            track.clips.contains { clip in
-                model.project.media(for: clip.mediaID)?.hasAudio == true
-            }
-        }
-    }
-
     // MARK: - Silence Detection
 
     @ViewBuilder
@@ -108,7 +97,7 @@ struct TutorialFinishingInspectorView: View {
                     Button("Detect Silences") {
                         model.runSilenceDetection(parameters: silenceParams)
                     }
-                    .disabled(!hasAudioMedia)
+                    .disabled(!model.canRunSilenceDetection)
 
                     if model.hasSilenceProposals {
                         Button("Review (\(model.silenceProposals.count))") {

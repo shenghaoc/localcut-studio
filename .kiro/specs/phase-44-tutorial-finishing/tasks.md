@@ -7,6 +7,9 @@
 - [x] **T1.1** Offline RMS-with-hysteresis pass on the selected audio track via vDSP.
 - [x] **T1.2** `ProposedCut` model + ordered list output; tuning parameters surfaced.
 - [x] **T1.3** Review modal: per-region apply / skip, scrubbable preview, single-transaction apply.
+- [x] **T1.4** Accept audio-bearing video clips as silence-detection targets and
+  keep Tutorial Finishing mounted; gate individual actions rather than hiding
+  the whole feature surface.
 
 ## Keystroke overlay
 
@@ -29,3 +32,6 @@
 - [x] **T5.2** YouTube chapter linter regression runs under the LocalCutCore package CI gate.
 - [x] **T5.3** Smoke: silence → review → apply → undo → re-apply → export with chapters.
 - [x] **T5.4** `xcodebuild` (Debug, macOS) green.
+- [x] **T5.5** Regression verifies an audio-bearing video clip is a valid
+  silence-detection target; inspector wiring keeps generic marker conversion
+  visible without testing SwiftUI internals.

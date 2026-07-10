@@ -24,6 +24,10 @@ All five infrastructure deps are now shipped on `main`.
 4. **Animation.** Enter/exit are time-based curves driven by `(currentTime - lineStart) / enterDuration` etc. Pop = scale + opacity; bounce = damped spring; slide = translate from edge; typewriter = mask-progress 0→1 across the text box. The typewriter mask keeps the raster outside the glyph/text box visible, so background pills do not wipe in with the text. All evaluated in the compositor at frame request time — deterministic and frame-accurate. When the configured `enterDuration + exitDuration` would extend past a line's own duration, both values are scaled DOWN proportionally per-line inside `CaptionAnimation.evaluate`; the style object itself stays untouched (it's reused across lines of varying lengths and the inspector keeps showing the user's authored values).
 5. **Compositor integration.** Extend the `EffectCompositor` (from `feature-colour-grading`) so each frame request fetches the active `CaptionLine` set, asks `CaptionRasterer` for the appropriate raster, applies animation transforms, and composites above clip layers honouring track ordering. `TitleRaster` carries both full drawn bounds and text bounds; the compositor uses the latter for typewriter masking.
 6. **Sidecar export.** Burn-in remains the default (style is project-level). SRT/VTT sidecar export stays plain text — no style — and the export menu states this plainly.
+7. **Caption retiming.** Moving a line shifts its optional word timings by the
+   same delta. Moving or shortening a line clamps every word to the new line
+   range and drops zero-duration words, so karaoke highlights cannot survive
+   outside the caption boundary.
 
 ## Trade-offs
 

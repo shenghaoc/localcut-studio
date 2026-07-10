@@ -66,16 +66,17 @@ extension EditorModel {
                             mutate: (inout VoiceCleanupSettings) -> Void) {
         let apply: () -> Void = { [self] in
             let wasDSPActive = project.voiceCleanup.requiresOfflineProcessing
-            let wasLoudnessActive = project.voiceCleanup.loudnessGainLinear != 1.0
+            let previousLoudnessGain = project.voiceCleanup.loudnessGainLinear
             var settings = project.voiceCleanup
             mutate(&settings)
             settings.clamp()
             project.voiceCleanup = settings
             audioBus.updateLiveCleanupSettings(settings)
-            // Rebuild when DSP pipeline state changes or loudness gain changes.
+            // Loudness-only gain is baked into the composition audio mix, so
+            // every gain-value change needs a rebuild, not just enable/disable.
             let isDSPActive = settings.requiresOfflineProcessing
-            let isLoudnessActive = settings.loudnessGainLinear != 1.0
-            if wasDSPActive != isDSPActive || wasLoudnessActive != isLoudnessActive {
+            if wasDSPActive != isDSPActive
+                || previousLoudnessGain != settings.loudnessGainLinear {
                 scheduleRebuild()
             }
         }
