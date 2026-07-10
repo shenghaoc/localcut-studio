@@ -77,6 +77,7 @@ struct ScopesView: View {
                 // child view so it only redraws when `kind` changes, not on every
                 // 30fps `latest` update from the parent body re-evaluation.
                 ScopeBackgroundView(kind: kind)
+                    .equatable()
 
                 // Live trace data and empty state placeholder. This Canvas captures `latest`
                 // and redraws at 30 fps.
