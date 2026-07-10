@@ -260,6 +260,15 @@ final class EditorModel {
     /// (nonisolated) for resource cleanup via `EffectCompositor.releaseOverlaySources`.
     @ObservationIgnored nonisolated(unsafe) var activeOverlaySourceRegistryID: UUID?
 
+    // MARK: Smart Reframe state (Phase 33)
+    @ObservationIgnored var reframeOptions = ReframeOptions()
+    @ObservationIgnored var reframeProposal: ReframeProposal?
+    @ObservationIgnored var isReframeAnalyzing = false
+    @ObservationIgnored var reframeProgressMessage = ""
+    @ObservationIgnored var showReframeOverlay = false
+    @ObservationIgnored var reframeAnalysisTask: Task<Void, Never>?
+    @ObservationIgnored var reframeAnalysisGeneration = 0
+
     // MARK: Document state
     /// The file backing the current project, or `nil` for an unsaved one.
     var documentURL: URL?

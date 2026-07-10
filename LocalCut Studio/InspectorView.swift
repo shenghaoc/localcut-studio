@@ -28,6 +28,7 @@ struct InspectorView: View {
                     colourSection
                     looksSection
                     beautySection
+                    SmartReframeInspectorView(model: model)
                 } else {
                     AudioClipFadesInspectorView(model: model, clip: clip)
                 }
