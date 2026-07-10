@@ -95,8 +95,9 @@
 - [x] **F7** Cleared the post-merge Swift 6 diagnostics in `CaptionTailFiller`, `ContentView`,
   and `ProgramCompositor` without changing asynchronous action, cancellation, or lock behaviour.
 - [x] **F8** Final local gate: `git diff --check`, LocalCutCore package build/tests (175 tests),
-  the full Debug/macOS suite (791 executed, 2 skipped, zero build warnings), the non-WebRTC
-  publish suite (9 tests), MediaMTX WHIP integration (2 tests), and 7 OTIO golden fixtures pass.
+  the full Debug/macOS suite (792 executed test-case lines, first-attempt pass, zero build
+  warnings), the non-WebRTC publish suite (9 tests), MediaMTX WHIP integration (2 tests), and
+  7 OTIO golden fixtures pass.
 - [x] **F9** Fixed the CI failure-retry path to resolve Swift Testing suite/test names to their
   recorded Xcode test target before passing `-only-testing:`. Relaxed the App Intents cancellation
   assertion from a scheduler-sensitive 100 ms to a still-bounded one-second deadline against its
