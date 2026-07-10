@@ -126,6 +126,14 @@ struct PreviewView: View {
                     profile: profile,
                     renderSize: model.project.renderSize)
             }
+            if model.showReframeOverlay {
+                SmartReframeOverlayView(
+                    targetAspectRatio: model.reframeTargetAspectRatio,
+                    currentTransform: model.reframeTransformAtPlayhead,
+                    renderSize: model.project.renderSize,
+                    containerSize: .zero,
+                    actionSafeHalfExtent: model.reframeOptions.actionSafeHalfExtent)
+            }
         }
     }
 
