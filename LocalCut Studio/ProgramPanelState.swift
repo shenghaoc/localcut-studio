@@ -110,7 +110,7 @@ final class ProgramPanelState {
         ownsCurrentSession = true
         isStarting = true
         currentSceneId = first.id
-        statusMessage = "Starting Program Mode..."
+        statusMessage = "Starting Program Mode…"
         Task { [weak self, weak model] in
             defer { self?.isStarting = false }
             guard let self else {
@@ -173,7 +173,7 @@ final class ProgramPanelState {
         isStopping = true
         ownsCurrentSession = false
         isRunning = false
-        statusMessage = "Stopping Program Mode..."
+        statusMessage = "Stopping Program Mode…"
         // model and session are captured strongly to guarantee the critical
         // stop/landing path completes even if the panel is dismissed.
         // self is captured weakly for UI state updates only.

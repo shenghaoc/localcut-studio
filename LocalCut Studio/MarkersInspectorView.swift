@@ -56,7 +56,7 @@ struct MarkersInspectorView: View {
             }
             .buttonStyle(.borderless)
             .help("Remove marker")
-            .accessibilityLabel("Remove marker")
+            .accessibilityLabel("Remove marker \(marker.name)")
         }
         .padding(.vertical, 2)
         .background(

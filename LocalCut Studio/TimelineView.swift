@@ -30,6 +30,7 @@ struct TimelineView: View {
     /// last programmatic target (Codex P2 on d8c7ee2).
     @State private var timelineCurrentScrollSeconds: Double = 0
     @FocusState private var focusedClipID: Clip.ID?
+    @FocusState private var focusedTransitionClipID: Clip.ID?
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
 
@@ -105,14 +106,30 @@ struct TimelineView: View {
                                      onRename: { beginRenamingSelectedMarker() },
                                      onDelete: { deleteSelectedMarkerIfAny() },
                                      onTogglePlay: { model.togglePlayPause() }))
+        .onDeleteCommand {
+            _ = deleteSelectedClipOrTransitionIfAny()
+        }
         .onMoveCommand(perform: moveTimelineSelection)
         .onChange(of: focusedClipID) { _, newValue in
             guard let newValue, model.selectedClipID != newValue else { return }
             model.selectClip(id: newValue)
             scrollTimelineToClip(id: newValue)
         }
+        .onChange(of: focusedTransitionClipID) { _, newValue in
+            guard let newValue, model.selectedTransitionClipID != newValue else { return }
+            model.selectTransition(clipID: newValue)
+        }
         .onChange(of: model.selectedClipID) { _, newValue in
             focusedClipID = newValue
+            if newValue != nil {
+                focusedTransitionClipID = nil
+            }
+        }
+        .onChange(of: model.selectedTransitionClipID) { _, newValue in
+            focusedTransitionClipID = newValue
+            if newValue != nil {
+                focusedClipID = nil
+            }
         }
     }
 
@@ -129,11 +146,22 @@ struct TimelineView: View {
 
     /// Deletes the selected marker; returns whether anything was deleted so the
     /// Delete handler can decide whether to consume the key. When no marker is
-    /// selected the existing clip / transition delete shortcut keeps firing.
+    /// selected the scoped timeline delete command handles clips/transitions.
     @discardableResult
     private func deleteSelectedMarkerIfAny() -> Bool {
         guard let id = model.selectedMarkerID else { return false }
         model.removeMarker(id: id)
+        return true
+    }
+
+    @discardableResult
+    private func deleteSelectedClipOrTransitionIfAny() -> Bool {
+        if model.selectedTransitionClipID != nil {
+            model.removeSelectedTransition()
+            return true
+        }
+        guard model.selectedClipID != nil else { return false }
+        model.deleteSelectedClip()
         return true
     }
 
@@ -374,10 +402,15 @@ struct TimelineView: View {
                     beatPath.move(to: CGPoint(x: x, y: 0))
                     beatPath.addLine(to: CGPoint(x: x, y: rulerHeight))
                 }
-                context.stroke(beatPath, with: .color(.yellow.opacity(0.65)), lineWidth: 1)
+                context.stroke(beatPath, with: .color(.lcBeatMarker), lineWidth: 1)
             }
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Timeline scrub ruler")
+            .accessibilityValue(rulerAccessibilityValue)
+            .accessibilityHint("Adjust to scrub the playhead")
+            .accessibilityAdjustableAction(adjustRulerPlayhead)
             // Declarative resize cursor signals the ruler is scrubbable. Region-
             // based, so there's no shared NSCursor push/pop stack to unbalance
             // when the ruler Canvas rebuilds on zoom.
@@ -438,6 +471,7 @@ struct TimelineView: View {
                         .fill(.regularMaterial.opacity(0.8)))
                 .frame(width: labelWidth)
                 .allowsHitTesting(false)
+                .accessibilityHidden(true)
             MarkerDiamond()
                 .fill(fill)
                 .overlay(MarkerDiamond().stroke(strokeColor, lineWidth: strokeWidth))
@@ -532,10 +566,10 @@ struct TimelineView: View {
         let label = line.text.isEmpty ? "Caption" : line.text
 
         return RoundedRectangle(cornerRadius: 5)
-            .fill(Color.indigo.opacity(captionDrag?.lineID == line.id ? 0.25 : 0.38))
+            .fill(Color.lcCaptionFill.opacity(captionDrag?.lineID == line.id ? 0.25 : 0.38))
             .overlay(
                 RoundedRectangle(cornerRadius: 5)
-                    .strokeBorder(Color.indigo.opacity(0.75), lineWidth: 1))
+                    .strokeBorder(Color.lcCaptionStroke, lineWidth: 1))
             .overlay(alignment: .leading) {
                 Text(label)
                     .font(.caption2)
@@ -554,7 +588,7 @@ struct TimelineView: View {
                     model.commitCoalescedUndo()
                 }
                 Divider()
-                Button("Delete Caption Line", role: .destructive) {
+                Button("Remove Caption Line", role: .destructive) {
                     model.removeCaptionLine(line.id, in: track.id)
                 }
             }
@@ -572,24 +606,28 @@ struct TimelineView: View {
             let isSelected = model.selectedTransitionClipID == placement.clip.id
             let type = placement.clip.transition?.type ?? .crossDissolve
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color.orange.opacity(isSelected ? 0.5 : 0.3))
+                .fill(Color.lcTransitionFill.opacity(isSelected ? 0.5 : 0.3))
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(isSelected ? Color.lcAccent : Color.orange.opacity(0.8),
+                        .strokeBorder(isSelected ? Color.lcAccent : Color.lcTransitionFill.opacity(0.8),
                                       lineWidth: isSelected ? 2 : 1))
                 .overlay(
                     Image(systemName: type.symbolName)
                         .font(.caption2)
-                        .foregroundStyle(.white))
+                        .foregroundStyle(Color.lcTransitionIcon))
                 .frame(width: width, height: laneHeight - 16)
                 .offset(x: x, y: 8)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     model.selectTransition(clipID: placement.clip.id)
                     focusedClipID = nil
+                    focusedTransitionClipID = placement.clip.id
                 }
+                .focusable()
+                .focused($focusedTransitionClipID, equals: placement.clip.id)
                 .accessibilityLabel("\(type.displayName) transition")
                 .accessibilityAddTraits(.isButton)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
     }
 
@@ -691,7 +729,7 @@ struct TimelineView: View {
         let isHovered = hoverEdge == activeEdge
 
         return Rectangle()
-            .fill(isHovered ? Color.white.opacity(0.15) : Color.clear)
+            .fill(isHovered ? Color.lcTrimHover : Color.clear)
             .frame(width: edgeZoneWidth)
             .contentShape(Rectangle())
             // Region-based cursor: no NSCursor push/pop stack to unbalance.
@@ -957,6 +995,25 @@ struct TimelineView: View {
             seconds, totalDuration: model.totalDuration)
         timelineScrollRequest += 1
     }
+
+    private var rulerAccessibilityValue: String {
+        "Playhead \(TimeFormatting.timecode(model.currentTime)) of \(TimeFormatting.timecode(model.totalDuration))"
+    }
+
+    private func adjustRulerPlayhead(_ direction: AccessibilityAdjustmentDirection) {
+        let increment: Bool
+        switch direction {
+        case .increment: increment = true
+        case .decrement: increment = false
+        @unknown default: return
+        }
+        guard let target = TimelineScrollMath.rulerAdjustmentTarget(
+            currentTime: model.currentTime,
+            totalDuration: model.totalDuration,
+            tickStep: tickStep(),
+            increment: increment) else { return }
+        model.seek(toSeconds: target)
+    }
 }
 
 /// Pure scroll-math helpers extracted from `TimelineView` so the page-scroll,
@@ -989,6 +1046,18 @@ enum TimelineScrollMath: Sendable {
     /// no content yet).
     static func clampedTarget(_ seconds: Double, totalDuration: Double) -> Double {
         min(max(seconds, 0), max(totalDuration, 0))
+    }
+
+    /// Target for one VoiceOver ruler adjustment. Keep the step usable at
+    /// extreme zoom levels and never seek outside the project range.
+    static func rulerAdjustmentTarget(currentTime: Double,
+                                      totalDuration: Double,
+                                      tickStep: Double,
+                                      increment: Bool) -> Double? {
+        guard totalDuration > 0 else { return nil }
+        let step = min(max(tickStep, 0.25), 5)
+        let target = currentTime + (increment ? step : -step)
+        return clampedTarget(target, totalDuration: totalDuration)
     }
 }
 
@@ -1071,6 +1140,7 @@ private struct PlayheadView: View {
                 .frame(maxHeight: .infinity)
                 .offset(x: x - lineWidth / 2)
                 .allowsHitTesting(false)
+                .accessibilityHidden(true)
 
             // Draggable head pinned to the ruler/lane boundary.
             PlayheadHead()
@@ -1135,23 +1205,20 @@ private struct MarkerDiamond: Shape {
     }
 }
 
-/// AppKit local-event monitor that adds / renames / deletes markers from the
-/// timeline keyboard shortcuts. The monitor lives for the lifetime of the
-/// timeline view but is scoped two ways: it only fires for events targeted at
-/// the *hosting* window (Gemini review #1 — multi-project windows each install
-/// their own monitor and must not fight over each other's keys), and it
-/// defers to any text-input first responder so typing into caption / inspector
-/// fields isn't stolen.
-///
-/// `Delete` only consumes the event when there is a selected marker — when
-/// none is selected, the event falls through to the existing toolbar
-/// `.keyboardShortcut(.delete, modifiers: [])` that drives clip / transition
-/// deletion. That's the contract the spec calls out (R4.5).
 /// Window-scoped key handler for bare-key editor shortcuts that must yield to
 /// text inputs: m / shift-m (add / rename marker), Delete (when a marker is
 /// selected), and Space (play/pause). These can't be menu/button
 /// key-equivalents because those fire before a focused text field, swallowing
 /// the key while the user is typing into a rename popover / caption field.
+///
+/// The monitor is scoped two ways: it only fires for events targeted at the
+/// *hosting* window (multi-project windows each install their own monitor and
+/// must not fight over each other's keys), and it defers to any text-input
+/// first responder so typing into caption / inspector fields isn't stolen.
+///
+/// `Delete` only consumes the event when there is a selected marker — when
+/// none is selected, the event falls through to the scoped `onDeleteCommand`
+/// that drives clip / transition deletion from timeline focus.
 private struct EditorKeyHandler: NSViewRepresentable {
     let onAdd: () -> Void
     let onRename: () -> Void
@@ -1270,8 +1337,8 @@ private struct EditorKeyHandler: NSViewRepresentable {
                 onRename?()
                 return true
             case .maybeDeleteMarker:
-                // Only consume when a marker is selected so the existing clip /
-                // transition delete shortcut keeps firing.
+                // Only consume when a marker is selected so the scoped clip /
+                // transition delete command can still fire.
                 return onDelete?() == true
             }
         }
@@ -1298,8 +1365,8 @@ enum EditorKeyHandlerPolicy: Sendable {
         case renameMarker
         /// Backspace/Forward-Delete — try to delete the selected marker; the
         /// Coordinator's `onDelete` callback returns whether a marker was
-        /// actually selected and consumed the key, so the toolbar's clip
-        /// delete shortcut keeps firing when no marker is selected.
+        /// actually selected and consumed the key, so the scoped timeline
+        /// delete command can handle clips/transitions when no marker is selected.
         case maybeDeleteMarker
     }
 

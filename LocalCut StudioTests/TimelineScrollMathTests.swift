@@ -75,6 +75,30 @@ struct TimelineScrollMathTests {
         #expect(TimelineScrollMath.clampedTarget(5, totalDuration: -10) == 0)
     }
 
+    // MARK: - Ruler accessibility adjustment
+
+    @Test("Ruler adjustment clamps the tick step to a usable range")
+    func rulerAdjustmentClampsStep() {
+        #expect(TimelineScrollMath.rulerAdjustmentTarget(
+            currentTime: 10, totalDuration: 30, tickStep: 0.1, increment: true) == 10.25)
+        #expect(TimelineScrollMath.rulerAdjustmentTarget(
+            currentTime: 10, totalDuration: 30, tickStep: 30, increment: true) == 15)
+    }
+
+    @Test("Ruler adjustment clamps at both project boundaries")
+    func rulerAdjustmentClampsBoundaries() {
+        #expect(TimelineScrollMath.rulerAdjustmentTarget(
+            currentTime: 0.1, totalDuration: 30, tickStep: 1, increment: false) == 0)
+        #expect(TimelineScrollMath.rulerAdjustmentTarget(
+            currentTime: 29.5, totalDuration: 30, tickStep: 1, increment: true) == 30)
+    }
+
+    @Test("Ruler adjustment is unavailable for an empty project")
+    func rulerAdjustmentEmptyProject() {
+        #expect(TimelineScrollMath.rulerAdjustmentTarget(
+            currentTime: 0, totalDuration: 0, tickStep: 1, increment: true) == nil)
+    }
+
     // MARK: - Page-scroll integration math
 
     @Test("Page-right from middle of project advances by pageSeconds")

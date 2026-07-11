@@ -83,6 +83,7 @@ struct AudioInspectorView: View {
                     }
                     .controlSize(.small)
                     .accessibilityLabel("Start live audio meter")
+                    .help("Begin real-time peak and RMS metering for the master output bus")
                 }
             }
 

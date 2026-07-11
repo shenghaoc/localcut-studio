@@ -110,7 +110,7 @@ final class PublishPanelState {
         normalizeCodecForEndpoint()
         isStarting = true
         publishState = .connecting
-        statusMessage = "Connecting to \(endpointType.displayName)..."
+        statusMessage = "Connecting to \(endpointType.displayName)…"
 
         let config = PublishConfig(
             videoCodec: selectedCodec == .h264Baseline ? "H264" : "AV1",
@@ -165,13 +165,13 @@ final class PublishPanelState {
                         self?.statusMessage = ""
                     case .connecting:
                         self?.publishState = .connecting
-                        self?.statusMessage = "Connecting..."
+                        self?.statusMessage = "Connecting…"
                     case .live:
                         self?.publishState = .live
                         self?.statusMessage = "Live — streaming to \(self?.endpointType.displayName ?? "")."
                     case .reconnecting:
                         self?.publishState = .reconnecting
-                        self?.statusMessage = "Reconnecting..."
+                        self?.statusMessage = "Reconnecting…"
                     case .failed(let message):
                         self?.publishState = .failed
                         self?.statusMessage = message
@@ -211,7 +211,7 @@ final class PublishPanelState {
         statsPollingTask?.cancel()
         isStopping = true
         publishState = .ended
-        statusMessage = "Stopping..."
+        statusMessage = "Stopping…"
         // model is captured strongly to guarantee the WHIP session is stopped
         // even if the panel is dismissed. self is captured weakly for UI updates.
         Task { [weak self] in

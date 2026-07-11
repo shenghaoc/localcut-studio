@@ -41,9 +41,11 @@ struct BeatToolsInspectorView: View {
 
             Toggle("Show Beat Markers", isOn: $model.showBeatMarkers)
                 .disabled(model.beatAnalyses.isEmpty)
+                .help("Display beat markers on the timeline ruler")
 
             Toggle("Snap to Beats", isOn: $model.snapToBeats)
                 .disabled(model.beatAnalyses.isEmpty)
+                .help("Snap timeline edits to detected beat positions")
 
             LabeledSliderRow(
                 label: "Offset",

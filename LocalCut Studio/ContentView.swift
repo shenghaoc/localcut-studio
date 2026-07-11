@@ -191,7 +191,7 @@ struct DocumentCommands: Commands {
         // inside Edit (after pasteboard) keeps the menu bar conventional.
         CommandGroup(after: .pasteboard) {
             Divider()
-            Button("Split Clip at Playhead") { model.splitSelectedClipAtPlayhead() }
+            Button("Split at Playhead") { model.splitSelectedClipAtPlayhead() }
                 .keyboardShortcut("k", modifiers: .command)
                 .disabled(model.selectedClipID == nil)
             Button("Analyse Beats for Selection") { model.analyzeBeatsForSelection() }
@@ -206,7 +206,7 @@ struct DocumentCommands: Commands {
             Button("Remove Transition") { model.removeSelectedTransition() }
                 .disabled(model.selectedTransitionClipID == nil)
             // Mirror the destructive toolbar button so deleting a clip/transition
-            // has a menu home; the toolbar keeps the same ⌫ shortcut.
+            // has a menu home; the scoped timeline handler owns the Delete key.
             Button("Delete Selected Clip") {
                 if model.selectedTransitionClipID != nil {
                     model.removeSelectedTransition()
@@ -338,7 +338,6 @@ struct EditorView: View {
                 Label("Delete", systemImage: "trash")
             }
             .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
-            .keyboardShortcut(.delete, modifiers: [])
             .help("Delete selected clip or transition")
 
             if model.isRecording || model.isPaused {
@@ -437,7 +436,7 @@ struct EditorView: View {
                 if model.recordingBackpressureCount > 0 {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundStyle(.yellow)
+                        .foregroundStyle(.orange)
                         .accessibilityLabel("\(model.recordingBackpressureCount) backpressure warning\(model.recordingBackpressureCount == 1 ? "" : "s")")
                 }
                 if let recordingStatusMessage {
@@ -486,7 +485,7 @@ struct EditorView: View {
 
     private var recordingStatusColor: Color {
         if model.recordingDiskWarning != nil || model.recordingBackpressureCount > 0 {
-            return .yellow
+            return .orange
         }
         return .secondary
     }
@@ -494,7 +493,7 @@ struct EditorView: View {
     private var relinkBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
+                .foregroundStyle(.orange)
                 .accessibilityHidden(true)
             Text("\(model.unresolvedMedia.count) media file(s) need relinking.")
                 .font(.caption)
@@ -722,9 +721,10 @@ private struct RecordingDiskSpaceView: View {
             Text("|")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
             Text("\(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(model.recordingDiskWarning == .warn ? .yellow : .secondary)
+                .foregroundStyle(model.recordingDiskWarning == .warn ? .orange : .secondary)
                 .accessibilityLabel("Disk free: \(ByteCountFormatter.string(fromByteCount: free, countStyle: .file))")
         }
     }

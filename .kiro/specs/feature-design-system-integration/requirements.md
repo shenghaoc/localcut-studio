@@ -26,8 +26,9 @@
 - **R2.3** The playhead head is an interactive grab target with a `DragGesture`
   (tolerant seek while dragging, precise seek on end). The full-height scrub
   line stays non-interactive (`allowsHitTesting(false)`) so clicks fall
-  through to clips and the ruler; the head carries `accessibilityHidden(true)`
-  and assistive scrubbing happens via the keyboard / adjustable action.
+  through to clips and the ruler; the head carries `accessibilityHidden(true)`.
+  The ruler remains an accessible scrub target with a label, live playhead
+  value, and adjustable action for VoiceOver users.
 
 ## R3 — Inspector media imagery
 
@@ -55,11 +56,15 @@
   so the suffix is translator-reorderable.
 - **R5.3** The preview exposes a localized `accessibilityValue` for the empty
   and active states; the transport time reads as "Playhead … of …".
+- **R5.4** Timeline clip blocks and transition glyphs are keyboard-focusable.
+  Focus selects the corresponding element, Delete reaches the timeline-scoped
+  command, and VoiceOver announces transition selection state.
 
 ## R6 — Quality gate
 
-- **R6.1** Debug/macOS build compiles with zero warnings.
-- **R6.2** The full test suite stays green with no count regression (this spec
-  adds presentation-only code with no new testable pure logic).
+- **R6.1** The Debug/macOS app target compiles successfully with no source
+  diagnostics introduced by this spec.
+- **R6.2** The full test suite stays green with no count regression. Pure tests
+  cover the ruler adjustment step and project-boundary clamping.
 - **R6.3** No model field, schema version, or composition time-range math
   changes; the standalone `app/` prototype is not merged.

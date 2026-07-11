@@ -19,7 +19,8 @@
   trailing slot (R2.1).
 - [x] **T2.2** Add the `PlayheadHead` triangle shape and draw it at the
   ruler/lane boundary inside `PlayheadView`, alongside the scrub line, passing
-  `rulerHeight` through; non-interactive (R2.2, R2.3).
+  `rulerHeight` through; the head is the direct-manipulation grab target while
+  the ruler remains the assistive scrub target (R2.2, R2.3).
 
 ## Inspector imagery
 
@@ -84,24 +85,27 @@
 
 - [x] **T9.1** Menu-bar completeness: `requestImport()`/`requestExport()` on the
   model; File ▸ Import… (⌘I) / Export… (⇧⌘E); Edit ▸ Delete Selected Clip /
-  Add Marker (M); View ▸ Show Inspector (⌥⌘I) / Go to Start (⌘↑). Spacebar
-  play/pause is handled by the window-scoped `EditorKeyHandler` NSEvent local
-  monitor (in `TimelineView.swift`) rather than a menu key-equivalent — a bare
-  `.space` menu shortcut is global in AppKit and would swallow spaces typed into
-  text inputs. The monitor also exempts focused non-text first responders
-  (NSControl + SwiftUI-hosted controls) so a Tab-focused checkbox/button
-  receives Space normally. Remove dead `exportTapped()`.
+  Add Marker (M); View ▸ Show Inspector (⌥⌘I) / Go to Start (⌘↑). Delete has no
+  bare menu/toolbar key equivalent; clips/transitions use the timeline-scoped
+  `onDeleteCommand` so text editing keeps Backspace; clip blocks and transition
+  glyphs are focusable so either selection can receive that command. Spacebar
+  play/pause is handled by the window-scoped `EditorKeyHandler` local monitor (in
+  `TimelineView.swift`) rather than a menu key-equivalent — a bare `.space` menu
+  shortcut is global in AppKit and would swallow spaces typed into text inputs.
+  The monitor also exempts focused non-text first responders (NSControl +
+  SwiftUI-hosted controls) so a Tab-focused checkbox/button receives Space
+  normally. Remove dead `exportTapped()`.
 - [x] **T9.2** Lift `isSideRailCollapsed` → `EditorModel.inspectorVisible`
   (UserDefaults-persisted); update toolbar, layout, collapsed-rail, and menu.
 - [x] **T9.3** Honor Reduce Motion on the scopes transition/animation; adaptive
   marker stroke (`separatorColor`); clip-kind glyph; format-badge VoiceOver
   label; scopes `accessibilityValue`; secondary tool picker `.isHeader`.
-- [x] **T9.4** Standard controls/materials: status bar `.bar`; Beauty toggles →
-  checkbox; inspector timecodes `monospacedDigit`; render-queue
+- [x] **T9.4** Standard controls/materials: status bar `.bar`; Preserve Pitch +
+  Beauty toggles → checkbox; inspector timecodes `monospacedDigit`; render-queue
   inline `Text` placeholder; Master Gain via `LabeledSliderRow`; scopes on
   `lcLane`; timeline fonts → text styles; Align-Window reset.
 - [x] **T9.5** Pointer feedback: ruler resize cursor + scrub tooltip; marker
-  pointing-hand cursor.
+  pointing-hand cursor; ruler VoiceOver label/value + adjustable scrub action.
 - [x] **T9.6** Unify list-row selection on the system selection colour (media
   bin + markers).
 - [x] **T9.7** Formerly-deferred interaction work, now complete:
@@ -123,9 +127,10 @@
   `.bar` strip; the render-format readout is a `.thinMaterial` badge — a
   non-interactive label belongs to the content layer, not glass.
 - [x] **T10.2** Replace the Diagnostics HUD's hand-rolled `NSVisualEffectView` +
-  clip + stroke with `.glassEffect(in: .rect(cornerRadius:))`; remove the dead
-  `VisualEffectBackground`. (HIG: Liquid Glass on the functional/floating layer
-  only, sparingly — system toolbars already adopt it automatically.)
+  clip + stroke with `.glassEffect(in: .rect(cornerRadius:))`; keep an explicit
+  max width so the overlay stays compact; remove the dead `VisualEffectBackground`.
+  (HIG: Liquid Glass on the functional/floating layer only, sparingly — system
+  toolbars already adopt it automatically.)
 - [x] **T10.3** De-hardcode `Theme.swift`: move the brand accent to
   `Assets.xcassets` as `AccentColor` (Display-P3, room for light/dark +
   high-contrast variants); back `lcLane` with `.underPageBackgroundColor` and
@@ -142,10 +147,29 @@
   so `Color.accentColor` and system focus rings inherit the gold app-wide; the
   explicit `lcAccent` references in T10.4 are now equivalent (they could later be
   simplified back to `Color.accentColor`).
+- [x] **T10.6** Codex review follow-up: keep the scrub ruler reachable to
+  VoiceOver instead of marking it decorative, and keep the clip context-menu
+  Split command enabled for unselected clips because the command selects the
+  clicked clip before splitting.
+- [x] **T10.7** Live review follow-up: remove global bare-Delete key equivalents
+  from menu/toolbar actions; keep countdown text white over its dark overlay;
+  constrain the Diagnostics HUD width; verify the callout list keeps `.isSelected` for
+  VoiceOver; replace `.yellow` warning indicators with `.orange` for
+  accessibility contrast; normalise status-message ellipsis from ASCII `...` to
+  Unicode `…`; add semantic timeline colour tokens (`lcCaptionFill`,
+  `lcCaptionStroke`, `lcTransitionFill`, `lcTransitionIcon`, `lcBeatMarker`,
+  `lcTrimHover`) to `Theme.swift`; make transition glyphs focusable and expose
+  selected state so timeline-scoped Delete and VoiceOver work after selection.
 
 ## Verification
 
-- [x] **T6.1** `xcodebuild test` (Debug, macOS) compiles with zero warnings and
-  the full suite passes with no count regression (R6.1, R6.2).
+- [x] **T6.1** `xcodebuild test` (Debug, macOS) compiles the app without new
+  source diagnostics and the full suite passes with no count regression
+  (R6.1, R6.2).
+- [x] **T6.3** Add focused pure tests for ruler adjustment step limits, project
+  boundary clamping, and the empty-project case (R2.3, R6.2).
+- [x] **T6.4** Stabilize the recorder UI flow test by activating its identified
+  buttons directly instead of relying on window-level synthetic key delivery;
+  keep every recorder-state and gap-collapse assertion unchanged.
 - [x] **T6.2** Confirm no model/schema/composition change and that the
   standalone `app/` prototype is not merged (R6.3).

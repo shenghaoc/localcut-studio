@@ -139,7 +139,7 @@ struct InspectorView: View {
             LabeledContent("Output", value: TimeFormatting.timecode(model.selectedClipOutputDuration.seconds))
 
             Toggle("Preserve Pitch", isOn: preservePitchBinding)
-                .toggleStyle(.switch)
+                .toggleStyle(.checkbox)
 
             Picker("Algorithm", selection: pitchAlgorithmBinding) {
                 ForEach(TimePitchAlgorithm.allCases) { algorithm in
@@ -797,7 +797,7 @@ struct InspectorView: View {
                         smooth.bypass = newValue
                     }
                 }))
-                .toggleStyle(.switch)
+                .toggleStyle(.checkbox)
 
             Toggle("Show Mask", isOn: Binding(
                 get: { model.showSkinMask },
@@ -805,7 +805,7 @@ struct InspectorView: View {
                     model.showSkinMask = newValue
                     model.scheduleRebuild()
                 }))
-                .toggleStyle(.switch)
+                .toggleStyle(.checkbox)
 
             HStack {
                 Button("Reset") { model.resetClipSkinSmooth() }
@@ -951,6 +951,7 @@ struct InspectorView: View {
             }
 
             Toggle("Show scopes", isOn: $model.showScopes)
+                .help("Show waveform and vectorscope panels beside the preview")
         }
     }
 
@@ -1296,7 +1297,7 @@ private struct InspectorPosterView: View {
                     .aspectRatio(contentMode: .fill)
             } else {
                 Image(systemName: media.hasVideo ? "film" : "waveform")
-                    .font(.system(size: 28))
+                    .font(.title2)
                     .foregroundStyle(.secondary)
             }
         }

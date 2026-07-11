@@ -52,8 +52,9 @@ the VoiceOver rotor's Headings list without a title that would duplicate the tab
   scrub line itself stays `allowsHitTesting(false)` so clicks fall through to
   clips and the ruler. Both live in the isolated `PlayheadView` so they
   re-evaluate per `currentTime` tick without invalidating the rest of the
-  timeline. The head carries `accessibilityHidden(true)` because the
-  adjustable action and the ruler scrub gesture cover the assistive path.
+  timeline. The head carries `accessibilityHidden(true)` because assistive
+  scrubbing lives on the ruler Canvas, which exposes a timeline-scrub label,
+  live playhead value, hint, and adjustable action.
 
 ### Inspector media imagery — `InspectorPosterView`
 
@@ -84,6 +85,9 @@ The integration also closes the VoiceOver gaps the design pass surfaced:
   `count == 1 ? …` logic.
 - The preview exposes a localized `accessibilityValue` describing the empty vs.
   active state; the transport time reads "Playhead m:ss.ff of m:ss.ff".
+- The timeline ruler stays reachable to VoiceOver as the direct scrub target:
+  it reports the current playhead time, supports adjustable increment/decrement
+  scrubbing, and leaves only decorative tick/marker label drawing hidden.
 
 ## Visual identity pass
 
@@ -136,10 +140,14 @@ are all standard SwiftUI/AppKit (no new paradigms):
 - **Menu bar mirrors the toolbar.** `EditorModel.requestImport()` /
   `requestExport()` back new **File ▸ Import… (⌘I)** and **File ▸ Export…
   (⇧⌘E)**; **Edit ▸ Delete Selected Clip** and **Edit ▸ Add Marker (M)** mirror
-  the timeline; **View ▸ Show Inspector (⌥⌘I)** and **Go to Start (⌘↑)** join
-  Show Diagnostics. The **Space** shortcut for play/pause is intentionally not
-  a menu key-equivalent (those fire globally, swallowing spaces typed into text
-  fields) — it lives on a window-scoped `NSEvent` local monitor
+  the timeline without a bare Delete key equivalent; clip/transition deletion
+  is handled by the timeline-scoped `onDeleteCommand` so Backspace still belongs
+  to focused text fields. Clip blocks and transition glyphs are focusable, so
+  selecting either timeline element routes Delete to that scoped command.
+  **View ▸ Show Inspector (⌥⌘I)** and **Go to Start (⌘↑)** join Show Diagnostics.
+  The **Space** shortcut for play/pause is
+  intentionally not a menu key-equivalent (those fire globally, swallowing
+  spaces typed into text fields) — it lives on a window-scoped `NSEvent` local monitor
   (`EditorKeyHandler` in `TimelineView.swift`) that yields to focused text
   inputs *and* any focused non-text control (so a Tab-focused checkbox /
   button receives Space normally).
@@ -153,9 +161,10 @@ are all standard SwiftUI/AppKit (no new paradigms):
   film/waveform glyph so kind isn't hue-only (Differentiate Without Color); the
   format badge gets a spelled-out VoiceOver label; the scopes Canvas gains a
   live/empty accessibility value.
-- **Standard controls & materials.** The status bar uses `.bar`; the Beauty
-  toggles drop `.switch` for the Form-default checkbox; inspector timecodes use
-  `monospacedDigit`; the render-queue empty state uses inline `Text` with `.foregroundStyle(.secondary)`;
+- **Standard controls & materials.** The status bar uses `.bar`; the Preserve
+  Pitch toggle and Beauty toggles drop `.switch` for the Form-default checkbox;
+  inspector timecodes use `monospacedDigit`; the render-queue empty state uses
+  inline `Text` with `.foregroundStyle(.secondary)`;
   Master Gain uses the shared `LabeledSliderRow`; the scopes pane sits on the
   recessed content surface (`lcLane`) rather than a chrome material; timeline
   fonts use `caption2`/monospaced text styles instead of raw point sizes.
@@ -187,13 +196,15 @@ The medium-risk interaction items are done and manually verified with real media
 - **Media-bin arrow-key navigation** — focusable rows (`@FocusState`) with
   `onMoveCommand` / `onDeleteCommand` and a focus ring; timeline clips are
   likewise focusable with arrow-key movement that scrolls the focused clip into
-  view, plus Page-Left/Right and center-playhead buttons and an
+  view; transition glyphs are focusable so Delete removes the selected
+  transition. Page-Left/Right and center-playhead buttons complement an
   accessibility-adjustable timeline viewport.
 - **Long-clip identity** — `ClipIdentityOverlay` repeats the clip's glyph + name
   across a long body so the tail of a clip isn't an unlabeled slab.
 - **Draggable playhead head** — the head is a grab target at the ruler/lane
   boundary that scrubs by drag translation (origin-independent); the scrub line
-  stays non-interactive so clicks still fall through to clips and the ruler.
+  stays non-interactive so clicks still fall through to clips and the ruler,
+  and the ruler Canvas remains the VoiceOver-adjustable scrub target.
 - **Clip-body move cursor** — declarative `.pointerStyle(.grabIdle/.grabActive)`
   on the clip body: region-based, so there's no `NSCursor` stack to unbalance,
   and it coexists with the trim handles' resize cursor.
@@ -211,7 +222,8 @@ custom additions are limited to the two genuinely-floating controls:
   render-format readout stays a `.thinMaterial` badge, because a non-interactive
   label is content, not a control.
 - **Diagnostics HUD** uses `.glassEffect(in: .rect(cornerRadius:))`, replacing a
-  hand-rolled `NSVisualEffectView` + clip + stroke.
+  hand-rolled `NSVisualEffectView` + clip + stroke, and keeps an explicit
+  maximum width so the top-trailing overlay remains a compact HUD.
 
 The same pass removes hard-coded colour literals (the project's own UI standards
 forbid colours that fight the system appearance):

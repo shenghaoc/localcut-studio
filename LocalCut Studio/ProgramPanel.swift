@@ -176,7 +176,7 @@ struct ProgramPanel: View {
                     HStack {
                         Toggle("", isOn: sourceToggleBinding(index: index))
                             .labelsHidden()
-                            .toggleStyle(.switch)
+                            .toggleStyle(.checkbox)
                             .controlSize(.small)
                             .disabled(programState.isRunning)
                             .accessibilityLabel("Enable \(binding.descriptor.displayName)")

@@ -52,7 +52,7 @@ struct RenderQueueInspectorView: View {
             if preset.projectAspect != model.project.aspect {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle")
-                        .foregroundStyle(.yellow)
+                        .foregroundStyle(.orange)
                         .accessibilityHidden(true)
                     Text("Project is \(model.project.aspect.displayName).")
                         .font(.caption)
