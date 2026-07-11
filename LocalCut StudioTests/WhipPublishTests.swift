@@ -84,6 +84,20 @@ struct WhipPublishTests {
         return try #require(pixelBuffer)
     }
 
+    @Test("Ring buffer copies into caller-owned audio storage")
+    func ringBufferCopiesWithoutAllocatingAResultArray() {
+        let ring = RingBuffer(capacity: 4)
+        ring.write([1, 2, 3, 4, 5])
+        var scratch = [Float](repeating: -1, count: 6)
+
+        let copied = ring.read(into: &scratch, count: scratch.count)
+
+        #expect(copied == 4)
+        #expect(Array(scratch.prefix(copied)) == [2, 3, 4, 5])
+        #expect(scratch[copied] == -1)
+        #expect(ring.read(count: 1).isEmpty)
+    }
+
     @Test("Publish parses quoted ICE Link headers with TURN credentials")
     func publishParsesQuotedIceServerLinks() async throws {
         URLProtocolStub.reset()

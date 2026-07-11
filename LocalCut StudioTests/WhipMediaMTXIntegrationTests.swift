@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import LocalCutCore
+import LocalCutDomain
 @testable import LocalCut_Studio
 
 /// MediaMTX WHIP integration test.

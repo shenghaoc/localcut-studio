@@ -77,7 +77,8 @@ func overlaySelectionClearsForOtherTargets() {
         ("alpha-video", URL(filePath: "/nonexistent/file.mov")),
     ]
 )
-func sourceReturnsNilForNonexistentFile(name: String, url: URL) async {
+func sourceReturnsNilForNonexistentFile(_ argument: (name: String, url: URL)) async {
+    let (name, url) = argument
     switch name {
     case "animated":
         #expect(AnimatedImageSource(url: url) == nil)

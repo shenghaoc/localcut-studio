@@ -40,12 +40,19 @@ key for that endpoint.
 
 WHIP requires WebRTC peer connection support. macOS does not provide a native
 framework that can push LocalCut's AVFoundation program feed into WebRTC, so the
-app uses the pinned `stasel/WebRTC` 140.0.0 XCFramework through
-`Packages/LocalCutWebRTC`.
+app uses the pinned `webrtc-sdk/Specs` 125.6422.09 Swift package.
 
-- Source: `stasel/WebRTC` release 140.0.0 (M140).
+- Source: `webrtc-sdk/Specs` release 125.6422.09 (M125), the newest published
+  release whose upstream SwiftPM manifest loads without modification. M137 uses
+  `visionOS(.v2)` and M144 uses `visionOS(.v26)`, but both still declare tools
+  5.9, so PackageDescription rejects them even with a newer installed compiler.
 - License: BSD-3-Clause.
-- Size: about 40 MB as the downloaded zip and about 87 MB extracted.
+- Size: about 64 MB as the downloaded XCFramework zip.
+- Worktrees: no setup is required. SwiftPM downloads the checksum-pinned
+  package into its normal shared source/artifact cache.
+- Audio input: LocalCut uses the package's public AVAudioEngine device-module
+  delegate to connect an `AVAudioSourceNode` carrying master-bus PCM. No binary
+  patch, copied private header, bootstrap script, symlink, or submodule is used.
 - Build gate: guarded by `LOCALCUT_ENABLE_WEBRTC`, so custom builds can remove
   the dependency and compile the reduced publish UI state.
 

@@ -20,6 +20,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  portable-domain-test:
+    name: Test (LocalCutDomain / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Pinned setup-swift v2.4.0. The Windows runner needs the Swift
+      # toolchain; using the same action on Linux keeps the portable gate
+      # on one explicit Swift version.
+      - name: Set up Swift 6.2
+        uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a
+        with:
+          swift-version: "6.2"
+
+      - name: Cache portable package build
+        uses: actions/cache@v6
+        with:
+          path: Packages/LocalCutCore/.build
+          key: localcutdomain-${{ runner.os }}-swift-6.2-${{ hashFiles('Packages/LocalCutCore/Package.swift', 'Packages/LocalCutCore/Sources/LocalCutDomain/**/*.swift', 'Packages/LocalCutCore/Tests/LocalCutDomainTests/**/*.swift') }}
+          restore-keys: |
+            localcutdomain-${{ runner.os }}-swift-6.2-
+
+      - name: Build and test portable domain
+        run: swift test --package-path Packages/LocalCutCore
+
   package-test:
     name: Test (LocalCutCore package)
     runs-on: macos-26
@@ -32,8 +67,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Cache LocalCutCore build
+        uses: actions/cache@v6
+        with:
+          path: Packages/LocalCutCore/.build
+          key: localcutcore-${{ runner.os }}-${{ hashFiles('Packages/LocalCutCore/Package.swift', 'Packages/LocalCutCore/Sources/**/*.swift', 'Packages/LocalCutCore/Tests/**/*.swift') }}
+          restore-keys: |
+            localcutcore-${{ runner.os }}-
+
+      - name: Validate core/app layer boundary
+        run: ./Scripts/validate-layer-boundaries.sh
+
       - name: Run package tests
         run: swift test --package-path "$PACKAGE_PATH"
+
+      # OTIO validation is independent of the Xcode build. Running it in this
+      # shorter parallel job removes it from the macOS test critical path.
+      - name: Restore OTIO validator venv
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/localcut-otio-validator-0.17.0
+          key: otio-validator-${{ runner.os }}-0.17.0
+
+      - name: Validate OTIO goldens
+        env:
+          OTIO_VALIDATOR_VENV: ${{ runner.temp }}/localcut-otio-validator-0.17.0
+        run: ./Scripts/validate-otio-goldens.sh
 
   test:
     name: Test (macOS 26 / Xcode)
@@ -57,15 +116,6 @@ jobs:
           swift --version
           sw_vers
 
-      - name: Cache WebRTC XCFramework
-        uses: actions/cache@v6
-        with:
-          path: Packages/LocalCutWebRTC/WebRTC.xcframework
-          key: webrtc-xcframework-140.0.0
-
-      - name: Prepare WebRTC XCFramework
-        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
-
       - name: Restore DerivedData cache
         id: deriveddata-cache
         uses: actions/cache/restore@v6
@@ -83,17 +133,6 @@ jobs:
       # not be masked by a retry pass).
       - name: MediaMTX WHIP integration
         run: ./Scripts/run-mediamtx-whip-integration.sh
-
-      - name: Restore OTIO validator venv
-        uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/localcut-otio-validator-0.17.0
-          key: otio-validator-${{ runner.os }}-0.17.0
-
-      - name: Validate OTIO goldens
-        env:
-          OTIO_VALIDATOR_VENV: ${{ runner.temp }}/localcut-otio-validator-0.17.0
-        run: ./Scripts/validate-otio-goldens.sh
 
       - name: Upload failure diagnostics
         if: failure()
@@ -141,18 +180,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # SPM resolves the LocalCutWebRTC package unconditionally; the XCFramework
-      # binary target must exist on disk even though we compile without the
-      # LOCALCUT_ENABLE_WEBRTC flag so the stub code paths are exercised.
-      - name: Cache WebRTC XCFramework
-        uses: actions/cache@v6
-        with:
-          path: Packages/LocalCutWebRTC/WebRTC.xcframework
-          key: webrtc-xcframework-140.0.0
-
-      - name: Prepare WebRTC XCFramework
-        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
-
       - name: Restore DerivedData cache
         id: deriveddata-cache
         uses: actions/cache/restore@v6
@@ -180,6 +207,7 @@ jobs:
             -configuration Debug \
             -destination 'platform=macOS' \
             -derivedDataPath "$DERIVED_DATA" \
+            -packageAuthorizationProvider netrc \
             -resultBundlePath "$RESULT_BUNDLE" \
             -only-testing:"LocalCut StudioTests/WhipPublishTests" \
             -test-timeouts-enabled YES \

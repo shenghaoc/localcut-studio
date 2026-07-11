@@ -203,7 +203,7 @@
 			packageReferences = (
 				00000000000000000000A010 /* XCLocalSwiftPackageReference "Packages/LocalCutCore" */,
 				00000000000000000000A011 /* XCRemoteSwiftPackageReference "lottie-ios" */,
-				00000000000000000000A012 /* XCLocalSwiftPackageReference "Packages/LocalCutWebRTC" */,
+				00000000000000000000A012 /* XCRemoteSwiftPackageReference "Specs" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -328,7 +328,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PROJECT_UNIQUE_VALUE = I3S1ANNI;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-					SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited) LOCALCUT_ENABLE_WEBRTC";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited) LOCALCUT_ENABLE_WEBRTC";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
@@ -385,9 +385,9 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PROJECT_UNIQUE_VALUE = I3S1ANNI;
-					STRING_CATALOG_GENERATE_SYMBOLS = YES;
-					SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) LOCALCUT_ENABLE_WEBRTC";
-					SWIFT_COMPILATION_MODE = wholemodule;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) LOCALCUT_ENABLE_WEBRTC";
+				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
 		};
@@ -593,10 +593,6 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/LocalCutCore;
 		};
-		00000000000000000000A012 /* XCLocalSwiftPackageReference "Packages/LocalCutWebRTC" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/LocalCutWebRTC;
-		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -606,6 +602,14 @@
 			requirement = {
 				kind = exactVersion;
 				version = 4.6.1;
+			};
+		};
+		00000000000000000000A012 /* XCRemoteSwiftPackageReference "Specs" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/webrtc-sdk/Specs.git";
+			requirement = {
+				kind = exactVersion;
+				version = 125.6422.09;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -626,6 +630,7 @@
 		};
 		00000000000000000000A024 /* WebRTC */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = 00000000000000000000A012 /* XCRemoteSwiftPackageReference "Specs" */;
 			productName = WebRTC;
 		};
 /* End XCSwiftPackageProductDependency section */

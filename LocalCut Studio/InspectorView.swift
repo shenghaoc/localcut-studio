@@ -3,6 +3,7 @@ import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
 import LocalCutCore
+import LocalCutDomain
 
 /// Context-sensitive properties for the current selection plus project-wide
 /// render settings.

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Shared seconds → timecode formatting.
+/// Platform-neutral seconds → timecode formatting.
 public enum TimeFormatting: Sendable {
     private static let maxSaneSeconds: Double = 100 * 60 * 60
 

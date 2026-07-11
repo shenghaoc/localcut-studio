@@ -26,9 +26,25 @@ struct LocalCutStudioApp: App {
         MemoryPressureHandler.shared.activate()
     }
 
+#if DEBUG
+    private var runsRecorderUITestHarness: Bool {
+        ProcessInfo.processInfo.arguments.contains("--localcut-ui-test-recorder-harness")
+            || ProcessInfo.processInfo.environment["LOCALCUT_UI_TEST_RECORDER_HARNESS"] == "1"
+    }
+#endif
+
     var body: some Scene {
         WindowGroup {
+#if DEBUG
+            if runsRecorderUITestHarness {
+                RecorderUITestHarnessView()
+                    .frame(minWidth: 420, minHeight: 320)
+            } else {
+                editorView
+            }
+#else
             editorView
+#endif
         }
         .defaultSize(width: 1360, height: 860)
         .windowStyle(.titleBar)

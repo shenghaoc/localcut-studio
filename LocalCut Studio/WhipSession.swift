@@ -1,6 +1,7 @@
 import Foundation
 import os
 import LocalCutCore
+import LocalCutDomain
 
 #if LOCALCUT_ENABLE_WEBRTC
 import WebRTC
@@ -62,6 +63,7 @@ actor WhipSession {
     private var factory: RTCPeerConnectionFactory?
     private var peerConnection: RTCPeerConnection?
     private var peerConnectionDelegate: WhipPeerConnectionDelegate?
+    private var audioDeviceModuleDelegate: LocalCutAudioDeviceModuleDelegate?
     private var videoTransceiver: RTCRtpTransceiver?
     private var audioTransceiver: RTCRtpTransceiver?
     #endif
@@ -313,6 +315,8 @@ actor WhipSession {
         #if LOCALCUT_ENABLE_WEBRTC
         videoTransceiver = nil
         audioTransceiver = nil
+        factory?.audioDeviceModule.observer = nil
+        audioDeviceModuleDelegate = nil
         peerConnection?.close()
         peerConnection = nil
         peerConnectionDelegate = nil
@@ -322,12 +326,17 @@ actor WhipSession {
 
     #if LOCALCUT_ENABLE_WEBRTC
     private func configurePeerConnection() async throws {
-        let audioDevice = await audioBridge?.rtcAudioDevice
         let factory = RTCPeerConnectionFactory(
+            audioDeviceModuleType: .audioEngine,
+            bypassVoiceProcessing: true,
             encoderFactory: nil,
             decoderFactory: nil,
-            audioDevice: audioDevice
+            audioProcessingModule: nil
         )
+        if let delegate = await audioBridge?.makeAudioDeviceModuleDelegate() {
+            factory.audioDeviceModule.observer = delegate
+            audioDeviceModuleDelegate = delegate
+        }
         self.factory = factory
 
         let rtcConfig = RTCConfiguration()
@@ -370,7 +379,7 @@ actor WhipSession {
             if !codecs.isEmpty {
                 let h264 = codecs.filter { $0.name == "H264" }
                 if !h264.isEmpty, let videoTransceiver {
-                    try videoTransceiver.setCodecPreferences(h264, error: ())
+                    videoTransceiver.codecPreferences = h264
                 }
             }
         }

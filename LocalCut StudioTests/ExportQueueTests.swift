@@ -461,8 +461,8 @@ struct RenderQueueTests {
         expectedCount: Int,
         timeout: TimeInterval = 20
     ) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
+        let deadline = ContinuousClock.now + .seconds(timeout)
+        while ContinuousClock.now < deadline {
             if queue.jobs.count == expectedCount,
                !queue.isRunning,
                queue.jobs.allSatisfy(\.isTerminal) {

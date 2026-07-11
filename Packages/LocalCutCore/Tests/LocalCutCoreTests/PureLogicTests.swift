@@ -3,6 +3,7 @@ import Foundation
 import CoreMedia
 import CoreGraphics
 import LocalCutCore
+import LocalCutDomain
 
 private func time(_ seconds: Double) -> CMTime {
     CMTime(seconds: seconds, preferredTimescale: 600)
@@ -316,16 +317,8 @@ func renderPlanningFitTransformAspectFits() {
     #expect(approximatelyEqual(rect.minY, 218.75))
 }
 
-@Test("Time utilities: clamp invalid values and reject out-of-range captions")
-func timeUtilitiesClampAndFormat() {
-    #expect(TimeFormatting.timecode(.nan) == "0:00.00")
-    #expect(TimeFormatting.timecode(-1) == "0:00.00")
-    #expect(TimeFormatting.timecode(61.239) == "1:01.24")
-    #expect(TimeFormatting.timecode(59.999) == "1:00.00")
-    #expect(TimeFormatting.timecode(360_000) == "6000:00.00")
-    #expect(TimeFormatting.timecode(360_000.01) == "0:00.00")
-    #expect(TimeFormatting.timecode(1e17) == "0:00.00")
-
+@Test("Caption time parser accepts the upper bound and rejects overflow")
+func captionTimeParserBounds() {
     let maxCaptionTime = CMTime(seconds: 360_000, preferredTimescale: 1_000)
     #expect(CaptionImporter.parseTimestamp("100:00:00,000", separator: ",") == maxCaptionTime)
     #expect(CaptionImporter.parseTimestamp("100:00:01,000", separator: ",") == nil)

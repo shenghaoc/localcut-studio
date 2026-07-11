@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import LocalCutCore
+import LocalCutDomain
 
 // MARK: - Program panel state
 

@@ -5,6 +5,7 @@ import CoreMedia
 import os
 @testable import LocalCut_Studio
 import LocalCutCore
+import LocalCutDomain
 
 // ProgramSession enforces one active process-wide session, so cases that start
 // sessions must not overlap each other in the same test process.

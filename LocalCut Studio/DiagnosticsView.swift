@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import LocalCutCore
+import LocalCutDomain
 
 /// A translucent overlay that surfaces the `DiagnosticsAgent`'s probes. Anchored
 /// top-trailing on the editor view; togglable from View ▸ Show Diagnostics.

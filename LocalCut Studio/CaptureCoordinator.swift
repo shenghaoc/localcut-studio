@@ -3,6 +3,7 @@ import AVFoundation
 import CoreMedia
 import VideoToolbox
 import LocalCutCore
+import LocalCutDomain
 
 actor CaptureCoordinator {
     private enum State {

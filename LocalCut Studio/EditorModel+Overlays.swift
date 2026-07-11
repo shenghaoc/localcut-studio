@@ -3,6 +3,7 @@ import AVFoundation
 import CoreGraphics
 import UniformTypeIdentifiers
 import LocalCutCore
+import LocalCutDomain
 
 extension UTType {
     static let dotLottie = UTType(filenameExtension: "lottie")

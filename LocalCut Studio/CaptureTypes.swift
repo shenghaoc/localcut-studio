@@ -2,6 +2,7 @@ import Foundation
 import CoreGraphics
 import CoreMedia
 import LocalCutCore
+import LocalCutDomain
 
 nonisolated enum CaptureEngineError: LocalizedError, Equatable {
     case alreadyRecording

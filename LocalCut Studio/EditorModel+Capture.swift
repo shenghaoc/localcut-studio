@@ -3,6 +3,7 @@ import AppKit
 import AVFoundation
 import CoreMedia
 import LocalCutCore
+import LocalCutDomain
 
 private enum RecordingFolderStore {
     static let bookmarkKey = "LocalCutStudio.recordingsFolderBookmark"

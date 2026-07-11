@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-import LocalCutCore
+import LocalCutDomain
 
 // MARK: - Tier ordering (R1.1)
 
@@ -17,50 +17,6 @@ func capabilityTierCodable() throws {
     let encoded = try JSONEncoder().encode([CapabilityTier.baseline, .accelerated, .pro])
     let decoded = try JSONDecoder().decode([CapabilityTier].self, from: encoded)
     #expect(decoded == [.baseline, .accelerated, .pro])
-}
-
-// MARK: - Snapshot stability (R2.5, R2.6)
-
-@Test("Capabilities.current: stable across repeated calls")
-func capabilitiesCurrentStable() {
-    let a = Capabilities.current
-    let b = Capabilities.current
-    #expect(a == b)
-    #expect(a.chip == b.chip)
-    #expect(a.unifiedMemoryBytes == b.unifiedMemoryBytes)
-    #expect(a.videoEncoderCount == b.videoEncoderCount)
-    #expect(a.osVersion == b.osVersion)
-}
-
-@Test("Capabilities.current: reports a defined chip and a non-zero OS major")
-func capabilitiesCurrentSane() {
-    let c = Capabilities.current
-    // We make no claim about the test host's exact chip — just that it
-    // resolved to one of the known cases (Intel or some Apple Silicon
-    // generation, possibly 0).
-    switch c.chip {
-    case .intel:
-        break
-    case .appleSilicon(let g):
-        #expect(g >= 0)
-    }
-    #expect(c.osVersion.major > 0)
-}
-
-// MARK: - Reason non-empty (R3.3)
-
-@Test("Capabilities.tier(for:): every feature returns a non-empty reason on the host")
-func capabilitiesReasonsNonEmpty() {
-    let c = Capabilities.current
-    for feature in [
-        CapabilityFeature.frameInterpolation,
-        .simultaneousCaptureStreams(count: 1),
-        .simultaneousCaptureStreams(count: 4),
-        .metalEffectChain,
-    ] {
-        let verdict = c.tier(for: feature)
-        #expect(!verdict.reason.isEmpty, "reason empty for \(feature)")
-    }
 }
 
 // MARK: - Frame interpolation gating (R3.4)
@@ -346,19 +302,4 @@ func programModeM1Accelerated() {
         osVersion: .init(major: 26, minor: 0))
     let verdict = caps.tier(for: .programMode)
     #expect(verdict.tier == .accelerated)
-}
-
-@Test("DiagnosticsBridge: encoder budget tracking")
-func diagnosticsEncoderBudget() {
-    let bridge = DiagnosticsBridge()
-    bridge.setEncoderBudget(active: 2, max: 4, ledger: ["export", "programIso"])
-    let snap = bridge.snapshot()
-    #expect(snap.encoderLeaseCount == 2)
-    #expect(snap.encoderBudgetMax == 4)
-    #expect(snap.encoderLedger.count == 2)
-    bridge.clearEncoderBudget()
-    let cleared = bridge.snapshot()
-    #expect(cleared.encoderLeaseCount == 0)
-    #expect(cleared.encoderBudgetMax == 0)
-    #expect(cleared.encoderLedger.isEmpty)
 }

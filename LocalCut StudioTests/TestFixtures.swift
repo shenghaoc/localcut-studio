@@ -57,18 +57,18 @@ func makeVideoFixture(
     }
 
     let frameCount = Int(seconds * Double(fps))
-    let deadline = ContinuousClock.now + .seconds(30)
     for frame in 0..<frameCount {
+        let readyDeadline = ContinuousClock.now + .seconds(5)
         while !input.isReadyForMoreMediaData {
             guard writer.status == .writing else {
                 throw writer.error ?? NSError(domain: "TestFixtures", code: -1,
                         userInfo: [NSLocalizedDescriptionKey: "AVAssetWriter not in .writing status"])
             }
-            guard ContinuousClock.now < deadline else {
+            guard ContinuousClock.now < readyDeadline else {
                 throw NSError(domain: "TestFixtures", code: -4,
-                              userInfo: [NSLocalizedDescriptionKey: "AVAssetWriter input never became ready (30s timeout)"])
+                              userInfo: [NSLocalizedDescriptionKey: "AVAssetWriter input never became ready (5s timeout)"])
             }
-            await Task.yield()
+            try await Task.sleep(for: .milliseconds(5))
         }
         var pixelBuffer: CVPixelBuffer?
         let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
@@ -202,12 +202,12 @@ func makeAVFixture(
     size: CGSize = CGSize(width: 64, height: 64),
     in directory: URL = FileManager.default.temporaryDirectory
 ) async throws -> URL {
-    // Create video and audio fixtures in parallel — they are independent.
-    async let videoTask = makeVideoFixture(seconds: seconds, fps: fps, size: size, in: directory)
+    // Register each cleanup immediately after creation so a later fixture
+    // failure cannot strand the first file in the temporary directory.
+    let videoURL = try await makeVideoFixture(seconds: seconds, fps: fps, size: size, in: directory)
+    defer { try? FileManager.default.removeItem(at: videoURL) }
     let audioURL = try makeAudioFixture(seconds: seconds, in: directory)
     defer { try? FileManager.default.removeItem(at: audioURL) }
-    let videoURL = try await videoTask
-    defer { try? FileManager.default.removeItem(at: videoURL) }
 
     let outputURL = directory.appendingPathComponent("av-fixture-\(UUID().uuidString).mov")
     try? FileManager.default.removeItem(at: outputURL)

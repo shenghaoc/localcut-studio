@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import LocalCutCore
+import LocalCutDomain
 
 /// Inspector section listing every marker. Click the timecode to seek, edit
 /// the name in place (coalesced into one undo step), or delete the row.

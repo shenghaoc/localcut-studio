@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import os
 import LocalCutCore
+import LocalCutDomain
 
 // MARK: - Beat tools
 

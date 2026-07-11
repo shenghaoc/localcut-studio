@@ -35,8 +35,7 @@ below.
 | --- | --- | --- | --- | --- |
 | `CaptureRunningSessions.swift` | `ScreenCaptureSession` | Medium | Keep with comment | `stateLock` protects target, stream, writers, and exclusions; ScreenCaptureKit callbacks and `dropNextScreenFrame` are confined to `outputQueue`. |
 | `CaptureRunningSessions.swift` | `AVCaptureSampleSession` | Medium | Keep with comment | AVFoundation sample callbacks mutate processor/audio-level state only on the configured delegate `queue`. |
-| `AudioPublishBridge.swift` | `AudioCaptureStopToken` | Low | Keep with comment | Single stopped flag is protected by `OSAllocatedUnfairLock`. |
-| `AudioPublishBridge.swift` | `LocalCutAudioDevice` | Medium | Keep with comment | `RTCAudioDevice` requires the conformance; delegate, playout/recording flags, and sample time are protected by `stateLock`. |
+| `AudioPublishBridge.swift` | `LocalCutAudioDeviceModuleDelegate`, `LocalCutAudioSourceRenderer` | Medium | Keep with comment | WebRTC invokes these from its worker/render threads; mutable render storage is confined to the audio callback and shared samples use the locked `RingBuffer`. |
 | `CaptureWriters.swift` | `CaptureManifestFileWriter` | Low | Keep with comment | `FileHandle` writes and close are serialized on the private manifest queue. |
 | `CaptureWriters.swift` | `ContinuousCaptureWriter` | Medium | Keep with comment | Writer lifecycle, timing, and sample counters are protected by `lock`; AVFoundation writer objects remain framework-owned. |
 | `LottieFrameSource.swift` | `LottieFrameSource` | Medium | Keep with comment | Cache and cache order are protected by `lock`; renderer metadata is immutable and rasterization remains on the expected main-actor path. |

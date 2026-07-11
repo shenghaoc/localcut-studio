@@ -8,6 +8,9 @@ Untitled Project/                  ← repo root (git)
 ├── .github/                       ← CI, dependabot, PR template
 ├── .kiro/                         ← steering, specs, skills, settings (project intelligence)
 ├── docs/                          ← user-facing documentation
+├── Packages/LocalCutCore/
+│   ├── Sources/LocalCutDomain/    ← Foundation-only, Linux/Windows tested
+│   └── Sources/LocalCutCore/      ← Apple media logic, no UI/AVFoundation
 ├── LocalCut Studio.xcodeproj/     ← Xcode project (target: "LocalCut Studio")
 └── LocalCut Studio/               ← Swift sources
     ├── ContentView.swift          ← @main app entry + EditorView shell
@@ -32,6 +35,11 @@ Untitled Project/                  ← repo root (git)
 
 ## Placement rules
 
+- **Portable domain code** goes in `LocalCutDomain` and may import Foundation
+  only. Linux and Windows CI are the executable boundary.
+- **Apple-only non-UI media logic** goes in package target `LocalCutCore` when
+  it needs CoreMedia/CoreGraphics/CoreVideo/Accelerate/VideoToolbox; needing no
+  UI does not make code cross-platform.
 - **No AVFoundation in views** beyond the wrapped `AVPlayerView`; views talk to `EditorModel`.
 - **No SwiftUI in the engine** (`CompositionBuilder`, future compositor/exporter).
 - One `View` concern per file; lift shared helpers (e.g. `TimeFormatting`) next to their primary user.
@@ -41,6 +49,8 @@ Untitled Project/                  ← repo root (git)
 
 | Concern | Location |
 |---------|----------|
+| Cross-platform policies/algorithms | `Packages/LocalCutCore/Sources/LocalCutDomain` |
+| Apple media-domain algorithms | `Packages/LocalCutCore/Sources/LocalCutCore` |
 | Timeline/model mutations | `EditorModel.swift` (+ `Models.swift` types) |
 | Composition / transforms | `CompositionBuilder.swift` |
 | Playback transport | `EditorModel` + `PreviewView` |

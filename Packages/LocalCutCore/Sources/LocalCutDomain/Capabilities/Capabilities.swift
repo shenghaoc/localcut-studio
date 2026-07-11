@@ -1,5 +1,4 @@
 import Foundation
-import VideoToolbox
 
 // MARK: - Tier
 
@@ -99,10 +98,6 @@ public struct Capabilities: Sendable, Hashable {
         Double(unifiedMemoryBytes) / (1024 * 1024 * 1024)
     }
 
-    /// Editor-wide snapshot. Eager `static let` runs the probe on first access
-    /// and caches the result for the process lifetime.
-    public static let current: Capabilities = .probe()
-
     public init(chip: ChipFamily,
                 unifiedMemoryBytes: UInt64,
                 videoEncoderCount: Int,
@@ -114,28 +109,9 @@ public struct Capabilities: Sendable, Hashable {
     }
 }
 
-// MARK: - Probe
+// MARK: - Pure Apple hardware classification
 
 extension Capabilities {
-
-    public static func probe() -> Capabilities {
-        let chip = probeChipFamily()
-        let memory = sysctlUInt64("hw.memsize") ?? 0
-        let encoders = probeHardwareEncoderCount()
-        let os = OSVersion(ProcessInfo.processInfo.operatingSystemVersion)
-        return Capabilities(chip: chip,
-                            unifiedMemoryBytes: memory,
-                            videoEncoderCount: encoders,
-                            osVersion: os)
-    }
-
-    private static func probeChipFamily() -> ChipFamily {
-        let isAppleSilicon = sysctlInt("hw.optional.arm64") == 1
-        guard isAppleSilicon else { return .intel }
-        let board = sysctlString("hw.model") ?? ""
-        return .appleSilicon(generation: appleSiliconGeneration(forBoard: board))
-    }
-
     /// Maps the `hw.model` board string to an M-series generation. Apple ships
     /// a handful of board prefixes per generation; the table covers shipping
     /// Macs through M4. New boards land here on each Mac release. Unknown ⇒ 0,
@@ -162,25 +138,6 @@ extension Capabilities {
         return 0
     }
 
-    /// Counts the number of hardware-accelerated video encoders available on
-    /// this machine. Shared by `Capabilities` and `EncoderBudget`.
-    package static func probeHardwareEncoderCount() -> Int {
-        // VTCopyVideoEncoderList doesn't expose a "hardware only" options-key
-        // — the hardware flag is a per-entry property
-        // (`kVTVideoEncoderList_IsHardwareAccelerated`). Pull the whole list
-        // and count entries where the flag is set. On Intel Macs without a
-        // hardware H.264/HEVC path none of the rows are hw-accelerated.
-        var listRef: CFArray?
-        let status = VTCopyVideoEncoderList(nil, &listRef)
-        guard status == noErr, let list = listRef else { return 0 }
-        let hwKey = kVTVideoEncoderList_IsHardwareAccelerated as String
-        var hwCount = 0
-        for entry in (list as NSArray) {
-            guard let dict = entry as? [String: Any] else { continue }
-            if (dict[hwKey] as? Bool) == true { hwCount += 1 }
-        }
-        return hwCount
-    }
 }
 
 // MARK: - Decision API
@@ -337,32 +294,4 @@ extension Capabilities {
     private var osVersionString: String {
         "\(osVersion.major).\(osVersion.minor).\(osVersion.patch)"
     }
-}
-
-// MARK: - sysctl helpers
-
-private func sysctlString(_ name: String) -> String? {
-    var size: Int = 0
-    if sysctlbyname(name, nil, &size, nil, 0) != 0 { return nil }
-    guard size > 0 else { return nil }
-    var buffer = [UInt8](repeating: 0, count: size)
-    if sysctlbyname(name, &buffer, &size, nil, 0) != 0 { return nil }
-    // `sysctlbyname` populates a NUL-terminated C string; truncate at the
-    // first NUL byte so the resulting Swift string is clean.
-    if let nul = buffer.firstIndex(of: 0) { buffer.removeSubrange(nul...) }
-    return String(decoding: buffer, as: UTF8.self)
-}
-
-private func sysctlInt(_ name: String) -> Int? {
-    var value: Int32 = 0
-    var size = MemoryLayout<Int32>.size
-    if sysctlbyname(name, &value, &size, nil, 0) != 0 { return nil }
-    return Int(value)
-}
-
-private func sysctlUInt64(_ name: String) -> UInt64? {
-    var value: UInt64 = 0
-    var size = MemoryLayout<UInt64>.size
-    if sysctlbyname(name, &value, &size, nil, 0) != 0 { return nil }
-    return value
 }

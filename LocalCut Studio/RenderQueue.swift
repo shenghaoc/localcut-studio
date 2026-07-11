@@ -5,6 +5,7 @@ import CoreMedia
 import Observation
 import os
 import LocalCutCore
+import LocalCutDomain
 
 // MARK: - Job model
 

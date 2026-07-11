@@ -46,4 +46,23 @@ final class RingBuffer: @unchecked Sendable {
             return result
         }
     }
+
+    /// Copies into caller-owned storage so real-time audio callbacks do not
+    /// allocate a new array for every render quantum.
+    @discardableResult
+    nonisolated func read(into destination: inout [Float], count requestedCount: Int) -> Int {
+        // `destination` is caller-owned scratch storage. The unchecked lock
+        // variant is appropriate here because the lock still serializes the
+        // ring state while allowing this synchronous closure to mutate the
+        // inout buffer under Swift 6's strict sendability rules.
+        state.withLockUnchecked { s in
+            let available = min(requestedCount, s.count, destination.count)
+            for index in 0..<available {
+                destination[index] = s.buffer[s.readPos]
+                s.readPos = (s.readPos + 1) % s.capacity
+            }
+            s.count -= available
+            return available
+        }
+    }
 }

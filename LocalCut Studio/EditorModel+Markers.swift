@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import LocalCutCore
+import LocalCutDomain
 
 // MARK: - Marker editing
 

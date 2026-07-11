@@ -3,6 +3,7 @@ import Foundation
 import AVFoundation
 import CoreMedia
 import LocalCutCore
+import LocalCutDomain
 @testable import LocalCut_Studio
 
 /// Helper for static-let contexts where `try!` would crash with an opaque error.
@@ -357,7 +358,7 @@ struct CaptureAlignmentTests {
         var testDescription: String { name }
     }
 
-    nonisolated(unsafe) static let alignmentCases: [AlignmentCase] = [
+    nonisolated static let alignmentCases: [AlignmentCase] = [
         AlignmentCase(
             name: "offset is zero when PTS equals sessionStart",
             sessionStartUs: 1_000_000,
@@ -420,7 +421,7 @@ struct CaptureManifestRecoveryTests {
         var testDescription: String { name }
     }
 
-    nonisolated(unsafe) static let manifestParseCases: [ManifestParseCase] = {
+    nonisolated static let manifestParseCases: [ManifestParseCase] = {
         var cases: [ManifestParseCase] = []
 
         // Truncated trailing line
@@ -539,7 +540,7 @@ struct CaptureCapabilityGateTests {
         var testDescription: String { name }
     }
 
-    nonisolated(unsafe) static let capabilityGateCases: [CapabilityGateCase] = [
+    nonisolated static let capabilityGateCases: [CapabilityGateCase] = [
         CapabilityGateCase(
             name: "baseline: zero streams rejected",
             chip: .intel,

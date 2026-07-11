@@ -160,7 +160,7 @@ func makePCMSampleBuffer(
             flags: 0,
             blockBufferOut: &blockBuffer
         )
-        guard createStatus == noErr, let blockBuffer else {
+        guard createStatus == noErr, blockBuffer != nil else {
             throw NSError(domain: "AudioTestHelpers", code: Int(createStatus),
                           userInfo: [NSLocalizedDescriptionKey: "CMBlockBufferCreateWithMemoryBlock failed (\(createStatus))"])
         }
@@ -303,8 +303,8 @@ func waitForRenderQueueToSettle(
     expectedCount: Int,
     timeout: TimeInterval
 ) async throws {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    let deadline = ContinuousClock.now + .seconds(timeout)
+    while ContinuousClock.now < deadline {
         if queue.jobs.count == expectedCount,
            !queue.isRunning,
            queue.jobs.allSatisfy(\.isTerminal) {

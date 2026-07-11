@@ -1,5 +1,6 @@
 import SwiftUI
 import LocalCutCore
+import LocalCutDomain
 
 enum PublishStateDisplay: String, Sendable {
     case idle, connecting, live, reconnecting, failed, ended

@@ -4,12 +4,13 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 
 ## Test Categories
 
-### 1. LocalCutCore Package Tests (Deterministic)
+### 1. Domain and Apple Core Package Tests (Deterministic)
 - **Location:** `Packages/LocalCutCore/Tests/`
 - **Framework:** Swift Testing
 - **Run command:** `swift test --package-path Packages/LocalCutCore`
-- **CI behavior:** No retry. Failures are always deterministic.
-- **Characteristics:** Pure logic, no GPU, no media, no network.
+- **CI behavior:** No retry. `LocalCutDomain` runs on Linux and Windows;
+  macOS runs both `LocalCutDomain` and the Apple-only `LocalCutCore` target.
+- **Characteristics:** No GPU, decoded media, or network.
 
 ### 2. Xcode Unit/Integration Tests
 - **Location:** `LocalCut StudioTests/`
@@ -36,6 +37,20 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 - **Run command:** `LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh`
 - **CI behavior:** Skipped if no container runtime and not required. In CI (where it is required), retries MediaMTX startup/readiness before failing. The wrapper attempts Docker, then Podman, then a direct binary fallback on macOS. Once MediaMTX is ready, the focused WHIP Xcode test is not retried.
 - **Characteristics:** Requires MediaMTX container or binary, network port binding.
+
+## CI Topology
+
+The portable domain matrix (Linux and Windows), macOS package job, and two Xcode
+jobs start in parallel. The macOS package job restores its
+SwiftPM `.build` cache, enforces the core/app import boundary, runs the package
+suite, and validates OTIO goldens. Keeping OTIO in this shorter job removes it
+from the full Xcode critical path. The main Xcode job runs the WebRTC-enabled
+unit/integration/UI suite plus MediaMTX; the focused non-WebRTC job rebuilds with
+`LOCALCUT_ENABLE_WEBRTC` stripped and exercises the publish stubs.
+
+Do not shard the hosted app suite without re-measuring build cost: current CI
+timings show that compiling the app dominates the test runtime, so additional
+shards would duplicate most of the work instead of reducing wall-clock time.
 
 ## Flaky-Test Detection
 

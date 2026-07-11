@@ -1,5 +1,4 @@
 import Foundation
-import VideoToolbox
 
 // MARK: - Encoder consumer
 
@@ -88,14 +87,12 @@ public actor EncoderBudget {
     /// The maximum number of concurrent video encoder sessions.
     public let maxConcurrent: Int
 
-    /// Creates an encoder budget with the given maximum. If `maxConcurrent`
-    /// is nil, the budget auto-probes from hardware capabilities.
-    public init(maxConcurrent: Int? = nil) {
-        if let explicit = maxConcurrent {
-            self.maxConcurrent = max(1, explicit)
-        } else {
-            self.maxConcurrent = Self.probeDefaultBudget()
-        }
+    /// Creates a platform-neutral encoder budget with an explicit capacity.
+    /// The Apple app layer probes VideoToolbox and supplies the host-specific
+    /// value; portable callers and tests choose the capacity appropriate to
+    /// their own runtime.
+    public init(maxConcurrent: Int) {
+        self.maxConcurrent = max(1, maxConcurrent)
     }
 
     /// Number of currently held leases.
@@ -169,12 +166,4 @@ public actor EncoderBudget {
         }
     }
 
-    // MARK: - Probing
-
-    /// Probes the default budget from hardware capabilities. Returns 4 if
-    /// hardware encoders are available, 1 otherwise.
-    private static func probeDefaultBudget() -> Int {
-        let count = Capabilities.probeHardwareEncoderCount()
-        return count > 0 ? 4 : 1
-    }
 }

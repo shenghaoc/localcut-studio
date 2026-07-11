@@ -5,6 +5,8 @@
 - **Runner**: Swift Testing (`import Testing`, `@Test`, `#expect`) for unit tests; **XCUIAutomation** for UI tests. Do not add XCTest-based unit tests for new code.
 - **Location**: a `LocalCut StudioTests` target alongside the app target (added when the first non-trivial pure-logic unit lands).
 - **Scope**: deterministic, framework-light logic — timeline model math and the parts of `CompositionBuilder` that don't require decoding real media.
+- **Cross-platform gate**: `LocalCutDomainTests` must pass with SwiftPM on
+  Linux and Windows. Apple framework tests stay in `LocalCutCoreTests` on macOS.
 
 ## What to test
 
@@ -40,4 +42,7 @@ Any non-trivial logic change **must** ship with tests; the test count must not d
 
 ## Quality gate
 
-`xcodebuild` (Debug, macOS) must compile cleanly and the test suite must stay green with no count regression before merging any non-trivial logic change.
+`swift test --package-path Packages/LocalCutCore` must pass on macOS, Linux,
+and Windows for the targets available on each host. `xcodebuild` (Debug,
+macOS) must compile cleanly and the test suite must stay green with no count
+regression before merging any non-trivial logic change.

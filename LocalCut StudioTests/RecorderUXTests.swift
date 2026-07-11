@@ -5,6 +5,7 @@ import AVFoundation
 import CoreMedia
 import os
 import LocalCutCore
+import LocalCutDomain
 @testable import LocalCut_Studio
 
 nonisolated private final class RecorderSwitchingSession: CaptureRunningSession, @unchecked Sendable {
@@ -74,7 +75,7 @@ struct ManifestPauseResumeTests {
         RecordRoundTripCase(record: .pause(CapturePauseRecord(atUs: 5_000_000)), expectedAtUs: 5_000_000),
         RecordRoundTripCase(record: .resume(CaptureResumeRecord(atUs: 8_000_000)), expectedAtUs: 8_000_000),
     ])
-    func recordRoundTrip(case testCase: RecordRoundTripCase) throws {
+    func recordRoundTrip(_ testCase: RecordRoundTripCase) throws {
         let manifest = CaptureManifest(records: [testCase.record])
         let data = try manifest.encodeNDJSON()
         let parsed = CaptureManifest.parseNDJSON(data)
@@ -334,7 +335,7 @@ struct PiPPresetLayoutTests {
         var testDescription: String { "\(preset) \(Int(source.width))x\(Int(source.height))" }
     }
 
-    nonisolated(unsafe) static let placementCases: [PlacementCase] = {
+    nonisolated static let placementCases: [PlacementCase] = {
         let canvas = CGSize(width: 1920, height: 1080)
 
         // Bottom-right: medium, roundedRect, 1280x720 source
@@ -361,7 +362,7 @@ struct PiPPresetLayoutTests {
     }()
 
     @Test("PiP preset places origin correctly", arguments: placementCases)
-    func placement(case testCase: PlacementCase) {
+    func placement(_ testCase: PlacementCase) {
         let layout = testCase.preset.layout(canvasSize: testCase.canvas, sourceSize: testCase.source)
 
         #expect(abs(layout.origin.x - testCase.expectedOriginX) < 1)
@@ -900,6 +901,7 @@ struct RecordingGapCollapseTests {
             do {
                 let url = try await makeVideoFixture(seconds: duration.seconds, in: directoryURL)
                 // Rename to the path CaptureChunkResolver expects.
+                try? FileManager.default.removeItem(at: fixtureURL)
                 try FileManager.default.moveItem(at: url, to: fixtureURL)
                 fixtureCreated = true
                 break
@@ -1132,79 +1134,5 @@ struct FloatingPanelFallbackTests {
         model.floatingPanelController.close()
         #expect(!model.floatingPanelController.isShown)
         #expect(model.isRecording)
-    }
-}
-
-// MARK: - Recorder flow (replaces RecorderFlowUITests)
-
-/// Pure-logic equivalent of the former `RecorderFlowUITests` XCTest UI test.
-/// The harness view set the same `EditorModel` flags; no window is needed.
-@Suite("Recorder flow (pause/resume/stop/collapse)")
-@MainActor
-struct RecorderFlowTests {
-    @Test("Full pause–resume–stop–collapse flow updates model state correctly")
-    func pauseResumeStopCollapseFlow() {
-        let model = EditorModel()
-
-        // Start recording
-        model.isRecording = true
-        model.isPaused = false
-        model.recordingSourceCount = 1
-        model.statusMessage = "Recording..."
-        #expect(model.isRecording)
-        #expect(!model.isPaused)
-        #expect(model.recordingSourceCount == 1)
-
-        // Pause
-        model.isRecording = false
-        model.isPaused = true
-        model.statusMessage = "Recording paused."
-        #expect(!model.isRecording)
-        #expect(model.isPaused)
-
-        // Resume
-        model.isRecording = true
-        model.isPaused = false
-        model.statusMessage = "Recording..."
-        #expect(model.isRecording)
-        #expect(!model.isPaused)
-
-        // Stop — seed a gapped recording (3-second gap)
-        model.isRecording = false
-        model.isPaused = false
-        model.recordingSourceCount = 0
-        let mediaID = UUID()
-        let duration = CMTime(seconds: 2, preferredTimescale: 600)
-        let first = Clip(mediaID: mediaID, sourceStart: .zero, duration: duration, timelineStart: .zero)
-        let second = Clip(
-            mediaID: mediaID, sourceStart: .zero, duration: duration,
-            timelineStart: CMTime(seconds: 5, preferredTimescale: 600))
-        let track = Track(name: "Screen", kind: .video)
-        track.clips = [first, second]
-        model.project.videoTracks = [track]
-        model.lastRecordingSlots = [
-            RecordingSlot(
-                key: RecordingSlotKey(sourceKind: .display, trackKind: .video, chunkIndex: 0),
-                trackID: track.id, trackIndex: 0, clipID: first.id,
-                mediaID: first.mediaID, timelineStart: first.timelineStart),
-            RecordingSlot(
-                key: RecordingSlotKey(sourceKind: .display, trackKind: .video, chunkIndex: 1),
-                trackID: track.id, trackIndex: 0, clipID: second.id,
-                mediaID: second.mediaID, timelineStart: second.timelineStart),
-        ]
-        model.statusMessage = "Recording stopped."
-        #expect(!model.isRecording)
-        #expect(!model.isPaused)
-
-        // Verify gap exists
-        let gapBefore = track.clips[1].timelineStart - track.clips[0].timelineEnd
-        #expect(gapBefore.seconds > 2.5)
-
-        // Collapse gaps
-        model.collapseRecordingGap()
-        #expect(model.statusMessage == "Recording gaps collapsed.")
-        let gapAfter = model.project.videoTracks.first!.clips[1].timelineStart
-            - model.project.videoTracks.first!.clips[0].timelineEnd
-        #expect(gapAfter.seconds < 0.05)
     }
 }

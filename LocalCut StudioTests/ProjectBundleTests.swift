@@ -991,8 +991,8 @@ struct ProjectBundleTests {
     // MARK: - Single-file path remains backwards-compatible
 
     @Test("Single-file save downconverts to the single-file schema version with no bundleFormat")
-    func singleFileSaveDownconvertsSchemaVersion() async throws {
-        try await withTempDirectory("downconvert") { tmp in
+    func singleFileSaveDownconvertsSchemaVersion() throws {
+        try withTempDirectory("downconvert") { tmp in
             let model = EditorModel()
             let lcstudioURL = tmp.appendingPathComponent("Old.lcstudio")
             _ = model.writeSynchronously(to: lcstudioURL)
