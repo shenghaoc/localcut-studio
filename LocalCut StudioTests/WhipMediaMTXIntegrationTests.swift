@@ -12,7 +12,7 @@ import LocalCutCore
 /// runs leave the suite disabled; the integration script creates a short-lived
 /// marker after starting MediaMTX and removes it during cleanup.
 private enum MediaMTXIntegrationGate {
-    nonisolated static let markerURL = URL(fileURLWithPath: #filePath)
+    nonisolated static let markerURL = URL(filePath: #filePath)
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .appendingPathComponent(".build/mediamtx/integration-enabled")

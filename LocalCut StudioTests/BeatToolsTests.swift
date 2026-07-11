@@ -45,7 +45,7 @@ func writeFixtureWAV(sampleRate: Int, duration: Double, bpm: Double) throws -> U
         t += interval
     }
 
-    let tmpURL = URL(filePath: NSTemporaryDirectory())
+    let tmpURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("beat-fixture-\(UUID().uuidString).wav")
     let dataCount = samples.count * 2 // 16-bit PCM
     var header = Data(count: 44)
@@ -306,7 +306,7 @@ struct BeatToolsEditorTests {
     @Test("Bundle cache persistence writes beat blobs under Caches/beats")
     func bundleCachePersistence() throws {
         let (model, media, _, _) = makeModel()
-        let directory = URL(filePath: NSTemporaryDirectory())
+        let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("beat-bundle-\(UUID().uuidString)", isDirectory: true)
         let bundleURL = directory.appendingPathComponent("Project.lcbundle", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -339,7 +339,7 @@ struct BeatToolsEditorTests {
         #expect(model.project.videoTracks.first!.clips.count == 1)
 
         // 4. Bundle save with beat caches
-        let directory = URL(filePath: NSTemporaryDirectory())
+        let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("beat-smoke-\(UUID().uuidString)", isDirectory: true)
         let bundleURL = directory.appendingPathComponent("Smoke.lcbundle", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -368,7 +368,7 @@ struct BeatToolsEditorTests {
         let key = try Fingerprint.sha256(of: wav)
         let analysis = try await BeatAnalyzer().analyze(url: wav)
 
-        let directory = URL(filePath: NSTemporaryDirectory())
+        let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("beat-reopen-\(UUID().uuidString)", isDirectory: true)
         let bundleURL = directory.appendingPathComponent("Reopen.lcbundle", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }

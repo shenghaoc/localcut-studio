@@ -133,7 +133,7 @@ struct RenderQueueDocTests {
         // The bookmark resolves (we use a real path-derived bookmark below to
         // keep the test focused on the rewind transition; an unresolvable
         // bookmark is a separate test).
-        let tempURL = URL(filePath: NSTemporaryDirectory())
+        let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("renderqueue-test-\(UUID()).bookmark")
         // Use Application Support — sandboxed apps reach it without panel/scope.
         // The bookmark format isn't really security-scoped here, but it
@@ -420,7 +420,7 @@ struct RenderQueueTests {
         let queue = RenderQueue(
             persistsToDisk: true,
             queueFileURLProvider: {
-                URL(filePath: NSTemporaryDirectory())
+                FileManager.default.temporaryDirectory
                     .appendingPathComponent("renderqueue-write-failure-\(UUID()).json")
             },
             queueDocumentWriter: { _, _ in

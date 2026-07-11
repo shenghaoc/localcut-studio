@@ -13,7 +13,7 @@ struct Phase44TutorialFinishingTests {
     @Test("Silence detection accepts an audio-bearing video clip")
     func silenceDetectionAcceptsVideoClipAudio() {
         let model = EditorModel()
-        let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.hasVideo = true
         media.hasAudio = true
         model.project.mediaItems = [media]
@@ -32,7 +32,7 @@ struct Phase44TutorialFinishingTests {
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        let videoURL = try await makeVideoFixture(seconds: 32, fps: 2, in: tmp)
+        let videoURL = try await makeVideoFixture(seconds: 32, fps: 2, size: CGSize(width: 64, height: 36), in: tmp)
         let media = try await loadedMedia(from: videoURL)
         let model = EditorModel()
         model.project.renderSize = CGSize(width: 64, height: 36)
@@ -243,7 +243,7 @@ struct Phase44TutorialFinishingTests {
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        let videoURL = try await makeVideoFixture(seconds: 2, fps: 2, in: tmp)
+        let videoURL = try await makeVideoFixture(seconds: 2, fps: 2, size: CGSize(width: 64, height: 36), in: tmp)
         let media = try await loadedMedia(from: videoURL)
         let model = EditorModel()
         model.project.renderSize = CGSize(width: 64, height: 36)
@@ -289,80 +289,5 @@ struct Phase44TutorialFinishingTests {
         [Float](repeating: 0.08, count: 2_000)
     }
 
-    private func makeVideoFixture(seconds: Double,
-                                  fps: Int32,
-                                  in directory: URL,
-                                  size: CGSize = CGSize(width: 64, height: 36)) async throws -> URL {
-        let url = directory.appendingPathComponent("phase44-fixture-\(UUID().uuidString).mov")
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Int(size.width),
-            AVVideoHeightKey: Int(size.height),
-        ])
-        input.expectsMediaDataInRealTime = false
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-                kCVPixelBufferWidthKey as String: Int(size.width),
-                kCVPixelBufferHeightKey as String: Int(size.height),
-            ])
-        writer.add(input)
-        try #require(writer.startWriting())
-        writer.startSession(atSourceTime: .zero)
-
-        let frameCount = Int(seconds * Double(fps))
-        for frame in 0..<frameCount {
-            while !input.isReadyForMoreMediaData {
-                guard writer.status == .writing else {
-                    throw writer.error ?? NSError(domain: "Phase44TutorialFinishingTests", code: -1)
-                }
-                await Task.yield()
-            }
-            let buffer = try makePixelBuffer(size: size, adaptor: adaptor, frame: frame)
-            guard adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else {
-                throw writer.error ?? NSError(domain: "Phase44TutorialFinishingTests", code: -2)
-            }
-        }
-
-        input.markAsFinished()
-        await writer.finishWriting()
-        try #require(writer.status == .completed)
-        return url
-    }
-
-    private func makePixelBuffer(size: CGSize,
-                                 adaptor: AVAssetWriterInputPixelBufferAdaptor,
-                                 frame: Int) throws -> CVPixelBuffer {
-        var pixelBuffer: CVPixelBuffer?
-        if let pool = adaptor.pixelBufferPool {
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
-        }
-        guard let pixelBuffer else {
-            throw NSError(domain: "Phase44TutorialFinishingTests", code: -3)
-        }
-        let status = CVPixelBufferLockBaseAddress(pixelBuffer, [])
-        guard status == kCVReturnSuccess else {
-            throw NSError(domain: "Phase44TutorialFinishingTests", code: Int(status))
-        }
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
-
-        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
-            throw NSError(domain: "Phase44TutorialFinishingTests", code: -4)
-        }
-        memset(base, Int32(0x40 + (frame % 64)), CVPixelBufferGetBytesPerRow(pixelBuffer) * Int(size.height))
-        return pixelBuffer
-    }
-
-    private func loadedMedia(from url: URL) async throws -> MediaItem {
-        let item = MediaItem(url: url)
-        item.duration = try await item.asset.load(.duration).sanitized
-        let tracks = try await item.asset.loadTracks(withMediaType: .video)
-        let track = try #require(tracks.first)
-        item.hasVideo = true
-        item.naturalSize = try await track.load(.naturalSize).sanitized
-        item.preferredTransform = try await track.load(.preferredTransform).sanitized
-        return item
-    }
+    // Uses shared makeVideoFixture and loadedMedia from TestFixtures.swift
 }

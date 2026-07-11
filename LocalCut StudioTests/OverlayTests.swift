@@ -504,7 +504,7 @@ func overlayTransformInterpolation() {
 }
 
 private func makeOverlayTempDirectory(_ label: String) throws -> URL {
-    let url = URL(filePath: NSTemporaryDirectory())
+    let url = FileManager.default.temporaryDirectory
         .appendingPathComponent("overlay-tests-\(label)-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
