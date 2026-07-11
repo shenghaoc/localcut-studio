@@ -93,8 +93,7 @@ struct ProgramSessionTests {
         _ = try await session.stop()
     }
 
-    @Test("Start with budget exhaustion opens no encoders",
-          .disabled("Pre-existing flaky test — passes in isolation, fails in full suite"))
+    @Test("Start with budget exhaustion opens no encoders")
     func budgetExhaustionOpensNoEncoders() async throws {
         // Budget of 1: the session needs 1 video source, but the budget
         // is already exhausted before start.
