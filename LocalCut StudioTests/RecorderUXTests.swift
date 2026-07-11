@@ -79,13 +79,14 @@ struct ManifestPauseResumeTests {
         let data = try manifest.encodeNDJSON()
         let parsed = CaptureManifest.parseNDJSON(data)
         #expect(parsed.records.count == 1)
-        switch parsed.records.first {
-        case .pause(let record):
+        // Verify both the kind and the timestamp survive the round-trip.
+        switch (testCase.record, parsed.records.first) {
+        case (.pause, .pause(let record)):
             #expect(record.atUs == testCase.expectedAtUs)
-        case .resume(let record):
+        case (.resume, .resume(let record)):
             #expect(record.atUs == testCase.expectedAtUs)
         default:
-            Issue.record("Expected pause or resume record")
+            Issue.record("Record kind mismatch: expected \(testCase.record), got \(String(describing: parsed.records.first))")
         }
     }
 

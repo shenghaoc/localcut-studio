@@ -55,17 +55,16 @@ func makeVideoFixture(
     }
 
     let frameCount = Int(seconds * Double(fps))
+    let deadline = ContinuousClock.now + .seconds(30)
     for frame in 0..<frameCount {
-        var yieldCount = 0
         while !input.isReadyForMoreMediaData {
             guard writer.status == .writing else {
                 throw writer.error ?? NSError(domain: "TestFixtures", code: -1,
                         userInfo: [NSLocalizedDescriptionKey: "AVAssetWriter not in .writing status"])
             }
-            yieldCount += 1
-            guard yieldCount < 10_000 else {
+            guard ContinuousClock.now < deadline else {
                 throw NSError(domain: "TestFixtures", code: -4,
-                              userInfo: [NSLocalizedDescriptionKey: "AVAssetWriter input never became ready (hung after \(yieldCount) yields)"])
+                              userInfo: [NSLocalizedDescriptionKey: "AVAssetWriter input never became ready (30s timeout)"])
             }
             await Task.yield()
         }

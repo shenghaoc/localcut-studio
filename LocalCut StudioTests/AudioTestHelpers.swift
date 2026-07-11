@@ -90,16 +90,13 @@ func makePCMSampleBuffer(
                       userInfo: [NSLocalizedDescriptionKey: "CMAudioFormatDescriptionCreate failed (\(fmtStatus))"])
     }
 
-    // -- Raw sample bytes (direct from source, no intermediate copy) --
-    let sampleBytes: [UInt8]
+    // -- Compute byte count from source arrays (no intermediate copy) --
     let byteCount: Int
     switch sampleType {
     case .int16(let samples):
-        sampleBytes = samples.withUnsafeBytes { Array($0) }
-        byteCount = sampleBytes.count
+        byteCount = samples.count * MemoryLayout<Int16>.size
     case .float32(let samples):
-        sampleBytes = samples.withUnsafeBytes { Array($0) }
-        byteCount = sampleBytes.count
+        byteCount = samples.count * MemoryLayout<Float>.size
     }
 
     // -- CMBlockBuffer (contiguous or fragmented) --
@@ -175,16 +172,26 @@ func makePCMSampleBuffer(
                       userInfo: [NSLocalizedDescriptionKey: "CMBlockBuffer is nil after creation"])
     }
     if byteCount > 0 {
-        let replaceStatus = sampleBytes.withUnsafeBytes { bytes in
-            guard let baseAddress = bytes.baseAddress else {
-                return OSStatus(kCMBlockBufferStructureAllocationFailedErr)
+        let replaceStatus: OSStatus
+        switch sampleType {
+        case .int16(let samples):
+            replaceStatus = samples.withUnsafeBytes { bytes in
+                guard let baseAddress = bytes.baseAddress else {
+                    return OSStatus(kCMBlockBufferStructureAllocationFailedErr)
+                }
+                return CMBlockBufferReplaceDataBytes(
+                    with: baseAddress, blockBuffer: blockBuffer,
+                    offsetIntoDestination: 0, dataLength: byteCount)
             }
-            return CMBlockBufferReplaceDataBytes(
-                with: baseAddress,
-                blockBuffer: blockBuffer,
-                offsetIntoDestination: 0,
-                dataLength: byteCount
-            )
+        case .float32(let samples):
+            replaceStatus = samples.withUnsafeBytes { bytes in
+                guard let baseAddress = bytes.baseAddress else {
+                    return OSStatus(kCMBlockBufferStructureAllocationFailedErr)
+                }
+                return CMBlockBufferReplaceDataBytes(
+                    with: baseAddress, blockBuffer: blockBuffer,
+                    offsetIntoDestination: 0, dataLength: byteCount)
+            }
         }
         guard replaceStatus == noErr else {
             throw NSError(domain: "AudioTestHelpers", code: Int(replaceStatus),
