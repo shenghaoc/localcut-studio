@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		00000000000000000000A030 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A020 /* LocalCutCore */; };
 		00000000000000000000A031 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A021 /* LocalCutCore */; };
+		00000000000000000000A032 /* LocalCutDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A022 /* LocalCutDomain */; };
+		00000000000000000000A033 /* LocalCutDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A023 /* LocalCutDomain */; };
 		00000000000000000000A035 /* LocalCutPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A025 /* LocalCutPlatform */; };
 		00000000000000000000A036 /* LocalCutPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A026 /* LocalCutPlatform */; };
 /* End PBXBuildFile section */
@@ -58,6 +60,7 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				00000000000000000000A032 /* LocalCutDomain in Frameworks */,
 				00000000000000000000A030 /* LocalCutCore in Frameworks */,
 				00000000000000000000A035 /* LocalCutPlatform in Frameworks */,
 			);
@@ -65,6 +68,7 @@
 		000000000000000230000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				00000000000000000000A033 /* LocalCutDomain in Frameworks */,
 				00000000000000000000A031 /* LocalCutCore in Frameworks */,
 				00000000000000000000A036 /* LocalCutPlatform in Frameworks */,
 			);
@@ -115,6 +119,7 @@
 			);
 			name = "LocalCut Studio";
 			packageProductDependencies = (
+				00000000000000000000A022 /* LocalCutDomain */,
 				00000000000000000000A020 /* LocalCutCore */,
 				00000000000000000000A025 /* LocalCutPlatform */,
 			);
@@ -140,6 +145,7 @@
 			);
 			name = "LocalCut StudioTests";
 			packageProductDependencies = (
+				00000000000000000000A023 /* LocalCutDomain */,
 				00000000000000000000A021 /* LocalCutCore */,
 				00000000000000000000A026 /* LocalCutPlatform */,
 			);
@@ -604,6 +610,14 @@
 		00000000000000000000A021 /* LocalCutCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalCutCore;
+		};
+		00000000000000000000A022 /* LocalCutDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LocalCutDomain;
+		};
+		00000000000000000000A023 /* LocalCutDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LocalCutDomain;
 		};
 		00000000000000000000A025 /* LocalCutPlatform */ = {
 			isa = XCSwiftPackageProductDependency;

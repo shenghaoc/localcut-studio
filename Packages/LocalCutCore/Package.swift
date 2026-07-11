@@ -3,15 +3,17 @@ import PackageDescription
 
 // LocalCutDomain is the Foundation-only cross-platform domain layer.
 // LocalCutCore is the Apple media layer built only on macOS.
-// Both stay independent of SwiftUI/AppKit and the app's orchestration.
+// LocalCutPlatform owns reusable macOS integrations such as capture, overlays,
+// and WebRTC publishing. All three stay independent of SwiftUI/AppKit and the
+// app's orchestration.
 // The fast macOS loop is:
 //
 //     swift test --package-path Packages/LocalCutCore
 //
-// App-facing AVFoundation/SwiftUI glue stays in the Xcode target; only testable
-// pure logic (time math, transition layout, render planning, keyframes,
-// capability-tier decisions, serialization helpers) migrates here. See
-// README.md for the migration plan.
+// Each library product names only its own root target. SwiftPM links target
+// dependencies transitively; including LocalCutDomain in the LocalCutCore
+// product as well would expose the same domain module through two products when
+// an app links LocalCutDomain and LocalCutCore together.
 var products: [Product] = [
     .library(name: "LocalCutDomain", targets: ["LocalCutDomain"]),
 ]
@@ -33,7 +35,7 @@ dependencies.append(
     .package(url: "https://github.com/airbnb/lottie-ios.git", exact: "4.6.1")
 )
 products.append(
-    .library(name: "LocalCutCore", targets: ["LocalCutDomain", "LocalCutCore"])
+    .library(name: "LocalCutCore", targets: ["LocalCutCore"])
 )
 products.append(
     .library(name: "LocalCutPlatform", targets: ["LocalCutPlatform"])
