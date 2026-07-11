@@ -24,7 +24,7 @@ import LocalCutPlatform
 /// |---|----------|-------|------------|-------------|
 /// | 1 | Static / constant | 1 | `inspectorVisibleKey` | `static let` is never observed. |
 /// | 2 | Injected store | 1 | `defaultsStore` | Holds a `UserDefaults` reference; value never changes after init. |
-/// | 3 | Service / coordinator objects | 6 | `importService`, `projectEditingService`, `previewRebuildCoordinator`, `exportCoordinator`, `documentController`, `captureCoordinator` | `let` bindings to stateless helpers; they mutate observed model properties as their output. No own state to track. |
+/// | 3 | Service / coordinator objects | 6 | `importService`, `projectEditingService`, `previewRebuildCoordinator`, `exportCoordinator`, `documentController`, `captureCoordinator` | Stable `let` identities. Some own lifecycle state, but SwiftUI never renders that state directly; their user-visible output is written to observed model properties. |
 /// | 4 | Framework objects | 4 | `floatingPanelController`, `beatAnalyzer`, `undoManager`, `replayBufferManager` | Opaque framework / helper types whose internal state is not meaningful to observe. `replayBufferManager`'s UI nil-check is covered by the observed `isRecording` co-condition. |
 /// | 5 | Observer / notification handles | 3 | `timeObserver`, `endObserver`, `activeOverlaySourceRegistryID` | Opaque handles retained for lifecycle cleanup (`removeTimeObserver`, `removeObserver`, `releaseOverlaySources`). Never rendered. |
 /// | 6 | Task handles | 4 | `silenceDetectionTask`, `loudnessTask`, `recordingMonitorTask`, `beatAnalysisTask` | Transient `Task<Void, Never>?` values for cancel-on-restart lifecycle. Never rendered. |
@@ -32,18 +32,19 @@ import LocalCutPlatform
 /// | 8 | Security-scoped cleanup | 3 | `accessedURLs`, `bundleAccessURL`, `recordingsFolderAccessURL` | `nonisolated(unsafe)` for `deinit` cleanup; balance `start/stopAccessingSecurityScopedResource()`. Never rendered. |
 /// | 9 | Caches / memoisation | 7 | `lutDisplayNames`, `beatAnalysisKeys`, `cachedProjectedBeatTimes`, `projectedBeatTimesRevision`, `lastProjectedBeatTimesRevision`, `clipIndex`, `lastBundleFingerprints` | Memoisation plumbing; consumers read the output through observed properties or computed accessors. Enabling observation causes spurious churn on batch updates (undo/redo, document restore). |
 /// | 10 | Undo coalescing plumbing | 5 | `coalescedUndoBefore`, `coalescedUndoName`, `coalescedUndoTarget`, `coalescedCommitTask`, `coalescedUndoWasDirty` | Gesture-internal before-snapshot and metadata. User-visible undo state (`canUndo`, `canRedo`, `undoTitle`, `redoTitle`, `isDirty`) IS observed. |
-/// | 11 | Capture / recorder internal state | 10 | `recordingPausedDuration`, `pauseStartedAt`, `lastRecordingRequest`, `lastRecordingSlots`, `retakeTimelinePositions`, `retakeUndoBefore`, `retakePreviousSlots`, `retakeTrackIndices`, `lastRecordingPiPPreset`, `closeSaveInProgress` | Retake slots, pause accounting, recording request snapshots. UI-facing flags (`isRecording`, `isPaused`, `hasLastRecordingTake`, `activePiPPreset`) ARE observed; these are backing plumbing. |
+/// | 11 | Capture / recorder internal state | 9 | `recordingPausedDuration`, `pauseStartedAt`, `lastRecordingRequest`, `lastRecordingSlots`, `retakeTimelinePositions`, `retakeUndoBefore`, `retakePreviousSlots`, `retakeTrackIndices`, `lastRecordingPiPPreset` | Retake slots, pause accounting, recording request snapshots. UI-facing flags (`isRecording`, `isPaused`, `hasLastRecordingTake`, `activePiPPreset`) ARE observed; these are backing plumbing. |
+/// | 12 | Document / operation guards | 1 | `closeSaveInProgress` | Re-entrancy guard for asynchronous document-close saves. It blocks duplicate operations but is never rendered. |
 ///
-/// Total: 1+1+6+4+3+4+3+3+7+5+10 = **47**.
+/// Total: 1+1+6+4+3+4+3+3+7+5+9+1 = **47**.
 ///
 /// **Cross-cutting notes** (non-exclusive — may reference properties already
 /// counted above):
 ///
-/// - **`nonisolated(unsafe)` overlap** — 9 properties carry both
+/// - **`nonisolated(unsafe)` overlap** — 11 properties carry both
 ///   `@ObservationIgnored` and `nonisolated(unsafe)`: `silenceDetectionTask`,
-///   `timeObserver`, `endObserver`, `recordingMonitorTask`, `beatAnalysisTask`,
-///   `activeOverlaySourceRegistryID`, `recordingsFolderAccessURL`,
-///   `accessedURLs`, `bundleAccessURL`. The
+///   `loudnessTask`, `timeObserver`, `endObserver`, `recordingMonitorTask`,
+///   `beatAnalysisTask`, `activeOverlaySourceRegistryID`, `coalescedCommitTask`,
+///   `recordingsFolderAccessURL`, `accessedURLs`, `bundleAccessURL`. The
 ///   `nonisolated(unsafe)` exists for `deinit` access; the `@ObservationIgnored`
 ///   exists because the properties are opaque handles or cleanup bookkeeping.
 ///   Neither annotation implies the other.
@@ -54,10 +55,9 @@ import LocalCutPlatform
 /// - **`replayBufferManager`** is a framework object (#4), not capture-internal
 ///   state (#11), because the UI reads it only via a nil-check that is covered
 ///   by the observed `isRecording` co-condition.
-/// - **`closeSaveInProgress`** is capture-internal (#11) rather than a separate
-///   "transient guard" category because it serves the same role: a backing flag
-///   whose UI effect (blocking the close) is expressed through other observed
-///   state.
+/// - **`closeSaveInProgress`** is a document/operation guard (#12), separate
+///   from capture state because it prevents duplicate asynchronous close-save
+///   operations and is not rendered.
 ///
 /// **When in doubt:** ask whether a SwiftUI view reads the property *directly*
 /// (not via a computed wrapper or another observed property). If yes, the
@@ -184,8 +184,9 @@ final class EditorModel {
     /// now lives on `renderQueue.totalProgress` and the per-job rows.
     let renderQueue: RenderQueue
 
-    // Service objects — stateless helpers that delegate to EditorModel.
-    // Ignored: they mutate observed model properties as their output; no own state to track.
+    // Service objects — stable helpers that delegate to EditorModel.
+    // Ignored: SwiftUI never renders their internal lifecycle state directly;
+    // they write user-visible output to observed model properties.
     @ObservationIgnored private let importService = ImportService()
     @ObservationIgnored private let projectEditingService = ProjectEditingService()
     @ObservationIgnored private let previewRebuildCoordinator = PreviewRebuildCoordinator()
