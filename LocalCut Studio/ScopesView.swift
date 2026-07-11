@@ -16,6 +16,28 @@ enum ScopeKind: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// The inset drawing frame shared by all scope draw methods.
+private func scopeFrameRect(for size: CGSize) -> CGRect {
+    CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
+}
+
+/// The centred square plot rect used by the vectorscope.
+private func vectorscopePlotRect(in frameRect: CGRect) -> CGRect {
+    let plotSide = min(frameRect.width, frameRect.height)
+    return CGRect(x: frameRect.midX - plotSide / 2,
+                  y: frameRect.midY - plotSide / 2,
+                  width: plotSide, height: plotSide)
+}
+
+/// Maps a vectorscope UV point to a plot-space `CGPoint`. U maps to x, V to y;
+/// render-coordinate y grows downward, so V is inverted for a screen-correct
+/// read (positive V → upper, i.e. red direction).
+private func vectorscopePoint(_ point: VectorPoint, in plot: CGRect) -> CGPoint {
+    let radius = min(plot.width, plot.height) / 2
+    return CGPoint(x: plot.midX + CGFloat(point.u) * radius,
+                   y: plot.midY - CGFloat(point.v) * radius)
+}
+
 /// The scopes panel: a `Picker` over scope kinds plus a `Canvas` drawing the
 /// latest sample published by `ScopeSampler.shared`.
 ///
@@ -30,14 +52,6 @@ struct ScopesView: View {
     @State private var displayedRevision: Int = -1
 
     private static let refreshNanoseconds = UInt64(ScopeSampler.minIntervalSeconds * 1_000_000_000)
-    private let vectorscopeTargets: [(label: String, rgb: (r: Float, g: Float, b: Float), color: Color)] = [
-        ("Yl", (0.75, 0.75, 0.0), .yellow),
-        ("R", (0.75, 0.0, 0.0), .red),
-        ("Mg", (0.75, 0.0, 0.75), .purple),
-        ("B", (0.0, 0.0, 0.75), .blue),
-        ("Cy", (0.0, 0.75, 0.75), .cyan),
-        ("G", (0.0, 0.75, 0.0), .green),
-    ]
 
     init(sampler: ScopeSampler = .shared) {
         self.sampler = sampler
@@ -58,12 +72,22 @@ struct ScopesView: View {
             .padding(.horizontal, 8)
             .padding(.top, 6)
 
-            Canvas { context, size in
-                switch kind {
-                case .waveform:
-                    drawWaveform(into: context, size: size, sample: latest)
-                case .vectorscope:
-                    drawVectorscope(into: context, size: size, sample: latest)
+            ZStack {
+                // Static background grid and text labels. Extracted into an Equatable
+                // child view so it only redraws when `kind` changes, not on every
+                // 30fps `latest` update from the parent body re-evaluation.
+                ScopeBackgroundView(kind: kind)
+                    .equatable()
+
+                // Live trace data and empty state placeholder. This Canvas captures `latest`
+                // and redraws at 30 fps.
+                Canvas { context, size in
+                    switch kind {
+                    case .waveform:
+                        drawWaveformTrace(into: context, size: size, sample: latest)
+                    case .vectorscope:
+                        drawVectorscopeTrace(into: context, size: size, sample: latest)
+                    }
                 }
             }
             .background(Color.black)
@@ -106,11 +130,8 @@ struct ScopesView: View {
 
     // MARK: - Waveform
 
-    private func drawWaveform(into context: GraphicsContext, size: CGSize, sample: ScopeSample?) {
-        // Frame outline.
-        let frameRect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
-        context.stroke(Path(frameRect), with: .color(.white.opacity(0.15)), lineWidth: 0.5)
-        drawWaveformGraticule(into: context, frameRect: frameRect)
+    private func drawWaveformTrace(into context: GraphicsContext, size: CGSize, sample: ScopeSample?) {
+        let frameRect = scopeFrameRect(for: size)
 
         guard let sample, !sample.waveform.isEmpty else {
             placeholder(into: context, size: size, label: "No frames yet")
@@ -135,48 +156,11 @@ struct ScopesView: View {
         }
     }
 
-    /// Horizontal IRE reference lines (0/25/50/75/100) with small labels so luma
-    /// levels read against a scale instead of empty black. Static — drawn behind
-    /// the live trace, no per-frame sampling cost.
-    private func drawWaveformGraticule(into context: GraphicsContext, frameRect: CGRect) {
-        for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
-            let y = frameRect.maxY - CGFloat(fraction) * frameRect.height
-            var line = Path()
-            line.move(to: CGPoint(x: frameRect.minX, y: y))
-            line.addLine(to: CGPoint(x: frameRect.maxX, y: y))
-            context.stroke(line, with: .color(.white.opacity(0.12)), lineWidth: 0.5)
-            // Sit the label just above its line (bottom-leading) so the line
-            // never bisects the digits; nudge the top "100" down a touch so it
-            // isn't clipped at the frame's top edge.
-            let label = Text("\(Int(fraction * 100))")
-                .font(.system(size: 8))
-                .foregroundStyle(.white.opacity(0.35))
-            let labelY = max(y, frameRect.minY + 9)
-            context.draw(label, at: CGPoint(x: frameRect.minX + 4, y: labelY), anchor: .bottomLeading)
-        }
-    }
-
     // MARK: - Vectorscope
 
-    private func drawVectorscope(into context: GraphicsContext, size: CGSize, sample: ScopeSample?) {
-        let frameRect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
-        let plotSide = min(frameRect.width, frameRect.height)
-        let plot = CGRect(x: frameRect.midX - plotSide / 2,
-                          y: frameRect.midY - plotSide / 2,
-                          width: plotSide, height: plotSide)
-
-        // Outer chroma circle + a 75%-saturation reference ring (colour-bar
-        // targets sit on/near it) + crosshairs as a reference grid.
-        context.stroke(Path(ellipseIn: plot), with: .color(.white.opacity(0.2)), lineWidth: 0.5)
-        let inner = plot.insetBy(dx: plot.width * 0.125, dy: plot.height * 0.125)
-        context.stroke(Path(ellipseIn: inner), with: .color(.white.opacity(0.12)), lineWidth: 0.5)
-        var crosshair = Path()
-        crosshair.move(to: CGPoint(x: plot.midX, y: plot.minY))
-        crosshair.addLine(to: CGPoint(x: plot.midX, y: plot.maxY))
-        crosshair.move(to: CGPoint(x: plot.minX, y: plot.midY))
-        crosshair.addLine(to: CGPoint(x: plot.maxX, y: plot.midY))
-        context.stroke(crosshair, with: .color(.white.opacity(0.1)), lineWidth: 0.5)
-        drawVectorscopeTargets(into: context, plot: plot)
+    private func drawVectorscopeTrace(into context: GraphicsContext, size: CGSize, sample: ScopeSample?) {
+        let frameRect = scopeFrameRect(for: size)
+        let plot = vectorscopePlotRect(in: frameRect)
 
         guard let sample, !sample.vectorscope.isEmpty else {
             placeholder(into: context, size: size, label: "No frames yet")
@@ -190,8 +174,92 @@ struct ScopesView: View {
         }
     }
 
+    private func placeholder(into context: GraphicsContext, size: CGSize, label: String) {
+        let text = Text(label).font(.caption2).foregroundStyle(.white.opacity(0.4))
+        context.draw(text, at: CGPoint(x: size.width / 2, y: size.height / 2), anchor: .center)
+    }
+}
+
+// MARK: - Static Background Canvas
+
+/// The static graticule, target boxes, and text labels for a scope. Conforms to
+/// `Equatable` so SwiftUI skips re-drawing when only the high-frequency `latest`
+/// sample changes in the parent — the background only redraws when `kind` flips.
+private struct ScopeBackgroundView: View, Equatable {
+    let kind: ScopeKind
+
+    /// Colour-bar reference targets at 75% saturation (BT.601).
+    private static let vectorscopeTargets: [(label: String, rgb: (r: Float, g: Float, b: Float), color: Color)] = [
+        ("Yl", (0.75, 0.75, 0.0), .yellow),
+        ("R", (0.75, 0.0, 0.0), .red),
+        ("Mg", (0.75, 0.0, 0.75), .purple),
+        ("B", (0.0, 0.0, 0.75), .blue),
+        ("Cy", (0.0, 0.75, 0.75), .cyan),
+        ("G", (0.0, 0.75, 0.0), .green),
+    ]
+
+    var body: some View {
+        Canvas { context, size in
+            switch kind {
+            case .waveform:
+                drawWaveformBackground(into: context, size: size)
+            case .vectorscope:
+                drawVectorscopeBackground(into: context, size: size)
+            }
+        }
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.kind == rhs.kind }
+
+    // MARK: - Waveform background
+
+    private func drawWaveformBackground(into context: GraphicsContext, size: CGSize) {
+        let frameRect = scopeFrameRect(for: size)
+        context.stroke(Path(frameRect), with: .color(.white.opacity(0.15)), lineWidth: 0.5)
+        drawWaveformGraticule(into: context, frameRect: frameRect)
+    }
+
+    /// Horizontal IRE reference lines (0/25/50/75/100) with small labels so luma
+    /// levels read against a scale instead of empty black.
+    private func drawWaveformGraticule(into context: GraphicsContext, frameRect: CGRect) {
+        for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let y = frameRect.maxY - CGFloat(fraction) * frameRect.height
+            var line = Path()
+            line.move(to: CGPoint(x: frameRect.minX, y: y))
+            line.addLine(to: CGPoint(x: frameRect.maxX, y: y))
+            context.stroke(line, with: .color(.white.opacity(0.12)), lineWidth: 0.5)
+            let label = Text("\(Int(fraction * 100))")
+                .font(.system(size: 8))
+                .foregroundStyle(.white.opacity(0.35))
+            // Anchor .bottomLeading keeps text above the line; clamp to min Y
+            // so the top "100" label isn't clipped at the frame edge.
+            let labelY = max(y, frameRect.minY + 9)
+            context.draw(label, at: CGPoint(x: frameRect.minX + 4, y: labelY), anchor: .bottomLeading)
+        }
+    }
+
+    // MARK: - Vectorscope background
+
+    private func drawVectorscopeBackground(into context: GraphicsContext, size: CGSize) {
+        let frameRect = scopeFrameRect(for: size)
+        let plot = vectorscopePlotRect(in: frameRect)
+
+        // Outer chroma circle + a 75%-saturation reference ring (colour-bar
+        // targets sit on/near it) + crosshairs as a reference grid.
+        context.stroke(Path(ellipseIn: plot), with: .color(.white.opacity(0.2)), lineWidth: 0.5)
+        let inner = plot.insetBy(dx: plot.width * 0.125, dy: plot.height * 0.125)
+        context.stroke(Path(ellipseIn: inner), with: .color(.white.opacity(0.12)), lineWidth: 0.5)
+        var crosshair = Path()
+        crosshair.move(to: CGPoint(x: plot.midX, y: plot.minY))
+        crosshair.addLine(to: CGPoint(x: plot.midX, y: plot.maxY))
+        crosshair.move(to: CGPoint(x: plot.minX, y: plot.midY))
+        crosshair.addLine(to: CGPoint(x: plot.maxX, y: plot.midY))
+        context.stroke(crosshair, with: .color(.white.opacity(0.1)), lineWidth: 0.5)
+        drawVectorscopeTargets(into: context, plot: plot)
+    }
+
     private func drawVectorscopeTargets(into context: GraphicsContext, plot: CGRect) {
-        for target in vectorscopeTargets {
+        for target in Self.vectorscopeTargets {
             let uv = ScopeSampler.rgbToUV(target.rgb)
             let center = vectorscopePoint(VectorPoint(u: uv.u, v: uv.v), in: plot)
             let box = CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)
@@ -203,16 +271,4 @@ struct ScopesView: View {
         }
     }
 
-    private func vectorscopePoint(_ point: VectorPoint, in plot: CGRect) -> CGPoint {
-        // U on x, V on y. Render-coordinate y grows downward, so we invert V
-        // for a screen-correct read (positive V points red -> upper).
-        let radius = min(plot.width, plot.height) / 2
-        return CGPoint(x: plot.midX + CGFloat(point.u) * radius,
-                       y: plot.midY - CGFloat(point.v) * radius)
-    }
-
-    private func placeholder(into context: GraphicsContext, size: CGSize, label: String) {
-        let text = Text(label).font(.caption2).foregroundStyle(.white.opacity(0.4))
-        context.draw(text, at: CGPoint(x: size.width / 2, y: size.height / 2), anchor: .center)
-    }
 }
