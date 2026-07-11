@@ -409,7 +409,7 @@ struct TimelineView: View {
             .gesture(rulerScrubGesture)
             .accessibilityHidden(true)
             .overlay {
-                RulerAccessibilityOverlay(model: model, tickStep: step)
+                RulerAccessibilityOverlay(model: model, tickStep: tickStep())
             }
             // Declarative resize cursor signals the ruler is scrubbable. Region-
             // based, so there's no shared NSCursor push/pop stack to unbalance
@@ -1008,20 +1008,22 @@ private struct RulerAccessibilityOverlay: View {
             .accessibilityLabel("Timeline scrub ruler")
             .accessibilityValue("Playhead \(TimeFormatting.timecode(model.currentTime)) of \(TimeFormatting.timecode(model.totalDuration))")
             .accessibilityHint("Adjust to scrub the playhead")
-            .accessibilityAdjustableAction { direction in
-                let increment: Bool
-                switch direction {
-                case .increment: increment = true
-                case .decrement: increment = false
-                @unknown default: return
-                }
-                guard let target = TimelineScrollMath.rulerAdjustmentTarget(
-                    currentTime: model.currentTime,
-                    totalDuration: model.totalDuration,
-                    tickStep: tickStep,
-                    increment: increment) else { return }
-                model.seek(toSeconds: target)
-            }
+            .accessibilityAdjustableAction(adjustRulerPlayhead)
+    }
+
+    private func adjustRulerPlayhead(_ direction: AccessibilityAdjustmentDirection) {
+        let increment: Bool
+        switch direction {
+        case .increment: increment = true
+        case .decrement: increment = false
+        @unknown default: return
+        }
+        guard let target = TimelineScrollMath.rulerAdjustmentTarget(
+            currentTime: model.currentTime,
+            totalDuration: model.totalDuration,
+            tickStep: tickStep,
+            increment: increment) else { return }
+        model.seek(toSeconds: target)
     }
 }
 
