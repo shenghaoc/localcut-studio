@@ -26,6 +26,8 @@ func makeVideoFixture(
 ) async throws -> URL {
     let url = directory.appendingPathComponent("test-fixture-\(UUID().uuidString).mov")
     try? FileManager.default.removeItem(at: url)
+    var success = false
+    defer { if !success { try? FileManager.default.removeItem(at: url) } }
 
     // H.264 rejects odd dimensions; mask the low bit off after rounding.
     let w = max(2, Int(size.width.rounded()) & ~1)
@@ -99,6 +101,7 @@ func makeVideoFixture(
     input.markAsFinished()
     await writer.finishWriting()
     try #require(writer.status == .completed)
+    success = true
     return url
 }
 
@@ -144,17 +147,14 @@ func makePixelBuffer(
     }
     let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
 
-    // Build a 4-byte ARGB pattern and fill each row with memcpy.
-    // alpha is always 0xFF for opaque test fixtures.
-    var argb = UInt32(0xFF000000) | (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
-    // On little-endian (Apple Silicon), reinterpret as 4 bytes in memory order.
-    let pattern = withUnsafeBytes(of: &argb) { Array($0) }
+    // Fill the buffer with a solid 32-bit ARGB pattern using typed pointer
+    // initialization — one call per row instead of width * copyMemory calls.
+    // Alpha is always 0xFF for opaque test fixtures.
+    let argb = UInt32(0xFF000000) | (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+    let typedBase = baseAddress.assumingMemoryBound(to: UInt32.self)
     for row in 0..<height {
-        let rowStart = baseAddress.advanced(by: row * bytesPerRow)
-        for col in 0..<width {
-            let offset = col * 4
-            rowStart.advanced(by: offset).copyMemory(from: pattern, byteCount: 4)
-        }
+        let rowStart = typedBase.advanced(by: row * (bytesPerRow / MemoryLayout<UInt32>.stride))
+        rowStart.initialize(repeating: argb, count: width)
     }
     return buffer
 }
@@ -211,6 +211,8 @@ func makeAVFixture(
 
     let outputURL = directory.appendingPathComponent("av-fixture-\(UUID().uuidString).mov")
     try? FileManager.default.removeItem(at: outputURL)
+    var outputSuccess = false
+    defer { if !outputSuccess { try? FileManager.default.removeItem(at: outputURL) } }
 
     let composition = AVMutableComposition()
     let videoAsset = AVURLAsset(url: videoURL)
@@ -240,6 +242,7 @@ func makeAVFixture(
         asset: composition,
         presetName: AVAssetExportPresetHighestQuality))
     try await session.export(to: outputURL, as: .mov)
+    outputSuccess = true
     return outputURL
 }
 
@@ -260,6 +263,8 @@ func makeAudioFixture(
 ) throws -> URL {
     let url = directory.appendingPathComponent("audio-fixture-\(UUID().uuidString).caf")
     try? FileManager.default.removeItem(at: url)
+    var success = false
+    defer { if !success { try? FileManager.default.removeItem(at: url) } }
 
     guard let format = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
@@ -284,5 +289,6 @@ func makeAudioFixture(
     buffer.frameLength = frameCount
     // Default-allocated channelData is zero — true silence.
     try file.write(from: buffer)
+    success = true
     return url
 }

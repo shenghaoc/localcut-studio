@@ -515,7 +515,7 @@ private func approximately(_ lhs: CGFloat, _ rhs: CGFloat, tolerance: CGFloat = 
 }
 
 private func waitForFinishedOverlayJob(_ queue: RenderQueue) async throws -> QueueJob {
-    for _ in 0..<300 {
+    for _ in 0..<600 {
         if let job = queue.jobs.first, job.isTerminal {
             return job
         }

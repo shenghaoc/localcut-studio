@@ -58,7 +58,7 @@ jobs:
           sw_vers
 
       - name: Cache WebRTC XCFramework
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: Packages/LocalCutWebRTC/WebRTC.xcframework
           key: webrtc-xcframework-140.0.0
@@ -68,7 +68,7 @@ jobs:
 
       - name: Restore DerivedData cache
         id: deriveddata-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: DerivedData
           key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
@@ -85,7 +85,7 @@ jobs:
         run: ./Scripts/run-mediamtx-whip-integration.sh
 
       - name: Restore OTIO validator venv
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/localcut-otio-validator-0.17.0
           key: otio-validator-${{ runner.os }}-0.17.0
@@ -121,7 +121,7 @@ jobs:
 
       - name: Save DerivedData cache
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.deriveddata-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: DerivedData
           key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
@@ -145,7 +145,7 @@ jobs:
       # binary target must exist on disk even though we compile without the
       # LOCALCUT_ENABLE_WEBRTC flag so the stub code paths are exercised.
       - name: Cache WebRTC XCFramework
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: Packages/LocalCutWebRTC/WebRTC.xcframework
           key: webrtc-xcframework-140.0.0
@@ -155,7 +155,7 @@ jobs:
 
       - name: Restore DerivedData cache
         id: deriveddata-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: DerivedData
           key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
@@ -201,7 +201,7 @@ jobs:
 
       - name: Save DerivedData cache
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.deriveddata-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: DerivedData
           key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
