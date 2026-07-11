@@ -37,3 +37,8 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Vulnerability:** Force unwraps (`!`) were discovered in various files like `EdlSerializer.swift`, `Time.swift`, `CaptureRunningSessions.swift`, and `EditorModel+Capture.swift`.
 **Learning:** Swift's strict memory safety means force unwrapping nil values results in a runtime crash, creating a vector for application instability and potential Denial of Service (DoS) vulnerabilities.
 **Prevention:** Avoid force-unwrapping (`!`) entirely. Use safe optional binding (`if let`, `guard let`), optional chaining (`?.`), nil-coalescing (`??`), or local variable restructuring to safely access values.
+
+## 2026-07-11 — Avoid Force Unwraps in AudioPublishBridge
+**Vulnerability:** Found a force unwrap (`!`) when accessing `baseAddress` from a buffer pointer in `AudioPublishBridge.swift`.
+**Learning:** Force-unwrapping poses a Denial of Service (crash) risk in Swift. If the buffer is empty or uninitialized, `baseAddress` will be nil, and the force unwrap will crash the application.
+**Prevention:** Always use safe optional binding (`if let`) when dealing with optional variables, especially pointers to memory buffers.

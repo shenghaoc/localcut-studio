@@ -201,7 +201,9 @@ private nonisolated final class LocalCutAudioSourceRenderer: @unchecked Sendable
                 return kAudio_ParamError
             }
             scratch.withUnsafeBufferPointer { samples in
-                destination.update(from: samples.baseAddress!, count: requestedSamples)
+                if let baseAddress = samples.baseAddress {
+                    destination.update(from: baseAddress, count: requestedSamples)
+                }
             }
             buffers[0].mDataByteSize = UInt32(requestedSamples * MemoryLayout<Float>.size)
             return noErr
