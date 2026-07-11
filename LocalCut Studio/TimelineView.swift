@@ -407,11 +407,10 @@ struct TimelineView: View {
             }
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Timeline scrub ruler")
-            .accessibilityValue(rulerAccessibilityValue)
-            .accessibilityHint("Adjust to scrub the playhead")
-            .accessibilityAdjustableAction(adjustRulerPlayhead)
+            .accessibilityHidden(true)
+            .overlay {
+                RulerAccessibilityOverlay(model: model, tickStep: step)
+            }
             // Declarative resize cursor signals the ruler is scrubbable. Region-
             // based, so there's no shared NSCursor push/pop stack to unbalance
             // when the ruler Canvas rebuilds on zoom.
@@ -997,23 +996,32 @@ struct TimelineView: View {
         timelineScrollRequest += 1
     }
 
-    private var rulerAccessibilityValue: String {
-        "Playhead \(TimeFormatting.timecode(model.currentTime)) of \(TimeFormatting.timecode(model.totalDuration))"
-    }
+}
 
-    private func adjustRulerPlayhead(_ direction: AccessibilityAdjustmentDirection) {
-        let increment: Bool
-        switch direction {
-        case .increment: increment = true
-        case .decrement: increment = false
-        @unknown default: return
-        }
-        guard let target = TimelineScrollMath.rulerAdjustmentTarget(
-            currentTime: model.currentTime,
-            totalDuration: model.totalDuration,
-            tickStep: tickStep(),
-            increment: increment) else { return }
-        model.seek(toSeconds: target)
+private struct RulerAccessibilityOverlay: View {
+    var model: EditorModel
+    var tickStep: Double
+
+    var body: some View {
+        Color.clear
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Timeline scrub ruler")
+            .accessibilityValue("Playhead \(TimeFormatting.timecode(model.currentTime)) of \(TimeFormatting.timecode(model.totalDuration))")
+            .accessibilityHint("Adjust to scrub the playhead")
+            .accessibilityAdjustableAction { direction in
+                let increment: Bool
+                switch direction {
+                case .increment: increment = true
+                case .decrement: increment = false
+                @unknown default: return
+                }
+                guard let target = TimelineScrollMath.rulerAdjustmentTarget(
+                    currentTime: model.currentTime,
+                    totalDuration: model.totalDuration,
+                    tickStep: tickStep,
+                    increment: increment) else { return }
+                model.seek(toSeconds: target)
+            }
     }
 }
 
