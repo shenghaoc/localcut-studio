@@ -18,7 +18,7 @@ import LocalCutPlatform
 /// the exclusive categories below — each annotation **must** have a reason; see
 /// the grouping comments inline.
 ///
-/// **Category count table** (exclusive — counts sum to 45):
+/// **Category count table** (exclusive — counts sum to 47):
 ///
 /// | # | Category | Count | Properties | Why ignored |
 /// |---|----------|-------|------------|-------------|
@@ -27,21 +27,21 @@ import LocalCutPlatform
 /// | 3 | Service / coordinator objects | 6 | `importService`, `projectEditingService`, `previewRebuildCoordinator`, `exportCoordinator`, `documentController`, `captureCoordinator` | `let` bindings to stateless helpers; they mutate observed model properties as their output. No own state to track. |
 /// | 4 | Framework objects | 4 | `floatingPanelController`, `beatAnalyzer`, `undoManager`, `replayBufferManager` | Opaque framework / helper types whose internal state is not meaningful to observe. `replayBufferManager`'s UI nil-check is covered by the observed `isRecording` co-condition. |
 /// | 5 | Observer / notification handles | 3 | `timeObserver`, `endObserver`, `activeOverlaySourceRegistryID` | Opaque handles retained for lifecycle cleanup (`removeTimeObserver`, `removeObserver`, `releaseOverlaySources`). Never rendered. |
-/// | 6 | Task handles | 3 | `loudnessTask`, `recordingMonitorTask`, `beatAnalysisTask` | Transient `Task<Void, Never>?` values for cancel-on-restart lifecycle. Never rendered. |
+/// | 6 | Task handles | 4 | `silenceDetectionTask`, `loudnessTask`, `recordingMonitorTask`, `beatAnalysisTask` | Transient `Task<Void, Never>?` values for cancel-on-restart lifecycle. Never rendered. |
 /// | 7 | Stale-cancellation tokens | 3 | `loudnessMeasurementToken`, `mutationRevision`, `sessionGeneration` | Monotonic counters compared across `await` boundaries to discard stale async results. Never rendered. |
 /// | 8 | Security-scoped cleanup | 3 | `accessedURLs`, `bundleAccessURL`, `recordingsFolderAccessURL` | `nonisolated(unsafe)` for `deinit` cleanup; balance `start/stopAccessingSecurityScopedResource()`. Never rendered. |
-/// | 9 | Caches / memoisation | 6 | `lutDisplayNames`, `beatAnalysisKeys`, `cachedProjectedBeatTimes`, `projectedBeatTimesRevision`, `lastProjectedBeatTimesRevision`, `lastBundleFingerprints` | Memoisation plumbing; consumers read the output through observed properties or computed accessors. Enabling observation causes spurious churn on batch updates (undo/redo, document restore). |
+/// | 9 | Caches / memoisation | 7 | `lutDisplayNames`, `beatAnalysisKeys`, `cachedProjectedBeatTimes`, `projectedBeatTimesRevision`, `lastProjectedBeatTimesRevision`, `clipIndex`, `lastBundleFingerprints` | Memoisation plumbing; consumers read the output through observed properties or computed accessors. Enabling observation causes spurious churn on batch updates (undo/redo, document restore). |
 /// | 10 | Undo coalescing plumbing | 5 | `coalescedUndoBefore`, `coalescedUndoName`, `coalescedUndoTarget`, `coalescedCommitTask`, `coalescedUndoWasDirty` | Gesture-internal before-snapshot and metadata. User-visible undo state (`canUndo`, `canRedo`, `undoTitle`, `redoTitle`, `isDirty`) IS observed. |
 /// | 11 | Capture / recorder internal state | 10 | `recordingPausedDuration`, `pauseStartedAt`, `lastRecordingRequest`, `lastRecordingSlots`, `retakeTimelinePositions`, `retakeUndoBefore`, `retakePreviousSlots`, `retakeTrackIndices`, `lastRecordingPiPPreset`, `closeSaveInProgress` | Retake slots, pause accounting, recording request snapshots. UI-facing flags (`isRecording`, `isPaused`, `hasLastRecordingTake`, `activePiPPreset`) ARE observed; these are backing plumbing. |
 ///
-/// Total: 1+1+6+4+3+3+3+3+6+5+10 = **45**.
+/// Total: 1+1+6+4+3+4+3+3+7+5+10 = **47**.
 ///
 /// **Cross-cutting notes** (non-exclusive — may reference properties already
 /// counted above):
 ///
-/// - **`nonisolated(unsafe)` overlap** — 8 properties carry both
-///   `@ObservationIgnored` and `nonisolated(unsafe)`: `timeObserver`,
-///   `endObserver`, `recordingMonitorTask`, `beatAnalysisTask`,
+/// - **`nonisolated(unsafe)` overlap** — 9 properties carry both
+///   `@ObservationIgnored` and `nonisolated(unsafe)`: `silenceDetectionTask`,
+///   `timeObserver`, `endObserver`, `recordingMonitorTask`, `beatAnalysisTask`,
 ///   `activeOverlaySourceRegistryID`, `recordingsFolderAccessURL`,
 ///   `accessedURLs`, `bundleAccessURL`. The
 ///   `nonisolated(unsafe)` exists for `deinit` access; the `@ObservationIgnored`
@@ -49,7 +49,7 @@ import LocalCutPlatform
 ///   Neither annotation implies the other.
 /// - **Task handles appear in two groups** — `coalescedCommitTask` is counted
 ///   under undo coalescing (#10) because its lifecycle is the coalesced gesture.
-///   The other three task handles (#6) are standalone. All share the same
+///   The other four task handles (#6) are standalone. All share the same
 ///   ignore rationale (cancel-on-restart, never rendered).
 /// - **`replayBufferManager`** is a framework object (#4), not capture-internal
 ///   state (#11), because the UI reads it only via a nil-check that is covered
@@ -229,7 +229,7 @@ final class EditorModel {
     /// bookmark on the main actor on every render. Not persisted; a LUT from a
     /// reopened project shows a generic label until re-imported.
     /// Ignored: read-only cache consumed by `selectedClipLUTName` and
-    /// `selectedClipLUT()` during inspector recomputation; the inspector already
+    /// `selectedClipLUT(_:)` during inspector recomputation; the inspector already
     /// re-evaluates when the clip/selection changes.  Enabling observation would
     /// cause spurious churn on document restore (batch LUT import).
     @ObservationIgnored private(set) var lutDisplayNames: [Data: String] = [:]
@@ -350,6 +350,8 @@ final class EditorModel {
 
     /// O(1) clip lookup: maps clip ID to (trackKind, trackIndex, clipIndex).
     /// Rebuilt on every project mutation via `rebuildClipIndex()`.
+    /// Ignored: derived lookup cache; UI observes the project mutations that
+    /// invalidate and rebuild it, never the index itself.
     @ObservationIgnored private var clipIndex: [Clip.ID: (trackKind: TrackKind, trackIndex: Int, clipIndex: Int)] = [:]
 
     /// Rebuilds the clip index from the current project state.
