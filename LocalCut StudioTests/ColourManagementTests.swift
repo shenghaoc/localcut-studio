@@ -96,74 +96,52 @@ struct ColourManagementSerialTests {
 @Suite("Colour management — pixel buffers + scopes")
 struct ColourManagementValueTests {
 
-@Test("applyColourAttachments tags a pixel buffer with sRGB primaries/transfer/matrix")
-func pixelBufferColourAttachmentsSRGB() {
-    guard let buffer = makePixelBuffer(width: 64, height: 36) else {
-        Issue.record("Could not allocate test pixel buffer")
-        return
-    }
-    EffectCompositor.applyColourAttachments(.sRGB, to: buffer)
-
-    let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
-    let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil) as? String
-    let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
-
-    #expect(primaries == kCVImageBufferColorPrimaries_ITU_R_709_2 as String)
-    #expect(transfer == kCVImageBufferTransferFunction_sRGB as String)
-    #expect(matrix == kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
+struct ColourAttachmentCase: Sendable, CustomTestStringConvertible {
+    let space: WorkingColourSpace
+    let expectedPrimaries: String
+    let expectedTransfer: String
+    let expectedMatrix: String
+    let transferMustDifferFrom: String?
+    var testDescription: String { "\(space)" }
 }
 
-@Test("applyColourAttachments tags a pixel buffer with Display P3 primaries + sRGB transfer + BT.709 matrix")
-func pixelBufferColourAttachmentsDisplayP3() {
+@Test("applyColourAttachments tags pixel buffer correctly", arguments: [
+    ColourAttachmentCase(space: .sRGB,
+                         expectedPrimaries: kCVImageBufferColorPrimaries_ITU_R_709_2 as String,
+                         expectedTransfer: kCVImageBufferTransferFunction_sRGB as String,
+                         expectedMatrix: kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String,
+                         transferMustDifferFrom: nil),
+    ColourAttachmentCase(space: .displayP3,
+                         expectedPrimaries: kCVImageBufferColorPrimaries_P3_D65 as String,
+                         expectedTransfer: kCVImageBufferTransferFunction_sRGB as String,
+                         expectedMatrix: kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String,
+                         transferMustDifferFrom: nil),
+    ColourAttachmentCase(space: .rec709,
+                         expectedPrimaries: kCVImageBufferColorPrimaries_ITU_R_709_2 as String,
+                         expectedTransfer: kCVImageBufferTransferFunction_ITU_R_709_2 as String,
+                         expectedMatrix: kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String,
+                         transferMustDifferFrom: kCVImageBufferTransferFunction_sRGB as String),
+    ColourAttachmentCase(space: .rec2020,
+                         expectedPrimaries: kCVImageBufferColorPrimaries_ITU_R_2020 as String,
+                         expectedTransfer: kCVImageBufferTransferFunction_ITU_R_709_2 as String,
+                         expectedMatrix: kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String,
+                         transferMustDifferFrom: nil),
+])
+func pixelBufferColourAttachments(_ cs: ColourAttachmentCase) {
     guard let buffer = makePixelBuffer(width: 64, height: 36) else {
         Issue.record("Could not allocate test pixel buffer")
         return
     }
-    EffectCompositor.applyColourAttachments(.displayP3, to: buffer)
+    EffectCompositor.applyColourAttachments(cs.space, to: buffer)
     let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
     let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil) as? String
     let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
-    #expect(primaries == kCVImageBufferColorPrimaries_P3_D65 as String)
-    // Display P3 uses the sRGB transfer function (unlike rec709 which uses ITU_R_709_2).
-    #expect(transfer == kCVImageBufferTransferFunction_sRGB as String)
-    #expect(matrix == kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
-}
-
-@Test("applyColourAttachments tags a Rec.709 buffer with the BT.709 transfer (NOT sRGB)")
-func pixelBufferColourAttachmentsRec709() {
-    // Pinned because `rec709` and `sRGB` share primaries + matrix but differ
-    // on transfer (`ITU_R_709_2` vs `sRGB`). A future refactor of
-    // `cvTransferFunction` that conflates the two would silently change the
-    // colour-tagged movie output; this test catches that.
-    guard let buffer = makePixelBuffer(width: 64, height: 36) else {
-        Issue.record("Could not allocate test pixel buffer")
-        return
+    #expect(primaries == cs.expectedPrimaries)
+    #expect(transfer == cs.expectedTransfer)
+    #expect(matrix == cs.expectedMatrix)
+    if let differ = cs.transferMustDifferFrom {
+        #expect(transfer != differ)
     }
-    EffectCompositor.applyColourAttachments(.rec709, to: buffer)
-    let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
-    let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil) as? String
-    let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
-    #expect(primaries == kCVImageBufferColorPrimaries_ITU_R_709_2 as String)
-    #expect(transfer == kCVImageBufferTransferFunction_ITU_R_709_2 as String)
-    #expect(transfer != kCVImageBufferTransferFunction_sRGB as String)
-    #expect(matrix == kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
-}
-
-@Test("applyColourAttachments tags a pixel buffer with Rec.2020 primaries (BT.709 transfer + matrix)")
-func pixelBufferColourAttachmentsRec2020() {
-    guard let buffer = makePixelBuffer(width: 64, height: 36) else {
-        Issue.record("Could not allocate test pixel buffer")
-        return
-    }
-    EffectCompositor.applyColourAttachments(.rec2020, to: buffer)
-    let primaries = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
-    let transfer = CVBufferCopyAttachment(buffer, kCVImageBufferTransferFunctionKey, nil) as? String
-    let matrix = CVBufferCopyAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) as? String
-    // SDR Rec.2020: primaries identify the gamut; transfer + matrix use the
-    // BT.709 SDR values (see WorkingColourSpace.cvTransferFunction docs).
-    #expect(primaries == kCVImageBufferColorPrimaries_ITU_R_2020 as String)
-    #expect(transfer == kCVImageBufferTransferFunction_ITU_R_709_2 as String)
-    #expect(matrix == kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
 }
 
 // MARK: - R6.3 — scope sampler waveform is non-empty for a non-black frame
