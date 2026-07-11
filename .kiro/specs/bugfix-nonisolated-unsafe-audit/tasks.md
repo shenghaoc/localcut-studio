@@ -10,7 +10,9 @@
   comment so it acknowledges main-actor seek reuse and detached-task read-only
   snapshot use.
 - [x] **T3** Replace `VideoPublishTap.latestPixelBuffer` with a
-  lock-protected computed getter backed by private storage.
+  lock-protected computed getter backed by private storage. This was the correct
+  audit fix at the time; the later required-WebRTC platform extraction removed
+  the fallback accessor.
 - [x] **T4** Convert `ReconnectController.clock` and `sleep` from mutable
   unsafe test seams to immutable initializer dependencies, and update the
   timing test.

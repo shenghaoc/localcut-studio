@@ -1,4 +1,5 @@
 import AppKit
+import LocalCutPlatform
 
 private let regionPickerEscapeKeyCode: UInt16 = 53
 

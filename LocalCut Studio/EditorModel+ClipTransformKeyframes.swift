@@ -1,5 +1,6 @@
 import CoreMedia
 import LocalCutCore
+import LocalCutDomain
 
 // MARK: - Clip transform keyframes (Phase 43)
 

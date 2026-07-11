@@ -2,6 +2,7 @@ import SwiftUI
 import Foundation
 import AVFoundation
 import LocalCutCore
+import LocalCutPlatform
 
 /// Maps the audio gain sliders between linear amplitude (what the model stores)
 /// and decibels (what the slider travels in), so equal travel is equal dB — the

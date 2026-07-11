@@ -1,5 +1,5 @@
 {
-  "originHash" : "0b376d324910f8bc0b633a8ba847e2c95d2cffed056c304240e2145321e5e324",
+  "originHash" : "1718f7565fc1245b58b706cf6b956bdd2af89e8768f3c39fbb9ad97781b51bb3",
   "pins" : [
     {
       "identity" : "lottie-ios",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "f4db77d7feacba0c2360b84a40c38a6ce8ff399d",
         "version" : "4.6.1"
+      }
+    },
+    {
+      "identity" : "specs",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/webrtc-sdk/Specs.git",
+      "state" : {
+        "revision" : "226c404e334739e32a3e1c88e3c78e3468267025",
+        "version" : "125.6422.9"
       }
     }
   ],

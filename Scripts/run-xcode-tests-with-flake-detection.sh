@@ -44,6 +44,7 @@ XCODEBUILD_BIN="${XCODEBUILD_BIN:-xcodebuild}"
 LOG_DIR="${LOG_DIR:-.}"
 TEST_TIMEOUTS_ENABLED="${TEST_TIMEOUTS_ENABLED:-YES}"
 DEFAULT_TEST_EXECUTION_TIME_ALLOWANCE="${DEFAULT_TEST_EXECUTION_TIME_ALLOWANCE:-300}"
+PACKAGE_AUTHORIZATION_PROVIDER="${PACKAGE_AUTHORIZATION_PROVIDER:-netrc}"
 XCODEBUILD_LOG="$LOG_DIR/xcodebuild.log"
 
 # Counters
@@ -79,6 +80,7 @@ set +e
     -configuration Debug \
     -destination 'platform=macOS' \
     -derivedDataPath "$DERIVED_DATA" \
+    -packageAuthorizationProvider "$PACKAGE_AUTHORIZATION_PROVIDER" \
     -resultBundlePath "$RESULT_BUNDLE" \
     -test-timeouts-enabled "$TEST_TIMEOUTS_ENABLED" \
     -default-test-execution-time-allowance "$DEFAULT_TEST_EXECUTION_TIME_ALLOWANCE" \
@@ -247,6 +249,7 @@ for test_id in "${FAILED_TEST_IDS[@]}"; do
             -configuration Debug \
             -destination 'platform=macOS' \
             -derivedDataPath "$DERIVED_DATA" \
+            -packageAuthorizationProvider "$PACKAGE_AUTHORIZATION_PROVIDER" \
             -resultBundlePath "$RETRY_RESULT" \
             -only-testing:"$test_id" \
             -test-timeouts-enabled "$TEST_TIMEOUTS_ENABLED" \
@@ -296,6 +299,7 @@ if [ ${#DETERMINISTIC_FAILURES[@]} -eq 0 ] && [ "$FLAKY_TESTS" -gt 0 ] && [ "$FL
             -configuration Debug \
             -destination 'platform=macOS' \
             -derivedDataPath "$DERIVED_DATA" \
+            -packageAuthorizationProvider "$PACKAGE_AUTHORIZATION_PROVIDER" \
             -resultBundlePath "$CONFIRMATION_RESULT" \
             -test-timeouts-enabled "$TEST_TIMEOUTS_ENABLED" \
             -default-test-execution-time-allowance "$DEFAULT_TEST_EXECUTION_TIME_ALLOWANCE" \

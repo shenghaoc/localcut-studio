@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreMedia
 import LocalCutCore
+import LocalCutDomain
 import UniformTypeIdentifiers
 
 /// Inspector section for Phase 43 screencast post-pack tools: zoom-n-pan

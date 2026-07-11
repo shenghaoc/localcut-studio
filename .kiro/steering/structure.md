@@ -8,6 +8,10 @@ Untitled Project/                  ← repo root (git)
 ├── .github/                       ← CI, dependabot, PR template
 ├── .kiro/                         ← steering, specs, skills, settings (project intelligence)
 ├── docs/                          ← user-facing documentation
+├── Packages/LocalCutCore/
+│   ├── Sources/LocalCutDomain/    ← Foundation-only, Linux tested
+│   ├── Sources/LocalCutCore/      ← deterministic Apple media logic
+│   └── Sources/LocalCutPlatform/  ← macOS capture/media/publishing adapters
 ├── LocalCut Studio.xcodeproj/     ← Xcode project (target: "LocalCut Studio")
 └── LocalCut Studio/               ← Swift sources
     ├── ContentView.swift          ← @main app entry + EditorView shell
@@ -32,15 +36,27 @@ Untitled Project/                  ← repo root (git)
 
 ## Placement rules
 
+- **Portable domain code** goes in `LocalCutDomain` and may import Foundation
+  only. Linux CI is the executable boundary.
+- **Apple-only non-UI media logic** goes in package target `LocalCutCore` when
+  it needs CoreMedia/CoreGraphics/CoreVideo/Accelerate/VideoToolbox; needing no
+  UI does not make code cross-platform.
+- **Live macOS framework integration** goes in `LocalCutPlatform`: AVFoundation,
+  ScreenCaptureKit, WebRTC, Lottie, capture devices, and reusable render/audio
+  adapters. It must not import SwiftUI or the app module.
 - **No AVFoundation in views** beyond the wrapped `AVPlayerView`; views talk to `EditorModel`.
 - **No SwiftUI in the engine** (`CompositionBuilder`, future compositor/exporter).
 - One `View` concern per file; lift shared helpers (e.g. `TimeFormatting`) next to their primary user.
-- New media-engine code goes in its own file under `LocalCut Studio/` (e.g. `Exporter.swift`, `EffectCompositor.swift`), added to the `LocalCut Studio` target.
+- New reusable platform code goes under `Sources/LocalCutPlatform`; app-specific
+  orchestration stays in `LocalCut Studio/`.
 
 ## Where things live
 
 | Concern | Location |
 |---------|----------|
+| Cross-platform policies/algorithms | `Packages/LocalCutCore/Sources/LocalCutDomain` |
+| Apple media-domain algorithms | `Packages/LocalCutCore/Sources/LocalCutCore` |
+| macOS capture/media/publishing adapters | `Packages/LocalCutCore/Sources/LocalCutPlatform` |
 | Timeline/model mutations | `EditorModel.swift` (+ `Models.swift` types) |
 | Composition / transforms | `CompositionBuilder.swift` |
 | Playback transport | `EditorModel` + `PreviewView` |

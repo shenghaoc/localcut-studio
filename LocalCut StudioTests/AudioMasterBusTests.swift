@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import AVFoundation
 import LocalCutCore
+@testable import LocalCutPlatform
 @testable import LocalCut_Studio
 
 // Tests for feature-audio-master-bus (P16 infrastructure).
@@ -12,25 +13,74 @@ import LocalCutCore
 // against the clip duration (R6.4), and a default project's audio mix is
 // bit-identical to the pre-bus path (R6.5).
 
-private func cm(_ seconds: Double) -> CMTime {
-    CMTime(seconds: seconds, preferredTimescale: 600)
-}
-
 // MARK: - R6.1 — master gain mutation undoable
 
+enum UndoMutation: CaseIterable, Sendable, CustomTestStringConvertible {
+    case masterGain
+    case trackInput
+    case clipVolumeEnvelope
+    case voiceCleanup
+
+    var testDescription: String {
+        switch self {
+        case .masterGain: "masterGain"
+        case .trackInput: "trackInput"
+        case .clipVolumeEnvelope: "clipVolumeEnvelope"
+        case .voiceCleanup: "voiceCleanup"
+        }
+    }
+}
+
 @MainActor
-@Test("AudioMasterBus: setMasterGain mutation is undoable and restorable (R6.1)")
-func masterGainIsUndoable() {
+@Test(
+    "AudioMasterBus: undoable mutations restore via undo (R6.1)",
+    arguments: UndoMutation.allCases
+)
+func undoableMutationsRestore(_ mutation: UndoMutation) {
     let model = EditorModel()
     #expect(model.project.masterGain == 1)
     #expect(model.canUndo == false)
 
-    model.setMasterGain(0.6)
-    #expect(model.project.masterGain == 0.6)
-    #expect(model.canUndo == true)
+    switch mutation {
+    case .masterGain:
+        model.setMasterGain(0.6)
+        #expect(model.project.masterGain == 0.6)
+        #expect(model.canUndo == true)
+        model.undo()
+        #expect(model.project.masterGain == 1)
 
-    model.undo()
-    #expect(model.project.masterGain == 1)
+    case .trackInput:
+        let trackID = model.project.audioTracks[0].id
+        model.setTrackInput(TrackInput(id: trackID, pan: -0.5, gain: 0.8))
+        #expect(model.project.trackInputs.count == 1)
+        #expect(model.project.trackInputs[0].pan == -0.5)
+        #expect(model.canUndo == true)
+        model.undo()
+        #expect(model.project.trackInputs.isEmpty)
+
+    case .clipVolumeEnvelope:
+        let clip = Clip(mediaID: UUID(), sourceStart: .zero,
+                        duration: cm(5), timelineStart: .zero)
+        model.project.audioTracks[0].clips = [clip]
+        let envelope = VolumeEnvelope(fadeIn: cm(0.5), fadeOut: cm(0.5))
+        model.setClipVolumeEnvelope(envelope, clipID: clip.id)
+        #expect(model.project.audioTracks[0].clips[0].volumeEnvelope.fadeIn == cm(0.5))
+        #expect(model.canUndo == true)
+        model.undo()
+        #expect(model.project.audioTracks[0].clips[0].volumeEnvelope.isEmpty)
+
+    case .voiceCleanup:
+        #expect(model.project.voiceCleanup.gate.bypass == true)
+        model.updateVoiceCleanup("Enable Gate") {
+            $0.gate.bypass = false
+            $0.gate.thresholdDB = -35
+        }
+        #expect(model.project.voiceCleanup.gate.bypass == false)
+        #expect(model.project.voiceCleanup.gate.thresholdDB == -35)
+        #expect(model.canUndo == true)
+        model.undo()
+        #expect(model.project.voiceCleanup.gate.bypass == true)
+    }
 }
 
 // MARK: - Gain slider dB mapping (design: log-mapped fader)
@@ -78,55 +128,14 @@ func masterGainCoalescesAcrossDrag() {
     #expect(abs(model.project.masterGain - 1) < 1e-6)
 }
 
-@MainActor
-@Test("AudioMasterBus: setTrackInput routes through undo")
-func trackInputIsUndoable() {
-    let model = EditorModel()
-    let trackID = model.project.audioTracks[0].id
-    model.setTrackInput(TrackInput(id: trackID, pan: -0.5, gain: 0.8))
-    #expect(model.project.trackInputs.count == 1)
-    #expect(model.project.trackInputs[0].pan == -0.5)
-    model.undo()
-    #expect(model.project.trackInputs.isEmpty)
-}
-
-@MainActor
-@Test("AudioMasterBus: setClipVolumeEnvelope routes through undo")
-func clipEnvelopeIsUndoable() {
-    let model = EditorModel()
-    let clip = Clip(mediaID: UUID(), sourceStart: .zero,
-                    duration: cm(5), timelineStart: .zero)
-    model.project.audioTracks[0].clips = [clip]
-
-    let envelope = VolumeEnvelope(fadeIn: cm(0.5), fadeOut: cm(0.5))
-    model.setClipVolumeEnvelope(envelope, clipID: clip.id)
-    #expect(model.project.audioTracks[0].clips[0].volumeEnvelope.fadeIn == cm(0.5))
-    model.undo()
-    #expect(model.project.audioTracks[0].clips[0].volumeEnvelope.isEmpty)
-}
-
-@MainActor
-@Test("VoiceCleanup: insert settings route through undo")
-func voiceCleanupSettingsAreUndoable() {
-    let model = EditorModel()
-    #expect(model.project.voiceCleanup.gate.bypass == true)
-
-    model.updateVoiceCleanup("Enable Gate") {
-        $0.gate.bypass = false
-        $0.gate.thresholdDB = -35
-    }
-    #expect(model.project.voiceCleanup.gate.bypass == false)
-    #expect(model.project.voiceCleanup.gate.thresholdDB == -35)
-
-    model.undo()
-    #expect(model.project.voiceCleanup.gate.bypass == true)
-}
+// Undo tests are parameterized as undoableMutationsRestore below.
+// activeLoudnessGainChangeSchedulesRebuild is a separate non-undo test.
 
 @MainActor
 @Test("VoiceCleanup: changing an active loudness gain invalidates composition-derived state")
 func activeLoudnessGainChangeSchedulesRebuild() {
     let model = EditorModel()
-    let media = MediaItem(url: URL(fileURLWithPath: "/dev/null"))
+    let media = MediaItem(url: URL(filePath: "/dev/null"))
     media.hasAudio = true
     model.project.mediaItems = [media]
     let clip = Clip(mediaID: media.id, sourceStart: .zero,
@@ -153,52 +162,69 @@ func activeLoudnessGainChangeSchedulesRebuild() {
 
 // MARK: - R6.4 — VolumeEnvelope clamping
 
-@Test("VolumeEnvelope: fadeIn + fadeOut greater than clip duration each clamp to half (R6.4)")
-func envelopeFadesClampWhenSumExceedsDuration() {
-    let envelope = VolumeEnvelope(fadeIn: cm(4), fadeOut: cm(4))
-    let (fi, fo) = envelope.clampedFades(clipDuration: cm(2))
-    #expect(abs(fi.seconds - 1) < 1e-6)
-    #expect(abs(fo.seconds - 1) < 1e-6)
+struct FadeClampCase: CustomTestStringConvertible {
+    let name: String
+    let fadeIn: CMTime
+    let fadeOut: CMTime
+    let clipDuration: CMTime
+    let expectedFadeIn: Double
+    let expectedFadeOut: Double
+    var testDescription: String { name }
 }
 
-@Test("VolumeEnvelope: each fade individually clamps to clip duration")
-func envelopeSingleFadeClampsToDuration() {
-    let envelope = VolumeEnvelope(fadeIn: cm(10), fadeOut: .zero)
-    let (fi, fo) = envelope.clampedFades(clipDuration: cm(3))
-    #expect(abs(fi.seconds - 3) < 1e-6)
-    #expect(fo == .zero)
+@Test(
+    "VolumeEnvelope: clampedFades (R6.4)",
+    arguments: [
+        FadeClampCase(name: "fadeIn + fadeOut greater than clip duration each clamp to half",
+                      fadeIn: cm(4), fadeOut: cm(4), clipDuration: cm(2),
+                      expectedFadeIn: 1, expectedFadeOut: 1),
+        FadeClampCase(name: "each fade individually clamps to clip duration",
+                      fadeIn: cm(10), fadeOut: .zero, clipDuration: cm(3),
+                      expectedFadeIn: 3, expectedFadeOut: 0),
+        FadeClampCase(name: "fades that already fit are untouched",
+                      fadeIn: cm(0.5), fadeOut: cm(0.5), clipDuration: cm(5),
+                      expectedFadeIn: 0.5, expectedFadeOut: 0.5),
+        FadeClampCase(name: "zero clip duration produces zero fades",
+                      fadeIn: cm(1), fadeOut: cm(1), clipDuration: .zero,
+                      expectedFadeIn: 0, expectedFadeOut: 0),
+    ]
+)
+func envelopeFadesClamp(_ cs: FadeClampCase) {
+    let envelope = VolumeEnvelope(fadeIn: cs.fadeIn, fadeOut: cs.fadeOut)
+    let (fi, fo) = envelope.clampedFades(clipDuration: cs.clipDuration)
+    #expect(abs(fi.seconds - cs.expectedFadeIn) < 1e-6, Comment(rawValue: cs.name))
+    #expect(abs(fo.seconds - cs.expectedFadeOut) < 1e-6, Comment(rawValue: cs.name))
 }
 
-@Test("VolumeEnvelope: fades that already fit are untouched")
-func envelopeFadesNoClampWhenSumFits() {
-    let envelope = VolumeEnvelope(fadeIn: cm(0.5), fadeOut: cm(0.5))
-    let (fi, fo) = envelope.clampedFades(clipDuration: cm(5))
-    #expect(abs(fi.seconds - 0.5) < 1e-6)
-    #expect(abs(fo.seconds - 0.5) < 1e-6)
+// MARK: - R6.4 — VolumeEnvelope Ramp clamping
+
+struct RampClampCase: CustomTestStringConvertible {
+    let name: String
+    let ramp: CMTimeRange
+    let expectedResult: Bool  // true = non-nil (clamped), false = nil (dropped)
+    var testDescription: String { name }
 }
 
-@Test("VolumeEnvelope: a Ramp range past the clip end clamps to the clip range (R6.4)")
-func envelopeRampClampsToClipRange() {
+@Test(
+    "VolumeEnvelope: clampedRange (R6.4)",
+    arguments: [
+        RampClampCase(name: "Ramp range past clip end clamps to clip range",
+                      ramp: CMTimeRange(start: cm(1), duration: cm(5)),
+                      expectedResult: true),
+        RampClampCase(name: "Ramp entirely outside clip range is dropped",
+                      ramp: CMTimeRange(start: cm(5), duration: cm(1)),
+                      expectedResult: false),
+    ]
+)
+func envelopeRampClamping(_ cs: RampClampCase) {
     let clipRange = CMTimeRange(start: cm(0), duration: cm(2))
-    let ramp = CMTimeRange(start: cm(1), duration: cm(5))   // ends at 6s, well past
-    let clamped = VolumeEnvelope.clampedRange(ramp, to: clipRange)
-    #expect(clamped != nil)
-    #expect(abs((clamped!.end - clipRange.end).seconds) < 1e-6)
-}
-
-@Test("VolumeEnvelope: a Ramp entirely outside the clip range is dropped")
-func envelopeRampOutsideDropped() {
-    let clipRange = CMTimeRange(start: cm(0), duration: cm(2))
-    let ramp = CMTimeRange(start: cm(5), duration: cm(1))
-    #expect(VolumeEnvelope.clampedRange(ramp, to: clipRange) == nil)
-}
-
-@Test("VolumeEnvelope: zero clip duration produces zero fades")
-func envelopeFadesZeroClipDuration() {
-    let envelope = VolumeEnvelope(fadeIn: cm(1), fadeOut: cm(1))
-    let (fi, fo) = envelope.clampedFades(clipDuration: .zero)
-    #expect(fi == .zero)
-    #expect(fo == .zero)
+    let clamped = VolumeEnvelope.clampedRange(cs.ramp, to: clipRange)
+    if cs.expectedResult {
+        #expect(clamped != nil, Comment(rawValue: cs.name))
+        #expect(abs((clamped!.end - clipRange.end).seconds) < 1e-6, Comment(rawValue: cs.name))
+    } else {
+        #expect(clamped == nil, Comment(rawValue: cs.name))
+    }
 }
 
 // MARK: - R6.3 + R6.2 — offline graph + meter snapshot
@@ -310,32 +336,44 @@ func renderOfflineBlockSucceedsWithScheduledBuffer() throws {
     #expect(status == .success)
 }
 
-@Test("AudioMasterBus.computeMeter: silent buffer ⇒ zero peak/rms")
-func computeMeterOnSilence() {
-    let format = AudioMasterBus.canonicalFormat
-    let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!
-    buf.frameLength = 1024
-    // Default-allocated channelData is zero, so this is genuine silence.
-    let snapshot = AudioMasterBus.computeMeter(buffer: buf)
-    #expect(snapshot.peakLeft == 0)
-    #expect(snapshot.peakRight == 0)
-    #expect(snapshot.rmsLeft == 0)
-    #expect(snapshot.rmsRight == 0)
+// MARK: - R6.2 — computeMeter parameterised cases
+
+struct MeterCase: CustomTestStringConvertible {
+    let name: String
+    let frameCount: Int
+    let fillValue: Float?
+    let expectZero: Bool
+    var testDescription: String { name }
 }
 
-@Test("AudioMasterBus.computeMeter: full-amplitude DC ⇒ peak = 1, rms = 1")
-func computeMeterOnUnitDC() {
+@Test(
+    "AudioMasterBus.computeMeter (R6.2)",
+    arguments: [
+        MeterCase(name: "silent buffer ⇒ zero peak/rms",
+                  frameCount: 1024, fillValue: nil, expectZero: true),
+        MeterCase(name: "full-amplitude DC ⇒ peak = 1, rms = 1",
+                  frameCount: 512, fillValue: 1, expectZero: false),
+    ]
+)
+func computeMeter(_ cs: MeterCase) {
     let format = AudioMasterBus.canonicalFormat
-    let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512)!
-    buf.frameLength = 512
-    if let ch = buf.floatChannelData {
+    let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(cs.frameCount))!
+    buf.frameLength = AVAudioFrameCount(cs.frameCount)
+    if let fill = cs.fillValue, let ch = buf.floatChannelData {
         for c in 0..<Int(format.channelCount) {
-            for i in 0..<512 { ch[c][i] = 1 }
+            for i in 0..<cs.frameCount { ch[c][i] = fill }
         }
     }
     let snapshot = AudioMasterBus.computeMeter(buffer: buf)
-    #expect(abs(snapshot.peakLeft - 1) < 1e-6)
-    #expect(abs(snapshot.rmsLeft - 1) < 1e-6)
+    if cs.expectZero {
+        #expect(snapshot.peakLeft == 0)
+        #expect(snapshot.peakRight == 0)
+        #expect(snapshot.rmsLeft == 0)
+        #expect(snapshot.rmsRight == 0)
+    } else {
+        #expect(abs(snapshot.peakLeft - 1) < 1e-6)
+        #expect(abs(snapshot.rmsLeft - 1) < 1e-6)
+    }
 }
 
 @Test("RenderQueue: writer-path PCM sample buffers publish an offline meter snapshot")
@@ -681,307 +719,6 @@ struct AudioBusRegressionTests {
     }
 }
 
-// MARK: - Audio fixture helpers (used by the regression tests)
-
-private func makePCMInt16SampleBuffer(samples: [Int16],
-                                      channels: Int) throws -> CMSampleBuffer {
-    var asbd = AudioStreamBasicDescription(
-        mSampleRate: 48_000,
-        mFormatID: kAudioFormatLinearPCM,
-        mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
-        mBytesPerPacket: UInt32(channels * MemoryLayout<Int16>.size),
-        mFramesPerPacket: 1,
-        mBytesPerFrame: UInt32(channels * MemoryLayout<Int16>.size),
-        mChannelsPerFrame: UInt32(channels),
-        mBitsPerChannel: 16,
-        mReserved: 0)
-
-    var formatDescription: CMAudioFormatDescription?
-    let formatStatus = CMAudioFormatDescriptionCreate(
-        allocator: kCFAllocatorDefault,
-        asbd: &asbd,
-        layoutSize: 0,
-        layout: nil,
-        magicCookieSize: 0,
-        magicCookie: nil,
-        extensions: nil,
-        formatDescriptionOut: &formatDescription)
-    guard formatStatus == noErr, let formatDescription else {
-        throw NSError(domain: "AudioBusTests", code: Int(formatStatus))
-    }
-
-    let byteCount = samples.count * MemoryLayout<Int16>.size
-    var blockBuffer: CMBlockBuffer?
-    let createStatus = CMBlockBufferCreateWithMemoryBlock(
-        allocator: kCFAllocatorDefault,
-        memoryBlock: nil,
-        blockLength: byteCount,
-        blockAllocator: kCFAllocatorDefault,
-        customBlockSource: nil,
-        offsetToData: 0,
-        dataLength: byteCount,
-        flags: 0,
-        blockBufferOut: &blockBuffer)
-    guard createStatus == noErr, let blockBuffer else {
-        throw NSError(domain: "AudioBusTests", code: Int(createStatus))
-    }
-
-    let replaceStatus = samples.withUnsafeBytes { bytes in
-        CMBlockBufferReplaceDataBytes(
-            with: bytes.baseAddress!,
-            blockBuffer: blockBuffer,
-            offsetIntoDestination: 0,
-            dataLength: byteCount)
-    }
-    guard replaceStatus == noErr else {
-        throw NSError(domain: "AudioBusTests", code: Int(replaceStatus))
-    }
-
-    let frameCount = samples.count / channels
-    var timing = CMSampleTimingInfo(
-        duration: CMTime(value: 1, timescale: 48_000),
-        presentationTimeStamp: .zero,
-        decodeTimeStamp: .invalid)
-    var sampleBuffer: CMSampleBuffer?
-    let sampleStatus = CMSampleBufferCreate(
-        allocator: kCFAllocatorDefault,
-        dataBuffer: blockBuffer,
-        dataReady: true,
-        makeDataReadyCallback: nil,
-        refcon: nil,
-        formatDescription: formatDescription,
-        sampleCount: frameCount,
-        sampleTimingEntryCount: 1,
-        sampleTimingArray: &timing,
-        sampleSizeEntryCount: 0,
-        sampleSizeArray: nil,
-        sampleBufferOut: &sampleBuffer)
-    guard sampleStatus == noErr, let sampleBuffer else {
-        throw NSError(domain: "AudioBusTests", code: Int(sampleStatus))
-    }
-    return sampleBuffer
-}
-
-private func makeFragmentedPCMInt16SampleBuffer(samples: [Int16],
-                                                channels: Int) throws -> CMSampleBuffer {
-    var asbd = AudioStreamBasicDescription(
-        mSampleRate: 48_000,
-        mFormatID: kAudioFormatLinearPCM,
-        mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
-        mBytesPerPacket: UInt32(channels * MemoryLayout<Int16>.size),
-        mFramesPerPacket: 1,
-        mBytesPerFrame: UInt32(channels * MemoryLayout<Int16>.size),
-        mChannelsPerFrame: UInt32(channels),
-        mBitsPerChannel: 16,
-        mReserved: 0)
-
-    var formatDescription: CMAudioFormatDescription?
-    let formatStatus = CMAudioFormatDescriptionCreate(
-        allocator: kCFAllocatorDefault,
-        asbd: &asbd,
-        layoutSize: 0,
-        layout: nil,
-        magicCookieSize: 0,
-        magicCookie: nil,
-        extensions: nil,
-        formatDescriptionOut: &formatDescription)
-    guard formatStatus == noErr, let formatDescription else {
-        throw NSError(domain: "AudioBusTests", code: Int(formatStatus))
-    }
-
-    let byteCount = samples.count * MemoryLayout<Int16>.size
-    let splitByteCount = byteCount / 2
-    var blockBuffer: CMBlockBuffer?
-    let createStatus = CMBlockBufferCreateEmpty(
-        allocator: kCFAllocatorDefault,
-        capacity: 2,
-        flags: 0,
-        blockBufferOut: &blockBuffer)
-    guard createStatus == noErr, let blockBuffer else {
-        throw NSError(domain: "AudioBusTests", code: Int(createStatus))
-    }
-
-    let firstAppend = CMBlockBufferAppendMemoryBlock(
-        blockBuffer,
-        memoryBlock: nil,
-        length: splitByteCount,
-        blockAllocator: kCFAllocatorDefault,
-        customBlockSource: nil,
-        offsetToData: 0,
-        dataLength: splitByteCount,
-        flags: 0)
-    guard firstAppend == noErr else {
-        throw NSError(domain: "AudioBusTests", code: Int(firstAppend))
-    }
-
-    let secondAppend = CMBlockBufferAppendMemoryBlock(
-        blockBuffer,
-        memoryBlock: nil,
-        length: byteCount - splitByteCount,
-        blockAllocator: kCFAllocatorDefault,
-        customBlockSource: nil,
-        offsetToData: 0,
-        dataLength: byteCount - splitByteCount,
-        flags: 0)
-    guard secondAppend == noErr else {
-        throw NSError(domain: "AudioBusTests", code: Int(secondAppend))
-    }
-
-    let replaceStatus = samples.withUnsafeBytes { bytes in
-        CMBlockBufferReplaceDataBytes(
-            with: bytes.baseAddress!,
-            blockBuffer: blockBuffer,
-            offsetIntoDestination: 0,
-            dataLength: byteCount)
-    }
-    guard replaceStatus == noErr else {
-        throw NSError(domain: "AudioBusTests", code: Int(replaceStatus))
-    }
-
-    let frameCount = samples.count / channels
-    var timing = CMSampleTimingInfo(
-        duration: CMTime(value: 1, timescale: 48_000),
-        presentationTimeStamp: .zero,
-        decodeTimeStamp: .invalid)
-    var sampleBuffer: CMSampleBuffer?
-    let sampleStatus = CMSampleBufferCreate(
-        allocator: kCFAllocatorDefault,
-        dataBuffer: blockBuffer,
-        dataReady: true,
-        makeDataReadyCallback: nil,
-        refcon: nil,
-        formatDescription: formatDescription,
-        sampleCount: frameCount,
-        sampleTimingEntryCount: 1,
-        sampleTimingArray: &timing,
-        sampleSizeEntryCount: 0,
-        sampleSizeArray: nil,
-        sampleBufferOut: &sampleBuffer)
-    guard sampleStatus == noErr, let sampleBuffer else {
-        throw NSError(domain: "AudioBusTests", code: Int(sampleStatus))
-    }
-    return sampleBuffer
-}
-
-private func makePCMFloat32SampleBuffer(samples: [Float],
-                                        channels: Int) throws -> CMSampleBuffer {
-    var asbd = AudioStreamBasicDescription(
-        mSampleRate: 48_000,
-        mFormatID: kAudioFormatLinearPCM,
-        mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
-        mBytesPerPacket: UInt32(channels * MemoryLayout<Float>.size),
-        mFramesPerPacket: 1,
-        mBytesPerFrame: UInt32(channels * MemoryLayout<Float>.size),
-        mChannelsPerFrame: UInt32(channels),
-        mBitsPerChannel: 32,
-        mReserved: 0)
-
-    var formatDescription: CMAudioFormatDescription?
-    let formatStatus = CMAudioFormatDescriptionCreate(
-        allocator: kCFAllocatorDefault,
-        asbd: &asbd,
-        layoutSize: 0,
-        layout: nil,
-        magicCookieSize: 0,
-        magicCookie: nil,
-        extensions: nil,
-        formatDescriptionOut: &formatDescription)
-    guard formatStatus == noErr, let formatDescription else {
-        throw NSError(domain: "AudioBusTests", code: Int(formatStatus))
-    }
-
-    let byteCount = samples.count * MemoryLayout<Float>.size
-    var blockBuffer: CMBlockBuffer?
-    let createStatus = CMBlockBufferCreateWithMemoryBlock(
-        allocator: kCFAllocatorDefault,
-        memoryBlock: nil,
-        blockLength: byteCount,
-        blockAllocator: kCFAllocatorDefault,
-        customBlockSource: nil,
-        offsetToData: 0,
-        dataLength: byteCount,
-        flags: 0,
-        blockBufferOut: &blockBuffer)
-    guard createStatus == noErr, let blockBuffer else {
-        throw NSError(domain: "AudioBusTests", code: Int(createStatus))
-    }
-
-    let replaceStatus = samples.withUnsafeBytes { bytes in
-        CMBlockBufferReplaceDataBytes(
-            with: bytes.baseAddress!,
-            blockBuffer: blockBuffer,
-            offsetIntoDestination: 0,
-            dataLength: byteCount)
-    }
-    guard replaceStatus == noErr else {
-        throw NSError(domain: "AudioBusTests", code: Int(replaceStatus))
-    }
-
-    let frameCount = samples.count / channels
-    var timing = CMSampleTimingInfo(
-        duration: CMTime(value: 1, timescale: 48_000),
-        presentationTimeStamp: .zero,
-        decodeTimeStamp: .invalid)
-    var sampleBuffer: CMSampleBuffer?
-    let sampleStatus = CMSampleBufferCreate(
-        allocator: kCFAllocatorDefault,
-        dataBuffer: blockBuffer,
-        dataReady: true,
-        makeDataReadyCallback: nil,
-        refcon: nil,
-        formatDescription: formatDescription,
-        sampleCount: frameCount,
-        sampleTimingEntryCount: 1,
-        sampleTimingArray: &timing,
-        sampleSizeEntryCount: 0,
-        sampleSizeArray: nil,
-        sampleBufferOut: &sampleBuffer)
-    guard sampleStatus == noErr, let sampleBuffer else {
-        throw NSError(domain: "AudioBusTests", code: Int(sampleStatus))
-    }
-    return sampleBuffer
-}
-
-/// Writes a short CAF containing one mono PCM audio track and returns its
-/// URL. Uses `AVAudioFile` so we don't have to plumb CoreMedia sample buffers
-/// by hand. The composition builder accepts any container `AVAsset` can load.
-@MainActor
-private func makeAudioFixture(seconds: Double, sampleRate: Double = 48_000) throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("audio-bus-fixture-\(UUID().uuidString).caf")
-    try? FileManager.default.removeItem(at: url)
-
-    guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                     sampleRate: sampleRate,
-                                     channels: 1,
-                                     interleaved: false) else {
-        throw NSError(domain: "AudioBusTests", code: -1)
-    }
-    let file = try AVAudioFile(forWriting: url,
-                               settings: format.settings,
-                               commonFormat: format.commonFormat,
-                               interleaved: format.isInterleaved)
-    let frameCount = AVAudioFrameCount(sampleRate * seconds)
-    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-        throw NSError(domain: "AudioBusTests", code: -2)
-    }
-    buffer.frameLength = frameCount
-    // Default-allocated channelData is zero ⇒ true silence; that's fine for
-    // the regression tests, which only need a valid audio track to exist.
-    try file.write(from: buffer)
-    return url
-}
-
-@MainActor
-private func loadAudioMedia(from url: URL) async throws -> MediaItem {
-    let item = MediaItem(url: url)
-    item.duration = try await item.asset.load(.duration)
-    let audioTracks = try await item.asset.loadTracks(withMediaType: .audio)
-    _ = try #require(audioTracks.first)
-    item.hasAudio = true
-    return item
-}
-
 // MARK: - T3.5 — Latency budget test
 
 /// Verifies that the live cleanup chain processes audio within the latency
@@ -1133,7 +870,7 @@ func bypassRampStateAdvancesWithoutOvershoot() {
 /// Verifies that exporting a noisy clip with denoiser and R128 target produces
 /// audio within ±0.5 LUFS of the target loudness.
 @MainActor
-@Test("VoiceCleanup: export with denoiser and R128 produces correct loudness (T3.6)")
+@Test("VoiceCleanup: export with denoiser and R128 produces correct loudness (T3.6)", .timeLimit(.minutes(1)))
 func exportSmokeFixtureLoudness() async throws {
     // Create a noisy audio fixture.
     let sampleRate: Double = 48_000
@@ -1236,22 +973,4 @@ func exportSmokeFixtureLoudness() async throws {
         settings: VoiceCleanupSettings())
     #expect(abs(measuredExport.measuredLUFS - project.voiceCleanup.loudness.targetLUFS) <= 0.5,
             "Export measured \(measuredExport.measuredLUFS) LUFS, expected \(project.voiceCleanup.loudness.targetLUFS) ±0.5")
-}
-
-@MainActor
-private func waitForRenderQueueToSettle(
-    _ queue: RenderQueue,
-    expectedCount: Int,
-    timeout: TimeInterval
-) async throws {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
-        if queue.jobs.count == expectedCount,
-           !queue.isRunning,
-           queue.jobs.allSatisfy(\.isTerminal) {
-            return
-        }
-        try await Task.sleep(for: .milliseconds(20))
-    }
-    Issue.record("Render queue did not settle before timeout")
 }

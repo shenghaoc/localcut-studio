@@ -16,7 +16,10 @@
 
 ## R3 — Capability gating
 
-- **R3.1** GoogleWebRTC available + linked in the build → publish feature available; otherwise hidden.
+- **R3.1** The macOS `LocalCutPlatform` target requires and links the pinned
+  WebRTC package, so publish is available in supported app builds. Non-macOS
+  package graphs exclude the platform target and expose no publish UI or
+  substitute WebRTC implementation.
 - **R3.2** `EncoderBudget` lease for `.whipPublish` required before peer connection opens.
 - **R3.3** Record + stream coexistence checks combined encoder count against the budget before start.
 
@@ -44,4 +47,4 @@
 - **R7.1** Unit tests for `WhipClient` (mocked `URLSession`), reconnect state machine (fake timers), `EncoderBudget` integration.
 - **R7.2** CI integration: publish to MediaMTX under the CI harness; assert ingest via the MediaMTX API; teardown sends DELETE. The harness retries MediaMTX startup/readiness failures but does not retry the focused WHIP Xcode test after the service is ready.
 - **R7.3** Bundle-exclusion test for the publish settings store.
-- **R7.4** `xcodebuild` (Debug, macOS) green for the default WebRTC-enabled build and for a non-WebRTC build that strips `LOCALCUT_ENABLE_WEBRTC`; no test count regression. Each Xcode CI test invocation, including the focused MediaMTX integration run, enables Xcode per-test timeouts with a 300-second default allowance.
+- **R7.4** `xcodebuild` (Debug, macOS) green for the required WebRTC-enabled platform build with no test count regression. Each Xcode CI test invocation, including the focused MediaMTX integration run, enables per-test timeouts with a 300-second default allowance.

@@ -1,6 +1,7 @@
 import SwiftUI
 import AVKit
 import LocalCutCore
+import LocalCutDomain
 
 /// Wraps AVKit's native `AVPlayerView` so the composition renders with hardware
 /// acceleration and standard playback chrome.

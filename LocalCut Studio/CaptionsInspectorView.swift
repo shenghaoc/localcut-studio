@@ -3,6 +3,7 @@ import AVFoundation
 import UniformTypeIdentifiers
 import AppKit
 import LocalCutCore
+import LocalCutDomain
 
 /// Inspector section listing every caption track + line. Per-line editing,
 /// import, default-style preset picking, and `.lccaption` import/export all live

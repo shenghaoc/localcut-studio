@@ -3,7 +3,15 @@ import Foundation
 import AVFoundation
 import CoreMedia
 import LocalCutCore
+import LocalCutDomain
 @testable import LocalCut_Studio
+@testable import LocalCutPlatform
+
+/// Helper for static-let contexts where `try!` would crash with an opaque error.
+/// Returns `Never` so it can be used as the RHS of `??` on any type.
+nonisolated private func fatalErrorAs<T>(_ message: String) -> T {
+    fatalError(message)
+}
 
 // MARK: - State machine (T6.1 partial)
 
@@ -339,38 +347,60 @@ struct CaptureAlignmentTests {
         #expect(t2 >= t1)
     }
 
-    @Test("timelineStartUs offsets to zero for PTS == sessionStart")
-    func timelineStartOffsetsToZero() {
-        // When first frame PTS equals sessionStart, timelineStart should be 0.
-        let pts = CMTime(value: 1_000_000, timescale: CaptureManifest.microsecondTimescale)
-        let sessionStartUs = CaptureManifest.microseconds(from: pts)
-        let firstUs = CaptureManifest.microseconds(from: pts)
-        let timelineStartUs = max(0, firstUs - sessionStartUs)
-        #expect(timelineStartUs == 0)
+    // MARK: Parameterized alignment cases
+
+    struct AlignmentCase: Sendable, CustomTestStringConvertible {
+        let name: String
+        let sessionStartUs: Int64
+        let ptsUs: [Int64]
+        let expectedOffsetUs: Int64?
+        let maxDeltaUs: Int64?
+
+        var testDescription: String { name }
     }
 
-    @Test("timelineStartUs offsets positive for PTS after sessionStart")
-    func timelineStartForDelayedFrame() {
-        let sessionStart = CMTime(value: 500_000, timescale: CaptureManifest.microsecondTimescale)
-        let firstPTS = CMTime(value: 700_000, timescale: CaptureManifest.microsecondTimescale)
+    nonisolated static let alignmentCases: [AlignmentCase] = [
+        AlignmentCase(
+            name: "offset is zero when PTS equals sessionStart",
+            sessionStartUs: 1_000_000,
+            ptsUs: [1_000_000],
+            expectedOffsetUs: 0,
+            maxDeltaUs: nil),
+        AlignmentCase(
+            name: "offset is positive for PTS after sessionStart",
+            sessionStartUs: 500_000,
+            ptsUs: [700_000],
+            expectedOffsetUs: 200_000,
+            maxDeltaUs: nil),
+        AlignmentCase(
+            name: "two sources produce aligned timeline offsets",
+            sessionStartUs: 1_000_000,
+            ptsUs: [1_010_000, 1_010_030],
+            expectedOffsetUs: nil,
+            maxDeltaUs: 1_000),
+    ]
+
+    @Test("Timeline offset calculations", arguments: alignmentCases)
+    func timelineOffsetCalculations(_testCase: AlignmentCase) {
+        let timescale = CaptureManifest.microsecondTimescale
+        let sessionStart = CMTime(value: _testCase.sessionStartUs, timescale: timescale)
         let sessionStartUs = CaptureManifest.microseconds(from: sessionStart)
-        let firstUs = CaptureManifest.microseconds(from: firstPTS)
-        let timelineStartUs = max(0, firstUs - sessionStartUs)
-        #expect(timelineStartUs == 200_000)
-    }
 
-    @Test("Two sources sharing host clock produce aligned timeline starts")
-    func twoSourcesAligned() {
-        let hostTime = CMClockGetTime(CMClockGetHostTimeClock())
-        let sessionStartUs = CaptureManifest.microseconds(from: hostTime)
-        // Simulate two sources starting at slightly different host times
-        let source1Start = hostTime + CMTime(value: 10_000, timescale: CaptureManifest.microsecondTimescale)
-        let source2Start = hostTime + CMTime(value: 10_030, timescale: CaptureManifest.microsecondTimescale)
-        let t1Us = CaptureManifest.microseconds(from: source1Start)
-        let t2Us = CaptureManifest.microseconds(from: source2Start)
-        let deltaUs = abs((t1Us - sessionStartUs) - (t2Us - sessionStartUs))
-        // Within one audio quantum at 48 kHz (~21 µs), plus measurement jitter.
-        #expect(deltaUs < 1_000)
+        if let expectedOffset = _testCase.expectedOffsetUs {
+            let pts = CMTime(value: _testCase.ptsUs[0], timescale: timescale)
+            let firstUs = CaptureManifest.microseconds(from: pts)
+            let timelineStartUs = max(Int64(0), firstUs - sessionStartUs)
+            #expect(timelineStartUs == expectedOffset)
+        } else if let maxDelta = _testCase.maxDeltaUs {
+            let offsets = _testCase.ptsUs.map { ptsValue -> Int64 in
+                let pts = CMTime(value: ptsValue, timescale: timescale)
+                return CaptureManifest.microseconds(from: pts) - sessionStartUs
+            }
+            let delta = abs(offsets[0] - offsets[1])
+            #expect(delta < maxDelta)
+        } else {
+            Issue.record("AlignmentCase '\(_testCase.name)' has neither expectedOffsetUs nor maxDeltaUs set")
+        }
     }
 }
 
@@ -379,85 +409,104 @@ struct CaptureAlignmentTests {
 @Suite("Capture manifest NDJSON recovery")
 struct CaptureManifestRecoveryTests {
 
-    @Test("Manifest parser drops truncated trailing line and keeps valid prefix")
-    func truncatedTrailingLine() throws {
-        let sourceID = UUID()
-        let source = CaptureSourceDescriptor(
-            id: sourceID,
-            kind: .display,
-            displayName: "Screen",
-            relativePath: "screen.mov",
-            width: 1920,
-            height: 1080,
-            frameRate: 30)
-        let manifest = CaptureManifest(records: [
-            .header(CaptureManifestHeader(
-                sessionID: UUID(),
-                createdAt: Date(),
-                sessionStartHostTimeUs: 1_000,
-                sources: [source],
-                encoders: [:])),
-            .sourceEnded(CaptureSourceEndedRecord(
-                sourceID: sourceID,
-                atUs: 4_000_000,
-                durationUs: 3_000_000,
-                timelineStartUs: 20_000,
-                sampleCount: 90)),
-        ])
-        var data = try manifest.encodeNDJSON()
-        // Simulate a crash mid-write: append a partial finalize line without
-        // a trailing newline.
-        data.append(#"{"kind":"finalize","atUs":5000000,"dur"#.data(using: .utf8)!)
+    // MARK: Parameterized manifest parse cases
 
-        let parsed = CaptureManifest.parseNDJSON(data)
-        #expect(parsed.records.count == 2)
-        #expect(!parsed.isFinalized)
-        #expect(parsed.recoveredSources.count == 1)
-        #expect(parsed.recoveredSources[0].descriptor.timelineStartUs == 20_000)
+    struct ManifestParseCase: Sendable, CustomTestStringConvertible {
+        let name: String
+        let data: Data
+        let expectedRecordCount: Int
+        let isFinalized: Bool
+        let expectedRecoveredSourceCount: Int
+        let expectedFirstTimelineStartUs: Int64?
+
+        var testDescription: String { name }
     }
 
-    @Test("Manifest parser ignores unknown record kind (scene-doc forward compat)")
-    func unknownRecordKind() throws {
-        let sourceID = UUID()
-        let source = CaptureSourceDescriptor(
-            id: sourceID,
-            kind: .display,
-            displayName: "Screen",
-            relativePath: "screen.mov")
-        let manifest = CaptureManifest(records: [
-            .header(CaptureManifestHeader(
-                sessionID: UUID(),
-                createdAt: Date(),
-                sessionStartHostTimeUs: 10,
-                sources: [source],
-                encoders: [:])),
-            .finalize(CaptureFinalizeRecord(atUs: 30, durationUs: 20)),
-        ])
-        var data = try manifest.encodeNDJSON()
-        // Insert an unknown record kind (Phase 45's scene-doc) between valid records.
-        let insertion = #"{"kind":"scene-doc","sceneId":"intro","atUs":15}"#.data(using: .utf8)!
-        if let finalizeStart = data.range(of: #"{"kind":"finalize""#.data(using: .utf8)!) {
-            data.insert(contentsOf: insertion, at: finalizeStart.lowerBound)
-            data.insert(0x0A, at: finalizeStart.lowerBound + insertion.count)
+    nonisolated static let manifestParseCases: [ManifestParseCase] = {
+        var cases: [ManifestParseCase] = []
+
+        // Truncated trailing line
+        do {
+            let sourceID = UUID()
+            let source = CaptureSourceDescriptor(
+                id: sourceID, kind: .display, displayName: "Screen",
+                relativePath: "screen.mov", width: 1920, height: 1080, frameRate: 30)
+            let manifest = CaptureManifest(records: [
+                .header(CaptureManifestHeader(
+                    sessionID: UUID(), createdAt: Date(),
+                    sessionStartHostTimeUs: 1_000, sources: [source], encoders: [:])),
+                .sourceEnded(CaptureSourceEndedRecord(
+                    sourceID: sourceID, atUs: 4_000_000, durationUs: 3_000_000,
+                    timelineStartUs: 20_000, sampleCount: 90)),
+            ])
+            var data = (try? manifest.encodeNDJSON()) ?? fatalErrorAs("encodeNDJSON failed for truncated trailing line case")
+            data.append(#"{"kind":"finalize","atUs":5000000,"dur"#.data(using: .utf8)!)
+            cases.append(ManifestParseCase(
+                name: "truncated trailing line",
+                data: data,
+                expectedRecordCount: 2,
+                isFinalized: false,
+                expectedRecoveredSourceCount: 1,
+                expectedFirstTimelineStartUs: 20_000))
         }
-        let parsed = CaptureManifest.parseNDJSON(data)
-        #expect(parsed.records.count == 2)
-        #expect(parsed.isFinalized)
-        #expect(parsed.recoveredSources.count == 1)
-    }
 
-    @Test("Manifest parser: empty data returns no records")
-    func emptyData() {
-        let parsed = CaptureManifest.parseNDJSON(Data())
-        #expect(parsed.records.isEmpty)
-        #expect(!parsed.isFinalized)
-        #expect(parsed.recoveredSources.isEmpty)
-    }
+        // Unknown record kind (scene-doc forward compat)
+        do {
+            let sourceID = UUID()
+            let source = CaptureSourceDescriptor(
+                id: sourceID, kind: .display, displayName: "Screen",
+                relativePath: "screen.mov")
+            let manifest = CaptureManifest(records: [
+                .header(CaptureManifestHeader(
+                    sessionID: UUID(), createdAt: Date(),
+                    sessionStartHostTimeUs: 10, sources: [source], encoders: [:])),
+                .finalize(CaptureFinalizeRecord(atUs: 30, durationUs: 20)),
+            ])
+            var data = (try? manifest.encodeNDJSON()) ?? fatalErrorAs("encodeNDJSON failed for unknown record kind case")
+            let insertion = #"{"kind":"scene-doc","sceneId":"intro","atUs":15}"#.data(using: .utf8)!
+            if let finalizeStart = data.range(of: #"{"kind":"finalize""#.data(using: .utf8)!) {
+                data.insert(contentsOf: insertion, at: finalizeStart.lowerBound)
+                data.insert(0x0A, at: finalizeStart.lowerBound + insertion.count)
+            }
+            cases.append(ManifestParseCase(
+                name: "unknown record kind ignored",
+                data: data,
+                expectedRecordCount: 2,
+                isFinalized: true,
+                expectedRecoveredSourceCount: 1,
+                expectedFirstTimelineStartUs: nil))
+        }
 
-    @Test("Manifest parser: only newline returns empty records")
-    func newlineOnly() {
-        let parsed = CaptureManifest.parseNDJSON("\n".data(using: .utf8)!)
-        #expect(parsed.records.isEmpty)
+        // Empty data
+        cases.append(ManifestParseCase(
+            name: "empty data returns no records",
+            data: Data(),
+            expectedRecordCount: 0,
+            isFinalized: false,
+            expectedRecoveredSourceCount: 0,
+            expectedFirstTimelineStartUs: nil))
+
+        // Newline only
+        cases.append(ManifestParseCase(
+            name: "newline-only data returns no records",
+            data: "\n".data(using: .utf8)!,
+            expectedRecordCount: 0,
+            isFinalized: false,
+            expectedRecoveredSourceCount: 0,
+            expectedFirstTimelineStartUs: nil))
+
+        return cases
+    }()
+
+    @Test("Manifest parser", arguments: manifestParseCases)
+    func manifestParsing(_testCase: ManifestParseCase) {
+        let parsed = CaptureManifest.parseNDJSON(_testCase.data)
+        #expect(parsed.records.count == _testCase.expectedRecordCount)
+        #expect(parsed.isFinalized == _testCase.isFinalized)
+        #expect(parsed.recoveredSources.count == _testCase.expectedRecoveredSourceCount)
+        if let expectedTimelineStart = _testCase.expectedFirstTimelineStartUs {
+            #expect(parsed.recoveredSources[0].descriptor.timelineStartUs == expectedTimelineStart)
+        }
     }
 }
 
@@ -478,119 +527,115 @@ struct SystemAudioDetectionTests {
 @Suite("Capture capability gating")
 struct CaptureCapabilityGateTests {
 
-    @Test("Baseline tier: zero capture streams rejected with empty reason")
-    func baselineZeroStreams() {
-        let intel = Capabilities(
-            chip: .intel,
-            unifiedMemoryBytes: 8 * 1024 * 1024 * 1024,
-            videoEncoderCount: 0,
-            osVersion: Capabilities.OSVersion(major: 26, minor: 0))
-        let verdict = intel.tier(for: .simultaneousCaptureStreams(count: 0))
-        #expect(verdict.tier == .baseline)
+    // MARK: Parameterized capability gate cases
+
+    struct CapabilityGateCase: Sendable, CustomTestStringConvertible {
+        let name: String
+        let chip: Capabilities.ChipFamily
+        let memoryBytes: UInt64
+        let encoderCount: Int
+        let streamCount: Int
+        let expectedTier: CapabilityTier
+        let reasonSubstring: String?
+
+        var testDescription: String { name }
     }
 
-    @Test("Baseline tier: single stream rejected on Intel with zero encoders")
-    func baselineSingleStreamRejected() {
-        let intel = Capabilities(
+    nonisolated static let capabilityGateCases: [CapabilityGateCase] = [
+        CapabilityGateCase(
+            name: "baseline: zero streams rejected",
             chip: .intel,
-            unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
-            videoEncoderCount: 0,
-            osVersion: Capabilities.OSVersion(major: 26, minor: 0))
-        let verdict = intel.tier(for: .simultaneousCaptureStreams(count: 1))
-        #expect(verdict.tier == .baseline)
-        #expect(verdict.reason.contains("Intel"))
-    }
-
-    @Test("Accelerated tier: single stream on Apple Silicon with 1 encoder")
-    func acceleratedSingleStream() {
-        let m1 = Capabilities(
+            memoryBytes: 8 * 1024 * 1024 * 1024,
+            encoderCount: 0,
+            streamCount: 0,
+            expectedTier: .baseline,
+            reasonSubstring: nil),
+        CapabilityGateCase(
+            name: "baseline: single stream rejected on Intel",
+            chip: .intel,
+            memoryBytes: 16 * 1024 * 1024 * 1024,
+            encoderCount: 0,
+            streamCount: 1,
+            expectedTier: .baseline,
+            reasonSubstring: "Intel"),
+        CapabilityGateCase(
+            name: "accelerated: single stream on M1 with 1 encoder",
             chip: .appleSilicon(generation: 1),
-            unifiedMemoryBytes: 8 * 1024 * 1024 * 1024,
-            videoEncoderCount: 1,
-            osVersion: Capabilities.OSVersion(major: 26, minor: 0))
-        let verdict = m1.tier(for: .simultaneousCaptureStreams(count: 1))
-        #expect(verdict.tier == .accelerated)
-        #expect(verdict.reason.contains("encoder"))
-    }
-
-    @Test("Accelerated tier: two streams on Apple Silicon with 2 encoders")
-    func acceleratedTwoStreams() {
-        let m2 = Capabilities(
+            memoryBytes: 8 * 1024 * 1024 * 1024,
+            encoderCount: 1,
+            streamCount: 1,
+            expectedTier: .accelerated,
+            reasonSubstring: "encoder"),
+        CapabilityGateCase(
+            name: "accelerated: two streams on M2 with 2 encoders",
             chip: .appleSilicon(generation: 2),
-            unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
-            videoEncoderCount: 2,
-            osVersion: Capabilities.OSVersion(major: 26, minor: 0))
-        let verdict = m2.tier(for: .simultaneousCaptureStreams(count: 2))
-        #expect(verdict.tier == .accelerated)
-    }
-
-    @Test("Pro tier: three streams with 3 encoders and ≥16 GiB")
-    func proThreeStreams() {
-        let m3pro = Capabilities(
+            memoryBytes: 16 * 1024 * 1024 * 1024,
+            encoderCount: 2,
+            streamCount: 2,
+            expectedTier: .accelerated,
+            reasonSubstring: nil),
+        CapabilityGateCase(
+            name: "pro: three streams with 3 encoders and >= 16 GiB",
             chip: .appleSilicon(generation: 3),
-            unifiedMemoryBytes: 32 * 1024 * 1024 * 1024,
-            videoEncoderCount: 3,
-            osVersion: Capabilities.OSVersion(major: 26, minor: 0))
-        let verdict = m3pro.tier(for: .simultaneousCaptureStreams(count: 3))
-        #expect(verdict.tier == .pro)
-        #expect(verdict.reason.contains("encoder"))
-    }
-
-    @Test("Pro tier: three streams with 3 encoders but < 16 GiB → accelerated")
-    func proThreeStreamsLowMemory() {
-        let config = Capabilities(
+            memoryBytes: 32 * 1024 * 1024 * 1024,
+            encoderCount: 3,
+            streamCount: 3,
+            expectedTier: .pro,
+            reasonSubstring: "encoder"),
+        CapabilityGateCase(
+            name: "accelerated: three streams with < 16 GiB falls back",
             chip: .appleSilicon(generation: 3),
-            unifiedMemoryBytes: 12 * 1024 * 1024 * 1024,
-            videoEncoderCount: 3,
-            osVersion: Capabilities.OSVersion(major: 26, minor: 0))
-        let verdict = config.tier(for: .simultaneousCaptureStreams(count: 3))
-        #expect(verdict.tier == .accelerated)
-    }
-
-    @Test("Capture streams: request exceeds encoder count → baseline")
-    func captureStreamsExceedEncoderCount() {
-        let config = Capabilities(
+            memoryBytes: 12 * 1024 * 1024 * 1024,
+            encoderCount: 3,
+            streamCount: 3,
+            expectedTier: .accelerated,
+            reasonSubstring: nil),
+        CapabilityGateCase(
+            name: "baseline: request exceeds encoder count",
             chip: .appleSilicon(generation: 2),
-            unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
-            videoEncoderCount: 1,
-            osVersion: Capabilities.OSVersion(major: 26, minor: 0))
-        let verdict = config.tier(for: .simultaneousCaptureStreams(count: 4))
-        #expect(verdict.tier == .baseline)
-    }
-
-    @Test("Pixel rate budget: baseline returns zero")
-    func pixelRateBudgetBaseline() {
-        // The maxPixelRate function is private but we can verify through
-        // the public API: baseline rejects any capture request.
-        let intel = Capabilities(
+            memoryBytes: 16 * 1024 * 1024 * 1024,
+            encoderCount: 1,
+            streamCount: 4,
+            expectedTier: .baseline,
+            reasonSubstring: nil),
+        CapabilityGateCase(
+            name: "baseline: Intel rejects single-stream pixel budget",
             chip: .intel,
-            unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
-            videoEncoderCount: 0,
-            osVersion: Capabilities.OSVersion(major: 26, minor: 0))
-        let verdict = intel.tier(for: .simultaneousCaptureStreams(count: 1))
-        #expect(verdict.tier == .baseline)
-    }
-
-    @Test("Pixel rate budget: accelerated allows 1080p30 (≈ 62 MPx/s)")
-    func pixelRateBudgetAccelerated() {
-        let m2 = Capabilities(
+            memoryBytes: 16 * 1024 * 1024 * 1024,
+            encoderCount: 0,
+            streamCount: 1,
+            expectedTier: .baseline,
+            reasonSubstring: nil),
+        CapabilityGateCase(
+            name: "accelerated: allows 1080p30 pixel budget",
             chip: .appleSilicon(generation: 2),
-            unifiedMemoryBytes: 16 * 1024 * 1024 * 1024,
-            videoEncoderCount: 2,
-            osVersion: Capabilities.OSVersion(major: 26, minor: 0))
-        let verdict = m2.tier(for: .simultaneousCaptureStreams(count: 1))
-        #expect(verdict.tier == .accelerated)
-    }
-
-    @Test("Pixel rate budget: pro allows 4K60 (≈ 498 MPx/s)")
-    func pixelRateBudgetPro() {
-        let m3pro = Capabilities(
+            memoryBytes: 16 * 1024 * 1024 * 1024,
+            encoderCount: 2,
+            streamCount: 1,
+            expectedTier: .accelerated,
+            reasonSubstring: nil),
+        CapabilityGateCase(
+            name: "pro: allows 4K60 pixel budget",
             chip: .appleSilicon(generation: 3),
-            unifiedMemoryBytes: 48 * 1024 * 1024 * 1024,
-            videoEncoderCount: 4,
+            memoryBytes: 48 * 1024 * 1024 * 1024,
+            encoderCount: 4,
+            streamCount: 3,
+            expectedTier: .pro,
+            reasonSubstring: nil),
+    ]
+
+    @Test("Capability tier gating", arguments: capabilityGateCases)
+    func capabilityGating(_testCase: CapabilityGateCase) {
+        let caps = Capabilities(
+            chip: _testCase.chip,
+            unifiedMemoryBytes: _testCase.memoryBytes,
+            videoEncoderCount: _testCase.encoderCount,
             osVersion: Capabilities.OSVersion(major: 26, minor: 0))
-        let verdict = m3pro.tier(for: .simultaneousCaptureStreams(count: 3))
-        #expect(verdict.tier == .pro)
+        let verdict = caps.tier(for: .simultaneousCaptureStreams(count: _testCase.streamCount))
+        #expect(verdict.tier == _testCase.expectedTier)
+        if let substring = _testCase.reasonSubstring {
+            #expect(verdict.reason.contains(substring))
+        }
     }
 }
 

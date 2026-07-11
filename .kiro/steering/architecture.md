@@ -26,10 +26,27 @@ SwiftUI views ──▶ EditorModel (@Observable, @MainActor)
 
 ## Layers
 
-- **Model** (`Models.swift`) — `MediaItem`, `Clip`, `Track`, `Project`. Plain value/observable types; no AVFoundation side effects beyond holding an `AVURLAsset`.
-- **Engine** (`CompositionBuilder.swift`, later a custom compositor + exporter) — pure-ish translation from `Project` to AVFoundation objects. No SwiftUI.
-- **Orchestrator** (`EditorModel.swift`) — `@Observable @MainActor`; import, timeline mutations, playback transport, rebuild, export. Holds the only `AVPlayer`.
-- **Views** (`*View.swift`) — SwiftUI; read the model, send intents. AppKit interop (`AVPlayerView`, `NSSavePanel`) wrapped at the edge.
+- **Portable domain** (`Packages/LocalCutCore/Sources/LocalCutDomain`) —
+  Foundation-only value types, policies, and algorithms. Built and tested on
+  macOS and Linux. It never imports Apple media or UI frameworks.
+- **Apple media core** (`Packages/LocalCutCore/Sources/LocalCutCore`) —
+  deterministic non-UI code that legitimately uses CoreMedia, CoreGraphics,
+  CoreVideo, Accelerate, VideoToolbox, Observation, or `os`. It never imports
+  SwiftUI, AppKit, AVKit, or AVFoundation.
+- **macOS platform layer** (`Packages/LocalCutCore/Sources/LocalCutPlatform`) —
+  presentation-independent adapters for AVFoundation, ScreenCaptureKit, Metal,
+  WebRTC, Lottie, capture, publishing, and media decoding. This target exists
+  only in the macOS package graph and depends on `LocalCutCore`, never the app.
+- **App orchestration** (`LocalCut Studio/`) — `EditorModel`, project/document
+  lifecycle, composition/export coordination, security-scoped resources, and
+  presentation state. It consumes the platform layer and owns no direct
+  WebRTC, ScreenCaptureKit, or Lottie integration.
+- **Views** (`*View.swift`) — SwiftUI; read models and send intents. AppKit
+  interop (`AVPlayerView`, `NSSavePanel`) stays at the edge.
+
+This is a dependency direction, not a claim that every non-view type is
+portable: app → macOS platform → Apple media core → portable domain, never the
+reverse.
 
 ## Render path invariant
 

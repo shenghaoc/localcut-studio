@@ -3,6 +3,7 @@ import AVFoundation
 import CoreGraphics
 import AppKit
 import LocalCutCore
+import LocalCutPlatform
 
 @MainActor
 final class DocumentController {

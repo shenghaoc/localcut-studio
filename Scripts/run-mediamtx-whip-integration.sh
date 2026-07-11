@@ -33,6 +33,7 @@ MEDIAMTX_READY_TIMEOUT_SECONDS="${MEDIAMTX_READY_TIMEOUT_SECONDS:-30}"
 MEDIAMTX_RETRY_DELAY_SECONDS="${MEDIAMTX_RETRY_DELAY_SECONDS:-2}"
 DERIVED_DATA="${DERIVED_DATA:-DerivedData}"
 XCODEBUILD_BIN="${XCODEBUILD_BIN:-xcodebuild}"
+PACKAGE_AUTHORIZATION_PROVIDER="${PACKAGE_AUTHORIZATION_PROVIDER:-netrc}"
 
 echo "=== MediaMTX WHIP Integration Test ==="
 
@@ -219,6 +220,7 @@ touch "${INTEGRATION_MARKER}"
     -configuration Debug \
     -destination 'platform=macOS' \
     -derivedDataPath "${DERIVED_DATA}" \
+    -packageAuthorizationProvider "${PACKAGE_AUTHORIZATION_PROVIDER}" \
     -only-testing:"LocalCut StudioTests/WhipMediaMTXIntegrationTests" \
     -test-timeouts-enabled YES \
     -default-test-execution-time-allowance 300 \

@@ -39,6 +39,10 @@ branch now keeps private backing storage and exposes a computed getter that
 acquires the existing `NSLock`, so the unsafe annotation is removed instead of
 documented.
 
+This section is historical. The later `LocalCutPlatform` extraction removed the
+non-WebRTC path and its latest-frame accessor; the current macOS target always
+builds the WebRTC source/capturer implementation.
+
 ## Reconnect Timing Dependencies
 
 `ReconnectController.clock` and `ReconnectController.sleep` are deterministic

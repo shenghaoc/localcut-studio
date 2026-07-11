@@ -12,136 +12,6 @@ private func approx(_ lhs: CMTime, _ rhs: CMTime, tolerance: Double = 1e-6) -> B
     abs((lhs - rhs).seconds) < tolerance
 }
 
-private func makeTimeRemapVideoFixture(seconds: Double,
-                                       fps: Int32 = 30,
-                                       size: CGSize = CGSize(width: 64, height: 64)) async throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("time-remap-fixture-\(UUID().uuidString).mov")
-    try? FileManager.default.removeItem(at: url)
-
-    let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-    let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-        AVVideoCodecKey: AVVideoCodecType.h264,
-        AVVideoWidthKey: Int(size.width),
-        AVVideoHeightKey: Int(size.height),
-    ])
-    input.expectsMediaDataInRealTime = false
-    let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-        assetWriterInput: input,
-        sourcePixelBufferAttributes: [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-            kCVPixelBufferWidthKey as String: Int(size.width),
-            kCVPixelBufferHeightKey as String: Int(size.height),
-        ])
-    writer.add(input)
-
-    #expect(writer.startWriting())
-    writer.startSession(atSourceTime: .zero)
-
-    let frameCount = Int(seconds * Double(fps))
-    for frame in 0..<frameCount {
-        while !input.isReadyForMoreMediaData { await Task.yield() }
-        guard let pool = adaptor.pixelBufferPool else { break }
-        var pixelBuffer: CVPixelBuffer?
-        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
-        guard let buffer = pixelBuffer else { break }
-        CVPixelBufferLockBaseAddress(buffer, [])
-        if let base = CVPixelBufferGetBaseAddress(buffer) {
-            memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
-        }
-        CVPixelBufferUnlockBaseAddress(buffer, [])
-        adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps))
-    }
-
-    input.markAsFinished()
-    await writer.finishWriting()
-    #expect(writer.status == .completed)
-    return url
-}
-
-@MainActor
-private func makeTimeRemapAudioFixture(seconds: Double,
-                                       sampleRate: Double = 48_000) throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("time-remap-audio-\(UUID().uuidString).caf")
-    try? FileManager.default.removeItem(at: url)
-
-    guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                     sampleRate: sampleRate,
-                                     channels: 1,
-                                     interleaved: false) else {
-        throw NSError(domain: "TimeRemappingTests", code: -1)
-    }
-    let file = try AVAudioFile(forWriting: url,
-                               settings: format.settings,
-                               commonFormat: format.commonFormat,
-                               interleaved: format.isInterleaved)
-    let frameCount = AVAudioFrameCount(sampleRate * seconds)
-    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-        throw NSError(domain: "TimeRemappingTests", code: -2)
-    }
-    buffer.frameLength = frameCount
-    try file.write(from: buffer)
-    return url
-}
-
-@MainActor
-private func makeTimeRemapAVFixture(seconds: Double) async throws -> URL {
-    let videoURL = try await makeTimeRemapVideoFixture(seconds: seconds)
-    let audioURL = try makeTimeRemapAudioFixture(seconds: seconds)
-    defer {
-        try? FileManager.default.removeItem(at: videoURL)
-        try? FileManager.default.removeItem(at: audioURL)
-    }
-
-    let outputURL = FileManager.default.temporaryDirectory
-        .appendingPathComponent("time-remap-av-\(UUID().uuidString).mov")
-    try? FileManager.default.removeItem(at: outputURL)
-
-    let composition = AVMutableComposition()
-    let videoAsset = AVURLAsset(url: videoURL)
-    let audioAsset = AVURLAsset(url: audioURL)
-    let duration = try await videoAsset.load(.duration)
-
-    let videoTracks = try await videoAsset.loadTracks(withMediaType: .video)
-    let audioTracks = try await audioAsset.loadTracks(withMediaType: .audio)
-    let videoSource = try #require(videoTracks.first)
-    let audioSource = try #require(audioTracks.first)
-
-    let videoTrack = try #require(composition.addMutableTrack(
-        withMediaType: .video,
-        preferredTrackID: kCMPersistentTrackID_Invalid))
-    try videoTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration),
-                                   of: videoSource,
-                                   at: .zero)
-
-    let audioTrack = try #require(composition.addMutableTrack(
-        withMediaType: .audio,
-        preferredTrackID: kCMPersistentTrackID_Invalid))
-    try audioTrack.insertTimeRange(CMTimeRange(start: .zero, duration: duration),
-                                   of: audioSource,
-                                   at: .zero)
-
-    let session = try #require(AVAssetExportSession(
-        asset: composition,
-        presetName: AVAssetExportPresetHighestQuality))
-    try await session.export(to: outputURL, as: .mov)
-    return outputURL
-}
-
-private func loadedTimeRemapMedia(from url: URL) async throws -> MediaItem {
-    let item = MediaItem(url: url)
-    item.duration = try await item.asset.load(.duration)
-    let videoTracks = try await item.asset.loadTracks(withMediaType: .video)
-    let track = try #require(videoTracks.first)
-    let audioTracks = try await item.asset.loadTracks(withMediaType: .audio)
-    item.hasVideo = true
-    item.hasAudio = !audioTracks.isEmpty
-    item.naturalSize = try await track.load(.naturalSize)
-    item.preferredTransform = try await track.load(.preferredTransform)
-    return item
-}
-
 nonisolated private func sampledLuma(asset: AVAsset,
                                      videoComposition: AVVideoComposition?,
                                      at time: CMTime) async throws -> Double {
@@ -422,11 +292,11 @@ func timeRemapSourceOutputMapping() {
 @MainActor
 @Test("TimeRemapping: CompositionBuilder scales a real retimed video composition")
 func timeRemapCompositionBuilderScalesVideo() async throws {
-    let url = try await makeTimeRemapVideoFixture(seconds: 2)
+    let url = try await makeVideoFixture(seconds: 2)
     defer { try? FileManager.default.removeItem(at: url) }
 
     let project = Project()
-    let media = try await loadedTimeRemapMedia(from: url)
+    let media = try await loadedMedia(from: url)
     project.mediaItems.append(media)
 
     var clip = Clip(mediaID: media.id, sourceStart: .zero,
@@ -443,14 +313,14 @@ func timeRemapCompositionBuilderScalesVideo() async throws {
 }
 
 @MainActor
-@Test("TimeRemapping: ramped A/V preview samples match exported samples")
+@Test("TimeRemapping: ramped A/V preview samples match exported samples", .timeLimit(.minutes(1)))
 func timeRemapPreviewExportAVParitySmoke() async throws {
-    let url = try await makeTimeRemapAVFixture(seconds: 2)
+    let url = try await makeAVFixture(seconds: 2)
     defer { try? FileManager.default.removeItem(at: url) }
 
     let project = Project()
     project.renderSize = CGSize(width: 64, height: 64)
-    let media = try await loadedTimeRemapMedia(from: url)
+    let media = try await loadedMedia(from: url)
     project.mediaItems.append(media)
 
     var videoClip = Clip(mediaID: media.id, sourceStart: .zero,
@@ -646,7 +516,7 @@ struct TimeRemappingEditorCacheTests {
 
 /// Speed keyframe times are clip-source-relative, so any edit that moves a
 /// clip's source origin or shortens its source span must rebase/filter those
-/// keyframes — otherwise the ramp drifts off the media frames it was authored
+/// keyframes -- otherwise the ramp drifts off the media frames it was authored
 /// against. These cover split, left-trim, and right-trim.
 @MainActor
 @Suite("Time remapping keyframe rebasing")
@@ -664,7 +534,7 @@ struct TimeRemappingKeyframeRebaseTests {
         let model = EditorModel()
         var clip = Clip(mediaID: UUID(), sourceStart: .zero,
                         duration: trTime(8), timelineStart: .zero)
-        // 1× everywhere so the output split point equals the source split point.
+        // 1x everywhere so the output split point equals the source split point.
         clip.speedCurve = constantSpeedCurve([1, 7])
         model.project.videoTracks[0].clips = [clip]
         model.selectedClipID = clip.id
@@ -677,7 +547,7 @@ struct TimeRemappingKeyframeRebaseTests {
         // Cut at source 4 s: left keeps the 1 s keyframe and gains a boundary
         // keyframe at the cut (4 s) so the ramp shape is preserved.
         #expect(clips[0].speedCurve.keyframes.map { $0.time } == [trTime(1), trTime(4)])
-        // Right half rebases to its own origin: a boundary at 0 plus 7 s − 4 s = 3 s.
+        // Right half rebases to its own origin: a boundary at 0 plus 7 s - 4 s = 3 s.
         #expect(clips[1].sourceStart == trTime(4))
         #expect(clips[1].speedCurve.keyframes.map { $0.time } == [trTime(0), trTime(3)])
     }
@@ -687,7 +557,7 @@ struct TimeRemappingKeyframeRebaseTests {
         let model = EditorModel()
         var clip = Clip(mediaID: UUID(), sourceStart: .zero,
                         duration: trTime(10), timelineStart: .zero)
-        // A genuine ramp: 1× at the head accelerating to 3× at the tail. Filtering
+        // A genuine ramp: 1x at the head accelerating to 3x at the tail. Filtering
         // keyframes without a boundary would flatten one side and detach the cut.
         clip.speedCurve = Keyframed<Float>(
             keyframes: [Keyframe<Float>(time: trTime(0), value: 1),
@@ -734,7 +604,7 @@ struct TimeRemappingKeyframeRebaseTests {
         #expect(trimmed.timelineStart == trTime(3))
         #expect(trimmed.sourceStart == .zero)
         #expect(trimmed.duration == trTime(6))
-        // The right edge must not move — only the head was dragged.
+        // The right edge must not move -- only the head was dragged.
         #expect(approx(trimmed.timelineEnd, originalEnd, tolerance: 0.005))
     }
 
@@ -746,7 +616,7 @@ struct TimeRemappingKeyframeRebaseTests {
         model.project.videoTracks[0].clips = [a, b]
         model.selectedClipID = a.id
 
-        // 0.5× doubles A's output length from 4 s to 8 s, so B must ripple +4 s.
+        // 0.5x doubles A's output length from 4 s to 8 s, so B must ripple +4 s.
         model.updateSelectedClipTimeRemap { $0.speedCurve.defaultValue = 0.5 }
 
         let clips = model.project.videoTracks[0].clips
@@ -765,7 +635,7 @@ struct TimeRemappingKeyframeRebaseTests {
         media.hasAudio = true
         model.project.mediaItems.append(media)
 
-        // Same media + range placed on V1 and A1 — a linked pair.
+        // Same media + range placed on V1 and A1 -- a linked pair.
         let videoClip = Clip(mediaID: media.id, sourceStart: .zero,
                              duration: trTime(10), timelineStart: .zero)
         let audioClip = Clip(mediaID: media.id, sourceStart: .zero,
@@ -917,75 +787,70 @@ struct TimeRemappingKeyframeRebaseTests {
         #expect(s.strength.keyframes.map { $0.time } == [trTime(0), trTime(2)])
     }
 
-    @Test("Trim left rebases speed keyframes onto the new source origin")
-    func trimLeftRebasesSpeedKeyframes() throws {
-        let model = EditorModel()
-        let media = MediaItem(url: URL(filePath: "/dev/null"))
-        media.duration = trTime(10)
-        media.hasVideo = true
-        model.project.mediaItems.append(media)
+    // MARK: - Parameterised trim rebasing tests
 
-        var clip = Clip(mediaID: media.id, sourceStart: .zero,
-                        duration: trTime(10), timelineStart: .zero)
-        clip.speedCurve = constantSpeedCurve([2, 5])
-        model.project.videoTracks[0].clips = [clip]
-
-        model.trimClip(id: clip.id, edge: .left, to: trTime(3))
-
-        let trimmed = model.project.videoTracks[0].clips[0]
-        #expect(trimmed.sourceStart == trTime(3))
-        // Origin advanced 3 s: an evaluated boundary pins the trim frame at the
-        // new origin, and the 5 s keyframe becomes 2 s.
-        #expect(trimmed.speedCurve.keyframes.map { $0.time } == [trTime(0), trTime(2)])
+    enum TrimRebaseCase: String, CaseIterable, Sendable {
+        case leftConstantKeyframes
+        case leftRampBoundaryValue
+        case rightDropsStaleKeyframes
     }
 
-    @Test("Trim left inside a speed ramp preserves the evaluated boundary value")
-    func trimLeftInsideRampPreservesBoundaryValue() throws {
+    @Test("Trim rebases speed keyframes correctly", arguments: TrimRebaseCase.allCases)
+    func trimRebasesSpeedKeyframes(_ testCase: TrimRebaseCase) throws {
         let model = EditorModel()
         let media = MediaItem(url: URL(filePath: "/dev/null"))
         media.duration = trTime(10)
         media.hasVideo = true
         model.project.mediaItems.append(media)
 
-        var clip = Clip(mediaID: media.id, sourceStart: .zero,
-                        duration: trTime(10), timelineStart: .zero)
-        clip.speedCurve = Keyframed<Float>(
-            keyframes: [Keyframe<Float>(time: .zero, value: 1),
-                        Keyframe<Float>(time: trTime(10), value: 3)],
-            defaultValue: 1)
-        let trimTime = clip.outputOffset(forSourceOffset: trTime(5))
-        model.project.videoTracks[0].clips = [clip]
+        switch testCase {
+        case .leftConstantKeyframes:
+            var clip = Clip(mediaID: media.id, sourceStart: .zero,
+                            duration: trTime(10), timelineStart: .zero)
+            clip.speedCurve = constantSpeedCurve([2, 5])
+            model.project.videoTracks[0].clips = [clip]
 
-        model.trimClip(id: clip.id, edge: .left, to: trimTime)
+            model.trimClip(id: clip.id, edge: .left, to: trTime(3))
 
-        let trimmed = model.project.videoTracks[0].clips[0]
-        let first = try #require(trimmed.speedCurve.keyframes.first)
-        #expect(first.time == .zero)
-        #expect(abs(first.value - 2) < 0.01)
-    }
+            let trimmed = model.project.videoTracks[0].clips[0]
+            #expect(trimmed.sourceStart == trTime(3))
+            // Origin advanced 3 s: an evaluated boundary pins the trim frame at
+            // the new origin, and the 5 s keyframe becomes 2 s.
+            #expect(trimmed.speedCurve.keyframes.map { $0.time } == [trTime(0), trTime(2)])
 
-    @Test("Trim right drops speed keyframes past the new source duration")
-    func trimRightDropsStaleSpeedKeyframes() throws {
-        let model = EditorModel()
-        let media = MediaItem(url: URL(filePath: "/dev/null"))
-        media.duration = trTime(10)
-        media.hasVideo = true
-        model.project.mediaItems.append(media)
+        case .leftRampBoundaryValue:
+            var clip = Clip(mediaID: media.id, sourceStart: .zero,
+                            duration: trTime(10), timelineStart: .zero)
+            clip.speedCurve = Keyframed<Float>(
+                keyframes: [Keyframe<Float>(time: .zero, value: 1),
+                            Keyframe<Float>(time: trTime(10), value: 3)],
+                defaultValue: 1)
+            let trimTime = clip.outputOffset(forSourceOffset: trTime(5))
+            model.project.videoTracks[0].clips = [clip]
 
-        var clip = Clip(mediaID: media.id, sourceStart: .zero,
-                        duration: trTime(10), timelineStart: .zero)
-        clip.speedCurve = constantSpeedCurve([2, 8])
-        model.project.videoTracks[0].clips = [clip]
+            model.trimClip(id: clip.id, edge: .left, to: trimTime)
 
-        model.trimClip(id: clip.id, edge: .right, to: trTime(5))
+            let trimmed = model.project.videoTracks[0].clips[0]
+            let first = try #require(trimmed.speedCurve.keyframes.first)
+            #expect(first.time == .zero)
+            #expect(abs(first.value - 2) < 0.01)
 
-        let trimmed = model.project.videoTracks[0].clips[0]
-        #expect(trimmed.duration == trTime(5))
-        // Source span shrank to 5 s, so the 8 s keyframe no longer fits.
-        // A boundary keyframe is inserted at the new duration to preserve the
-        // ramp shape at the trim point.
-        #expect(trimmed.speedCurve.keyframes.map { $0.time } == [trTime(2), trTime(5)])
-        // Boundary value matches the interpolated value at the trim point.
-        #expect(trimmed.speedCurve.keyframes.last?.value == 1)
+        case .rightDropsStaleKeyframes:
+            var clip = Clip(mediaID: media.id, sourceStart: .zero,
+                            duration: trTime(10), timelineStart: .zero)
+            clip.speedCurve = constantSpeedCurve([2, 8])
+            model.project.videoTracks[0].clips = [clip]
+
+            model.trimClip(id: clip.id, edge: .right, to: trTime(5))
+
+            let trimmed = model.project.videoTracks[0].clips[0]
+            #expect(trimmed.duration == trTime(5))
+            // Source span shrank to 5 s, so the 8 s keyframe no longer fits.
+            // A boundary keyframe is inserted at the new duration to preserve
+            // the ramp shape at the trim point.
+            #expect(trimmed.speedCurve.keyframes.map { $0.time } == [trTime(2), trTime(5)])
+            // Boundary value matches the interpolated value at the trim point.
+            #expect(trimmed.speedCurve.keyframes.last?.value == 1)
+        }
     }
 }

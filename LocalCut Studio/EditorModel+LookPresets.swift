@@ -3,6 +3,7 @@ import AppKit
 import CoreMedia
 import UniformTypeIdentifiers
 import LocalCutCore
+import LocalCutDomain
 
 extension UTType {
     static let localCutLookPreset = UTType(filenameExtension: LookPresetV1.fileExtension,

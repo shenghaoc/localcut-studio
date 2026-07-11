@@ -44,6 +44,10 @@ API and uses `NSLock.withLock` for the read.
 - **Impact**: No product behavior change. The non-WebRTC stub path remains
   deterministic and synchronized.
 
+This records the completed audit's original boundary. The later
+`LocalCutPlatform` extraction made WebRTC mandatory on macOS and removed the
+fallback path and accessor; current tests use the real WebRTC-backed tap.
+
 ### B4 - Replay-buffer track pipes needed explicit queue confinement
 
 `TrackPipe` wraps non-`Sendable` `AVAssetReaderTrackOutput` and

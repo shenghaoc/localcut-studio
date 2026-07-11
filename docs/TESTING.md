@@ -4,12 +4,13 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 
 ## Test Categories
 
-### 1. LocalCutCore Package Tests (Deterministic)
+### 1. Domain and Apple Core Package Tests (Deterministic)
 - **Location:** `Packages/LocalCutCore/Tests/`
 - **Framework:** Swift Testing
 - **Run command:** `swift test --package-path Packages/LocalCutCore`
-- **CI behavior:** No retry. Failures are always deterministic.
-- **Characteristics:** Pure logic, no GPU, no media, no network.
+- **CI behavior:** No retry. `LocalCutDomain` runs on Linux;
+  macOS builds `LocalCutPlatform` and runs `LocalCutDomain`/`LocalCutCore` tests.
+- **Characteristics:** No GPU, decoded media, or network.
 
 ### 2. Xcode Unit/Integration Tests
 - **Location:** `LocalCut StudioTests/`
@@ -36,6 +37,20 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 - **Run command:** `LOCALCUT_REQUIRE_MEDIAMTX_INTEGRATION=1 ./Scripts/run-mediamtx-whip-integration.sh`
 - **CI behavior:** Skipped if no container runtime and not required. In CI (where it is required), retries MediaMTX startup/readiness before failing. The wrapper attempts Docker, then Podman, then a direct binary fallback on macOS. Once MediaMTX is ready, the focused WHIP Xcode test is not retried.
 - **Characteristics:** Requires MediaMTX container or binary, network port binding.
+
+## CI Topology
+
+The portable domain Linux job, macOS package job, and full Xcode job start in
+parallel. The macOS package job restores its
+SwiftPM `.build` cache, enforces the core/app import boundary, runs the package
+platform target, runs the package suite, and validates OTIO goldens. Keeping OTIO in this shorter job removes it
+from the full Xcode critical path. The Xcode job runs the WebRTC-enabled
+unit/integration/UI suite plus MediaMTX. There is no alternate WebRTC or
+non-WebRTC product path.
+
+Do not shard the hosted app suite without re-measuring build cost: current CI
+timings show that compiling the app dominates the test runtime, so additional
+shards would duplicate most of the work instead of reducing wall-clock time.
 
 ## Flaky-Test Detection
 
@@ -244,8 +259,12 @@ forward arbitrary parent-process variables into the test runner.
 
 ### Jobs
 
-1. **package-test:** Runs LocalCutCore package tests (deterministic, no retry).
-2. **test:** Runs Xcode tests with flake detection, OTIO golden validation, and MediaMTX integration. Depends on `package-test` — it only runs after package tests pass, to fail fast on pure-logic regressions.
+1. **portable-domain-test:** Runs `LocalCutDomain` on Linux.
+2. **package-test:** Builds `LocalCutPlatform`, validates layer boundaries, runs
+   deterministic Domain/Core tests, and validates OTIO goldens.
+3. **test:** Runs Xcode tests with flake detection and MediaMTX integration.
+
+All three jobs start in parallel; none waits on another job's build artifacts.
 
 ### Artifacts
 

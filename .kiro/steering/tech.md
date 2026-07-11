@@ -2,7 +2,12 @@
 
 ## Platform & toolchain
 
-- **Target**: macOS 26 (`MACOSX_DEPLOYMENT_TARGET = 26.0`). `SUPPORTED_PLATFORMS = macosx` — this is a Mac-only app so AppKit interop is fair game.
+- **App target**: macOS 26 (`MACOSX_DEPLOYMENT_TARGET = 26.0`).
+  `SUPPORTED_PLATFORMS = macosx` — the product is Mac-only, so AppKit interop
+  is fair game in the app layer.
+- **Portable target**: `LocalCutDomain` uses Foundation only and must compile
+  under SwiftPM on macOS and Linux. Platform-specific media support
+  is not faked or substituted on those hosts.
 - **Language**: Swift 6 mode features enabled (approachable concurrency). `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` — types are main-actor isolated unless marked otherwise. Push blocking media work off the main actor deliberately.
 - **UI**: SwiftUI with the **Observation** framework (`@Observable`, `@Bindable`). No Combine — prefer `async`/`await` and `AsyncSequence`.
 - **Xcode project**: target and product/app name **LocalCut Studio**. Build/run via the `xcode-tools` MCP (`BuildProject`, `RunProject`) or `xcodebuild`.
@@ -24,7 +29,9 @@
 
 ## Constraints / rules
 
-- **No third-party media libraries** — AVFoundation/VideoToolbox/Core Image cover the pipeline. Avoid adding SPM deps without a spec.
+- **No third-party media libraries without a spec** — WebRTC and Lottie are
+  documented macOS platform dependencies. They remain in `LocalCutPlatform`
+  and never enter `LocalCutDomain` or `LocalCutCore`.
 - **Time math in `CMTime`** — never convert to `Double` seconds for editing decisions except at the UI boundary (pixels ↔ seconds).
 - **Async asset loading** — never use the deprecated synchronous `AVAsset` accessors; they block and are removed in modern SDKs.
 - **One `AVPlayer`** — owned by `EditorModel`; views observe it, never create their own.

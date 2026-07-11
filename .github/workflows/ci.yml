@@ -20,6 +20,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  portable-domain-test:
+    name: Test (LocalCutDomain / Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # ubuntu-24.04 provides Swift 6.3.3, matching the proven CI setup in
+      # rowplay-studio#46 and runplay-studio#28 without a setup action.
+      - name: Verify Swift version
+        run: swift --version
+
+      - name: Cache portable package build
+        uses: actions/cache@v6
+        with:
+          path: Packages/LocalCutCore/.build
+          key: localcutdomain-${{ runner.os }}-swift-6.3.3-${{ hashFiles('Packages/LocalCutCore/Package.swift', 'Packages/LocalCutCore/Sources/LocalCutDomain/**/*.swift', 'Packages/LocalCutCore/Tests/LocalCutDomainTests/**/*.swift') }}
+          restore-keys: |
+            localcutdomain-${{ runner.os }}-swift-6.3.3-
+
+      - name: Build and test portable domain
+        run: swift test --package-path Packages/LocalCutCore
+
   package-test:
     name: Test (LocalCutCore package)
     runs-on: macos-26
@@ -32,8 +57,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Cache LocalCutCore build
+        uses: actions/cache@v6
+        with:
+          path: Packages/LocalCutCore/.build
+          key: localcutcore-${{ runner.os }}-${{ hashFiles('Packages/LocalCutCore/Package.swift', 'Packages/LocalCutCore/Sources/**/*.swift', 'Packages/LocalCutCore/Tests/**/*.swift') }}
+          restore-keys: |
+            localcutcore-${{ runner.os }}-
+
+      - name: Validate core/app layer boundary
+        run: ./Scripts/validate-layer-boundaries.sh
+
+      - name: Build macOS platform layer
+        run: swift build --package-path "$PACKAGE_PATH" --target LocalCutPlatform
+
       - name: Run package tests
         run: swift test --package-path "$PACKAGE_PATH"
+
+      # OTIO validation is independent of the Xcode build. Running it in this
+      # shorter parallel job removes it from the macOS test critical path.
+      - name: Restore OTIO validator venv
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/localcut-otio-validator-0.17.0
+          key: otio-validator-${{ runner.os }}-0.17.0
+
+      - name: Validate OTIO goldens
+        env:
+          OTIO_VALIDATOR_VENV: ${{ runner.temp }}/localcut-otio-validator-0.17.0
+        run: ./Scripts/validate-otio-goldens.sh
 
   test:
     name: Test (macOS 26 / Xcode)
@@ -57,23 +109,16 @@ jobs:
           swift --version
           sw_vers
 
-      - name: Cache WebRTC XCFramework
-        uses: actions/cache@v4
-        with:
-          path: Packages/LocalCutWebRTC/WebRTC.xcframework
-          key: webrtc-xcframework-140.0.0
-
-      - name: Prepare WebRTC XCFramework
-        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
-
       - name: Restore DerivedData cache
         id: deriveddata-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: DerivedData
-          key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
-          restore-keys: |
-            deriveddata-${{ runner.os }}-webrtc-
+          # Source-only changes can safely reuse the main-branch cache; Xcode
+          # invalidates changed objects. Package/project graph changes must
+          # miss exactly, because restoring modules built from an older graph
+          # can expose duplicate package products under Xcode 26.5.
+          key: deriveddata-${{ runner.os }}-v2-${{ hashFiles('**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
 
       - name: Build and test (with flake detection)
         run: ./Scripts/run-xcode-tests-with-flake-detection.sh
@@ -83,17 +128,6 @@ jobs:
       # not be masked by a retry pass).
       - name: MediaMTX WHIP integration
         run: ./Scripts/run-mediamtx-whip-integration.sh
-
-      - name: Restore OTIO validator venv
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/localcut-otio-validator-0.17.0
-          key: otio-validator-${{ runner.os }}-0.17.0
-
-      - name: Validate OTIO goldens
-        env:
-          OTIO_VALIDATOR_VENV: ${{ runner.temp }}/localcut-otio-validator-0.17.0
-        run: ./Scripts/validate-otio-goldens.sh
 
       - name: Upload failure diagnostics
         if: failure()
@@ -121,87 +155,7 @@ jobs:
 
       - name: Save DerivedData cache
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.deriveddata-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: DerivedData
-          key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
-
-  build-non-webrtc:
-    name: Test (non-WebRTC stubs)
-    runs-on: macos-26
-    timeout-minutes: 30
-
-    env:
-      PROJECT: "LocalCut Studio.xcodeproj"
-      SCHEME: "LocalCut Studio"
-      RESULT_BUNDLE: TestResults.xcresult
-      DERIVED_DATA: DerivedData
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      # SPM resolves the LocalCutWebRTC package unconditionally; the XCFramework
-      # binary target must exist on disk even though we compile without the
-      # LOCALCUT_ENABLE_WEBRTC flag so the stub code paths are exercised.
-      - name: Cache WebRTC XCFramework
-        uses: actions/cache@v4
-        with:
-          path: Packages/LocalCutWebRTC/WebRTC.xcframework
-          key: webrtc-xcframework-140.0.0
-
-      - name: Prepare WebRTC XCFramework
-        run: ./Packages/LocalCutWebRTC/Scripts/download-webrtc.sh
-
-      - name: Restore DerivedData cache
-        id: deriveddata-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: DerivedData
-          key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
-          restore-keys: |
-            deriveddata-${{ runner.os }}-nonwebrtc-
-
-      # Runs the focused publish suite for the non-WebRTC stub path.
-      # The nonWebRTCVideoTapStoresLatestFrame test exercises the stub
-      # VideoPublishTap; the WebRTC-enabled test job covers the real path.
-      - name: Test without WebRTC
-        run: |
-          set -o pipefail
-          rm -rf "$RESULT_BUNDLE"
-
-          # Strip LOCALCUT_ENABLE_WEBRTC from the project-level setting
-          # so the #if !LOCALCUT_ENABLE_WEBRTC stub paths are compiled.
-          # Keep the same per-test timeout as the WebRTC-enabled lane so a
-          # hung stub-path test cannot consume the whole 30-minute job.
-          xcodebuild test \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -configuration Debug \
-            -destination 'platform=macOS' \
-            -derivedDataPath "$DERIVED_DATA" \
-            -resultBundlePath "$RESULT_BUNDLE" \
-            -only-testing:"LocalCut StudioTests/WhipPublishTests" \
-            -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 300 \
-            SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG \
-            | tee xcodebuild.log
-
-      - name: Upload failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: xcode-test-non-webrtc-diagnostics
-          path: |
-            xcodebuild.log
-            TestResults.xcresult
-            DerivedData/Build/Logs/Build/*.xcactivitylog
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Save DerivedData cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.deriveddata-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: DerivedData
-          key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
+          key: deriveddata-${{ runner.os }}-v2-${{ hashFiles('**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}

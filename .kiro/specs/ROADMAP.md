@@ -94,7 +94,7 @@ The roadmap introduces exactly **two** non-Apple runtime libraries; both are jus
 | Library | Phase | Why it can't be Apple-native |
 |---|---|---|
 | [`lottie-ios`](https://github.com/airbnb/lottie-ios) (Apache-2.0) | [Phase 38](./phase-38-look-packs/) | Lottie's After Effects JSON model has no Apple equivalent — `CAEmitterLayer` / `CAAnimation` / SwiftUI animation cover nothing of it. Writing a renderer from scratch would dwarf the spec. |
-| Community WebRTC XCFramework — primary [`stasel/WebRTC`](https://github.com/stasel/WebRTC); fallback [`webrtc-sdk/webrtc`](https://github.com/webrtc-sdk/webrtc) (BSD-3-Clause) | [Phase 47](./phase-47-whip-publish/) | Apple ships WebRTC inside `WKWebView` only; it is not exposed as a standalone framework usable from AppKit / SwiftUI. WHIP requires `RTCPeerConnection`. The official GoogleWebRTC CocoaPods binary is iOS-only with no macOS slice — adding it via SPM would not link the macOS target. The community packages repackage upstream `webrtc.googlesource.com` sources with the public API unchanged. |
+| Community WebRTC XCFramework — [`webrtc-sdk/Specs`](https://github.com/webrtc-sdk/Specs) 125.6422.09, backed by [`webrtc-sdk/webrtc`](https://github.com/webrtc-sdk/webrtc) (BSD-3-Clause) | [Phase 47](./phase-47-whip-publish/) | Apple ships WebRTC inside `WKWebView` only; it is not exposed as a standalone framework usable from AppKit / SwiftUI. WHIP requires `RTCPeerConnection`. The pinned Swift package includes macOS and exposes the AVAudioEngine input hook LocalCut needs for master-bus PCM. |
 
 Every other ML / media path uses an Apple-provided API — no vendored on-device models anywhere in the roadmap.
 

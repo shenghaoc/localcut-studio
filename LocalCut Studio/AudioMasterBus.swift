@@ -3,6 +3,7 @@ import AVFoundation
 import Accelerate
 import os
 import LocalCutCore
+import LocalCutPlatform
 
 /// The native macOS port's audio master bus (P16). Owns live and offline
 /// `AVAudioEngine` graphs for metering, processed preview audio, and export

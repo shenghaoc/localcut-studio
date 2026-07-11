@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreMedia
 import LocalCutCore
+import LocalCutDomain
 
 struct ClipTransformKeyframeEditor: View {
     @Bindable var model: EditorModel

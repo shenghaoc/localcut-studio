@@ -1,7 +1,9 @@
 import Foundation
 import Testing
 import LocalCutCore
+import LocalCutDomain
 @testable import LocalCut_Studio
+@testable import LocalCutPlatform
 
 /// MediaMTX WHIP integration test.
 ///
@@ -12,7 +14,7 @@ import LocalCutCore
 /// runs leave the suite disabled; the integration script creates a short-lived
 /// marker after starting MediaMTX and removes it during cleanup.
 private enum MediaMTXIntegrationGate {
-    nonisolated static let markerURL = URL(fileURLWithPath: #filePath)
+    nonisolated static let markerURL = URL(filePath: #filePath)
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .appendingPathComponent(".build/mediamtx/integration-enabled")

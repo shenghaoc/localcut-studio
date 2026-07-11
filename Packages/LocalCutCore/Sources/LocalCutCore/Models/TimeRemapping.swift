@@ -1,5 +1,5 @@
 import Foundation
-import AVFoundation
+import CoreMedia
 
 // MARK: - Time Pitch Algorithm
 
@@ -17,12 +17,6 @@ public nonisolated enum TimePitchAlgorithm: String, Codable, Hashable, CaseItera
         }
     }
 
-    public var avFoundationAlgorithm: AVAudioTimePitchAlgorithm {
-        switch self {
-        case .timeDomain: .timeDomain
-        case .spectral: .spectral
-        }
-    }
 }
 
 // MARK: - Time Remap Segment

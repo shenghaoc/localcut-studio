@@ -361,38 +361,33 @@ struct TransitionsTests {
         #expect(model.selectedTransitionMaxDuration == time(5))
     }
 
-    @Test("Removing a transition restores the plain cut")
-    func removeTransitionRestoresCut() {
-        let (model, _, bID) = makeModel()
-        model.selectedClipID = bID
-        model.addTransitionToSelectedClip()
-        model.removeSelectedTransition()
-
-        #expect(model.clip(for: bID)?.transition == nil)
-        #expect(model.selectedTransitionClipID == nil)
+    struct TransitionClearCase: Sendable, CustomTestStringConvertible {
+        let name: String
+        var testDescription: String { name }
     }
 
-    @Test("Deleting a transition's predecessor clears the now-orphaned transition")
-    func deletePredecessorClearsTransition() {
+    @Test("Transition is cleared by mutation", arguments: [
+        TransitionClearCase(name: "remove transition"),
+        TransitionClearCase(name: "delete predecessor"),
+        TransitionClearCase(name: "move clip"),
+    ])
+    func transitionClearedByMutation(_ cs: TransitionClearCase) {
         let (model, aID, bID) = makeModel()
         model.selectedClipID = bID
         model.addTransitionToSelectedClip()
 
-        model.selectedClipID = aID
-        model.deleteSelectedClip()
-
-        #expect(model.clip(for: bID)?.transition == nil)
-        #expect(model.selectedTransitionClipID == nil)
-    }
-
-    @Test("Moving a clip drops its incoming transition (cut destroyed)")
-    func moveClipClearsTransition() {
-        let (model, _, bID) = makeModel()
-        model.selectedClipID = bID
-        model.addTransitionToSelectedClip()
-
-        let trackID = model.project.videoTracks.first!.id
-        model.moveClip(id: bID, toTrack: trackID, start: time(20))
+        switch cs.name {
+        case "remove transition":
+            model.removeSelectedTransition()
+        case "delete predecessor":
+            model.selectedClipID = aID
+            model.deleteSelectedClip()
+        case "move clip":
+            let trackID = model.project.videoTracks.first!.id
+            model.moveClip(id: bID, toTrack: trackID, start: time(20))
+        default:
+            break
+        }
 
         #expect(model.clip(for: bID)?.transition == nil)
         #expect(model.selectedTransitionClipID == nil)

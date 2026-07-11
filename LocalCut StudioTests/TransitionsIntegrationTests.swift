@@ -1,8 +1,11 @@
 import Testing
 import AVFoundation
-import CoreImage
 import LocalCutCore
 @testable import LocalCut_Studio
+
+extension Tag {
+    @Tag static var integration: Self
+}
 
 /// End-to-end transition tests that build a real `AVComposition` from a
 /// generated video fixture, exercising the AVFoundation insertion / ripple path
@@ -13,69 +16,6 @@ struct TransitionsIntegrationTests {
 
     private func time(_ seconds: Double) -> CMTime {
         CMTime(seconds: seconds, preferredTimescale: 600)
-    }
-
-    // MARK: - Fixture
-
-    /// Writes a short solid-colour H.264 movie to a temp file and returns its URL.
-    private func makeVideoFixture(seconds: Double, fps: Int32 = 30,
-                                  size: CGSize = CGSize(width: 64, height: 64)) async throws -> URL {
-        // Unique per call — tests in a suite run in parallel and must not share
-        // (and clobber) the same fixture file.
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("transition-fixture-\(UUID().uuidString).mov")
-        try? FileManager.default.removeItem(at: url)
-
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Int(size.width),
-            AVVideoHeightKey: Int(size.height),
-        ])
-        input.expectsMediaDataInRealTime = false
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-                kCVPixelBufferWidthKey as String: Int(size.width),
-                kCVPixelBufferHeightKey as String: Int(size.height),
-            ])
-        writer.add(input)
-
-        #expect(writer.startWriting())
-        writer.startSession(atSourceTime: .zero)
-
-        let frameCount = Int(seconds * Double(fps))
-        for frame in 0..<frameCount {
-            while !input.isReadyForMoreMediaData { await Task.yield() }
-            guard let pool = adaptor.pixelBufferPool else { break }
-            var pixelBuffer: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
-            guard let buffer = pixelBuffer else { break }
-            CVPixelBufferLockBaseAddress(buffer, [])
-            if let base = CVPixelBufferGetBaseAddress(buffer) {
-                // Mid-grey opaque frame.
-                memset(base, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
-            }
-            CVPixelBufferUnlockBaseAddress(buffer, [])
-            adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps))
-        }
-
-        input.markAsFinished()
-        await writer.finishWriting()
-        #expect(writer.status == .completed)
-        return url
-    }
-
-    private func loadedMedia(from url: URL) async throws -> MediaItem {
-        let item = MediaItem(url: url)
-        item.duration = try await item.asset.load(.duration)
-        let videoTracks = try await item.asset.loadTracks(withMediaType: .video)
-        let track = try #require(videoTracks.first)
-        item.hasVideo = true
-        item.naturalSize = try await track.load(.naturalSize)
-        item.preferredTransform = try await track.load(.preferredTransform)
-        return item
     }
 
     // MARK: - Tests

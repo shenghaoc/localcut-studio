@@ -6,6 +6,7 @@ import Metal
 import CoreVideo
 import os
 import LocalCutCore
+import LocalCutPlatform
 
 // MARK: - Layer metadata for the compositor
 

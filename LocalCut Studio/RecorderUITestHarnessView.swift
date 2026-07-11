@@ -38,41 +38,31 @@ struct RecorderUITestHarnessView: View {
             }
 
             HStack(spacing: 10) {
-                Button("Start Recording") {
-                    startRecording()
-                }
-                .accessibilityIdentifier("uitest-start-recording")
-                .keyboardShortcut("1", modifiers: recorderHarnessShortcutModifiers)
-                .disabled(phase == .recording)
+                Button("Start Recording") { startRecording() }
+                    .accessibilityIdentifier("uitest-start-recording")
+                    .keyboardShortcut("1", modifiers: recorderHarnessShortcutModifiers)
+                    .disabled(phase == .recording)
 
-                Button("Pause") {
-                    pauseRecording()
-                }
-                .accessibilityIdentifier("uitest-pause-recording")
-                .keyboardShortcut("2", modifiers: recorderHarnessShortcutModifiers)
-                .disabled(phase != .recording)
+                Button("Pause") { pauseRecording() }
+                    .accessibilityIdentifier("uitest-pause-recording")
+                    .keyboardShortcut("2", modifiers: recorderHarnessShortcutModifiers)
+                    .disabled(phase != .recording)
 
-                Button("Resume") {
-                    resumeRecording()
-                }
-                .accessibilityIdentifier("uitest-resume-recording")
-                .keyboardShortcut("3", modifiers: recorderHarnessShortcutModifiers)
-                .disabled(phase != .paused)
+                Button("Resume") { resumeRecording() }
+                    .accessibilityIdentifier("uitest-resume-recording")
+                    .keyboardShortcut("3", modifiers: recorderHarnessShortcutModifiers)
+                    .disabled(phase != .paused)
 
-                Button("Stop") {
-                    stopRecording()
-                }
-                .accessibilityIdentifier("uitest-stop-recording")
-                .keyboardShortcut("4", modifiers: recorderHarnessShortcutModifiers)
-                .disabled(phase != .recording)
+                Button("Stop") { stopRecording() }
+                    .accessibilityIdentifier("uitest-stop-recording")
+                    .keyboardShortcut("4", modifiers: recorderHarnessShortcutModifiers)
+                    .disabled(phase != .recording)
             }
 
-            Button("Collapse Gaps") {
-                model.collapseRecordingGap()
-            }
-            .accessibilityIdentifier("uitest-collapse-gaps")
-            .keyboardShortcut("5", modifiers: recorderHarnessShortcutModifiers)
-            .disabled(model.lastRecordingSlots.isEmpty)
+            Button("Collapse Gaps") { model.collapseRecordingGap() }
+                .accessibilityIdentifier("uitest-collapse-gaps")
+                .keyboardShortcut("5", modifiers: recorderHarnessShortcutModifiers)
+                .disabled(model.lastRecordingSlots.isEmpty)
         }
         .padding(24)
     }

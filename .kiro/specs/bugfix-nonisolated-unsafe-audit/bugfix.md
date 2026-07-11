@@ -50,6 +50,10 @@ that lock in the non-WebRTC path.
   the latest captured frame, but reads now use the same synchronization as
   writes.
 
+This records the state of that completed audit. The later `LocalCutPlatform`
+extraction made WebRTC a required macOS dependency and removed the fallback
+accessor entirely; current tests exercise the real WebRTC-backed tap.
+
 ### B4 - Reconnect test seams were mutable after construction
 
 `ReconnectController.clock` and `ReconnectController.sleep` were mutable

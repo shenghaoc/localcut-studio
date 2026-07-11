@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import AVFoundation
 import LocalCutCore
+import LocalCutDomain
 
 /// The multi-track timeline: a time ruler, one lane per track, clip blocks, and a
 /// draggable playhead. Zoom is controlled by `model.pixelsPerSecond`.

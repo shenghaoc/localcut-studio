@@ -5,6 +5,8 @@ import AVFoundation
 import CoreMedia
 import os
 import LocalCutCore
+import LocalCutDomain
+@testable import LocalCutPlatform
 @testable import LocalCut_Studio
 
 nonisolated private final class RecorderSwitchingSession: CaptureRunningSession, @unchecked Sendable {
@@ -58,33 +60,35 @@ nonisolated private final class RecorderSwitchingSession: CaptureRunningSession,
 @Suite("Recorder UX — Manifest pause/resume records")
 struct ManifestPauseResumeTests {
 
-    @Test("Pause record round-trips through encode/parse")
-    func pauseRecordRoundTrip() throws {
-        let manifest = CaptureManifest(records: [
-            .pause(CapturePauseRecord(atUs: 5_000_000)),
-        ])
-        let data = try manifest.encodeNDJSON()
-        let parsed = CaptureManifest.parseNDJSON(data)
-        #expect(parsed.records.count == 1)
-        if case .pause(let record) = parsed.records.first {
-            #expect(record.atUs == 5_000_000)
-        } else {
-            Issue.record("Expected pause record")
+    struct RecordRoundTripCase: Sendable, CustomTestStringConvertible {
+        let record: CaptureManifestRecord
+        let expectedAtUs: Int64
+        var testDescription: String {
+            switch record {
+            case .pause: "pause at \(expectedAtUs)us"
+            case .resume: "resume at \(expectedAtUs)us"
+            default: "record at \(expectedAtUs)us"
+            }
         }
     }
 
-    @Test("Resume record round-trips through encode/parse")
-    func resumeRecordRoundTrip() throws {
-        let manifest = CaptureManifest(records: [
-            .resume(CaptureResumeRecord(atUs: 8_000_000)),
-        ])
+    @Test("Record round-trips through encode/parse", arguments: [
+        RecordRoundTripCase(record: .pause(CapturePauseRecord(atUs: 5_000_000)), expectedAtUs: 5_000_000),
+        RecordRoundTripCase(record: .resume(CaptureResumeRecord(atUs: 8_000_000)), expectedAtUs: 8_000_000),
+    ])
+    func recordRoundTrip(_ testCase: RecordRoundTripCase) throws {
+        let manifest = CaptureManifest(records: [testCase.record])
         let data = try manifest.encodeNDJSON()
         let parsed = CaptureManifest.parseNDJSON(data)
         #expect(parsed.records.count == 1)
-        if case .resume(let record) = parsed.records.first {
-            #expect(record.atUs == 8_000_000)
-        } else {
-            Issue.record("Expected resume record")
+        // Verify both the kind and the timestamp survive the round-trip.
+        switch (testCase.record, parsed.records.first) {
+        case (.pause, .pause(let record)):
+            #expect(record.atUs == testCase.expectedAtUs)
+        case (.resume, .resume(let record)):
+            #expect(record.atUs == testCase.expectedAtUs)
+        default:
+            Issue.record("Record kind mismatch: expected \(testCase.record), got \(String(describing: parsed.records.first))")
         }
     }
 
@@ -322,37 +326,51 @@ struct CoordinatorSourceSwitchRoutingTests {
 @Suite("PiP preset layout")
 struct PiPPresetLayoutTests {
 
-    @Test("Bottom-right preset places origin at bottom-right corner")
-    func bottomRightPlacement() {
-        let preset = PiPPreset(corner: .bottomRight, size: .medium, mask: .roundedRect)
-        let canvas = CGSize(width: 1920, height: 1080)
-        let source = CGSize(width: 1280, height: 720)
-        let layout = preset.layout(canvasSize: canvas, sourceSize: source)
-
-        // Scale should be proportional to canvas height fraction.
-        let expectedHeight = canvas.height * PiPSize.medium.heightFraction
-        let expectedScale = expectedHeight / source.height
-        #expect(abs(layout.scale - expectedScale) < 0.01)
-
-        // X should be near the right edge minus inset.
-        let expectedWidth = expectedHeight * (source.width / source.height)
-        let expectedX = canvas.width - expectedWidth - preset.inset
-        #expect(abs(layout.origin.x - expectedX) < 1)
-
-        // Y should be near the bottom edge minus inset.
-        let expectedY = canvas.height - expectedHeight - preset.inset
-        #expect(abs(layout.origin.y - expectedY) < 1)
+    struct PlacementCase: Sendable, CustomTestStringConvertible {
+        let preset: PiPPreset
+        let canvas: CGSize
+        let source: CGSize
+        let expectedOriginX: CGFloat
+        let expectedOriginY: CGFloat
+        let expectedScale: CGFloat?
+        var testDescription: String { "\(preset) \(Int(source.width))x\(Int(source.height))" }
     }
 
-    @Test("Top-left preset places origin at top-left corner")
-    func topLeftPlacement() {
-        let preset = PiPPreset(corner: .topLeft, size: .small, mask: .circle)
+    nonisolated static let placementCases: [PlacementCase] = {
         let canvas = CGSize(width: 1920, height: 1080)
-        let source = CGSize(width: 640, height: 480)
-        let layout = preset.layout(canvasSize: canvas, sourceSize: source)
 
-        #expect(abs(layout.origin.x - preset.inset) < 1)
-        #expect(abs(layout.origin.y - preset.inset) < 1)
+        // Bottom-right: medium, roundedRect, 1280x720 source
+        let brPreset = PiPPreset(corner: .bottomRight, size: .medium, mask: .roundedRect)
+        let brSource = CGSize(width: 1280, height: 720)
+        let brExpectedHeight = canvas.height * PiPSize.medium.heightFraction
+        let brExpectedScale = brExpectedHeight / brSource.height
+        let brExpectedWidth = brExpectedHeight * (brSource.width / brSource.height)
+        let brExpectedX = canvas.width - brExpectedWidth - brPreset.inset
+        let brExpectedY = canvas.height - brExpectedHeight - brPreset.inset
+
+        // Top-left: small, circle, 640x480 source
+        let tlPreset = PiPPreset(corner: .topLeft, size: .small, mask: .circle)
+        let tlSource = CGSize(width: 640, height: 480)
+
+        return [
+            PlacementCase(preset: brPreset, canvas: canvas, source: brSource,
+                          expectedOriginX: brExpectedX, expectedOriginY: brExpectedY,
+                          expectedScale: brExpectedScale),
+            PlacementCase(preset: tlPreset, canvas: canvas, source: tlSource,
+                          expectedOriginX: tlPreset.inset, expectedOriginY: tlPreset.inset,
+                          expectedScale: nil),
+        ]
+    }()
+
+    @Test("PiP preset places origin correctly", arguments: placementCases)
+    func placement(_ testCase: PlacementCase) {
+        let layout = testCase.preset.layout(canvasSize: testCase.canvas, sourceSize: testCase.source)
+
+        #expect(abs(layout.origin.x - testCase.expectedOriginX) < 1)
+        #expect(abs(layout.origin.y - testCase.expectedOriginY) < 1)
+        if let expectedScale = testCase.expectedScale {
+            #expect(abs(layout.scale - expectedScale) < 0.01)
+        }
     }
 
     @Test("Standard presets all produce valid layouts")
@@ -592,14 +610,12 @@ struct ReplayBufferTimelineInsertionTests {
 
         let duration = CMTime(seconds: 1, preferredTimescale: 600)
         let offset = CMTime(seconds: 0.25, preferredTimescale: 600)
-        let screenURL = try await makeReplayVideoFixture(
-            in: directoryURL,
-            name: "screen.mov",
-            duration: duration)
-        let webcamURL = try await makeReplayVideoFixture(
-            in: directoryURL,
-            name: "webcam.mov",
-            duration: duration)
+        let screenURL = try await makeVideoFixture(
+            seconds: duration.seconds,
+            in: directoryURL)
+        let webcamURL = try await makeVideoFixture(
+            seconds: duration.seconds,
+            in: directoryURL)
 
         let model = EditorModel()
         model.currentTime = 4
@@ -635,81 +651,6 @@ struct ReplayBufferTimelineInsertionTests {
         #expect(model.project.mediaItems.isEmpty)
         #expect(model.project.videoTracks.count == 1)
         #expect(model.project.videoTracks[0].clips.isEmpty)
-    }
-
-    private func makeReplayVideoFixture(in directoryURL: URL,
-                                        name: String,
-                                        duration: CMTime,
-                                        fps: Int32 = 30) async throws -> URL {
-        let url = directoryURL.appendingPathComponent(name)
-        try? FileManager.default.removeItem(at: url)
-
-        let size = CGSize(width: 64, height: 64)
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Int(size.width),
-            AVVideoHeightKey: Int(size.height),
-        ])
-        input.expectsMediaDataInRealTime = false
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-                kCVPixelBufferWidthKey as String: Int(size.width),
-                kCVPixelBufferHeightKey as String: Int(size.height),
-            ])
-        writer.add(input)
-        try #require(writer.startWriting())
-        writer.startSession(atSourceTime: .zero)
-
-        let frameCount = max(1, Int(duration.seconds * Double(fps)))
-        for frame in 0..<frameCount {
-            while !input.isReadyForMoreMediaData {
-                guard writer.status == .writing else {
-                    throw writer.error ?? NSError(domain: "ReplayBufferTimelineInsertionTests", code: -1)
-                }
-                await Task.yield()
-            }
-            let buffer = try makePixelBuffer(size: size, adaptor: adaptor)
-            let lockStatus = CVPixelBufferLockBaseAddress(buffer, [])
-            guard lockStatus == kCVReturnSuccess else {
-                throw NSError(domain: "ReplayBufferTimelineInsertionTests", code: Int(lockStatus))
-            }
-            defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
-            guard let baseAddress = CVPixelBufferGetBaseAddress(buffer) else {
-                throw NSError(domain: "ReplayBufferTimelineInsertionTests", code: -2)
-            }
-            memset(baseAddress, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
-            guard adaptor.append(
-                buffer,
-                withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else {
-                throw writer.error ?? NSError(domain: "ReplayBufferTimelineInsertionTests", code: -3)
-            }
-        }
-
-        input.markAsFinished()
-        await writer.finishWriting()
-        try #require(writer.status == .completed)
-        return url
-    }
-
-    private func makePixelBuffer(size: CGSize,
-                                 adaptor: AVAssetWriterInputPixelBufferAdaptor) throws -> CVPixelBuffer {
-        var pixelBuffer: CVPixelBuffer?
-        if let pool = adaptor.pixelBufferPool {
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
-        }
-        if pixelBuffer == nil {
-            CVPixelBufferCreate(
-                kCFAllocatorDefault,
-                Int(size.width),
-                Int(size.height),
-                kCVPixelFormatType_32ARGB,
-                nil,
-                &pixelBuffer)
-        }
-        return try #require(pixelBuffer)
     }
 }
 
@@ -952,10 +893,25 @@ struct RecordingGapCollapseTests {
             .appendingPathComponent("RetakeUndoRedo-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directoryURL) }
-        _ = try await makeVideoFixture(
-            in: directoryURL,
-            name: "screen.mov",
-            duration: duration)
+
+        // Create fixture at the path the resolver expects (screen.mov).
+        // Retry on transient AVFoundation resource contention under parallel load.
+        let fixtureURL = directoryURL.appendingPathComponent("screen.mov")
+        var fixtureCreated = false
+        for attempt in 0..<3 {
+            do {
+                let url = try await makeVideoFixture(seconds: duration.seconds, in: directoryURL)
+                // Rename to the path CaptureChunkResolver expects.
+                try? FileManager.default.removeItem(at: fixtureURL)
+                try FileManager.default.moveItem(at: url, to: fixtureURL)
+                fixtureCreated = true
+                break
+            } catch {
+                if attempt == 2 { throw error }
+                try await Task.sleep(for: .milliseconds(200 * (attempt + 1)))
+            }
+        }
+        try #require(fixtureCreated, "Failed to create video fixture after 3 attempts")
         let sourceID = UUID()
         let source = CaptureSourceDescriptor(
             id: sourceID,
@@ -1012,81 +968,6 @@ struct RecordingGapCollapseTests {
         #expect(model.lastRecordingSlots == replacementSlots)
         #expect(model.hasLastRecordingTake)
         #expect(model.project.videoTracks.first?.clips.first?.timelineStart == previousStart)
-    }
-
-    private func makeVideoFixture(in directoryURL: URL,
-                                  name: String,
-                                  duration: CMTime,
-                                  fps: Int32 = 30) async throws -> URL {
-        let url = directoryURL.appendingPathComponent(name)
-        try? FileManager.default.removeItem(at: url)
-
-        let size = CGSize(width: 64, height: 64)
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Int(size.width),
-            AVVideoHeightKey: Int(size.height),
-        ])
-        input.expectsMediaDataInRealTime = false
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
-                kCVPixelBufferWidthKey as String: Int(size.width),
-                kCVPixelBufferHeightKey as String: Int(size.height),
-            ])
-        writer.add(input)
-        try #require(writer.startWriting())
-        writer.startSession(atSourceTime: .zero)
-
-        let frameCount = max(1, Int(duration.seconds * Double(fps)))
-        for frame in 0..<frameCount {
-            while !input.isReadyForMoreMediaData {
-                guard writer.status == .writing else {
-                    throw writer.error ?? NSError(domain: "RecorderUXTests", code: -1)
-                }
-                await Task.yield()
-            }
-            let buffer = try makePixelBuffer(size: size, adaptor: adaptor)
-            let lockStatus = CVPixelBufferLockBaseAddress(buffer, [])
-            guard lockStatus == kCVReturnSuccess else {
-                throw NSError(domain: "RecorderUXTests", code: Int(lockStatus))
-            }
-            defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
-            guard let baseAddress = CVPixelBufferGetBaseAddress(buffer) else {
-                throw NSError(domain: "RecorderUXTests", code: -2)
-            }
-            memset(baseAddress, 0x80, CVPixelBufferGetBytesPerRow(buffer) * Int(size.height))
-            guard adaptor.append(
-                buffer,
-                withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: fps)) else {
-                throw writer.error ?? NSError(domain: "RecorderUXTests", code: -3)
-            }
-        }
-
-        input.markAsFinished()
-        await writer.finishWriting()
-        try #require(writer.status == .completed)
-        return url
-    }
-
-    private func makePixelBuffer(size: CGSize,
-                                 adaptor: AVAssetWriterInputPixelBufferAdaptor) throws -> CVPixelBuffer {
-        var pixelBuffer: CVPixelBuffer?
-        if let pool = adaptor.pixelBufferPool {
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer)
-        }
-        if pixelBuffer == nil {
-            CVPixelBufferCreate(
-                kCFAllocatorDefault,
-                Int(size.width),
-                Int(size.height),
-                kCVPixelFormatType_32ARGB,
-                nil,
-                &pixelBuffer)
-        }
-        return try #require(pixelBuffer)
     }
 }
 
@@ -1163,54 +1044,52 @@ struct RecordingTransportErrorHandlingTests {
 @MainActor
 struct RecordingDocumentCommandGuardTests {
 
-    @Test("Window close is blocked while recording is paused")
-    func closeBlockedWhilePaused() {
-        let model = EditorModel()
-        let window = NSWindow()
-        model.isPaused = true
+    enum CloseBlocker: CaseIterable, Sendable, CustomTestStringConvertible {
+        case paused
+        case countdown
+        case starting
+        case pausing
+        case stopping
 
-        #expect(model.confirmClose(window: window) == false)
-        #expect(model.statusMessage == "Resume and stop the recording before closing the window.")
+        var testDescription: String {
+            switch self {
+            case .paused: "paused"
+            case .countdown: "countdown"
+            case .starting: "starting"
+            case .pausing: "pausing"
+            case .stopping: "stopping"
+            }
+        }
+
+        func setup(model: EditorModel) {
+            switch self {
+            case .paused: model.isPaused = true
+            case .countdown: model.isCountdownActive = true
+            case .starting: model.isStartingRecording = true
+            case .pausing: model.isPausingRecording = true
+            case .stopping: model.isStoppingRecording = true
+            }
+        }
+
+        var expectedMessage: String {
+            switch self {
+            case .paused: return "Resume and stop the recording before closing the window."
+            case .countdown: return "Cancel the countdown before closing the window."
+            case .starting: return "Wait for the recording to start before closing the window."
+            case .pausing: return "Finish pausing the recording before closing the window."
+            case .stopping: return "Finish stopping the recording before closing the window."
+            }
+        }
     }
 
-    @Test("Window close is blocked while countdown is active")
-    func closeBlockedDuringCountdown() {
+    @Test("Window close is blocked during recording transitions", arguments: CloseBlocker.allCases)
+    func closeBlocked(blocker: CloseBlocker) {
         let model = EditorModel()
         let window = NSWindow()
-        model.isCountdownActive = true
+        blocker.setup(model: model)
 
         #expect(model.confirmClose(window: window) == false)
-        #expect(model.statusMessage == "Cancel the countdown before closing the window.")
-    }
-
-    @Test("Window close is blocked while recording is starting")
-    func closeBlockedWhileStarting() {
-        let model = EditorModel()
-        let window = NSWindow()
-        model.isStartingRecording = true
-
-        #expect(model.confirmClose(window: window) == false)
-        #expect(model.statusMessage == "Wait for the recording to start before closing the window.")
-    }
-
-    @Test("Window close is blocked while recording is pausing")
-    func closeBlockedWhilePausing() {
-        let model = EditorModel()
-        let window = NSWindow()
-        model.isPausingRecording = true
-
-        #expect(model.confirmClose(window: window) == false)
-        #expect(model.statusMessage == "Finish pausing the recording before closing the window.")
-    }
-
-    @Test("Window close is blocked while recording is stopping")
-    func closeBlockedWhileStopping() {
-        let model = EditorModel()
-        let window = NSWindow()
-        model.isStoppingRecording = true
-
-        #expect(model.confirmClose(window: window) == false)
-        #expect(model.statusMessage == "Finish stopping the recording before closing the window.")
+        #expect(model.statusMessage == blocker.expectedMessage)
     }
 }
 

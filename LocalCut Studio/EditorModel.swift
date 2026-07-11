@@ -3,6 +3,8 @@ import AVFoundation
 import CoreGraphics
 import Observation
 import LocalCutCore
+import LocalCutDomain
+import LocalCutPlatform
 
 /// The single source of truth driving the editor UI: it owns the project, the
 /// preview `AVPlayer`, the current selection, and the timeline view state, and it
@@ -22,7 +24,8 @@ final class EditorModel {
 
     /// Shared encoder budget for all hardware encoder consumers
     /// (export, capture, Program Mode). Created once per editor lifetime.
-    let encoderBudget = EncoderBudget()
+    let encoderBudget = EncoderBudget(
+        maxConcurrent: Capabilities.current.videoEncoderCount > 0 ? 4 : 1)
 
     /// The active Program Mode session. Shared across all ProgramPanel
     /// instances to enforce the one-session invariant.

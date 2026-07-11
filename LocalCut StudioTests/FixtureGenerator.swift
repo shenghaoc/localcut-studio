@@ -41,7 +41,7 @@ struct FixtureGenerator {
     /// Uses a UUID-based subdirectory to avoid collisions between parallel runs.
     private static let outputDirectory: String? = {
         guard isRegenerationEnabled else { return nil }
-        let base = NSTemporaryDirectory()
+        let base = FileManager.default.temporaryDirectory.path
         let dir = (base as NSString).appendingPathComponent("localcut-fixtures-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         print("FixtureGenerator: writing to \(dir)")
@@ -296,7 +296,7 @@ struct FixtureGenerator {
     func normalModeWriteFixtureIsNoOp() throws {
         guard !Self.isRegenerationEnabled else { return }
 
-        let tmpBase = NSTemporaryDirectory()
+        let tmpBase = FileManager.default.temporaryDirectory.path
         let fm = FileManager.default
         let before = Set(try fm.contentsOfDirectory(atPath: tmpBase))
         let sentinelName = "normal-mode-\(UUID().uuidString).otio"

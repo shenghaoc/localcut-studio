@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import CoreMedia
 @testable import LocalCut_Studio
+@testable import LocalCutPlatform
 import LocalCutCore
 
 @Suite("ProgramRecovery")

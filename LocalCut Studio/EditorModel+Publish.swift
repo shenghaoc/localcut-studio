@@ -1,6 +1,7 @@
 import Foundation
 import AVFAudio
 import LocalCutCore
+import LocalCutPlatform
 
 enum WhipPublishStartError: LocalizedError, Sendable {
     case invalidEndpoint
@@ -46,11 +47,7 @@ extension EditorModel {
             sampleRate: AudioMasterBus.canonicalFormat.sampleRate,
             channels: Int(AudioMasterBus.canonicalFormat.channelCount))
 
-        let session = WhipSession(
-            client: WhipClientImpl(),
-            budget: encoderBudget,
-            config: config
-        )
+        let session = WhipSession(budget: encoderBudget, config: config)
         whipSession = session
 
         // Store taps so they stay alive for the session lifetime.

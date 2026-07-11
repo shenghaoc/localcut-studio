@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import LocalCutCore
+import LocalCutPlatform
 
 // MARK: - Audio master bus editing (P16)
 //

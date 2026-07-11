@@ -3,6 +3,7 @@ import os
 import Testing
 import CoreVideo
 @testable import LocalCut_Studio
+@testable import LocalCutPlatform
 
 @Suite("WHIP publish", .serialized)
 struct WhipPublishTests {
@@ -84,6 +85,20 @@ struct WhipPublishTests {
         return try #require(pixelBuffer)
     }
 
+    @Test("Ring buffer copies into caller-owned audio storage")
+    func ringBufferCopiesWithoutAllocatingAResultArray() {
+        let ring = RingBuffer(capacity: 4)
+        ring.write([1, 2, 3, 4, 5])
+        var scratch = [Float](repeating: -1, count: 6)
+
+        let copied = ring.read(into: &scratch, count: scratch.count)
+
+        #expect(copied == 4)
+        #expect(Array(scratch.prefix(copied)) == [2, 3, 4, 5])
+        #expect(scratch[copied] == -1)
+        #expect(ring.read(count: 1).isEmpty)
+    }
+
     @Test("Publish parses quoted ICE Link headers with TURN credentials")
     func publishParsesQuotedIceServerLinks() async throws {
         URLProtocolStub.reset()
@@ -146,17 +161,14 @@ struct WhipPublishTests {
         #expect(URLProtocolStub.requests.count == 1)
     }
 
-    @Test("Non-WebRTC video tap stores the latest frame without deadlocking")
-    func nonWebRTCVideoTapStoresLatestFrame() throws {
-        #if !LOCALCUT_ENABLE_WEBRTC
+    @Test("WebRTC video tap accepts frames and closes idempotently")
+    func videoTapLifecycleDoesNotDeadlock() throws {
         let tap = VideoPublishTap()
         let buffer = try makeTestBuffer()
         tap.capturePixelBuffer(buffer)
-        #expect(tap.latestPixelBuffer != nil)
         tap.close()
-        #else
-        #expect(Bool(true))
-        #endif
+        tap.close()
+        tap.capturePixelBuffer(buffer)
     }
 
     @Test("Reconnect controller applies grace period and backoff ladder")

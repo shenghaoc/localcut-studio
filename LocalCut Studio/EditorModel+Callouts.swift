@@ -2,6 +2,7 @@ import Foundation
 import CoreMedia
 import CoreGraphics
 import LocalCutCore
+import LocalCutDomain
 
 // MARK: - Callout management (Phase 43)
 
