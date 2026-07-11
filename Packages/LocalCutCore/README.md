@@ -3,7 +3,7 @@
 This package deliberately contains two targets:
 
 - **LocalCutDomain** — Foundation-only domain policy and algorithms. It builds
-  and tests on macOS, Linux, and Windows.
+  and tests on macOS and Linux.
 - **LocalCutCore** — Apple media models and algorithms that legitimately use
   CoreMedia, CoreGraphics, CoreVideo, Accelerate, VideoToolbox, Observation,
   and `os`, but never SwiftUI, AppKit, AVKit, or AVFoundation.
@@ -14,7 +14,7 @@ The macOS fast loop runs both targets:
 swift test --package-path Packages/LocalCutCore
 ```
 
-CI also runs the same command on Linux and Windows; the package manifest exposes
+CI also runs the same command on Linux; the package manifest exposes
 only `LocalCutDomain` on non-macOS hosts. This makes the portable boundary an
 executable constraint rather than a naming convention.
 
@@ -55,7 +55,7 @@ project snapshots.
 
 | Module | Status | Notes |
 | --- | --- | --- |
-| Capabilities policy | ✅ LocalCutDomain | Pure value/decision layer; Windows/Linux tested. |
+| Capabilities policy | ✅ LocalCutDomain | Pure value/decision layer; Linux tested. |
 | Capability probe | ✅ LocalCutCore | macOS sysctl + VideoToolbox adapter. |
 | EncoderBudget | ✅ LocalCutDomain | Explicit capacity supplied by the platform layer. |
 | Models (Clip/Track/ColourGrade/captions/keyframes/audio/WorkingColourSpace) | ✅ migrated | Pure value types + `@Observable` Track/CaptionTrack. |

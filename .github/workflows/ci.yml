@@ -21,55 +21,26 @@ concurrency:
 
 jobs:
   portable-domain-test:
-    name: Test (LocalCutDomain / ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Test (LocalCutDomain / Linux)
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-24.04
-          - windows-2022
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # setup-swift v2.4.0 supports modern Swift on Linux, but its hard-coded
-      # Windows catalog stops at Swift 5.6. Use it only where it is current.
-      - name: Set up Swift 6.2.1 (Linux)
-        if: runner.os == 'Linux'
-        uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a
-        with:
-          swift-version: "6.2.1"
-
-      # Swift.org's supported Windows installation path. The hosted image
-      # already includes Visual Studio 2022 and the Windows SDK prerequisites.
-      - name: Set up current Swift (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          winget install --id Swift.Toolchain --exact --source winget `
-            --accept-source-agreements --accept-package-agreements `
-            --disable-interactivity
-
-          # WinGet updates the machine PATH, but the runner process predates
-          # that update. Export its entries for subsequent workflow steps.
-          [Environment]::GetEnvironmentVariable('Path', 'Machine').Split(';') |
-            Where-Object { $_ } |
-            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Show portable toolchain
+      # ubuntu-24.04 provides Swift 6.3.3, matching the proven CI setup in
+      # rowplay-studio#46 and runplay-studio#28 without a setup action.
+      - name: Verify Swift version
         run: swift --version
 
       - name: Cache portable package build
         uses: actions/cache@v6
         with:
           path: Packages/LocalCutCore/.build
-          key: localcutdomain-${{ runner.os }}-swift6-${{ hashFiles('Packages/LocalCutCore/Package.swift', 'Packages/LocalCutCore/Sources/LocalCutDomain/**/*.swift', 'Packages/LocalCutCore/Tests/LocalCutDomainTests/**/*.swift') }}
+          key: localcutdomain-${{ runner.os }}-swift-6.3.3-${{ hashFiles('Packages/LocalCutCore/Package.swift', 'Packages/LocalCutCore/Sources/LocalCutDomain/**/*.swift', 'Packages/LocalCutCore/Tests/LocalCutDomainTests/**/*.swift') }}
           restore-keys: |
-            localcutdomain-${{ runner.os }}-swift6-
+            localcutdomain-${{ runner.os }}-swift-6.3.3-
 
       - name: Build and test portable domain
         run: swift test --package-path Packages/LocalCutCore

@@ -9,7 +9,7 @@ Untitled Project/                  ← repo root (git)
 ├── .kiro/                         ← steering, specs, skills, settings (project intelligence)
 ├── docs/                          ← user-facing documentation
 ├── Packages/LocalCutCore/
-│   ├── Sources/LocalCutDomain/    ← Foundation-only, Linux/Windows tested
+│   ├── Sources/LocalCutDomain/    ← Foundation-only, Linux tested
 │   └── Sources/LocalCutCore/      ← Apple media logic, no UI/AVFoundation
 ├── LocalCut Studio.xcodeproj/     ← Xcode project (target: "LocalCut Studio")
 └── LocalCut Studio/               ← Swift sources
@@ -36,7 +36,7 @@ Untitled Project/                  ← repo root (git)
 ## Placement rules
 
 - **Portable domain code** goes in `LocalCutDomain` and may import Foundation
-  only. Linux and Windows CI are the executable boundary.
+  only. Linux CI is the executable boundary.
 - **Apple-only non-UI media logic** goes in package target `LocalCutCore` when
   it needs CoreMedia/CoreGraphics/CoreVideo/Accelerate/VideoToolbox; needing no
   UI does not make code cross-platform.

@@ -8,7 +8,7 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 - **Location:** `Packages/LocalCutCore/Tests/`
 - **Framework:** Swift Testing
 - **Run command:** `swift test --package-path Packages/LocalCutCore`
-- **CI behavior:** No retry. `LocalCutDomain` runs on Linux and Windows;
+- **CI behavior:** No retry. `LocalCutDomain` runs on Linux;
   macOS runs both `LocalCutDomain` and the Apple-only `LocalCutCore` target.
 - **Characteristics:** No GPU, decoded media, or network.
 
@@ -40,7 +40,7 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 
 ## CI Topology
 
-The portable domain matrix (Linux and Windows), macOS package job, and two Xcode
+The portable domain Linux job, macOS package job, and two Xcode
 jobs start in parallel. The macOS package job restores its
 SwiftPM `.build` cache, enforces the core/app import boundary, runs the package
 suite, and validates OTIO goldens. Keeping OTIO in this shorter job removes it

@@ -6,7 +6,7 @@
   `SUPPORTED_PLATFORMS = macosx` — the product is Mac-only, so AppKit interop
   is fair game in the app layer.
 - **Portable target**: `LocalCutDomain` uses Foundation only and must compile
-  under SwiftPM on macOS, Linux, and Windows. Platform-specific media support
+  under SwiftPM on macOS and Linux. Platform-specific media support
   is not faked or substituted on those hosts.
 - **Language**: Swift 6 mode features enabled (approachable concurrency). `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` — types are main-actor isolated unless marked otherwise. Push blocking media work off the main actor deliberately.
 - **UI**: SwiftUI with the **Observation** framework (`@Observable`, `@Bindable`). No Combine — prefer `async`/`await` and `AsyncSequence`.

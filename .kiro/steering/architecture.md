@@ -28,7 +28,7 @@ SwiftUI views ──▶ EditorModel (@Observable, @MainActor)
 
 - **Portable domain** (`Packages/LocalCutCore/Sources/LocalCutDomain`) —
   Foundation-only value types, policies, and algorithms. Built and tested on
-  macOS, Linux, and Windows. It never imports Apple media or UI frameworks.
+  macOS and Linux. It never imports Apple media or UI frameworks.
 - **Apple media core** (`Packages/LocalCutCore/Sources/LocalCutCore`) —
   deterministic non-UI code that legitimately uses CoreMedia, CoreGraphics,
   CoreVideo, Accelerate, VideoToolbox, Observation, or `os`. It never imports
