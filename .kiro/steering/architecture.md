@@ -33,14 +33,20 @@ SwiftUI views ──▶ EditorModel (@Observable, @MainActor)
   deterministic non-UI code that legitimately uses CoreMedia, CoreGraphics,
   CoreVideo, Accelerate, VideoToolbox, Observation, or `os`. It never imports
   SwiftUI, AppKit, AVKit, or AVFoundation.
-- **macOS platform/app layer** (`LocalCut Studio/`) — AVFoundation, Metal,
-  WebRTC, Lottie, security-scoped resources, orchestration, and framework
-  adapters. Non-UI code belongs here whenever it needs these macOS-only APIs.
+- **macOS platform layer** (`Packages/LocalCutCore/Sources/LocalCutPlatform`) —
+  presentation-independent adapters for AVFoundation, ScreenCaptureKit, Metal,
+  WebRTC, Lottie, capture, publishing, and media decoding. This target exists
+  only in the macOS package graph and depends on `LocalCutCore`, never the app.
+- **App orchestration** (`LocalCut Studio/`) — `EditorModel`, project/document
+  lifecycle, composition/export coordination, security-scoped resources, and
+  presentation state. It consumes the platform layer and owns no direct
+  WebRTC, ScreenCaptureKit, or Lottie integration.
 - **Views** (`*View.swift`) — SwiftUI; read models and send intents. AppKit
   interop (`AVPlayerView`, `NSSavePanel`) stays at the edge.
 
 This is a dependency direction, not a claim that every non-view type is
-portable: app → Apple media core → portable domain, never the reverse.
+portable: app → macOS platform → Apple media core → portable domain, never the
+reverse.
 
 ## Render path invariant
 

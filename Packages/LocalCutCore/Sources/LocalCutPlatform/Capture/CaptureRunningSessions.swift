@@ -5,7 +5,7 @@ import os
 @preconcurrency import ScreenCaptureKit
 import LocalCutCore
 
-protocol CaptureRunningSession: Sendable {
+public protocol CaptureRunningSession: Sendable {
     nonisolated var supportsSourceSwitching: Bool { get }
 
     func start() async throws
@@ -14,7 +14,7 @@ protocol CaptureRunningSession: Sendable {
     func excludeWindow(_ windowID: CGWindowID) async throws
 }
 
-extension CaptureRunningSession {
+public extension CaptureRunningSession {
     nonisolated var supportsSourceSwitching: Bool { false }
 
     func updateTarget(_ newTarget: CaptureTarget) async throws {
@@ -50,8 +50,8 @@ nonisolated enum CapturePermissionAuthorizer {
 /// `@unchecked Sendable`: mutable state (`target`, `stream`, writers,
 /// `excludingWindowIDs`) is protected by `stateLock`; `dropNextScreenFrame`
 /// and delegate callbacks from ScreenCaptureKit are confined to `outputQueue`.
-nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    nonisolated var supportsSourceSwitching: Bool { true }
+public nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    public nonisolated var supportsSourceSwitching: Bool { true }
 
     private let stateLock = OSAllocatedUnfairLock(initialState: ())
     private var target: CaptureTarget
@@ -75,7 +75,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         try stateLock.withLockUnchecked { _ in try body() }
     }
 
-    init(target: CaptureTarget,
+    public init(target: CaptureTarget,
          frameRate: Double,
          videoWriter: ContinuousCaptureWriter?,
          audioWriter: ContinuousCaptureWriter?,
@@ -101,7 +101,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         self.onVideoFrame = onVideoFrame
     }
 
-    func start() async throws {
+    public func start() async throws {
         guard CapturePermissionAuthorizer.requestScreenRecordingAccess() else {
             throw CaptureEngineError.screenRecordingDenied
         }
@@ -130,7 +130,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         }
     }
 
-    func stop() async {
+    public func stop() async {
         guard let stream = withLockedState({ self.stream }) else { return }
         await withCheckedContinuation { continuation in
             stream.stopCapture { _ in continuation.resume() }
@@ -143,7 +143,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
     /// Update the capture target mid-session. The stream's content filter and
     /// configuration are updated in-place; the first frame after the switch is
     /// dropped to avoid a transitional artifact.
-    func updateTarget(_ newTarget: CaptureTarget) async throws {
+    public func updateTarget(_ newTarget: CaptureTarget) async throws {
         guard let stream = withLockedState({ self.stream }) else { throw CaptureEngineError.notRecording }
         withLockedState {
             self.target = newTarget
@@ -210,7 +210,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
 
     /// Add a window ID to the exclusion list and update the live capture filter.
     /// Used to exclude the floating control panel from screen capture.
-    func excludeWindow(_ windowID: CGWindowID) async throws {
+    public func excludeWindow(_ windowID: CGWindowID) async throws {
         guard windowID != 0 else { return }
         let runningStream = withLockedState {
             excludingWindowIDs.insert(windowID)
@@ -251,7 +251,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         return configuration
     }
 
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    public func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         switch type {
         case .screen:
             // ScreenCaptureKit can deliver idle, blank, or stopped frames during
@@ -276,7 +276,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
         }
     }
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
+    public func stream(_ stream: SCStream, didStopWithError error: Error) {
         // The stream stopped unexpectedly (window closed, permission revoked,
         // etc.). Surface it so the UI can stop the recording and inform the user.
         onStop?(error)
@@ -335,7 +335,7 @@ nonisolated final class ScreenCaptureSession: NSObject, CaptureRunningSession, S
 
 /// `@unchecked Sendable`: mutable `processorState` and `lastAudioLevelEmission`
 /// are touched only inside AVFoundation delegate callbacks confined to `queue`.
-nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
+public nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let deviceID: String
     private let mediaType: AVMediaType
     private let writer: ContinuousCaptureWriter
@@ -349,7 +349,7 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
     private var processorState = VoiceCleanupProcessorState()
     private var lastAudioLevelEmission = CFAbsoluteTimeGetCurrent()
 
-    init(deviceID: String,
+    public init(deviceID: String,
          mediaType: AVMediaType,
          writer: ContinuousCaptureWriter,
          onAudioLevel: (@Sendable (Float) -> Void)? = nil,
@@ -365,7 +365,7 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
         super.init()
     }
 
-    func start() async throws {
+    public func start() async throws {
         guard await CapturePermissionAuthorizer.requestDeviceAccess(for: mediaType) else {
             throw mediaType == .video
                 ? CaptureEngineError.cameraPermissionDenied
@@ -424,7 +424,7 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
         }
     }
 
-    func stop() async {
+    public func stop() async {
         await withCheckedContinuation { continuation in
             queue.async {
                 if self.session.isRunning {
@@ -435,9 +435,9 @@ nonisolated final class AVCaptureSampleSession: NSObject, CaptureRunningSession,
         }
     }
 
-    func captureOutput(_ output: AVCaptureOutput,
-                       didOutput sampleBuffer: CMSampleBuffer,
-                       from connection: AVCaptureConnection) {
+    public func captureOutput(_ output: AVCaptureOutput,
+                              didOutput sampleBuffer: CMSampleBuffer,
+                              from connection: AVCaptureConnection) {
         if mediaType == .audio,
            let onAudioLevel,
            let level = Self.audioPeakLevel(from: sampleBuffer) {

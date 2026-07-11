@@ -12,7 +12,7 @@ import AVFAudio
 /// `LocalCutAudioDeviceModuleDelegate` replaces the candidate SDK's physical
 /// input node with an `AVAudioSourceNode`; WebRTC owns the render cadence and
 /// sample conversion through its public AVAudioEngine device-module API.
-actor AudioPublishBridge {
+public actor AudioPublishBridge {
     private var isRunning = false
     private var sampleRate: Double = 48_000
     private var channels: Int = 2
@@ -34,7 +34,9 @@ actor AudioPublishBridge {
     nonisolated var latestChannels: Int { sharedState.withLock { $0.latestChannels } }
     #endif
 
-    func start(sampleRate: Double, channels: Int) {
+    public init() {}
+
+    public func start(sampleRate: Double, channels: Int) {
         guard !isRunning, sampleRate > 0, channels > 0 else { return }
         self.sampleRate = sampleRate
         self.channels = channels
@@ -48,7 +50,7 @@ actor AudioPublishBridge {
         }
     }
 
-    func stop() {
+    public func stop() {
         guard isRunning else { return }
         isRunning = false
         sharedState.withLock { state in
@@ -56,7 +58,7 @@ actor AudioPublishBridge {
         }
     }
 
-    nonisolated func pushSamples(_ buffer: [Float], sampleRate: Double, channels: Int) {
+    public nonisolated func pushSamples(_ buffer: [Float], sampleRate: Double, channels: Int) {
         sharedState.withLock { state in
             guard let ring = state.ringBuffer else { return }
             ring.write(buffer)

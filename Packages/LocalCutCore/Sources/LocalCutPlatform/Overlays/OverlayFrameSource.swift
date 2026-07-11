@@ -9,7 +9,7 @@ import LocalCutCore
 /// Provides decoded CIImage frames for an animated overlay source at arbitrary
 /// timeline times. Implementations must be thread-safe — the compositor awaits
 /// `frame(at:)` from AVFoundation render tasks that are not main-actor bound.
-protocol OverlayFrameSource: AnyObject, Sendable {
+public protocol OverlayFrameSource: AnyObject, Sendable {
     /// The natural size (pixels) of the overlay source.
     nonisolated var naturalSize: CGSize { get }
     /// Number of decoded frames currently retained by the source cache.
@@ -23,18 +23,18 @@ protocol OverlayFrameSource: AnyObject, Sendable {
     nonisolated func purgeCachedFrames()
 }
 
-extension OverlayFrameSource {
+public extension OverlayFrameSource {
     nonisolated var cachedFrameCount: Int { 0 }
     nonisolated func purgeCachedFrames() {}
 }
 
 // MARK: - Factory
 
-enum OverlayFrameSourceFactory: Sendable {
+public enum OverlayFrameSourceFactory: Sendable {
     /// Creates the appropriate frame source for the given overlay clip.
     /// The `sourceURL` is resolved from the bookmark or bundle-relative path.
-    static func makeSource(for overlay: OverlayClip,
-                           sourceURL: URL) async -> (any OverlayFrameSource)? {
+    public static func makeSource(for overlay: OverlayClip,
+                                  sourceURL: URL) async -> (any OverlayFrameSource)? {
         switch overlay.sourceType {
         case .animatedImage:
             return await Task.detached(priority: .userInitiated) {

@@ -1,5 +1,6 @@
 import SwiftUI
 import LocalCutCore
+import LocalCutPlatform
 
 /// SwiftUI content displayed inside the floating recorder control panel.
 struct RecorderFloatingPanelContent: View {

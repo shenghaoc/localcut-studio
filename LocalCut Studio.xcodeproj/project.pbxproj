@@ -9,8 +9,8 @@
 /* Begin PBXBuildFile section */
 		00000000000000000000A030 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A020 /* LocalCutCore */; };
 		00000000000000000000A031 /* LocalCutCore in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A021 /* LocalCutCore */; };
-		00000000000000000000A032 /* Lottie in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A022 /* Lottie */; };
-		00000000000000000000A034 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A024 /* WebRTC */; };
+		00000000000000000000A035 /* LocalCutPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A025 /* LocalCutPlatform */; };
+		00000000000000000000A036 /* LocalCutPlatform in Frameworks */ = {isa = PBXBuildFile; productRef = 00000000000000000000A026 /* LocalCutPlatform */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,14 +59,14 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				00000000000000000000A030 /* LocalCutCore in Frameworks */,
-				00000000000000000000A032 /* Lottie in Frameworks */,
-				00000000000000000000A034 /* WebRTC in Frameworks */,
+				00000000000000000000A035 /* LocalCutPlatform in Frameworks */,
 			);
 		};
 		000000000000000230000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				00000000000000000000A031 /* LocalCutCore in Frameworks */,
+				00000000000000000000A036 /* LocalCutPlatform in Frameworks */,
 			);
 		};
 		000000000000000330000000 /* Frameworks */ = {
@@ -116,8 +116,7 @@
 			name = "LocalCut Studio";
 			packageProductDependencies = (
 				00000000000000000000A020 /* LocalCutCore */,
-				00000000000000000000A022 /* Lottie */,
-				00000000000000000000A024 /* WebRTC */,
+				00000000000000000000A025 /* LocalCutPlatform */,
 			);
 			productName = "LocalCut Studio";
 			productReference = 000000000000000000000120 /* LocalCut Studio.app */;
@@ -142,6 +141,7 @@
 			name = "LocalCut StudioTests";
 			packageProductDependencies = (
 				00000000000000000000A021 /* LocalCutCore */,
+				00000000000000000000A026 /* LocalCutPlatform */,
 			);
 			productName = "LocalCut StudioTests";
 			productReference = 000000000000000000000220 /* LocalCut StudioTests.xctest */;
@@ -202,8 +202,6 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				00000000000000000000A010 /* XCLocalSwiftPackageReference "Packages/LocalCutCore" */,
-				00000000000000000000A011 /* XCRemoteSwiftPackageReference "lottie-ios" */,
-				00000000000000000000A012 /* XCRemoteSwiftPackageReference "Specs" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -328,7 +326,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PROJECT_UNIQUE_VALUE = I3S1ANNI;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited) LOCALCUT_ENABLE_WEBRTC";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
@@ -386,7 +384,7 @@
 				MTL_FAST_MATH = YES;
 				PROJECT_UNIQUE_VALUE = I3S1ANNI;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) LOCALCUT_ENABLE_WEBRTC";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited)";
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -596,22 +594,6 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		00000000000000000000A011 /* XCRemoteSwiftPackageReference "lottie-ios" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/airbnb/lottie-ios.git";
-			requirement = {
-				kind = exactVersion;
-				version = 4.6.1;
-			};
-		};
-		00000000000000000000A012 /* XCRemoteSwiftPackageReference "Specs" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/webrtc-sdk/Specs.git";
-			requirement = {
-				kind = exactVersion;
-				version = 125.6422.09;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -623,15 +605,13 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalCutCore;
 		};
-		00000000000000000000A022 /* Lottie */ = {
+		00000000000000000000A025 /* LocalCutPlatform */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 00000000000000000000A011 /* XCRemoteSwiftPackageReference "lottie-ios" */;
-			productName = Lottie;
+			productName = LocalCutPlatform;
 		};
-		00000000000000000000A024 /* WebRTC */ = {
+		00000000000000000000A026 /* LocalCutPlatform */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 00000000000000000000A012 /* XCRemoteSwiftPackageReference "Specs" */;
-			productName = WebRTC;
+			productName = LocalCutPlatform;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

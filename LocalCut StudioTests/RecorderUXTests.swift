@@ -6,6 +6,7 @@ import CoreMedia
 import os
 import LocalCutCore
 import LocalCutDomain
+@testable import LocalCutPlatform
 @testable import LocalCut_Studio
 
 nonisolated private final class RecorderSwitchingSession: CaptureRunningSession, @unchecked Sendable {

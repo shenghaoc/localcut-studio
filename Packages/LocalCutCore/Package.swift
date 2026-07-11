@@ -16,6 +16,8 @@ var products: [Product] = [
     .library(name: "LocalCutDomain", targets: ["LocalCutDomain"]),
 ]
 
+var dependencies: [Package.Dependency] = []
+
 var targets: [Target] = [
     .target(name: "LocalCutDomain"),
     .testTarget(
@@ -24,8 +26,17 @@ var targets: [Target] = [
 ]
 
 #if os(macOS)
+dependencies.append(
+    .package(url: "https://github.com/webrtc-sdk/Specs.git", exact: "125.6422.09")
+)
+dependencies.append(
+    .package(url: "https://github.com/airbnb/lottie-ios.git", exact: "4.6.1")
+)
 products.append(
     .library(name: "LocalCutCore", targets: ["LocalCutDomain", "LocalCutCore"])
+)
+products.append(
+    .library(name: "LocalCutPlatform", targets: ["LocalCutPlatform"])
 )
 targets.append(
     .target(
@@ -37,6 +48,19 @@ targets.append(
         name: "LocalCutCoreTests",
         dependencies: ["LocalCutDomain", "LocalCutCore"])
 )
+targets.append(
+    .target(
+        name: "LocalCutPlatform",
+        dependencies: [
+            "LocalCutDomain",
+            "LocalCutCore",
+            .product(name: "Lottie", package: "lottie-ios"),
+            .product(name: "WebRTC", package: "Specs"),
+        ],
+        swiftSettings: [
+            .define("LOCALCUT_ENABLE_WEBRTC"),
+        ])
+)
 #endif
 
 let package = Package(
@@ -45,4 +69,5 @@ let package = Package(
         .macOS("26.0"),
     ],
     products: products,
+    dependencies: dependencies,
     targets: targets)

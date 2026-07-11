@@ -3,6 +3,7 @@ import Testing
 import LocalCutCore
 import LocalCutDomain
 @testable import LocalCut_Studio
+@testable import LocalCutPlatform
 
 /// MediaMTX WHIP integration test.
 ///

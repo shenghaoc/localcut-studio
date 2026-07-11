@@ -9,7 +9,7 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 - **Framework:** Swift Testing
 - **Run command:** `swift test --package-path Packages/LocalCutCore`
 - **CI behavior:** No retry. `LocalCutDomain` runs on Linux;
-  macOS runs both `LocalCutDomain` and the Apple-only `LocalCutCore` target.
+  macOS builds `LocalCutPlatform` and runs `LocalCutDomain`/`LocalCutCore` tests.
 - **Characteristics:** No GPU, decoded media, or network.
 
 ### 2. Xcode Unit/Integration Tests
@@ -40,13 +40,13 @@ This document describes the testing infrastructure, flaky-test detection, and qu
 
 ## CI Topology
 
-The portable domain Linux job, macOS package job, and two Xcode
-jobs start in parallel. The macOS package job restores its
+The portable domain Linux job, macOS package job, and full Xcode job start in
+parallel. The macOS package job restores its
 SwiftPM `.build` cache, enforces the core/app import boundary, runs the package
-suite, and validates OTIO goldens. Keeping OTIO in this shorter job removes it
-from the full Xcode critical path. The main Xcode job runs the WebRTC-enabled
-unit/integration/UI suite plus MediaMTX; the focused non-WebRTC job rebuilds with
-`LOCALCUT_ENABLE_WEBRTC` stripped and exercises the publish stubs.
+platform target, runs the package suite, and validates OTIO goldens. Keeping OTIO in this shorter job removes it
+from the full Xcode critical path. The Xcode job runs the WebRTC-enabled
+unit/integration/UI suite plus MediaMTX. There is no alternate WebRTC or
+non-WebRTC product path.
 
 Do not shard the hosted app suite without re-measuring build cost: current CI
 timings show that compiling the app dominates the test runtime, so additional
@@ -259,8 +259,12 @@ forward arbitrary parent-process variables into the test runner.
 
 ### Jobs
 
-1. **package-test:** Runs LocalCutCore package tests (deterministic, no retry).
-2. **test:** Runs Xcode tests with flake detection, OTIO golden validation, and MediaMTX integration. Depends on `package-test` — it only runs after package tests pass, to fail fast on pure-logic regressions.
+1. **portable-domain-test:** Runs `LocalCutDomain` on Linux.
+2. **package-test:** Builds `LocalCutPlatform`, validates layer boundaries, runs
+   deterministic Domain/Core tests, and validates OTIO goldens.
+3. **test:** Runs Xcode tests with flake detection and MediaMTX integration.
+
+All three jobs start in parallel; none waits on another job's build artifacts.
 
 ### Artifacts
 

@@ -6,12 +6,12 @@ import LocalCutCore
 
 /// `@unchecked Sendable`: `FileHandle` mutations are serialised on a private
 /// `DispatchQueue`.
-nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
+public nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
     let url: URL
     private let queue = DispatchQueue(label: "com.localcutstudio.capture.manifest")
     private let handle: FileHandle
 
-    init(url: URL) throws {
+    public init(url: URL) throws {
         self.url = url
         FileManager.default.createFile(atPath: url.path, contents: nil)
         self.handle = try FileHandle(forWritingTo: url)
@@ -21,7 +21,7 @@ nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
         close()
     }
 
-    func append(_ record: CaptureManifestRecord) throws {
+    public func append(_ record: CaptureManifestRecord) throws {
         let line = try CaptureManifest.lineData(for: record)
         try queue.sync {
             try handle.seekToEnd()
@@ -30,7 +30,7 @@ nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
         }
     }
 
-    func close() {
+    public func close() {
         queue.sync {
             try? handle.close()
         }
@@ -40,7 +40,7 @@ nonisolated final class CaptureManifestFileWriter: @unchecked Sendable {
 /// `@unchecked Sendable`: writer state (`didStartWriting`, `isFinished`,
 /// timing, sample counts) is protected by `lock`; `AVAssetWriter` and
 /// `AVAssetWriterInput` are non-`Sendable` framework objects.
-nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
+public nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     let source: CaptureSourceDescriptor
     private let outputURL: URL
     private let writer: AVAssetWriter
@@ -68,7 +68,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
     private var writeStartupError: String?
     private var manifestAppendError: String?
 
-    init(source: CaptureSourceDescriptor,
+    public init(source: CaptureSourceDescriptor,
          outputURL: URL,
          mediaType: AVMediaType,
          outputSettings: [String: Any],
@@ -95,7 +95,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         writer.add(input)
     }
 
-    func append(_ sampleBuffer: CMSampleBuffer) {
+    public func append(_ sampleBuffer: CMSampleBuffer) {
         lock.withLockUnchecked { _ in appendLocked(sampleBuffer) }
     }
 
@@ -164,7 +164,7 @@ nonisolated final class ContinuousCaptureWriter: @unchecked Sendable {
         }
     }
 
-    func finish() async throws -> CaptureSourceEndedRecord {
+    public func finish() async throws -> CaptureSourceEndedRecord {
         try await withCheckedThrowingContinuation { continuation in
             enum FinishAction {
                 case cancelAndThrow(Error)

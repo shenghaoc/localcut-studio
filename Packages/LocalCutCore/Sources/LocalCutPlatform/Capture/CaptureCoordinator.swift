@@ -5,7 +5,7 @@ import VideoToolbox
 import LocalCutCore
 import LocalCutDomain
 
-actor CaptureCoordinator {
+public actor CaptureCoordinator {
     private enum State {
         case idle
         case starting
@@ -53,7 +53,9 @@ actor CaptureCoordinator {
     private var state: State = .idle
     private var activeSession: ActiveSession?
 
-    func start(_ request: CaptureStartRequest,
+    public init() {}
+
+    public func start(_ request: CaptureStartRequest,
                encoderBudget: EncoderBudget? = nil,
                onStreamStopped: (@Sendable (Error) -> Void)? = nil,
                onBackpressure: (@Sendable (CaptureSourceDescriptor) -> Void)? = nil,
@@ -363,7 +365,7 @@ actor CaptureCoordinator {
         didStartRecording = true
     }
 
-    func stop() async throws -> CaptureSessionResult {
+    public func stop() async throws -> CaptureSessionResult {
         guard state == .recording || state == .paused, let active = activeSession else {
             throw CaptureEngineError.notRecording
         }
@@ -494,7 +496,7 @@ actor CaptureCoordinator {
     /// writer chunks. The PTS gap between pause and the subsequent `resume()` is
     /// preserved as a timestamp jump — the timeline shows the gap, not a stitched
     /// continuous clip.
-    func pause() async throws {
+    public func pause() async throws {
         guard state == .recording, var active = activeSession else {
             throw CaptureEngineError.notRecording
         }
@@ -565,7 +567,7 @@ actor CaptureCoordinator {
 
     /// Resume a paused recording. Creates new writer chunks for each source and
     /// restarts capture streams. The PTS gap since `pause()` is preserved.
-    func resume() async throws {
+    public func resume() async throws {
         guard state == .paused, let active = activeSession, let request = active.startRequest else {
             throw CaptureEngineError.captureSessionFailed("No paused recording to resume.")
         }
@@ -776,7 +778,7 @@ actor CaptureCoordinator {
     /// Switch the capture source mid-session. Updates the screen capture
     /// session's target (content filter + configuration). The first frame after
     /// the switch is dropped to avoid transitional artifacts.
-    func updateSource(_ newTarget: CaptureTarget) async throws {
+    public func updateSource(_ newTarget: CaptureTarget) async throws {
         guard state == .recording, var active = activeSession else {
             throw CaptureEngineError.notRecording
         }
@@ -795,7 +797,7 @@ actor CaptureCoordinator {
     private var floatingPanelWindowID: CGWindowID = 0
 
     /// Update the floating panel window ID for capture exclusion.
-    func setFloatingPanelWindowID(_ windowID: CGWindowID) async throws {
+    public func setFloatingPanelWindowID(_ windowID: CGWindowID) async throws {
         guard windowID != 0 else { return }
         floatingPanelWindowID = windowID
         if var active = activeSession {
@@ -807,7 +809,7 @@ actor CaptureCoordinator {
         _ = try await Self.excludeWindowFromFirstSwitchableSession(active.sessions, windowID: windowID)
     }
 
-    func scanRecoveredSessions(rootURL: URL) throws -> [CaptureSessionResult] {
+    public func scanRecoveredSessions(rootURL: URL) throws -> [CaptureSessionResult] {
         // A live recording's manifest isn't finalized yet; don't mistake it for
         // a crashed session.
         let activeID = state == .idle ? nil : activeSession?.id

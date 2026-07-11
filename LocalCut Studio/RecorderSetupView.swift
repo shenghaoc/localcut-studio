@@ -1,5 +1,6 @@
 import SwiftUI
 import LocalCutCore
+import LocalCutPlatform
 
 struct RecorderSetupView: View {
     @Bindable var model: EditorModel

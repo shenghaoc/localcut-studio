@@ -11,7 +11,7 @@ import Metal
 /// queue affinity keeps the buffer-pool use ordered.
 /// `@unchecked Sendable`: all properties are immutable `let`s; `CIContext` is
 /// a non-`Sendable` framework object.
-nonisolated final class FrameScaler: @unchecked Sendable {
+public nonisolated final class FrameScaler: @unchecked Sendable {
     private let ciContext: CIContext
     private let targetWidth: Int
     private let targetHeight: Int
@@ -22,7 +22,7 @@ nonisolated final class FrameScaler: @unchecked Sendable {
     /// Lanzcos scale transform filter, cached and reused per instance.
     private static let filterName = "CILanczosScaleTransform"
 
-    init(targetWidth: Int, targetHeight: Int, pixelFormat: OSType = kCVPixelFormatType_32BGRA) {
+    public init(targetWidth: Int, targetHeight: Int, pixelFormat: OSType = kCVPixelFormatType_32BGRA) {
         self.targetWidth = targetWidth
         self.targetHeight = targetHeight
         self.pixelFormat = pixelFormat
@@ -50,7 +50,7 @@ nonisolated final class FrameScaler: @unchecked Sendable {
     /// Scale a pixel buffer to the target dimensions. Returns `nil` if scaling
     /// fails (e.g. incompatible pixel format). The returned buffer is suitable
     /// for appending to the `AVAssetWriter`.
-    func scale(_ sourceBuffer: CVPixelBuffer) -> CVPixelBuffer? {
+    public func scale(_ sourceBuffer: CVPixelBuffer) -> CVPixelBuffer? {
         let sourceWidth = CVPixelBufferGetWidth(sourceBuffer)
         let sourceHeight = CVPixelBufferGetHeight(sourceBuffer)
 
@@ -100,9 +100,9 @@ nonisolated final class FrameScaler: @unchecked Sendable {
         return output
     }
 
-    static func centerCropRect(forScaledExtent extent: CGRect,
-                               targetWidth: Int,
-                               targetHeight: Int) -> CGRect {
+    public static func centerCropRect(forScaledExtent extent: CGRect,
+                                      targetWidth: Int,
+                                      targetHeight: Int) -> CGRect {
         CGRect(
             x: extent.origin.x + (extent.width - CGFloat(targetWidth)) / 2,
             y: extent.origin.y + (extent.height - CGFloat(targetHeight)) / 2,

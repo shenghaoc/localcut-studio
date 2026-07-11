@@ -3,6 +3,7 @@ import AVFoundation
 import CoreGraphics
 import UniformTypeIdentifiers
 import LocalCutCore
+import LocalCutPlatform
 import LocalCutDomain
 
 extension UTType {

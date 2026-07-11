@@ -9,40 +9,66 @@ import WebRTC
 
 // MARK: - Publish state
 
-nonisolated enum PublishState: Sendable, Equatable {
+public nonisolated enum PublishState: Sendable, Equatable {
     case idle, connecting, live, reconnecting, failed(String), ended
 }
 
 // MARK: - Publish stats
 
-struct PublishStats: Sendable, Equatable {
-    var bytesSent: Int64 = 0
-    var framesSent: Int64 = 0
-    var bitrate: Double = 0
-    var rtt: TimeInterval = 0
+public struct PublishStats: Sendable, Equatable {
+    public var bytesSent: Int64 = 0
+    public var framesSent: Int64 = 0
+    public var bitrate: Double = 0
+    public var rtt: TimeInterval = 0
+
+    public init(
+        bytesSent: Int64 = 0,
+        framesSent: Int64 = 0,
+        bitrate: Double = 0,
+        rtt: TimeInterval = 0
+    ) {
+        self.bytesSent = bytesSent
+        self.framesSent = framesSent
+        self.bitrate = bitrate
+        self.rtt = rtt
+    }
 }
 
 // MARK: - Publish config
 
-struct PublishConfig: Sendable {
-    var videoCodec: String = "H264"
-    var videoBitrate: UInt = 2_500_000
-    var keyframeInterval: Double = 2.0
-    var audioStereo: Bool = true
-    var audioBitrate: UInt = 128_000
+public struct PublishConfig: Sendable {
+    public var videoCodec: String
+    public var videoBitrate: UInt
+    public var keyframeInterval: Double
+    public var audioStereo: Bool
+    public var audioBitrate: UInt
+
+    public init(
+        videoCodec: String = "H264",
+        videoBitrate: UInt = 2_500_000,
+        keyframeInterval: Double = 2.0,
+        audioStereo: Bool = true,
+        audioBitrate: UInt = 128_000
+    ) {
+        self.videoCodec = videoCodec
+        self.videoBitrate = videoBitrate
+        self.keyframeInterval = keyframeInterval
+        self.audioStereo = audioStereo
+        self.audioBitrate = audioBitrate
+    }
 }
 
 // MARK: - WhipSession actor
 
-actor WhipSession {
-    private(set) var state: PublishState = .idle {
+public actor WhipSession {
+    public private(set) var state: PublishState = .idle {
         didSet {
             guard state != oldValue else { return }
             stateContinuation?.yield(state)
             if state == .ended { stateContinuation?.finish() }
         }
     }
-    private(set) var stats = PublishStats()
+    public private(set) var stats = PublishStats()
 
     private var resourceUrl: URL?
     private var etag: String?
@@ -79,7 +105,14 @@ actor WhipSession {
         self.reconnectController = reconnectController
     }
 
-    var stateStream: AsyncStream<PublishState> {
+    public init(budget: EncoderBudget, config: PublishConfig = PublishConfig()) {
+        self.client = WhipClientImpl()
+        self.budget = budget
+        self.config = config
+        self.reconnectController = ReconnectController()
+    }
+
+    public var stateStream: AsyncStream<PublishState> {
         if let existing = _cachedStateStream { return existing }
         let (stream, continuation) = AsyncStream<PublishState>.makeStream(bufferingPolicy: .bufferingNewest(1))
         stateContinuation = continuation
@@ -88,7 +121,7 @@ actor WhipSession {
         return stream
     }
 
-    func start(endpointURL: URL, authToken: String? = nil, config: PublishConfig? = nil, videoTap: VideoPublishTap? = nil, audioBridge: AudioPublishBridge? = nil) async throws {
+    public func start(endpointURL: URL, authToken: String? = nil, config: PublishConfig? = nil, videoTap: VideoPublishTap? = nil, audioBridge: AudioPublishBridge? = nil) async throws {
         guard canStartFromCurrentState else {
             throw WhipError.invalidState("Cannot start: session is already \(state).")
         }
@@ -130,7 +163,7 @@ actor WhipSession {
         }
     }
 
-    func stop() async {
+    public func stop() async {
         guard state != .ended else { return }
         statsTask?.cancel()
         statsTask = nil

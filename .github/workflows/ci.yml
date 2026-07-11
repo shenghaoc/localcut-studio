@@ -68,6 +68,9 @@ jobs:
       - name: Validate core/app layer boundary
         run: ./Scripts/validate-layer-boundaries.sh
 
+      - name: Build macOS platform layer
+        run: swift build --package-path "$PACKAGE_PATH" --target LocalCutPlatform
+
       - name: Run package tests
         run: swift test --package-path "$PACKAGE_PATH"
 
@@ -154,72 +157,3 @@ jobs:
         with:
           path: DerivedData
           key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
-
-  build-non-webrtc:
-    name: Test (non-WebRTC stubs)
-    runs-on: macos-26
-    timeout-minutes: 30
-
-    env:
-      PROJECT: "LocalCut Studio.xcodeproj"
-      SCHEME: "LocalCut Studio"
-      RESULT_BUNDLE: TestResults.xcresult
-      DERIVED_DATA: DerivedData
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Restore DerivedData cache
-        id: deriveddata-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: DerivedData
-          key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
-          restore-keys: |
-            deriveddata-${{ runner.os }}-nonwebrtc-
-
-      # Runs the focused publish suite for the non-WebRTC stub path.
-      # The nonWebRTCVideoTapStoresLatestFrame test exercises the stub
-      # VideoPublishTap; the WebRTC-enabled test job covers the real path.
-      - name: Test without WebRTC
-        run: |
-          set -o pipefail
-          rm -rf "$RESULT_BUNDLE"
-
-          # Strip LOCALCUT_ENABLE_WEBRTC from the project-level setting
-          # so the #if !LOCALCUT_ENABLE_WEBRTC stub paths are compiled.
-          # Keep the same per-test timeout as the WebRTC-enabled lane so a
-          # hung stub-path test cannot consume the whole 30-minute job.
-          xcodebuild test \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -configuration Debug \
-            -destination 'platform=macOS' \
-            -derivedDataPath "$DERIVED_DATA" \
-            -packageAuthorizationProvider netrc \
-            -resultBundlePath "$RESULT_BUNDLE" \
-            -only-testing:"LocalCut StudioTests/WhipPublishTests" \
-            -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 300 \
-            SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG \
-            | tee xcodebuild.log
-
-      - name: Upload failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: xcode-test-non-webrtc-diagnostics
-          path: |
-            xcodebuild.log
-            TestResults.xcresult
-            DerivedData/Build/Logs/Build/*.xcactivitylog
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Save DerivedData cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.deriveddata-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: DerivedData
-          key: deriveddata-${{ runner.os }}-nonwebrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}

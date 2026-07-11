@@ -6,6 +6,7 @@ import CoreMedia
 import os
 import LocalCutCore
 @testable import LocalCut_Studio
+@testable import LocalCutPlatform
 
 private nonisolated final class PurgeableOverlaySource: OverlayFrameSource, @unchecked Sendable {
     nonisolated let naturalSize = CGSize(width: 8, height: 8)

@@ -5,6 +5,7 @@ import CoreMedia
 import LocalCutCore
 import LocalCutDomain
 @testable import LocalCut_Studio
+@testable import LocalCutPlatform
 
 /// Helper for static-let contexts where `try!` would crash with an opaque error.
 /// Returns `Never` so it can be used as the RHS of `??` on any type.

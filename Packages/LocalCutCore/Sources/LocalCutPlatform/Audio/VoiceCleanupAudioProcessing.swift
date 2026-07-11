@@ -4,16 +4,22 @@ import CoreMedia
 import Accelerate
 import LocalCutCore
 
-enum VoiceCleanupAudioProcessing: Sendable {
-    struct PCMBlock {
-        var samples: [Float]
-        var channels: Int
-        var sampleRate: Double
+public enum VoiceCleanupAudioProcessing: Sendable {
+    public struct PCMBlock {
+        public var samples: [Float]
+        public var channels: Int
+        public var sampleRate: Double
+
+        public init(samples: [Float], channels: Int, sampleRate: Double) {
+            self.samples = samples
+            self.channels = channels
+            self.sampleRate = sampleRate
+        }
     }
 
-    nonisolated static func process(sample: CMSampleBuffer,
-                                    settings: VoiceCleanupSettings,
-                                    state: inout VoiceCleanupProcessorState) -> CMSampleBuffer? {
+    public nonisolated static func process(sample: CMSampleBuffer,
+                                           settings: VoiceCleanupSettings,
+                                           state: inout VoiceCleanupProcessorState) -> CMSampleBuffer? {
         guard var block = floatBlock(from: sample) else { return nil }
         VoiceCleanupDSP.processInterleaved(
             &block.samples,
@@ -28,10 +34,10 @@ enum VoiceCleanupAudioProcessing: Sendable {
             source: sample)
     }
 
-    nonisolated static func measureLoudness(composition: AVComposition,
-                                            audioMix: AVAudioMix?,
-                                            duration: Double,
-                                            settings: VoiceCleanupSettings) throws -> LoudnessAnalysisResult {
+    public nonisolated static func measureLoudness(composition: AVComposition,
+                                                   audioMix: AVAudioMix?,
+                                                   duration: Double,
+                                                   settings: VoiceCleanupSettings) throws -> LoudnessAnalysisResult {
         guard duration >= 3 else {
             return LoudnessAnalysisResult(
                 measuredLUFS: -.infinity,
@@ -109,7 +115,7 @@ enum VoiceCleanupAudioProcessing: Sendable {
             durationSeconds: duration)
     }
 
-    nonisolated static func floatBlock(from sample: CMSampleBuffer) -> PCMBlock? {
+    public nonisolated static func floatBlock(from sample: CMSampleBuffer) -> PCMBlock? {
         guard let formatDescription = CMSampleBufferGetFormatDescription(sample),
               let asbdPointer = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription),
               let dataBuffer = CMSampleBufferGetDataBuffer(sample) else {
@@ -235,9 +241,9 @@ enum VoiceCleanupAudioProcessing: Sendable {
         return output
     }
 
-    nonisolated static func sampleDuration(totalDuration: CMTime,
-                                           frameCount: Int,
-                                           sampleRate: Double) -> CMTime {
+    public nonisolated static func sampleDuration(totalDuration: CMTime,
+                                                  frameCount: Int,
+                                                  sampleRate: Double) -> CMTime {
         if totalDuration.isValid, totalDuration.isNumeric, frameCount > 0 {
             return CMTimeMultiplyByRatio(
                 totalDuration,
@@ -253,11 +259,11 @@ enum VoiceCleanupAudioProcessing: Sendable {
     }
 }
 
-enum VoiceCleanupError: LocalizedError, Sendable {
+public enum VoiceCleanupError: LocalizedError, Sendable {
     case readerOutputRejected
     case readerStartFailed
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .readerOutputRejected:
             "Could not add an audio reader output for loudness measurement."

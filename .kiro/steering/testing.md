@@ -6,7 +6,8 @@
 - **Location**: a `LocalCut StudioTests` target alongside the app target (added when the first non-trivial pure-logic unit lands).
 - **Scope**: deterministic, framework-light logic — timeline model math and the parts of `CompositionBuilder` that don't require decoding real media.
 - **Cross-platform gate**: `LocalCutDomainTests` must pass with SwiftPM on
-  Linux. Apple framework tests stay in `LocalCutCoreTests` on macOS.
+  Linux. `LocalCutCoreTests` run on macOS; `LocalCutPlatform` is built by SwiftPM
+  and its binary-framework behavior is exercised by the Xcode suite.
 
 ## What to test
 

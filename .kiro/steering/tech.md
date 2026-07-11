@@ -29,8 +29,9 @@
 
 ## Constraints / rules
 
-- **No third-party media libraries without a spec** — WebRTC is the documented
-  WHIP exception and remains in the macOS app layer, never LocalCutDomain.
+- **No third-party media libraries without a spec** — WebRTC and Lottie are
+  documented macOS platform dependencies. They remain in `LocalCutPlatform`
+  and never enter `LocalCutDomain` or `LocalCutCore`.
 - **Time math in `CMTime`** — never convert to `Double` seconds for editing decisions except at the UI boundary (pixels ↔ seconds).
 - **Async asset loading** — never use the deprecated synchronous `AVAsset` accessors; they block and are removed in modern SDKs.
 - **One `AVPlayer`** — owned by `EditorModel`; views observe it, never create their own.

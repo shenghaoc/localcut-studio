@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import CoreGraphics
 import LocalCutCore
+import LocalCutPlatform
 
 /// The product of building a project: an immutable composition plus the video
 /// composition that describes how its video layers are transformed and stacked.

@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 import CoreMedia
 import LocalCutCore
 import LocalCutDomain
+import LocalCutPlatform
 
 /// The media library: imported source files with poster frames. Selecting an
 /// item shows it in the inspector; the add button (or double-click) appends it

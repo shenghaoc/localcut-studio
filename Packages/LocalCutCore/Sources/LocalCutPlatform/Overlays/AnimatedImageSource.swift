@@ -11,8 +11,8 @@ import LocalCutCore
 /// Frames are decoded on demand and cached in a sliding window to bound memory.
 /// `@unchecked Sendable`: frame cache is protected by `lock`; immutable
 /// metadata (`frameCount`, `frameDurations`, `frameStarts`) is set in `init`.
-nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Sendable {
-    nonisolated let naturalSize: CGSize
+public nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Sendable {
+    public nonisolated let naturalSize: CGSize
     private let url: URL
     private let frameCount: Int
     private let totalDuration: TimeInterval
@@ -28,7 +28,7 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
     private let cacheState = OSAllocatedUnfairLock(initialState: CacheState())
     private let maxCachedFrames = 8
 
-    init?(url: URL) {
+    public init?(url: URL) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
@@ -75,7 +75,7 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
         self.frameStarts = starts
     }
 
-    nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage? {
+    public nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage? {
         let t = time.seconds
         guard t >= 0 else { return nil }
 
@@ -129,11 +129,11 @@ nonisolated final class AnimatedImageSource: OverlayFrameSource, @unchecked Send
         return ciImage
     }
 
-    nonisolated var cachedFrameCount: Int {
+    public nonisolated var cachedFrameCount: Int {
         cacheState.withLock { $0.cache.count }
     }
 
-    nonisolated func purgeCachedFrames() {
+    public nonisolated func purgeCachedFrames() {
         cacheState.withLock { $0.cache.removeAll() }
     }
 }

@@ -5,6 +5,7 @@ import CoreGraphics
 import CoreImage
 import LocalCutCore
 @testable import LocalCut_Studio
+@testable import LocalCutPlatform
 
 // MARK: - Overlay model round-trip tests
 

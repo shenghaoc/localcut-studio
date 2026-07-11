@@ -53,8 +53,8 @@ app uses the pinned `webrtc-sdk/Specs` 125.6422.09 Swift package.
 - Audio input: LocalCut uses the package's public AVAudioEngine device-module
   delegate to connect an `AVAudioSourceNode` carrying master-bus PCM. No binary
   patch, copied private header, bootstrap script, symlink, or submodule is used.
-- Build gate: guarded by `LOCALCUT_ENABLE_WEBRTC`, so custom builds can remove
-  the dependency and compile the reduced publish UI state.
+- Platform boundary: WebRTC is required by the macOS-only `LocalCutPlatform`
+  target. Linux excludes that target and does not compile a substitute.
 
 ## Exporting OTIO and EDL
 

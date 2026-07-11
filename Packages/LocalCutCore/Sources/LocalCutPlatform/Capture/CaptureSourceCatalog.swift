@@ -4,9 +4,9 @@ import CoreGraphics
 import Darwin
 import ScreenCaptureKit
 
-enum CaptureSourceCatalog {
+public enum CaptureSourceCatalog {
     @MainActor
-    static func screenOptions() async throws -> [CaptureSourceOption] {
+    public static func screenOptions() async throws -> [CaptureSourceOption] {
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
             throw CaptureEngineError.screenRecordingDenied
         }
@@ -80,7 +80,7 @@ enum CaptureSourceCatalog {
     }
 
     @MainActor
-    static func webcamOptions() -> [CaptureDeviceOption] {
+    public static func webcamOptions() -> [CaptureDeviceOption] {
         let discovery = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInWideAngleCamera, .external],
             mediaType: .video,
@@ -89,7 +89,7 @@ enum CaptureSourceCatalog {
     }
 
     @MainActor
-    static func microphoneOptions() -> [CaptureDeviceOption] {
+    public static func microphoneOptions() -> [CaptureDeviceOption] {
         let discovery = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.microphone, .external],
             mediaType: .audio,
@@ -101,7 +101,7 @@ enum CaptureSourceCatalog {
     /// System audio requires macOS 13+ and a chip with hardware audio routing
     /// (Apple Silicon). Intel Macs running macOS 13+ may report the capability
     /// but cannot reliably deliver system audio through SCStream.
-    static nonisolated var isSystemAudioAvailable: Bool {
+    public static nonisolated var isSystemAudioAvailable: Bool {
         let os = ProcessInfo.processInfo.operatingSystemVersion
         if os.majorVersion < 13 { return false }
         let isAppleSilicon = {

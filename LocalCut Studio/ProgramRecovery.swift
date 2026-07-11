@@ -1,6 +1,7 @@
 import Foundation
 import CoreMedia
 import LocalCutCore
+import LocalCutPlatform
 
 // MARK: - Program recovery
 

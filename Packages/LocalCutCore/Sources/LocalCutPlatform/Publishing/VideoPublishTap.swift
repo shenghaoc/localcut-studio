@@ -9,12 +9,12 @@ import WebRTC
 /// `@unchecked Sendable`: WebRTC source/capturer and frame delivery state
 /// (`isClosed`, `isInFlight`, `pendingBuffer`, `latestPixelBuffer`) are
 /// protected by `lock`.
-nonisolated final class VideoPublishTap: @unchecked Sendable {
+public nonisolated final class VideoPublishTap: @unchecked Sendable {
     #if LOCALCUT_ENABLE_WEBRTC
     private var videoSource: RTCVideoSource?
     private var capturer: TapCapturer?
 
-    init() {}
+    public init() {}
 
     nonisolated func attach(to factory: RTCPeerConnectionFactory) -> RTCVideoSource {
         lock.withLockUnchecked { _ in
@@ -38,7 +38,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     }
 
     private var latestPixelBufferStorage: CVPixelBuffer?
-    init() {}
+    public init() {}
     nonisolated func detachFromWebRTC() {}
     #endif
 
@@ -47,7 +47,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
     private var isInFlight = false
     private var pendingBuffer: CVPixelBuffer?
 
-    nonisolated func capturePixelBuffer(_ buffer: CVPixelBuffer) {
+    public nonisolated func capturePixelBuffer(_ buffer: CVPixelBuffer) {
         let shouldDeliver = lock.withLockUnchecked { _ -> Bool in
             guard !isClosed else { return false }
             if isInFlight {
@@ -62,7 +62,7 @@ nonisolated final class VideoPublishTap: @unchecked Sendable {
         }
     }
 
-    nonisolated func close() {
+    public nonisolated func close() {
         lock.withLock { _ in
             guard !isClosed else { return }
             isClosed = true

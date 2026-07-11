@@ -1,6 +1,7 @@
 import SwiftUI
 import LocalCutCore
 import LocalCutDomain
+import LocalCutPlatform
 
 enum PublishStateDisplay: String, Sendable {
     case idle, connecting, live, reconnecting, failed, ended
@@ -225,11 +226,7 @@ final class PublishPanelState {
     }
 
     func refreshCapability(model: EditorModel) {
-        #if LOCALCUT_ENABLE_WEBRTC
         isWebRTCAvailable = true
-        #else
-        isWebRTCAvailable = false
-        #endif
         isProgramOutputAvailable = model.programSession != nil
         Task { [weak self, weak model] in
             guard let self, let model else { return }

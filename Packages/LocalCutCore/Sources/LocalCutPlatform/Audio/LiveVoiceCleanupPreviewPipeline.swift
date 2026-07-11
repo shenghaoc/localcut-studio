@@ -5,71 +5,93 @@ import os
 import LocalCutCore
 
 /// `@unchecked Sendable`: `VoiceCleanupSettings` behind `OSAllocatedUnfairLock`.
-nonisolated final class LiveVoiceCleanupSettingsStore: @unchecked Sendable {
+public nonisolated final class LiveVoiceCleanupSettingsStore: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock<VoiceCleanupSettings>(
         initialState: VoiceCleanupSettings())
 
-    func update(_ settings: VoiceCleanupSettings) {
+    public init() {}
+
+    public func update(_ settings: VoiceCleanupSettings) {
         var clamped = settings
         clamped.clamp()
         let stored = clamped
         lock.withLock { $0 = stored }
     }
 
-    func read() -> VoiceCleanupSettings {
+    public func read() -> VoiceCleanupSettings {
         lock.withLock { $0 }
     }
 }
 
 /// `@unchecked Sendable`: frame count behind `OSAllocatedUnfairLock`.
-nonisolated final class LiveQueuedFrameCounter: @unchecked Sendable {
+public nonisolated final class LiveQueuedFrameCounter: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock<Int>(initialState: 0)
 
-    func reset() {
+    public init() {}
+
+    public func reset() {
         lock.withLock { $0 = 0 }
     }
 
-    func add(_ frames: Int) {
+    public func add(_ frames: Int) {
         lock.withLock { $0 += max(0, frames) }
     }
 
-    func remove(_ frames: Int) {
+    public func remove(_ frames: Int) {
         lock.withLock { $0 = max(0, $0 - max(0, frames)) }
     }
 
-    var value: Int {
+    public var value: Int {
         lock.withLock { $0 }
     }
 }
 
 /// `@unchecked Sendable`: `LiveGainReduction` behind `OSAllocatedUnfairLock`.
-nonisolated final class LiveGainReductionStore: @unchecked Sendable {
+public nonisolated final class LiveGainReductionStore: @unchecked Sendable {
     private let lock = OSAllocatedUnfairLock<LiveGainReduction>(
         initialState: LiveGainReduction())
 
-    func update(_ value: LiveGainReduction) {
+    public init() {}
+
+    public func update(_ value: LiveGainReduction) {
         lock.withLock { $0 = value }
     }
 
-    func read() -> LiveGainReduction {
+    public func read() -> LiveGainReduction {
         lock.withLock { $0 }
     }
 }
 
-struct LiveGainReduction: Sendable, Equatable {
-    var denoiserReduction: Float = 0
-    var gateReductionDB: Float = 0
-    var compressorReductionDB: Float = 0
-    var limiterReductionDB: Float = 0
+public struct LiveGainReduction: Sendable, Equatable {
+    public var denoiserReduction: Float
+    public var gateReductionDB: Float
+    public var compressorReductionDB: Float
+    public var limiterReductionDB: Float
+
+    public init(
+        denoiserReduction: Float = 0,
+        gateReductionDB: Float = 0,
+        compressorReductionDB: Float = 0,
+        limiterReductionDB: Float = 0
+    ) {
+        self.denoiserReduction = denoiserReduction
+        self.gateReductionDB = gateReductionDB
+        self.compressorReductionDB = compressorReductionDB
+        self.limiterReductionDB = limiterReductionDB
+    }
 }
 
 /// `@unchecked Sendable`: immutable wrapper for non-`Sendable`
 /// `AVAudioPCMBuffer`.
-nonisolated struct LiveAudioPCMBufferBox: @unchecked Sendable {
-    let buffer: AVAudioPCMBuffer
+public nonisolated struct LiveAudioPCMBufferBox: @unchecked Sendable {
+    public let buffer: AVAudioPCMBuffer
+
+    public init(buffer: AVAudioPCMBuffer) {
+        self.buffer = buffer
+    }
 }
 
-struct BypassRampState: Sendable {
+public struct BypassRampState: Sendable {
     var denoiserBypass: Float = 1.0
     var gateBypass: Float = 1.0
     var compressorBypass: Float = 1.0
@@ -103,9 +125,11 @@ struct BypassRampState: Sendable {
             rampFrames: rampFrames)
     }
 
-    nonisolated mutating func snapshotAndAdvance(settings: VoiceCleanupSettings,
-                                                 frameCount: Int,
-                                                 rampFrames: Int) -> VoiceCleanupInsertBypassRamp {
+    public init() {}
+
+    public nonisolated mutating func snapshotAndAdvance(settings: VoiceCleanupSettings,
+                                                        frameCount: Int,
+                                                        rampFrames: Int) -> VoiceCleanupInsertBypassRamp {
         let targetDenoiser: Float = settings.denoiser.bypass ? 1.0 : 0.0
         let targetGate: Float = settings.gate.bypass ? 1.0 : 0.0
         let targetCompressor: Float = settings.compressor.bypass ? 1.0 : 0.0
@@ -130,10 +154,10 @@ struct BypassRampState: Sendable {
     }
 }
 
-enum LiveVoiceCleanupPreviewPipeline: Sendable {
-    nonisolated static let maxQueuedFrames = 16_384
+public enum LiveVoiceCleanupPreviewPipeline: Sendable {
+    public nonisolated static let maxQueuedFrames = 16_384
 
-    nonisolated static func decodeProcessAndSchedule(
+    public nonisolated static func decodeProcessAndSchedule(
         composition: AVComposition,
         audioMix: AVAudioMix?,
         startTime: CMTime,

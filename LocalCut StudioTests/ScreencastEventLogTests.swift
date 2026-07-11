@@ -3,6 +3,7 @@ import Foundation
 import CoreMedia
 import LocalCutCore
 @testable import LocalCut_Studio
+@testable import LocalCutPlatform
 
 // MARK: - Own-App Detection
 

@@ -12,8 +12,8 @@ import LocalCutCore
 /// pre-rendering the full animation into memory.
 /// `@unchecked Sendable`: frame cache (`cache`, `cacheOrder`) is protected by
 /// `lock`; immutable metadata is set once in `init`.
-nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendable {
-    nonisolated let naturalSize: CGSize
+public nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendable {
+    public nonisolated let naturalSize: CGSize
 
     private let renderer: LottieFrameRenderer
     private let frameRate: Double
@@ -34,7 +34,7 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
     private static let maxRasterDimension: CGFloat = 8_192
 
     @MainActor
-    convenience init?(url: URL) {
+    public convenience init?(url: URL) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         guard let data = try? Data(contentsOf: url),
@@ -45,7 +45,7 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
     }
 
     @MainActor
-    static func make(url: URL) async -> LottieFrameSource? {
+    public static func make(url: URL) async -> LottieFrameSource? {
         guard let animation = await loadAnimation(url: url) else { return nil }
         return LottieFrameSource(animation: animation)
     }
@@ -66,7 +66,7 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
         }.value
     }
 
-    static func unsupportedFeatureWarning(for url: URL) -> String? {
+    public static func unsupportedFeatureWarning(for url: URL) -> String? {
         guard url.pathExtension.lowercased() != "lottie",
               let data = try? Data(contentsOf: url),
               containsAfterEffectsLayerEffects(in: data) else {
@@ -75,7 +75,7 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
         return unsupportedFeatureWarningMessage
     }
 
-    static func unsupportedFeatureWarningAsync(for url: URL) async -> String? {
+    public static func unsupportedFeatureWarningAsync(for url: URL) async -> String? {
         await Task.detached(priority: .utility) { () async -> String? in
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
@@ -140,7 +140,7 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
         self.maxCachedFrames = max(1, min(8, Self.maxCachedBytes / bytesPerFrame))
     }
 
-    nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage? {
+    public nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage? {
         guard frameCount > 0 else { return nil }
         let seconds = time.seconds
         guard seconds >= 0 else { return nil }
@@ -183,11 +183,11 @@ nonisolated final class LottieFrameSource: OverlayFrameSource, @unchecked Sendab
         return image
     }
 
-    nonisolated var cachedFrameCount: Int {
+    public nonisolated var cachedFrameCount: Int {
         cacheState.withLock { $0.cache.count }
     }
 
-    nonisolated func purgeCachedFrames() {
+    public nonisolated func purgeCachedFrames() {
         cacheState.withLock { state in
             state.cache.removeAll()
             state.cacheOrder.removeAll()

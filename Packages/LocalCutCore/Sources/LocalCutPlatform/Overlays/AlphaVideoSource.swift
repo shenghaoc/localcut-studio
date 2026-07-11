@@ -15,8 +15,8 @@ import LocalCutCore
 /// `@unchecked Sendable`: frame cache (`cache`, `cacheOrder`) is protected by
 /// `lock`; `AVAssetImageGenerator` is non-`Sendable` but its async
 /// `image(at:)` API handles concurrent requests internally.
-nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendable {
-    nonisolated let naturalSize: CGSize
+public nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendable {
+    public nonisolated let naturalSize: CGSize
     private let url: URL
     private let generator: AVAssetImageGenerator
     private let frameStarts: [TimeInterval]
@@ -47,7 +47,7 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
         self.duration = duration
     }
 
-    static func make(url: URL) async -> AlphaVideoSource? {
+    public static func make(url: URL) async -> AlphaVideoSource? {
         await Task.detached(priority: .userInitiated) {
             await makeWithScopedAccess(url: url)
         }.value
@@ -105,7 +105,7 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
             duration: duration.seconds)
     }
 
-    nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage? {
+    public nonisolated func frame(at time: CMTime, endAction: OverlayEndAction) async -> CIImage? {
         guard !frameStarts.isEmpty else { return nil }
         let t = time.seconds
         guard t >= 0 else { return nil }
@@ -159,11 +159,11 @@ nonisolated final class AlphaVideoSource: OverlayFrameSource, @unchecked Sendabl
         return image
     }
 
-    nonisolated var cachedFrameCount: Int {
+    public nonisolated var cachedFrameCount: Int {
         cacheState.withLock { $0.cache.count }
     }
 
-    nonisolated func purgeCachedFrames() {
+    public nonisolated func purgeCachedFrames() {
         cacheState.withLock { state in
             state.cache.removeAll()
             state.cacheOrder.removeAll()

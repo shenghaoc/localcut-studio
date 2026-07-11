@@ -1,16 +1,21 @@
-# LocalCut domain and Apple media cores
+# LocalCut domain, Apple media core, and macOS platform
 
-This package deliberately contains two targets:
+This package deliberately contains three targets:
 
 - **LocalCutDomain** — Foundation-only domain policy and algorithms. It builds
   and tests on macOS and Linux.
 - **LocalCutCore** — Apple media models and algorithms that legitimately use
   CoreMedia, CoreGraphics, CoreVideo, Accelerate, VideoToolbox, Observation,
   and `os`, but never SwiftUI, AppKit, AVKit, or AVFoundation.
+- **LocalCutPlatform** — macOS-only, presentation-independent adapters for
+  AVFoundation, ScreenCaptureKit, WebRTC, Lottie, capture, publishing, audio,
+  and animated-overlay decoding. It never imports SwiftUI or the app module.
 
-The macOS fast loop runs both targets:
+The macOS fast loop builds the binary-backed platform target, then runs the
+deterministic Domain/Core tests:
 
 ```sh
+swift build --package-path Packages/LocalCutCore --target LocalCutPlatform
 swift test --package-path Packages/LocalCutCore
 ```
 
@@ -21,9 +26,9 @@ executable constraint rather than a naming convention.
 ## What belongs here
 
 Cross-platform code belongs in `LocalCutDomain` and may import Foundation only.
-Code that uses Apple media/runtime frameworks belongs in `LocalCutCore`, even
-when it has no UI. Framework adapters and live `AVAsset`/`AVPlayer`/`CIContext`
-glue stay in the app target. CI enforces both boundaries with
+Code that uses deterministic Apple media/runtime types belongs in
+`LocalCutCore`. Reusable live-framework adapters belong in `LocalCutPlatform`.
+The app target owns orchestration and presentation. CI enforces all boundaries with
 `Scripts/validate-layer-boundaries.sh`.
 
 ## Module layout
@@ -40,6 +45,12 @@ Sources/LocalCutCore/
   Transitions/       ← TransitionLayout geometry (cuts, overlaps, ripple, placements)
   RenderPlanning/    ← VisibleSegment, PlannedUnit, planUnits(), fitTransform()
   Diagnostics/       ← DiagnosticsBridge (thread-safe ring buffer)
+Sources/LocalCutPlatform/
+  Audio/             ← AVFoundation voice-cleanup adapters
+  Capture/           ← ScreenCaptureKit/AVCapture sessions and writers
+  Media/             ← frame scaling and AVFoundation mappings
+  Overlays/          ← Lottie/animated-image/alpha-video frame sources
+  Publishing/        ← WHIP client, WebRTC bridges, reconnect policy
 Tests/LocalCutDomainTests/
 Tests/LocalCutCoreTests/
 ```
@@ -75,6 +86,6 @@ project snapshots.
 - `CompositionBuilder` — `AVMutableComposition` / `AVVideoComposition`
 - `EffectCompositor` — `AVVideoCompositing` (Metal/Core Image)
 - `RenderQueue` — `AVAssetExportSession` / `AVAssetWriter`
-- `AudioMasterBus` — `AVAudioEngine`
+- `AudioMasterBus` — app-owned graph/orchestration consuming platform DSP adapters
 - `DiagnosticsAgent` — `proc_pidinfo`, Timer
 - All SwiftUI views

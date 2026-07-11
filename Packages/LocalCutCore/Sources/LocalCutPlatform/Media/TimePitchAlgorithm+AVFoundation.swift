@@ -1,7 +1,7 @@
 import AVFoundation
 import LocalCutCore
 
-extension TimePitchAlgorithm {
+public extension TimePitchAlgorithm {
     var avFoundationAlgorithm: AVAudioTimePitchAlgorithm {
         switch self {
         case .timeDomain: .timeDomain

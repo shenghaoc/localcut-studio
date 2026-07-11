@@ -4,6 +4,7 @@ import CoreMedia
 @preconcurrency import CoreVideo
 import LocalCutCore
 import LocalCutDomain
+import LocalCutPlatform
 
 // MARK: - Program session error
 

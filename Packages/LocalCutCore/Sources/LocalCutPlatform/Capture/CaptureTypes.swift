@@ -4,7 +4,7 @@ import CoreMedia
 import LocalCutCore
 import LocalCutDomain
 
-nonisolated enum CaptureEngineError: LocalizedError, Equatable {
+public nonisolated enum CaptureEngineError: LocalizedError, Equatable {
     case alreadyRecording
     case notRecording
     case noCaptureSources
@@ -20,7 +20,7 @@ nonisolated enum CaptureEngineError: LocalizedError, Equatable {
     case captureSessionFailed(String)
     case manifestWriteFailed(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .alreadyRecording:
             "A recording is already running."
@@ -54,21 +54,21 @@ nonisolated enum CaptureEngineError: LocalizedError, Equatable {
     }
 }
 
-nonisolated struct CaptureSourceOption: Identifiable, Hashable {
-    let id: String
-    var title: String
-    var subtitle: String
-    var target: CaptureTarget
-    var width: Int
-    var height: Int
+public nonisolated struct CaptureSourceOption: Identifiable, Hashable {
+    public let id: String
+    public var title: String
+    public var subtitle: String
+    public var target: CaptureTarget
+    public var width: Int
+    public var height: Int
 }
 
-nonisolated enum CaptureTarget: Hashable, Sendable {
+public nonisolated enum CaptureTarget: Hashable, Sendable {
     case display(displayID: UInt32, width: Int, height: Int)
     case window(windowID: UInt32, title: String, owner: String, width: Int, height: Int, frame: CGRect)
     case application(processID: Int32, bundleIdentifier: String, name: String, displayID: UInt32, width: Int, height: Int)
 
-    var sourceKind: CaptureSourceKind {
+    public var sourceKind: CaptureSourceKind {
         switch self {
         case .display: .display
         case .window: .window
@@ -76,7 +76,7 @@ nonisolated enum CaptureTarget: Hashable, Sendable {
         }
     }
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .display(let displayID, _, _):
             "Display \(displayID)"
@@ -87,7 +87,7 @@ nonisolated enum CaptureTarget: Hashable, Sendable {
         }
     }
 
-    var outputSize: (width: Int, height: Int) {
+    public var outputSize: (width: Int, height: Int) {
         switch self {
         case .display(_, let width, let height),
              .window(_, _, _, let width, let height, _),
@@ -99,17 +99,17 @@ nonisolated enum CaptureTarget: Hashable, Sendable {
     }
 }
 
-nonisolated struct CaptureRegion: Hashable, Sendable {
-    var displayID: UInt32
-    var sourceRect: CGRect
-    var outputWidth: Int
-    var outputHeight: Int
+public nonisolated struct CaptureRegion: Hashable, Sendable {
+    public var displayID: UInt32
+    public var sourceRect: CGRect
+    public var outputWidth: Int
+    public var outputHeight: Int
 
-    init?(displayID: UInt32,
-          selectionInScreen: CGRect,
-          screenFrame: CGRect,
-          displayPixelWidth: Int,
-          displayPixelHeight: Int) {
+    public init?(displayID: UInt32,
+                 selectionInScreen: CGRect,
+                 screenFrame: CGRect,
+                 displayPixelWidth: Int,
+                 displayPixelHeight: Int) {
         guard !selectionInScreen.isNull, !screenFrame.isEmpty else { return nil }
         let clipped = selectionInScreen.intersection(screenFrame)
         guard clipped.width > 0, clipped.height > 0 else { return nil }
@@ -130,46 +130,72 @@ nonisolated struct CaptureRegion: Hashable, Sendable {
             height: clipped.height).integral
     }
 
-    func applies(to target: CaptureTarget) -> Bool {
+    public func applies(to target: CaptureTarget) -> Bool {
         guard case .display(let targetDisplayID, _, _) = target else { return false }
         return targetDisplayID == displayID
     }
 }
 
-nonisolated struct CaptureDeviceOption: Identifiable, Hashable, Sendable {
-    let id: String
-    var title: String
+public nonisolated struct CaptureDeviceOption: Identifiable, Hashable, Sendable {
+    public let id: String
+    public var title: String
 }
 
-nonisolated struct CaptureStartRequest: Sendable {
-    var target: CaptureTarget?
-    var includeSystemAudio: Bool
-    var webcamDeviceID: String?
-    var microphoneDeviceID: String?
-    var rootURL: URL
-    var frameRate: Double
-    var fragmentInterval: CMTime
-    var capabilities: Capabilities
-    var captureRegion: CaptureRegion? = nil
-    var excludedWindowIDs: Set<CGWindowID> = []
+public nonisolated struct CaptureStartRequest: Sendable {
+    public var target: CaptureTarget?
+    public var includeSystemAudio: Bool
+    public var webcamDeviceID: String?
+    public var microphoneDeviceID: String?
+    public var rootURL: URL
+    public var frameRate: Double
+    public var fragmentInterval: CMTime
+    public var capabilities: Capabilities
+    public var captureRegion: CaptureRegion?
+    public var excludedWindowIDs: Set<CGWindowID>
     /// Voice cleanup settings store for mic recording path (Phase 36/46).
     /// When non-nil, mic audio is processed through VoiceCleanupDSP before encoding.
-    var voiceCleanupSettings: LiveVoiceCleanupSettingsStore? = nil
+    public var voiceCleanupSettings: LiveVoiceCleanupSettingsStore?
+
+    public init(
+        target: CaptureTarget?,
+        includeSystemAudio: Bool,
+        webcamDeviceID: String?,
+        microphoneDeviceID: String?,
+        rootURL: URL,
+        frameRate: Double,
+        fragmentInterval: CMTime,
+        capabilities: Capabilities,
+        captureRegion: CaptureRegion? = nil,
+        excludedWindowIDs: Set<CGWindowID> = [],
+        voiceCleanupSettings: LiveVoiceCleanupSettingsStore? = nil
+    ) {
+        self.target = target
+        self.includeSystemAudio = includeSystemAudio
+        self.webcamDeviceID = webcamDeviceID
+        self.microphoneDeviceID = microphoneDeviceID
+        self.rootURL = rootURL
+        self.frameRate = frameRate
+        self.fragmentInterval = fragmentInterval
+        self.capabilities = capabilities
+        self.captureRegion = captureRegion
+        self.excludedWindowIDs = excludedWindowIDs
+        self.voiceCleanupSettings = voiceCleanupSettings
+    }
 }
 
-nonisolated struct CaptureSessionResult: Sendable, Identifiable {
-    let id: UUID
-    var directoryURL: URL
-    var manifestURL: URL
-    var manifest: CaptureManifest
-    var wasRecovered: Bool
+public nonisolated struct CaptureSessionResult: Sendable, Identifiable {
+    public let id: UUID
+    public var directoryURL: URL
+    public var manifestURL: URL
+    public var manifest: CaptureManifest
+    public var wasRecovered: Bool
     /// Non-nil when the manifest's finalize record could not be written (disk
     /// full, volume disappeared, prior critical manifest write failed, etc.).
     /// The UI surfaces this; the manifest remains unfinalized so crash recovery
     /// can still discover the session.
-    var manifestFinalizationError: String?
+    public var manifestFinalizationError: String?
 
-    var manifestFinalizeFailed: Bool {
+    public var manifestFinalizeFailed: Bool {
         manifestFinalizationError != nil
     }
 }
