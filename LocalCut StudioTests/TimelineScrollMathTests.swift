@@ -52,51 +52,52 @@ struct TimelineScrollMathTests {
 
     // MARK: - clampedTarget
 
-    @Test("clampedTarget pins negatives to 0")
-    func clampedTargetNegative() {
-        #expect(TimelineScrollMath.clampedTarget(-5, totalDuration: 30) == 0)
+    struct ClampedTargetCase: CustomTestStringConvertible {
+        let target: Double
+        let totalDuration: Double
+        let expected: Double
+        var testDescription: String { "clamp(\(target), dur:\(totalDuration)) == \(expected)" }
     }
 
-    @Test("clampedTarget pins past-end to totalDuration")
-    func clampedTargetPastEnd() {
-        #expect(TimelineScrollMath.clampedTarget(100, totalDuration: 30) == 30)
-    }
-
-    @Test("clampedTarget returns 0 for an empty project")
-    func clampedTargetEmptyProject() {
-        #expect(TimelineScrollMath.clampedTarget(10, totalDuration: 0) == 0)
-        #expect(TimelineScrollMath.clampedTarget(0, totalDuration: 0) == 0)
-    }
-
-    @Test("clampedTarget protects against a negative totalDuration argument")
-    func clampedTargetNegativeDuration() {
-        // Math defensively floors totalDuration at 0 so callers can pass an
-        // uninitialised model.totalDuration without splattering negatives.
-        #expect(TimelineScrollMath.clampedTarget(5, totalDuration: -10) == 0)
+    @Test("clampedTarget pins to valid range", arguments: [
+        ClampedTargetCase(target: -5, totalDuration: 30, expected: 0),
+        ClampedTargetCase(target: 100, totalDuration: 30, expected: 30),
+        ClampedTargetCase(target: 10, totalDuration: 0, expected: 0),
+        ClampedTargetCase(target: 0, totalDuration: 0, expected: 0),
+        ClampedTargetCase(target: 5, totalDuration: -10, expected: 0),
+    ])
+    func clampedTarget(_ cs: ClampedTargetCase) {
+        #expect(TimelineScrollMath.clampedTarget(cs.target, totalDuration: cs.totalDuration) == cs.expected)
     }
 
     // MARK: - Ruler accessibility adjustment
 
-    @Test("Ruler adjustment clamps the tick step to a usable range")
-    func rulerAdjustmentClampsStep() {
-        #expect(TimelineScrollMath.rulerAdjustmentTarget(
-            currentTime: 10, totalDuration: 30, tickStep: 0.1, increment: true) == 10.25)
-        #expect(TimelineScrollMath.rulerAdjustmentTarget(
-            currentTime: 10, totalDuration: 30, tickStep: 30, increment: true) == 15)
+    struct RulerCase: CustomTestStringConvertible {
+        let currentTime: Double
+        let totalDuration: Double
+        let tickStep: Double
+        let increment: Bool
+        let expected: Double?
+        var testDescription: String {
+            let dir = increment ? "++" : "--"
+            return "ruler(\(currentTime), step:\(tickStep), \(dir)) == \(expected.map { String($0) } ?? "nil")"
+        }
     }
 
-    @Test("Ruler adjustment clamps at both project boundaries")
-    func rulerAdjustmentClampsBoundaries() {
+    @Test("Ruler adjustment target", arguments: [
+        // Tick step clamping
+        RulerCase(currentTime: 10, totalDuration: 30, tickStep: 0.1, increment: true, expected: 10.25),
+        RulerCase(currentTime: 10, totalDuration: 30, tickStep: 30, increment: true, expected: 15),
+        // Boundary clamping
+        RulerCase(currentTime: 0.1, totalDuration: 30, tickStep: 1, increment: false, expected: 0),
+        RulerCase(currentTime: 29.5, totalDuration: 30, tickStep: 1, increment: true, expected: 30),
+        // Empty project
+        RulerCase(currentTime: 0, totalDuration: 0, tickStep: 1, increment: true, expected: nil),
+    ])
+    func rulerAdjustment(_ cs: RulerCase) {
         #expect(TimelineScrollMath.rulerAdjustmentTarget(
-            currentTime: 0.1, totalDuration: 30, tickStep: 1, increment: false) == 0)
-        #expect(TimelineScrollMath.rulerAdjustmentTarget(
-            currentTime: 29.5, totalDuration: 30, tickStep: 1, increment: true) == 30)
-    }
-
-    @Test("Ruler adjustment is unavailable for an empty project")
-    func rulerAdjustmentEmptyProject() {
-        #expect(TimelineScrollMath.rulerAdjustmentTarget(
-            currentTime: 0, totalDuration: 0, tickStep: 1, increment: true) == nil)
+            currentTime: cs.currentTime, totalDuration: cs.totalDuration,
+            tickStep: cs.tickStep, increment: cs.increment) == cs.expected)
     }
 
     // MARK: - Page-scroll integration math

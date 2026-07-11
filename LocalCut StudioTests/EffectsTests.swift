@@ -248,7 +248,7 @@ func lutOnlyClipHasExportableLookPreset() {
 
 @Test("Look preset LUT resolver rejects unsafe sidecar paths")
 func lookPresetLUTResolverRejectsUnsafePaths() throws {
-    let tmp = URL(filePath: NSTemporaryDirectory())
+    let tmp = FileManager.default.temporaryDirectory
         .appendingPathComponent("look-lut-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: tmp) }
     try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
@@ -440,7 +440,7 @@ func builtInLookPresetResourcesMatchLibrary() throws {
 @Test("Exported look presets copy LUTs under assets/luts")
 @MainActor
 func exportedLookPresetCopiesLUTUnderAssetsLuts() async throws {
-    let tmp = URL(filePath: NSTemporaryDirectory())
+    let tmp = FileManager.default.temporaryDirectory
         .appendingPathComponent("look-preset-export-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tmp) }
