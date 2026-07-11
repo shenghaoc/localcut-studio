@@ -114,9 +114,11 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: DerivedData
-          key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
-          restore-keys: |
-            deriveddata-${{ runner.os }}-webrtc-
+          # Source-only changes can safely reuse the main-branch cache; Xcode
+          # invalidates changed objects. Package/project graph changes must
+          # miss exactly, because restoring modules built from an older graph
+          # can expose duplicate package products under Xcode 26.5.
+          key: deriveddata-${{ runner.os }}-v2-${{ hashFiles('**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
 
       - name: Build and test (with flake detection)
         run: ./Scripts/run-xcode-tests-with-flake-detection.sh
@@ -156,4 +158,4 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: DerivedData
-          key: deriveddata-${{ runner.os }}-webrtc-${{ hashFiles('**/*.swift', '**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
+          key: deriveddata-${{ runner.os }}-v2-${{ hashFiles('**/Package.swift', '**/Package.resolved', '**/*.pbxproj', '**/*.xcconfig') }}
