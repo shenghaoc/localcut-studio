@@ -38,19 +38,19 @@ jobs:
 
       # Pinned setup-swift v2.4.0. The Windows runner needs the Swift
       # toolchain; using the same action on Linux keeps the portable gate
-      # on one explicit Swift version.
-      - name: Set up Swift 6.2
+      # on one explicit Swift version currently published for both hosts.
+      - name: Set up Swift 6.3.3
         uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a
         with:
-          swift-version: "6.2"
+          swift-version: "6.3.3"
 
       - name: Cache portable package build
         uses: actions/cache@v6
         with:
           path: Packages/LocalCutCore/.build
-          key: localcutdomain-${{ runner.os }}-swift-6.2-${{ hashFiles('Packages/LocalCutCore/Package.swift', 'Packages/LocalCutCore/Sources/LocalCutDomain/**/*.swift', 'Packages/LocalCutCore/Tests/LocalCutDomainTests/**/*.swift') }}
+          key: localcutdomain-${{ runner.os }}-swift-6.3.3-${{ hashFiles('Packages/LocalCutCore/Package.swift', 'Packages/LocalCutCore/Sources/LocalCutDomain/**/*.swift', 'Packages/LocalCutCore/Tests/LocalCutDomainTests/**/*.swift') }}
           restore-keys: |
-            localcutdomain-${{ runner.os }}-swift-6.2-
+            localcutdomain-${{ runner.os }}-swift-6.3.3-
 
       - name: Build and test portable domain
         run: swift test --package-path Packages/LocalCutCore
