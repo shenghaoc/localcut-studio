@@ -58,9 +58,6 @@ targets.append(
             "LocalCutCore",
             .product(name: "Lottie", package: "lottie-ios"),
             .product(name: "WebRTC", package: "Specs"),
-        ],
-        swiftSettings: [
-            .define("LOCALCUT_ENABLE_WEBRTC"),
         ])
 )
 #endif

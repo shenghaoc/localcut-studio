@@ -8,7 +8,7 @@ APPLE_CORE_SOURCES="${ROOT_DIR}/Packages/LocalCutCore/Sources/LocalCutCore"
 PLATFORM_SOURCES="${ROOT_DIR}/Packages/LocalCutCore/Sources/LocalCutPlatform"
 APP_SOURCES="${ROOT_DIR}/LocalCut Studio"
 
-domain_forbidden_imports='^import (SwiftUI|AppKit|AVKit|AVFoundation|CoreMedia|CoreGraphics|CoreVideo|VideoToolbox|Accelerate|Metal|MetalKit|ScreenCaptureKit|Observation|WebRTC|Lottie|os)$'
+domain_forbidden_imports='^(@preconcurrency )?import (SwiftUI|AppKit|AVKit|AVFoundation|CoreMedia|CoreGraphics|CoreVideo|VideoToolbox|Accelerate|Metal|MetalKit|ScreenCaptureKit|Observation|WebRTC|Lottie|os)$'
 if rg -n "${domain_forbidden_imports}" "${DOMAIN_SOURCES}"; then
     echo "ERROR: LocalCutDomain must remain Foundation-only and cross-platform."
     exit 1
@@ -24,13 +24,13 @@ if rg -n '^import LocalCutPlatform$' "${DOMAIN_SOURCES}" "${APPLE_CORE_SOURCES}"
     exit 1
 fi
 
-apple_core_forbidden_imports='^import (SwiftUI|AppKit|AVKit|AVFoundation|WebRTC|Lottie)$'
+apple_core_forbidden_imports='^(@preconcurrency )?import (SwiftUI|AppKit|AVKit|AVFoundation|ScreenCaptureKit|WebRTC|Lottie)$'
 if rg -n "${apple_core_forbidden_imports}" "${APPLE_CORE_SOURCES}"; then
     echo "ERROR: LocalCutCore must not import UI, AVFoundation, or app-layer dependencies."
     exit 1
 fi
 
-platform_forbidden_imports='^import (SwiftUI|Charts|AppIntents)$'
+platform_forbidden_imports='^(@preconcurrency )?import (SwiftUI|Charts|AppIntents)$'
 if rg -n "${platform_forbidden_imports}" "${PLATFORM_SOURCES}"; then
     echo "ERROR: LocalCutPlatform must remain presentation-independent."
     exit 1
@@ -42,7 +42,7 @@ if rg -n '(^|[^A-Za-z0-9_])LocalCut_Studio([^A-Za-z0-9_]|$)' \
     exit 1
 fi
 
-if rg -n '^import (WebRTC|ScreenCaptureKit|Lottie)$|^@preconcurrency import (WebRTC|ScreenCaptureKit)$' "${APP_SOURCES}"; then
+if rg -n '^(@preconcurrency )?import (WebRTC|ScreenCaptureKit|Lottie)$' "${APP_SOURCES}"; then
     echo "ERROR: reusable WebRTC, ScreenCaptureKit, and Lottie integration belongs in LocalCutPlatform."
     exit 1
 fi

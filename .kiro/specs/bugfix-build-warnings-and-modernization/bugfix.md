@@ -35,7 +35,8 @@ concurrency boundaries, and deprecated file-URL construction in tests and two so
 - **Main-sync decision:** current `main` already actor-isolates `WhipSession.stateStream`, so the
   PR's older extra stream-cache lock is intentionally superseded by that stronger actor-owned
   implementation. Current `main` lifetime comments and the non-WebRTC `VideoPublishTap` storage
-  accessor are retained while their locks are modernized.
+  accessor were retained while their locks were modernized. The later `LocalCutPlatform`
+  extraction made WebRTC required on macOS and removed that fallback accessor.
 - **Regression path:** the LocalCutCore package suite and full macOS Xcode suite cover the
   affected model, capture, compositor, overlay-cache, replay-buffer, and publish paths. The
   effective post-merge diff adds no user-facing UI.

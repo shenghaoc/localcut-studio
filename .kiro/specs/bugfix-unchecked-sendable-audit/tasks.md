@@ -11,7 +11,8 @@
   add the lock-protected `activeScene` read accessor.
 - [x] **T3** Keep `VideoPublishTap.latestPixelBuffer` as the non-WebRTC
   test-facing accessor and read the private backing storage through
-  `lock.withLock`.
+  `lock.withLock`. This completed the audit at the time; the later
+  required-WebRTC platform extraction removed that fallback accessor.
 - [x] **T4** Update `ProgramCompositorTests` and `WhipPublishTests` to use the
   synchronized accessors after the rebase onto PR #78.
 - [x] **T5** Add this Kiro bugfix spec and link it from `AGENTS.md`.

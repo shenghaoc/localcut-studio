@@ -2,10 +2,7 @@ import Foundation
 import os
 import LocalCutCore
 import LocalCutDomain
-
-#if LOCALCUT_ENABLE_WEBRTC
 import WebRTC
-#endif
 
 // MARK: - Publish state
 
@@ -85,14 +82,12 @@ public actor WhipSession {
     private var isReconnectInFlight = false
     private var reconnectGeneration = 0
 
-    #if LOCALCUT_ENABLE_WEBRTC
     private var factory: RTCPeerConnectionFactory?
     private var peerConnection: RTCPeerConnection?
     private var peerConnectionDelegate: WhipPeerConnectionDelegate?
     private var audioDeviceModuleDelegate: LocalCutAudioDeviceModuleDelegate?
     private var videoTransceiver: RTCRtpTransceiver?
     private var audioTransceiver: RTCRtpTransceiver?
-    #endif
 
     private var stateContinuation: AsyncStream<PublishState>.Continuation?
     private var _cachedStateStream: AsyncStream<PublishState>?
@@ -243,7 +238,6 @@ public actor WhipSession {
 
     private func connect(endpointURL: URL) async throws {
         currentEndpointConfig = (endpoint: endpointURL, authToken: authToken)
-        #if LOCALCUT_ENABLE_WEBRTC
         try await configurePeerConnection()
         let offer = try await createOffer()
         let response = try await client.publish(endpoint: endpointURL, offerSdp: offer, authToken: authToken)
@@ -254,9 +248,6 @@ public actor WhipSession {
         reconnectController.updateIceServers(response.iceServers.map { $0.url.absoluteString })
         try applyIceServers(response.iceServers)
         try await applyAnswerSdp(response.answerSdp)
-        #else
-        try await Task.sleep(for: .milliseconds(100))
-        #endif
         state = .live
         startStatsPolling()
     }
@@ -266,7 +257,6 @@ public actor WhipSession {
             await attemptFullReconnect()
             return
         }
-        #if LOCALCUT_ENABLE_WEBRTC
         do {
             guard let pc = peerConnection else { await attemptFullReconnect(); return }
             // Request an actual ICE restart by setting the iceRestart
@@ -291,10 +281,6 @@ public actor WhipSession {
             reconnectController.patchFailed()
             await attemptFullReconnect()
         }
-        #else
-        state = .live
-        startStatsPolling()
-        #endif
     }
 
     private func attemptFullReconnect() async {
@@ -345,7 +331,6 @@ public actor WhipSession {
         } else {
             videoTap?.detachFromWebRTC()
         }
-        #if LOCALCUT_ENABLE_WEBRTC
         videoTransceiver = nil
         audioTransceiver = nil
         factory?.audioDeviceModule.observer = nil
@@ -354,10 +339,8 @@ public actor WhipSession {
         peerConnection = nil
         peerConnectionDelegate = nil
         factory = nil
-        #endif
     }
 
-    #if LOCALCUT_ENABLE_WEBRTC
     private func configurePeerConnection() async throws {
         let factory = RTCPeerConnectionFactory(
             audioDeviceModuleType: .audioEngine,
@@ -455,7 +438,6 @@ public actor WhipSession {
         let answer = RTCSessionDescription(type: .answer, sdp: sdp)
         try await pc.setRemoteDescription(answer)
     }
-    #endif
 
     private func startStatsPolling() {
         statsTask?.cancel()
@@ -469,14 +451,11 @@ public actor WhipSession {
     }
 
     private func collectStats() async {
-        #if LOCALCUT_ENABLE_WEBRTC
         guard let pc = peerConnection else { return }
         let report = await pc.statistics()
         processStatsReport(report)
-        #endif
     }
 
-    #if LOCALCUT_ENABLE_WEBRTC
     private func processStatsReport(_ report: RTCStatisticsReport) {
         var newStats = PublishStats()
         for (_, stat) in report.statistics {
@@ -492,7 +471,6 @@ public actor WhipSession {
         if newStats.bytesSent > prevBytes { newStats.bitrate = Double(newStats.bytesSent - prevBytes) * 8.0 / 1000.0 }
         stats = newStats
     }
-    #endif
 }
 
 // WhipError.transport case needed for WebRTC path
@@ -547,7 +525,6 @@ nonisolated enum IceSdpFragmentBuilder {
 
 // MARK: - RTCPeerConnectionDelegate
 
-#if LOCALCUT_ENABLE_WEBRTC
 private nonisolated final class WhipPeerConnectionDelegate: NSObject, RTCPeerConnectionDelegate {
     private weak var session: WhipSession?
 
@@ -583,4 +560,3 @@ private nonisolated final class WhipPeerConnectionDelegate: NSObject, RTCPeerCon
     func peerConnection(_ peerConnection: RTCPeerConnection, didAdd rtpReceiver: RTCRtpReceiver, streams mediaStreams: [RTCMediaStream]) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove rtpReceiver: RTCRtpReceiver) {}
 }
-#endif

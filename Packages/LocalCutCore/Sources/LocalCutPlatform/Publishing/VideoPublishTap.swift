@@ -1,16 +1,11 @@
 import Foundation
 import CoreVideo
 import os
-
-#if LOCALCUT_ENABLE_WEBRTC
 import WebRTC
-#endif
 
 /// `@unchecked Sendable`: WebRTC source/capturer and frame delivery state
-/// (`isClosed`, `isInFlight`, `pendingBuffer`, `latestPixelBuffer`) are
-/// protected by `lock`.
+/// (`isClosed`, `isInFlight`, and `pendingBuffer`) are protected by `lock`.
 public nonisolated final class VideoPublishTap: @unchecked Sendable {
-    #if LOCALCUT_ENABLE_WEBRTC
     private var videoSource: RTCVideoSource?
     private var capturer: TapCapturer?
 
@@ -32,15 +27,6 @@ public nonisolated final class VideoPublishTap: @unchecked Sendable {
             capturer = nil
         }
     }
-    #else
-    var latestPixelBuffer: CVPixelBuffer? {
-        lock.withLockUnchecked { _ in latestPixelBufferStorage }
-    }
-
-    private var latestPixelBufferStorage: CVPixelBuffer?
-    public init() {}
-    nonisolated func detachFromWebRTC() {}
-    #endif
 
     private let lock = OSAllocatedUnfairLock(initialState: ())
     private var isClosed = false
@@ -72,7 +58,6 @@ public nonisolated final class VideoPublishTap: @unchecked Sendable {
     }
 
     private nonisolated func deliverFrame(_ buffer: CVPixelBuffer) {
-        #if LOCALCUT_ENABLE_WEBRTC
         let activeCapturer = lock.withLockUnchecked { _ in capturer }
         if let activeCapturer {
             let frame = RTCVideoFrame(
@@ -82,9 +67,6 @@ public nonisolated final class VideoPublishTap: @unchecked Sendable {
             )
             activeCapturer.didCapture(frame)
         }
-        #else
-        lock.withLockUnchecked { _ in latestPixelBufferStorage = buffer }
-        #endif
 
         let next = lock.withLockUnchecked { _ -> CVPixelBuffer? in
             let n = pendingBuffer
@@ -98,7 +80,6 @@ public nonisolated final class VideoPublishTap: @unchecked Sendable {
     }
 }
 
-#if LOCALCUT_ENABLE_WEBRTC
 private nonisolated final class TapCapturer: RTCVideoCapturer {
     init(source: RTCVideoSource) {
         super.init(delegate: source)
@@ -107,4 +88,3 @@ private nonisolated final class TapCapturer: RTCVideoCapturer {
         delegate?.capturer(self, didCapture: frame)
     }
 }
-#endif

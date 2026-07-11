@@ -91,13 +91,15 @@
   helpers and the touched app/package test fixtures, preserving directory hints where needed.
 - [x] **F6** Merged current `main` and resolved the four overlapping concurrency files by keeping
   `main`'s actor isolation, lifetime documentation, and non-WebRTC storage accessor alongside
-  the PR's valid lock migrations.
+  the PR's valid lock migrations. The later required-WebRTC platform extraction removed that
+  historical fallback accessor.
 - [x] **F7** Cleared the post-merge Swift 6 diagnostics in `CaptionTailFiller`, `ContentView`,
   and `ProgramCompositor` without changing asynchronous action, cancellation, or lock behaviour.
 - [x] **F8** Final local gate: `git diff --check`, LocalCutCore package build/tests (175 tests),
   the full Debug/macOS suite (792 executed test-case lines, first-attempt pass, zero build
   warnings), the non-WebRTC publish suite (9 tests), MediaMTX WHIP integration (2 tests), and
-  7 OTIO golden fixtures pass.
+  7 OTIO golden fixtures pass. These are the historical completion results; the current CI has
+  no non-WebRTC product lane because macOS always builds `LocalCutPlatform` with WebRTC.
 - [x] **F9** Fixed the CI failure-retry path to resolve Swift Testing suite/test names to their
   recorded Xcode test target before passing `-only-testing:`. Relaxed the App Intents cancellation
   assertion from a scheduler-sensitive 100 ms to a still-bounded one-second deadline against its

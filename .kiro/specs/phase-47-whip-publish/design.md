@@ -48,7 +48,10 @@ A tag-by-tag manifest search found that M137 and every published M144 Specs tag 
 ## Risks
 
 - The community WebRTC XCFramework's API surface drifts with upstream WebRTC. Version 125.6422.09 is deliberately pinned; upgrades require manifest, header/import, audio-engine, WHIP, and MediaMTX validation.
-- Build size bumps to roughly ~157 MB total app (~70 MB current + ~87 MB community WebRTC XCFramework). Users see this clearly in release notes.
+- SwiftPM downloads a 60.2 MiB archive and extracts a roughly 142 MiB
+  all-platform XCFramework. Only the roughly 39 MiB universal macOS framework
+  is embedded in the current Debug app; release packaging must be re-measured
+  whenever the pinned WebRTC version changes.
 - Apple may ship a first-party `WebRTC` framework in a future macOS; we'd switch.
 
 ## Non-goals

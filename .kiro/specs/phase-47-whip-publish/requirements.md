@@ -16,7 +16,10 @@
 
 ## R3 — Capability gating
 
-- **R3.1** GoogleWebRTC available + linked in the build → publish feature available; otherwise hidden.
+- **R3.1** The macOS `LocalCutPlatform` target requires and links the pinned
+  WebRTC package, so publish is available in supported app builds. Non-macOS
+  package graphs exclude the platform target and expose no publish UI or
+  substitute WebRTC implementation.
 - **R3.2** `EncoderBudget` lease for `.whipPublish` required before peer connection opens.
 - **R3.3** Record + stream coexistence checks combined encoder count against the budget before start.
 

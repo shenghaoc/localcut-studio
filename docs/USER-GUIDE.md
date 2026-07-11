@@ -47,7 +47,9 @@ app uses the pinned `webrtc-sdk/Specs` 125.6422.09 Swift package.
   `visionOS(.v2)` and M144 uses `visionOS(.v26)`, but both still declare tools
   5.9, so PackageDescription rejects them even with a newer installed compiler.
 - License: BSD-3-Clause.
-- Size: about 64 MB as the downloaded XCFramework zip.
+- Size: 60.2 MiB (63.1 MB) as the downloaded archive and roughly 142 MiB
+  extracted across all platform slices; the current universal macOS framework
+  is roughly 39 MiB before release packaging.
 - Worktrees: no setup is required. SwiftPM downloads the checksum-pinned
   package into its normal shared source/artifact cache.
 - Audio input: LocalCut uses the package's public AVAudioEngine device-module

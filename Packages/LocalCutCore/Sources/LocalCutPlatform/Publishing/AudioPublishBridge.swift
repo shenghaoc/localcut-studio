@@ -1,10 +1,7 @@
 import Foundation
 import os
-
-#if LOCALCUT_ENABLE_WEBRTC
 import AVFAudio
 @preconcurrency import WebRTC
-#endif
 
 /// Bridges post-master-bus interleaved Float32 samples into WebRTC.
 ///
@@ -19,20 +16,9 @@ public actor AudioPublishBridge {
 
     private struct SharedState {
         var ringBuffer: RingBuffer?
-        #if !LOCALCUT_ENABLE_WEBRTC
-        var latestBuffer: [Float]?
-        var latestSampleRate: Double = 0
-        var latestChannels: Int = 0
-        #endif
     }
 
     private let sharedState = OSAllocatedUnfairLock(initialState: SharedState())
-
-    #if !LOCALCUT_ENABLE_WEBRTC
-    nonisolated var latestBuffer: [Float]? { sharedState.withLock { $0.latestBuffer } }
-    nonisolated var latestSampleRate: Double { sharedState.withLock { $0.latestSampleRate } }
-    nonisolated var latestChannels: Int { sharedState.withLock { $0.latestChannels } }
-    #endif
 
     public init() {}
 
@@ -62,15 +48,9 @@ public actor AudioPublishBridge {
         sharedState.withLock { state in
             guard let ring = state.ringBuffer else { return }
             ring.write(buffer)
-            #if !LOCALCUT_ENABLE_WEBRTC
-            state.latestBuffer = buffer
-            state.latestSampleRate = sampleRate
-            state.latestChannels = channels
-            #endif
         }
     }
 
-    #if LOCALCUT_ENABLE_WEBRTC
     func makeAudioDeviceModuleDelegate() -> LocalCutAudioDeviceModuleDelegate? {
         guard isRunning,
               let ring = sharedState.withLock({ $0.ringBuffer }) else { return nil }
@@ -79,10 +59,8 @@ public actor AudioPublishBridge {
             sampleRate: sampleRate,
             channels: channels)
     }
-    #endif
 }
 
-#if LOCALCUT_ENABLE_WEBRTC
 /// Supplies LocalCut's master-bus samples through webrtc-sdk's supported
 /// AVAudioEngine input hook. WebRTC calls this delegate on its worker thread.
 nonisolated final class LocalCutAudioDeviceModuleDelegate:
@@ -253,4 +231,3 @@ private nonisolated final class LocalCutAudioSourceRenderer: @unchecked Sendable
         }
     }
 }
-#endif

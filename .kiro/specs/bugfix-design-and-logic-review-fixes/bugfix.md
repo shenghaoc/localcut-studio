@@ -66,7 +66,9 @@ it before XCTest can bootstrap.
 - The full-suite, non-WebRTC, and MediaMTX Xcode invocations keep Xcode's
   default local ad hoc signing enabled. This requires no developer identity,
   lets the macOS UI-test runner pass Gatekeeper, and preserves the test host's
-  sandbox network entitlement for localhost integration.
+  sandbox network entitlement for localhost integration. This describes the
+  historical harness; the later required-WebRTC platform extraction removed
+  the non-WebRTC lane.
 - The MediaMTX script owns a short-lived marker in the ignored `.build`
   directory. Swift Testing discovery reads that marker, avoiding Xcode 27's
   filtering of parent-process environment variables and ensuring the required

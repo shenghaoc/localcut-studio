@@ -61,7 +61,7 @@ below.
 | `EffectCompositor.swift` | `EffectCompositionInstruction` | Low | Keep with comment | Immutable instruction required by `AVVideoCompositionInstructionProtocol`. |
 | `EffectCompositor.swift` | `PendingVideoCompositionRequest` | Medium | Keep with comment | Non-Sendable request is paired with a task handle inside a lock-protected pending-request dictionary. |
 | `ReconnectController.swift` | `ReconnectController` | Low | Keep with comment | Reconnect counters, ETag, ICE servers, restart flag, and disconnect time are protected by `OSAllocatedUnfairLock`; test seams are immutable `let` closures. |
-| `VideoPublishTap.swift` | `VideoPublishTap` | Medium | Add lock-protected accessor | WebRTC source/capturer and frame delivery state are protected by `lock`; non-WebRTC `latestPixelBuffer` reads private storage through `lock.withLock`. |
+| `VideoPublishTap.swift` | `VideoPublishTap` | Medium | Keep with comment | WebRTC source/capturer and frame-delivery state are protected by `lock`; the later required-WebRTC platform extraction removed the historical fallback accessor. |
 
 ## Program Compositor Accessor
 
@@ -76,6 +76,9 @@ The non-WebRTC build path is a deterministic test seam, but it is still part of
 a `@unchecked Sendable` type. `latestPixelBuffer` remains the accessor used by
 tests, and its implementation now uses `lock.withLock` against private backing
 storage.
+
+This section is historical. `LocalCutPlatform` now requires WebRTC on macOS, so
+the fallback accessor was removed and tests exercise the real tap lifecycle.
 
 ## Replay Buffer Track Pipe
 
