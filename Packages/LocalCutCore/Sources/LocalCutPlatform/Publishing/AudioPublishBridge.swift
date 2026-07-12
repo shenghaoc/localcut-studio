@@ -200,8 +200,15 @@ private nonisolated final class LocalCutAudioSourceRenderer: @unchecked Sendable
             guard let destination = buffers[0].mData?.assumingMemoryBound(to: Float.self) else {
                 return kAudio_ParamError
             }
-            scratch.withUnsafeBufferPointer { samples in
-                destination.update(from: samples.baseAddress!, count: requestedSamples)
+            let didCopy = scratch.withUnsafeBufferPointer { samples -> Bool in
+                guard let baseAddress = samples.baseAddress else {
+                    return false
+                }
+                destination.update(from: baseAddress, count: requestedSamples)
+                return true
+            }
+            guard didCopy else {
+                return kAudio_ParamError
             }
             buffers[0].mDataByteSize = UInt32(requestedSamples * MemoryLayout<Float>.size)
             return noErr

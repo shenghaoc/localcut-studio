@@ -8,6 +8,7 @@
 - [x] **T1.2** Keyframe-aligned eviction.
 - [x] **T1.3** Disk spill writer/reader under `Caches/ReplayBuffer/<uuid>/`.
 - [x] **T1.4** Unified index that bridges memory + spill.
+- [x] **T1.5** Disable and release an enabled replay manager when capture startup fails, then clear its ring asynchronously.
 
 ## Save command
 
@@ -30,3 +31,4 @@
 - [x] **T5.2** Frame-accuracy test on the inserted clip.
 - [x] **T5.3** Latency budget test.
 - [x] **T5.4** `xcodebuild` (Debug, macOS) green.
+- [x] **T5.5** Focused regression for replay-manager cleanup after capture startup failure.
