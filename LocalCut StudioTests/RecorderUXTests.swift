@@ -601,6 +601,19 @@ struct CountdownStateTests {
 @MainActor
 struct ReplayBufferTimelineInsertionTests {
 
+    @Test("Failed capture startup releases an enabled replay buffer")
+    func failedCaptureStartupReleasesReplayBuffer() async throws {
+        let model = EditorModel()
+        let manager = ReplayBufferManager(sessionUUID: UUID())
+        try await manager.enable()
+        model.replayBufferManager = manager
+
+        await model.cleanupReplayBufferAfterFailedStart(manager)
+
+        #expect(model.replayBufferManager == nil)
+        #expect(!manager.isEnabled)
+    }
+
     @Test("Multi-source replay clips land on separate aligned tracks")
     func multiSourceReplayClipsLandOnSeparateAlignedTracks() async throws {
         let directoryURL = FileManager.default.temporaryDirectory

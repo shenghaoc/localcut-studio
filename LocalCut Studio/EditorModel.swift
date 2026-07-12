@@ -25,7 +25,7 @@ import LocalCutPlatform
 /// | 1 | Static / constant | 1 | `inspectorVisibleKey` | `static let` is never observed. |
 /// | 2 | Injected store | 1 | `defaultsStore` | Holds a `UserDefaults` reference; value never changes after init. |
 /// | 3 | Service / coordinator objects | 6 | `importService`, `projectEditingService`, `previewRebuildCoordinator`, `exportCoordinator`, `documentController`, `captureCoordinator` | Stable `let` identities. Some own lifecycle state, but SwiftUI never renders that state directly; their user-visible output is written to observed model properties. |
-/// | 4 | Framework objects | 4 | `floatingPanelController`, `beatAnalyzer`, `undoManager`, `replayBufferManager` | Opaque framework / helper types whose internal state is not meaningful to observe. `replayBufferManager`'s UI nil-check is covered by the observed `isRecording` co-condition. |
+/// | 4 | Framework objects | 4 | `floatingPanelController`, `beatAnalyzer`, `undoManager`, `replayBufferManager` | Opaque framework / helper types whose internal state is not meaningful to observe. Replay availability is projected through observed recording state, and failed startup explicitly clears the manager. |
 /// | 5 | Observer / notification handles | 3 | `timeObserver`, `endObserver`, `activeOverlaySourceRegistryID` | Opaque handles retained for lifecycle cleanup (`removeTimeObserver`, `removeObserver`, `releaseOverlaySources`). Never rendered. |
 /// | 6 | Task handles | 4 | `silenceDetectionTask`, `loudnessTask`, `recordingMonitorTask`, `beatAnalysisTask` | Transient `Task<Void, Never>?` values for cancel-on-restart lifecycle. Never rendered. |
 /// | 7 | Stale-cancellation tokens | 3 | `loudnessMeasurementToken`, `mutationRevision`, `sessionGeneration` | Monotonic counters compared across `await` boundaries to discard stale async results. Never rendered. |
@@ -53,8 +53,9 @@ import LocalCutPlatform
 ///   The other four task handles (#6) are standalone. All share the same
 ///   ignore rationale (cancel-on-restart, never rendered).
 /// - **`replayBufferManager`** is a framework object (#4), not capture-internal
-///   state (#11), because the UI reads it only via a nil-check that is covered
-///   by the observed `isRecording` co-condition.
+///   state (#11). The UI reads it only while observed `isRecording` is true;
+///   failed capture startup disables, clears, and releases the manager before
+///   returning with `isRecording == false`.
 /// - **`closeSaveInProgress`** is a document/operation guard (#12), separate
 ///   from capture state because it prevents duplicate asynchronous close-save
 ///   operations and is not rendered.
@@ -197,8 +198,8 @@ final class EditorModel {
     // MARK: - Replay buffer (Phase 46)
 
     /// The replay buffer manager for the current recording session, if any.
-    /// Ignored: UI only checks `!= nil` while `isRecording` (which IS observed)
-    /// is true; lifecycle always coincides with recording start/stop.
+    /// Ignored: UI only checks `!= nil` while observed `isRecording` is true.
+    /// Failed capture startup explicitly disables, clears, and releases it.
     @ObservationIgnored var replayBufferManager: ReplayBufferManager?
     /// Whether the replay buffer is enabled for the current session.
     var replayBufferEnabled: Bool = false
