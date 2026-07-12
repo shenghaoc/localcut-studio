@@ -410,6 +410,7 @@ struct TimelineView: View {
             .accessibilityHidden(true)
             .overlay {
                 RulerAccessibilityOverlay(model: model, tickStep: tickStep())
+                    .allowsHitTesting(false)
             }
             // Declarative resize cursor signals the ruler is scrubbable. Region-
             // based, so there's no shared NSCursor push/pop stack to unbalance
