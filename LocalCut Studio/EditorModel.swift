@@ -54,8 +54,8 @@ import LocalCutPlatform
 ///   ignore rationale (cancel-on-restart, never rendered).
 /// - **`replayBufferManager`** is a framework object (#4), not capture-internal
 ///   state (#11). The UI reads it only while observed `isRecording` is true;
-///   failed capture startup disables, clears, and releases the manager before
-///   returning with `isRecording == false`.
+///   failed capture startup disables and releases the manager before returning
+///   with `isRecording == false`, then clears ring storage asynchronously.
 /// - **`closeSaveInProgress`** is a document/operation guard (#12), separate
 ///   from capture state because it prevents duplicate asynchronous close-save
 ///   operations and is not rendered.
@@ -199,7 +199,8 @@ final class EditorModel {
 
     /// The replay buffer manager for the current recording session, if any.
     /// Ignored: UI only checks `!= nil` while observed `isRecording` is true.
-    /// Failed capture startup explicitly disables, clears, and releases it.
+    /// Failed capture startup disables and releases it immediately, then clears
+    /// ring storage asynchronously.
     @ObservationIgnored var replayBufferManager: ReplayBufferManager?
     /// Whether the replay buffer is enabled for the current session.
     var replayBufferEnabled: Bool = false

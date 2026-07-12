@@ -23,6 +23,7 @@ The browser-editor's v1 runs DSP in the worker's capture loop (not an `AudioWork
 5. **Live audio chain.** Phase 36's master-bus inserts (denoiser, gate, compressor, limiter) sit between mic / system-audio capture and the encoder feed. The same `AVAudioEngine` graph drives the monitor tap so what the user hears matches what gets recorded.
 6. **Latency measurement.** A round-trip measurement at session start (input → graph → output) reports total live-monitor latency. Surfaced in the diagnostics panel and the recorder UX.
 7. **Recovery.** If the app crashes, the ring buffer's in-memory portion is lost; spilled chunks remain. On next launch Phase 41 recovery offers the session whose chunks include both the (recoverable) main encoded stream and any spilled ring entries — the user can choose to import either.
+8. **Failure cleanup.** Replay setup finishes before capture startup so the encoded-chunk callback can capture the manager. If capture startup then fails, `EditorModel` synchronously clears its manager reference and disables appends before restoring recorder UI state. Ring clearing is scheduled in a child task and executes on the `EncodedChunkRing` actor, so spill-file removal cannot delay the main-actor failure transition.
 
 ## Trade-offs
 

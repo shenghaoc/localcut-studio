@@ -28,6 +28,7 @@
 - **R5.1** Ring memory stays within its configured bound (mocked-chunk tests verify).
 - **R5.2** Save-last-N-seconds succeeds repeatedly during a continuous session.
 - **R5.3** Spilled chunks remain after a crash and are presented to the recovery flow.
+- **R5.4** If replay setup succeeds but capture startup fails, the editor immediately disables and releases the replay manager, restores recorder UI state, and clears ring storage asynchronously so cleanup cannot delay the failure transition.
 
 ## R6 — Verification
 
@@ -35,3 +36,4 @@
 - **R6.2** Frame-accuracy test: the inserted clip is sample-aligned with the ongoing recording.
 - **R6.3** Latency budget test on the live monitor graph.
 - **R6.4** `xcodebuild` (Debug, macOS) green; no test count regression.
+- **R6.5** A focused regression verifies failed capture startup clears the editor's replay-manager ownership and disables the manager.
