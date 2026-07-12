@@ -1072,12 +1072,7 @@ extension EditorModel {
 
     /// Cleans up replay buffer resources on session end.
     func cleanupReplayBuffer() {
-        guard let manager = replayBufferManager else { return }
-        replayBufferManager = nil
-        manager.disable()
-        Task {
-            await manager.cleanup()
-        }
+        cleanupReplayBufferAfterFailedStart(replayBufferManager)
     }
 
     /// Balances replay-buffer setup when capture startup fails after the buffer
