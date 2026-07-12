@@ -28,3 +28,6 @@ Append a dated entry whenever you learn something about keeping LocalCut Studio 
 ## 2026-07-12 - Extract timeline ruler Canvas to Equatable background view
 **Learning:** The TimelineView re-evaluates on every scroll frame due to its timelineCurrentScrollSeconds state. The ruler Canvas redrew thousands of ticks and beat markers needlessly.
 **Action:** Extract static canvas elements (like timeline ticks and beat markers) into an `Equatable` view when they are inside a view that re-evaluates frequently (like scrolling).
+## 2026-07-28 - Prevent full redraws by extracting accessibility dependencies
+**Learning:** Attaching accessibility modifiers (like `.accessibilityValue`) that depend on high-frequency state (`model.currentTime`) directly to an interactive `Canvas` (such as the timeline ruler) inside a large view like `TimelineView` forces the entire parent view to re-render constantly.
+**Action:** Extract accessibility modifiers that track frequently changing state into isolated, invisible subviews (e.g., using `Color.clear` in an `.overlay`). This limits the `@Observable` dependency invalidation to just the lightweight overlay component, preserving the performance of the complex parent view during playback or scrubbing.
