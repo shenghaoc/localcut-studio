@@ -377,6 +377,7 @@ struct TimelineView: View {
                 pps: pps,
                 rulerHeight: rulerHeight,
                 tickStep: tickStep(),
+                beatMarkersRevision: model.projectedBeatTimesRevision,
                 beatMarkers: beatMarkers
             )
             .equatable()
@@ -1041,6 +1042,7 @@ private struct RulerBackgroundCanvas: View, Equatable {
     let pps: CGFloat
     let rulerHeight: CGFloat
     let tickStep: Double
+    let beatMarkersRevision: Int
     let beatMarkers: [ProjectedBeatMarker]
 
     var body: some View {
@@ -1085,14 +1087,13 @@ private struct RulerBackgroundCanvas: View, Equatable {
         guard lhs.pps == rhs.pps,
               lhs.rulerHeight == rhs.rulerHeight,
               lhs.tickStep == rhs.tickStep,
+              lhs.beatMarkersRevision == rhs.beatMarkersRevision,
               lhs.beatMarkers.count == rhs.beatMarkers.count
         else { return false }
-        // Beat markers are time-ordered and don't change mid-scroll; comparing
-        // first/last IDs is a constant-time heuristic that avoids an O(n) full-
-        // array scan on every scroll frame, while still detecting genuine changes
-        // (additions/removals at either end, or a completely different set).
-        return lhs.beatMarkers.first?.id == rhs.beatMarkers.first?.id &&
-               lhs.beatMarkers.last?.id == rhs.beatMarkers.last?.id
+        // The model increments this revision whenever any input to beat
+        // projection changes. It keeps scroll-time equality constant-time while
+        // still invalidating for interior beat moves and retimes.
+        return true
     }
 }
 
