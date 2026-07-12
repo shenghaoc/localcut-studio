@@ -324,7 +324,7 @@ extension EditorModel {
                 : ""
             statusMessage = panelExclusionWarning ?? "Recording…\(latencySuffix)"
         } catch {
-            cleanupReplayBufferAfterFailedStart(replayManager)
+            teardownReplayBuffer(replayManager)
             floatingPanelController.close()
             isRecorderPresented = wasRecorderPresented
             activePiPPreset = nil
@@ -1072,12 +1072,11 @@ extension EditorModel {
 
     /// Cleans up replay buffer resources on session end.
     func cleanupReplayBuffer() {
-        cleanupReplayBufferAfterFailedStart(replayBufferManager)
+        teardownReplayBuffer(replayBufferManager)
     }
 
-    /// Balances replay-buffer setup when capture startup fails after the buffer
-    /// has already been enabled.
-    func cleanupReplayBufferAfterFailedStart(_ manager: ReplayBufferManager?) {
+    /// Releases an enabled replay manager without delaying recorder UI state.
+    func teardownReplayBuffer(_ manager: ReplayBufferManager?) {
         guard let manager else { return }
         if replayBufferManager === manager {
             replayBufferManager = nil

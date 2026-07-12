@@ -608,7 +608,7 @@ struct ReplayBufferTimelineInsertionTests {
         try await manager.enable()
         model.replayBufferManager = manager
 
-        model.cleanupReplayBufferAfterFailedStart(manager)
+        model.teardownReplayBuffer(manager)
 
         #expect(model.replayBufferManager == nil)
         #expect(!manager.isEnabled)
