@@ -1046,13 +1046,16 @@ private struct RulerBackgroundCanvas: View, Equatable {
     var body: some View {
         Canvas { context, size in
             let step = tickStep
+            guard step > 0, pps > 0 else { return }
             // Ticks sit in the lower half of the ruler so the marker band
             // above them stays visually distinct.
             let tickTop = rulerHeight - 12
-            var t = 0.0
-            while CGFloat(t) * pps <= size.width {
+            var i = 0
+            while true {
+                let t = Double(i) * step
                 let x = CGFloat(t) * pps
-                let isMajor = (t.truncatingRemainder(dividingBy: step * 5) < 0.0001)
+                guard x <= size.width else { break }
+                let isMajor = (i % 5 == 0)
                 var line = Path()
                 line.move(to: CGPoint(x: x, y: isMajor ? tickTop : tickTop + 6))
                 line.addLine(to: CGPoint(x: x, y: rulerHeight))
@@ -1061,7 +1064,7 @@ private struct RulerBackgroundCanvas: View, Equatable {
                     let text = Text(TimeFormatting.timecode(t)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
                     context.draw(text, at: CGPoint(x: x + 2, y: tickTop), anchor: .topLeading)
                 }
-                t += step
+                i += 1
             }
 
             // One Path stroked once, not one stroke per marker — long
@@ -1079,10 +1082,17 @@ private struct RulerBackgroundCanvas: View, Equatable {
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.pps == rhs.pps &&
-        lhs.rulerHeight == rhs.rulerHeight &&
-        lhs.tickStep == rhs.tickStep &&
-        lhs.beatMarkers == rhs.beatMarkers
+        guard lhs.pps == rhs.pps,
+              lhs.rulerHeight == rhs.rulerHeight,
+              lhs.tickStep == rhs.tickStep,
+              lhs.beatMarkers.count == rhs.beatMarkers.count
+        else { return false }
+        // Beat markers are time-ordered and don't change mid-scroll; comparing
+        // first/last IDs is a constant-time heuristic that avoids an O(n) full-
+        // array scan on every scroll frame, while still detecting genuine changes
+        // (additions/removals at either end, or a completely different set).
+        return lhs.beatMarkers.first?.id == rhs.beatMarkers.first?.id &&
+               lhs.beatMarkers.last?.id == rhs.beatMarkers.last?.id
     }
 }
 
