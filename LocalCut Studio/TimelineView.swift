@@ -373,38 +373,13 @@ struct TimelineView: View {
             // marker glyph's `onTapGesture` actually wins on a press that lands
             // on a glyph. `DragGesture(minimumDistance: 0)` on the outer ZStack
             // would otherwise intercept every touch (Gemini review #3).
-            Canvas { context, size in
-                let step = tickStep()
-                // Ticks sit in the lower half of the ruler so the marker band
-                // above them stays visually distinct.
-                let tickTop = rulerHeight - 12
-                var t = 0.0
-                while CGFloat(t) * pps <= size.width {
-                    let x = CGFloat(t) * pps
-                    let isMajor = (t.truncatingRemainder(dividingBy: step * 5) < 0.0001)
-                    var line = Path()
-                    line.move(to: CGPoint(x: x, y: isMajor ? tickTop : tickTop + 6))
-                    line.addLine(to: CGPoint(x: x, y: rulerHeight))
-                    context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
-                    if isMajor {
-                        let text = Text(TimeFormatting.timecode(t)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
-                        context.draw(text, at: CGPoint(x: x + 2, y: tickTop), anchor: .topLeading)
-                    }
-                    t += step
-                }
-
-                // One Path stroked once, not one stroke per marker — long
-                // timelines can carry thousands of beats and per-line draw calls
-                // dominate scroll cost.
-                var beatPath = Path()
-                for marker in beatMarkers {
-                    let x = CGFloat(marker.time.seconds) * pps
-                    guard x >= 0, x <= size.width else { continue }
-                    beatPath.move(to: CGPoint(x: x, y: 0))
-                    beatPath.addLine(to: CGPoint(x: x, y: rulerHeight))
-                }
-                context.stroke(beatPath, with: .color(.lcBeatMarker), lineWidth: 1)
-            }
+            RulerBackgroundCanvas(
+                pps: pps,
+                rulerHeight: rulerHeight,
+                tickStep: tickStep(),
+                beatMarkers: beatMarkers
+            )
+            .equatable()
             .contentShape(Rectangle())
             .gesture(rulerScrubGesture)
             .accessibilityElement(children: .ignore)
@@ -1059,6 +1034,55 @@ enum TimelineScrollMath: Sendable {
         let step = min(max(tickStep, 0.25), 5)
         let target = currentTime + (increment ? step : -step)
         return clampedTarget(target, totalDuration: totalDuration)
+    }
+}
+
+private struct RulerBackgroundCanvas: View, Equatable {
+    let pps: CGFloat
+    let rulerHeight: CGFloat
+    let tickStep: Double
+    let beatMarkers: [TimelineMarker]
+
+    var body: some View {
+        Canvas { context, size in
+            let step = tickStep
+            // Ticks sit in the lower half of the ruler so the marker band
+            // above them stays visually distinct.
+            let tickTop = rulerHeight - 12
+            var t = 0.0
+            while CGFloat(t) * pps <= size.width {
+                let x = CGFloat(t) * pps
+                let isMajor = (t.truncatingRemainder(dividingBy: step * 5) < 0.0001)
+                var line = Path()
+                line.move(to: CGPoint(x: x, y: isMajor ? tickTop : tickTop + 6))
+                line.addLine(to: CGPoint(x: x, y: rulerHeight))
+                context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
+                if isMajor {
+                    let text = Text(TimeFormatting.timecode(t)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                    context.draw(text, at: CGPoint(x: x + 2, y: tickTop), anchor: .topLeading)
+                }
+                t += step
+            }
+
+            // One Path stroked once, not one stroke per marker — long
+            // timelines can carry thousands of beats and per-line draw calls
+            // dominate scroll cost.
+            var beatPath = Path()
+            for marker in beatMarkers {
+                let x = CGFloat(marker.time.seconds) * pps
+                guard x >= 0, x <= size.width else { continue }
+                beatPath.move(to: CGPoint(x: x, y: 0))
+                beatPath.addLine(to: CGPoint(x: x, y: rulerHeight))
+            }
+            context.stroke(beatPath, with: .color(.lcBeatMarker), lineWidth: 1)
+        }
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.pps == rhs.pps &&
+        lhs.rulerHeight == rhs.rulerHeight &&
+        lhs.tickStep == rhs.tickStep &&
+        lhs.beatMarkers == rhs.beatMarkers
     }
 }
 
