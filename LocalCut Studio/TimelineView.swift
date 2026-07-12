@@ -1041,7 +1041,7 @@ private struct RulerBackgroundCanvas: View, Equatable {
     let pps: CGFloat
     let rulerHeight: CGFloat
     let tickStep: Double
-    let beatMarkers: [TimelineMarker]
+    let beatMarkers: [ProjectedBeatMarker]
 
     var body: some View {
         Canvas { context, size in
