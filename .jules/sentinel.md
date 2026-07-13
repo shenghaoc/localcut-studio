@@ -42,3 +42,8 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Vulnerability:** Found a force unwrap (`!`) when accessing `baseAddress` from a buffer pointer in `AudioPublishBridge.swift`.
 **Learning:** Force-unwrapping poses a Denial of Service (crash) risk in Swift. If the buffer is empty or uninitialized, `baseAddress` will be nil, and the force unwrap will crash the application.
 **Prevention:** Always use safe optional binding (`if let`) when dealing with optional variables, especially pointers to memory buffers.
+
+## 2026-07-13 - Prevent unencrypted stream key transmission
+**Vulnerability:** WHIP client allowed publishing stream keys (Bearer tokens) over unencrypted HTTP connections.
+**Learning:** Network clients must explicitly validate that sensitive credentials are only transmitted over secure channels (HTTPS) or local loopback interfaces. Unencrypted transmission exposes stream keys to interception on the network path.
+**Prevention:** Always assert the protocol scheme is `https` (or target is `localhost` for local dev tools) before attaching authentication headers to outgoing HTTP requests.

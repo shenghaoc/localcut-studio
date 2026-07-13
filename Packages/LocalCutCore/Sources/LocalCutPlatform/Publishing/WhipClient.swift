@@ -9,6 +9,7 @@ nonisolated enum WhipError: Error, Sendable, LocalizedError {
     case invalidResponse
     case httpStatus(Int, Data?)
     case invalidState(String)
+    case insecureConnection
 
     var errorDescription: String? {
         switch self {
@@ -19,6 +20,7 @@ nonisolated enum WhipError: Error, Sendable, LocalizedError {
         case .invalidResponse: "The server returned an unexpected response."
         case .httpStatus(let code, _): "Unexpected HTTP status \(code)."
         case .invalidState(let message): message
+        case .insecureConnection: "Insecure connection: stream keys must be sent over HTTPS."
         }
     }
 }
@@ -53,7 +55,16 @@ actor WhipClientImpl: WhipClient {
         self.session = session
     }
 
+    private func validateSecureTransmission(url: URL, hasToken: Bool) throws {
+        guard hasToken else { return }
+        let isLocalhost = url.host?.lowercased() == "localhost" || url.host == "127.0.0.1"
+        guard url.scheme?.lowercased() == "https" || isLocalhost else {
+            throw WhipError.insecureConnection
+        }
+    }
+
     func publish(endpoint: URL, offerSdp: String, authToken: String?) async throws -> (resourceUrl: URL, etag: String, iceServers: [ICEServerInfo], answerSdp: String) {
+        try validateSecureTransmission(url: endpoint, hasToken: authToken != nil)
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
@@ -88,6 +99,7 @@ actor WhipClientImpl: WhipClient {
     }
 
     func patchIceRestart(resourceUrl: URL, sdpFragment: String, etag: String, authToken: String?) async throws -> (answerSdp: String, newEtag: String) {
+        try validateSecureTransmission(url: resourceUrl, hasToken: authToken != nil)
         var request = URLRequest(url: resourceUrl)
         request.httpMethod = "PATCH"
         request.setValue("application/trickle-ice-sdpfrag", forHTTPHeaderField: "Content-Type")
@@ -111,6 +123,11 @@ actor WhipClientImpl: WhipClient {
     }
 
     func teardown(resourceUrl: URL, authToken: String?) async {
+        do {
+            try validateSecureTransmission(url: resourceUrl, hasToken: authToken != nil)
+        } catch {
+            return
+        }
         var request = URLRequest(url: resourceUrl)
         request.httpMethod = "DELETE"
         if let token = authToken {
