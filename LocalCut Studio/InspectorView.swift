@@ -1229,6 +1229,7 @@ struct InspectorView: View {
                         Circle()
                             .fill(model.selectedOverlayID == overlay.id ? Color.accentColor : Color.clear)
                             .frame(width: 8, height: 8)
+                            .accessibilityHidden(true)
                         Text(overlay.sourceType.displayName)
                         Spacer()
                         Text(TimeFormatting.timecode(overlay.timelineStart.seconds))
@@ -1240,6 +1241,7 @@ struct InspectorView: View {
                         model.selectOverlay(overlay.id)
                     }
                     .accessibilityAddTraits(.isButton)
+                    .accessibilityAddTraits(model.selectedOverlayID == overlay.id ? .isSelected : [])
                     .accessibilityLabel("\(overlay.sourceType.displayName) overlay at \(TimeFormatting.timecode(overlay.timelineStart.seconds))")
                 }
                 .onDelete { indexSet in
