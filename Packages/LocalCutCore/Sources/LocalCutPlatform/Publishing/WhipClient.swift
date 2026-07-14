@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-nonisolated enum WhipError: Error, Sendable, LocalizedError {
+nonisolated enum WhipError: Error, Sendable, LocalizedError, Equatable {
     case rejectedOffer
     case auth
     case notFound
@@ -10,6 +10,25 @@ nonisolated enum WhipError: Error, Sendable, LocalizedError {
     case httpStatus(Int, Data?)
     case invalidState(String)
     case insecureConnection
+
+    public static func == (lhs: WhipError, rhs: WhipError) -> Bool {
+        switch (lhs, rhs) {
+        case (.rejectedOffer, .rejectedOffer),
+             (.auth, .auth),
+             (.notFound, .notFound),
+             (.invalidResponse, .invalidResponse),
+             (.insecureConnection, .insecureConnection):
+            true
+        case (.retryable(let lhsError), .retryable(let rhsError)):
+            lhsError.localizedDescription == rhsError.localizedDescription
+        case (.httpStatus(let lhsCode, _), .httpStatus(let rhsCode, _)):
+            lhsCode == rhsCode
+        case (.invalidState(let lhsMsg), .invalidState(let rhsMsg)):
+            lhsMsg == rhsMsg
+        default:
+            false
+        }
+    }
 
     var errorDescription: String? {
         switch self {
@@ -57,7 +76,7 @@ actor WhipClientImpl: WhipClient {
 
     private func validateSecureTransmission(url: URL, hasToken: Bool) throws {
         guard hasToken else { return }
-        let isLocalhost = url.host?.lowercased() == "localhost" || url.host == "127.0.0.1"
+        let isLocalhost = url.host?.lowercased() == "localhost" || url.host == "127.0.0.1" || url.host == "::1"
         guard url.scheme?.lowercased() == "https" || isLocalhost else {
             throw WhipError.insecureConnection
         }
