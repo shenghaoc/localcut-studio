@@ -1240,8 +1240,8 @@ struct InspectorView: View {
                     .onTapGesture {
                         model.selectOverlay(overlay.id)
                     }
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityAddTraits(model.selectedOverlayID == overlay.id ? .isSelected : [])
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityAddTraits(model.selectedOverlayID == overlay.id ? [.isButton, .isSelected] : .isButton)
                     .accessibilityLabel("\(overlay.sourceType.displayName) overlay at \(TimeFormatting.timecode(overlay.timelineStart.seconds))")
                 }
                 .onDelete { indexSet in
