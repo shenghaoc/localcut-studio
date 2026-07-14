@@ -161,6 +161,115 @@ struct WhipPublishTests {
         #expect(URLProtocolStub.requests.count == 1)
     }
 
+    @Test("Publish rejects HTTP endpoint with auth token on non-localhost")
+    func publishRejectsInsecureEndpoint() async {
+        URLProtocolStub.reset()
+        defer { URLProtocolStub.reset() }
+        let endpoint = try! #require(URL(string: "http://evil.example.test/whip"))
+        // No handler needed — the client should throw before making a request.
+        let client = WhipClientImpl(session: session())
+        do {
+            _ = try await client.publish(endpoint: endpoint, offerSdp: "offer", authToken: "secret")
+            Issue.record("Expected insecureConnection error but none was thrown")
+        } catch let error as WhipError {
+            #expect(error == .insecureConnection)
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+
+    @Test("Publish allows HTTP endpoint without auth token (no token to protect)")
+    func publishAllowsHttpWithoutToken() async throws {
+        URLProtocolStub.reset()
+        defer { URLProtocolStub.reset() }
+        let endpoint = try #require(URL(string: "http://example.test/whip"))
+        URLProtocolStub.handler = { _ in
+            let response = HTTPURLResponse(
+                url: endpoint,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Location": "/whip/resource"])!
+            return (response, Data("answer".utf8))
+        }
+        let client = WhipClientImpl(session: session())
+        let result = try await client.publish(endpoint: endpoint, offerSdp: "offer", authToken: nil)
+        #expect(result.answerSdp == "answer")
+    }
+
+    @Test("Publish allows HTTP endpoint with auth token on localhost")
+    func publishAllowsHttpOnLocalhost() async throws {
+        URLProtocolStub.reset()
+        defer { URLProtocolStub.reset() }
+        let endpoint = try #require(URL(string: "http://localhost:8080/whip"))
+        URLProtocolStub.handler = { _ in
+            let response = HTTPURLResponse(
+                url: endpoint,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Location": "/whip/resource"])!
+            return (response, Data("answer".utf8))
+        }
+        let client = WhipClientImpl(session: session())
+        let result = try await client.publish(endpoint: endpoint, offerSdp: "offer", authToken: "secret")
+        #expect(result.answerSdp == "answer")
+    }
+
+    @Test("Publish allows HTTP endpoint with auth token on 127.0.0.1")
+    func publishAllowsHttpOnIPv4Loopback() async throws {
+        URLProtocolStub.reset()
+        defer { URLProtocolStub.reset() }
+        let endpoint = try #require(URL(string: "http://127.0.0.1:8080/whip"))
+        URLProtocolStub.handler = { _ in
+            let response = HTTPURLResponse(
+                url: endpoint,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Location": "/whip/resource"])!
+            return (response, Data("answer".utf8))
+        }
+        let client = WhipClientImpl(session: session())
+        let result = try await client.publish(endpoint: endpoint, offerSdp: "offer", authToken: "secret")
+        #expect(result.answerSdp == "answer")
+    }
+
+    @Test("Publish allows HTTP endpoint with auth token on ::1 (IPv6 loopback)")
+    func publishAllowsHttpOnIPv6Loopback() async throws {
+        URLProtocolStub.reset()
+        defer { URLProtocolStub.reset() }
+        let endpoint = try #require(URL(string: "http://[::1]:8080/whip"))
+        URLProtocolStub.handler = { _ in
+            let response = HTTPURLResponse(
+                url: endpoint,
+                statusCode: 201,
+                httpVersion: nil,
+                headerFields: ["Location": "/whip/resource"])!
+            return (response, Data("answer".utf8))
+        }
+        let client = WhipClientImpl(session: session())
+        let result = try await client.publish(endpoint: endpoint, offerSdp: "offer", authToken: "secret")
+        #expect(result.answerSdp == "answer")
+    }
+
+    @Test("PATCH ICE restart rejects HTTP endpoint with auth token on non-localhost")
+    func patchRejectsInsecureEndpoint() async {
+        URLProtocolStub.reset()
+        defer { URLProtocolStub.reset() }
+        let resource = try! #require(URL(string: "http://evil.example.test/whip/resource"))
+        let client = WhipClientImpl(session: session())
+        do {
+            _ = try await client.patchIceRestart(
+                resourceUrl: resource,
+                sdpFragment: "fragment",
+                etag: "etag",
+                authToken: "secret")
+            Issue.record("Expected insecureConnection error but none was thrown")
+        } catch let error as WhipError {
+            #expect(error == .insecureConnection)
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+
     @Test("WebRTC video tap accepts frames and closes idempotently")
     func videoTapLifecycleDoesNotDeadlock() throws {
         let tap = VideoPublishTap()
