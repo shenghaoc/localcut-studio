@@ -39,6 +39,11 @@ struct LocalCutStudioApp: App {
         ProcessInfo.processInfo.arguments.contains("--localcut-ui-test-timeline-focus-harness")
             || ProcessInfo.processInfo.environment["LOCALCUT_UI_TEST_TIMELINE_FOCUS_HARNESS"] == "1"
     }
+
+    private var runsTimelineViewUITestHarness: Bool {
+        ProcessInfo.processInfo.arguments.contains("--localcut-ui-test-timeline-view-harness")
+            || ProcessInfo.processInfo.environment["LOCALCUT_UI_TEST_TIMELINE_VIEW_HARNESS"] == "1"
+    }
 #endif
 
     var body: some Scene {
@@ -47,6 +52,9 @@ struct LocalCutStudioApp: App {
             if runsRecorderUITestHarness {
                 RecorderUITestHarnessView()
                     .frame(minWidth: 420, minHeight: 320)
+            } else if runsTimelineViewUITestHarness {
+                TimelineViewUITestHarnessView()
+                    .frame(minWidth: 1000, minHeight: 640)
             } else if runsTimelineFocusUITestHarness {
                 TimelineFocusUITestHarnessView()
                     .frame(minWidth: 480, minHeight: 360)
@@ -157,6 +165,9 @@ struct ViewCommands: Commands {
 }
 
 /// File and Edit menu items backed by the editor's custom document controller.
+/// Actions intentionally use the process-wide model while focused values
+/// supply scene presentation state. A future multi-editor shell must focus the
+/// action target as well as its enablement state.
 struct DocumentCommands: Commands {
     let model: EditorModel
     @FocusedValue(\.localCutInterchangeExport) private var interchangeExport

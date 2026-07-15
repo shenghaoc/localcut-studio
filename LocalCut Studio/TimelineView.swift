@@ -38,6 +38,7 @@ struct TimelineView: View {
     @FocusState private var focusedClipID: Clip.ID?
     @FocusState private var focusedTransitionClipID: Clip.ID?
     @FocusState private var receivesTimelineShortcuts: Bool
+    @FocusState private var isMarkerRenameFieldFocused: Bool
     /// One-shot initial focus so transport shortcuts work without a click on
     /// first layout. Subsequent appears must not steal focus from text fields,
     /// buttons, or the inspector.
@@ -127,6 +128,10 @@ struct TimelineView: View {
             receivesTimelineShortcuts = true
         })
         .onKeyPress { press in
+            // The popover's text field gets first refusal. This guard also
+            // prevents a transient focus hand-off from turning typed m/M into
+            // timeline marker shortcuts while the editor is visible.
+            guard renamingMarkerID == nil else { return .ignored }
             switch TimelineShortcutPolicy.action(for: press) {
             case .ignore:
                 return .ignored
@@ -522,6 +527,8 @@ struct TimelineView: View {
             TextField("Name", text: $renameDraft)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: markerRenameFieldWidth)
+                .focused($isMarkerRenameFieldFocused)
+                .onAppear { isMarkerRenameFieldFocused = true }
                 .onSubmit { commitRenameIfActive(); renamingMarkerID = nil }
             Button("Done") {
                 commitRenameIfActive()

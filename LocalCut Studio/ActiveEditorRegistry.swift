@@ -83,6 +83,22 @@ final class ActiveEditorRegistry {
     ) async throws {
         if readyEditor() != nil { return }
 
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await clock.sleep(for: timeout)
+                throw WaitError.timedOut
+            }
+            group.addTask {
+                try await self.waitForReadiness()
+            }
+            defer { group.cancelAll() }
+            _ = try await group.next()
+        }
+    }
+
+    /// Suspends one structured child until readiness or cancellation. The
+    /// sibling timeout task is cancelled as soon as this waiter finishes.
+    private func waitForReadiness() async throws {
         let waiterID = UUID()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -91,11 +107,6 @@ final class ActiveEditorRegistry {
                     return
                 }
                 waiters[waiterID] = continuation
-                Task { @MainActor in
-                    try? await clock.sleep(for: timeout)
-                    guard let pending = self.waiters.removeValue(forKey: waiterID) else { return }
-                    pending.resume(throwing: WaitError.timedOut)
-                }
             }
         } onCancel: {
             Task { @MainActor in
