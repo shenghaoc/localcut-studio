@@ -307,10 +307,23 @@ extension EditorModel {
         ProjectOpenPanelConfiguration.apply(to: panel)
         let validator = ProjectOpenPanelValidator()
         panel.delegate = validator
-        let response = await withCheckedContinuation { continuation in
-            panel.begin { [validator] response in
-                _ = validator
-                continuation.resume(returning: response)
+        let cancellationHandle = PanelCancellationHandle(panel)
+        let response = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                MainActor.assumeIsolated {
+                    guard !Task.isCancelled else {
+                        continuation.resume(returning: NSApplication.ModalResponse.cancel)
+                        return
+                    }
+                    panel.begin { [validator] response in
+                        _ = validator
+                        continuation.resume(returning: response)
+                    }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                cancellationHandle.cancel()
             }
         }
         return (response, panel.url)
