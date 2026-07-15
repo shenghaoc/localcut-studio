@@ -89,7 +89,7 @@ struct RecorderSetupView: View {
 
                 Section("Audio") {
                     Toggle("Microphone", isOn: $includeMicrophone)
-                    Picker("Input", selection: $selectedMicrophoneID) {
+                    Picker("Microphone", selection: $selectedMicrophoneID) {
                         Text("None").tag(Optional<String>.none)
                         ForEach(microphoneOptions) { device in
                             Text(device.title).tag(Optional(device.id))

@@ -59,7 +59,7 @@ extension EditorModel {
                 }
             } catch {
                 guard let self, self.silenceDetectionGeneration == detectionGen else { return }
-                self.statusMessage = "Silence detection failed: \(error.localizedDescription)"
+                statusMessage = "Silence detection failed. Try again with different audio or a shorter selection."
             }
         }
     }
@@ -108,7 +108,7 @@ extension EditorModel {
                 applySingleProposal(proposal)
             }
             silenceProposals = []
-            statusMessage = "Applied \(coalesced.count) silence cut(s)."
+            statusMessage = "Applied \(coalesced.count) silence cut(s) to the timeline."
             scheduleRebuild()
         }
     }
@@ -117,7 +117,7 @@ extension EditorModel {
     @MainActor
     func cancelSilenceReview() {
         silenceProposals = []
-        statusMessage = "Silence review cancelled."
+        statusMessage = "Silence review closed."
     }
 
     // MARK: - Private

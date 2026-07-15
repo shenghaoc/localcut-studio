@@ -179,7 +179,7 @@ final class PublishPanelState {
                         self?.statusMessage = message
                     case .ended:
                         self?.publishState = .idle
-                        self?.statusMessage = "Publish ended."
+                        self?.statusMessage = "Publishing stopped."
                         self?.stats = nil
                     }
                 }

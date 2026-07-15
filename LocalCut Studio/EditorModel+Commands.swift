@@ -287,7 +287,7 @@ extension EditorModel {
                 statusMessage = "Exported \(url.lastPathComponent) — \(warningText)"
             }
         } catch {
-            statusMessage = "OTIO export failed: \(error.localizedDescription)"
+            statusMessage = "Could not write OTIO file. Check that the destination has enough free space and isn't locked by another app."
         }
     }
 
@@ -349,7 +349,7 @@ extension EditorModel {
                 statusMessage = "Exported \(url.lastPathComponent) — \(warningText)"
             }
         } catch {
-            statusMessage = "EDL export failed: \(error.localizedDescription)"
+            statusMessage = "Could not write EDL file. Check that the destination has enough free space and isn't locked by another app."
         }
     }
 
@@ -369,7 +369,7 @@ extension EditorModel {
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Resolve chapter markers before export"
+        alert.messageText = "Chapter markers need attention before export"
         alert.informativeText = chapterIssueSummary(issues)
         alert.addButton(withTitle: ChapterShortSpanRepairStrategy.merge.displayName)
         alert.addButton(withTitle: ChapterShortSpanRepairStrategy.drop.displayName)
@@ -381,7 +381,7 @@ extension EditorModel {
         case .alertSecondButtonReturn:
             repairChapterShortSpans(strategy: .drop)
         default:
-            statusMessage = "Export cancelled until chapter markers are fixed."
+            statusMessage = "Export cancelled. Fix the chapter marker issues above, then try again."
             return false
         }
 
@@ -396,11 +396,11 @@ extension EditorModel {
     private func presentChapterExportBlockedAlert(issues: [ChapterExportIssue]) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Fix chapter markers before export"
+        alert.messageText = "Chapter markers need attention before export"
         alert.informativeText = chapterIssueSummary(issues)
         alert.addButton(withTitle: "OK")
         alert.runModal()
-        statusMessage = "Export blocked by \(issues.count) chapter validation issue(s)."
+        statusMessage = "\(issues.count) chapter marker issue(s) to fix before export."
     }
 
     private func chapterIssueSummary(_ issues: [ChapterExportIssue]) -> String {

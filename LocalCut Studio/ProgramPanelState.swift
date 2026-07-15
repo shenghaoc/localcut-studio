@@ -68,7 +68,7 @@ final class ProgramPanelState {
             let screenOptions = try await CaptureSourceCatalog.screenOptions()
             refreshed.append(contentsOf: screenOptions.map(Self.descriptor(for:)))
         } catch {
-            statusMessage = "Could not refresh screen sources: \(error.localizedDescription)"
+            statusMessage = "Could not refresh screen sources. Check Screen Recording permissions in System Settings."
         }
 
         refreshed.append(contentsOf: CaptureSourceCatalog.webcamOptions().map(Self.webcamDescriptor(for:)))

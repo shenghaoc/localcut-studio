@@ -60,7 +60,7 @@ extension EditorModel {
                                                     includingResourceValuesForKeys: nil,
                                                     relativeTo: nil) else {
             if access { url.stopAccessingSecurityScopedResource() }
-            statusMessage = "Could not create bookmark for \(url.lastPathComponent)."
+            statusMessage = "Could not save access permission for \(url.lastPathComponent)."
             return
         }
         guard sessionGeneration == generation else {

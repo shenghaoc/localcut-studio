@@ -171,12 +171,12 @@ struct InspectorView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                LabeledContent("Value") {
+                LabeledContent("Speed") {
                     Text(String(format: "%.2fx", model.selectedClipSpeedAtPlayhead))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                LabeledContent("Count") {
+                LabeledContent("Keyframe Count") {
                     Text("\(clip.speedCurve.keyframes.count)")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -650,12 +650,12 @@ struct InspectorView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            LabeledContent("Value") {
+            LabeledContent("Strength") {
                 Text("\(Int(model.lookStrengthAtPlayhead(kind) * 100))%")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            LabeledContent("Count") {
+            LabeledContent("Keyframe Count") {
                 Text("\(model.lookStrengthKeyframes(kind).count)")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -741,12 +741,12 @@ struct InspectorView: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                LabeledContent("Value") {
+                LabeledContent("Strength") {
                     Text("\(Int(model.selectedClipSkinSmoothStrengthAtPlayhead * 100))%")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                LabeledContent("Count") {
+                LabeledContent("Keyframe Count") {
                     Text("\(model.selectedClipSkinSmooth.strength.keyframes.count)")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -1413,7 +1413,13 @@ private struct CoverInspectorView: View {
                     .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             } else if coverPreviewIsLoading {
-                ProgressView()
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Generating cover preview…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } else if let coverPreviewError {
                 Text(coverPreviewError)
                     .font(.caption)

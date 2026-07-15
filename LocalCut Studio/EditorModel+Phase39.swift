@@ -71,7 +71,7 @@ extension EditorModel {
             }.value
             statusMessage = "Exported cover \(url.lastPathComponent)."
         } catch {
-            statusMessage = "Cover export failed: \(error.localizedDescription)"
+            statusMessage = "Could not export cover image. Check that the destination has enough space and you have write permission."
         }
     }
 

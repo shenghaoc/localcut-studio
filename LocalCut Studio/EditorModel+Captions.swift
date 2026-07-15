@@ -27,7 +27,7 @@ extension EditorModel {
                 scheduleRebuild()
             }
         } catch {
-            statusMessage = "Could not import captions: \(error.localizedDescription)"
+            statusMessage = "Could not import captions from \(url.lastPathComponent). The file may be in an unsupported format or contain invalid timestamps. Try a clean SRT or VTT export."
         }
     }
 

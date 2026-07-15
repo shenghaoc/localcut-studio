@@ -142,7 +142,7 @@ struct AudioInspectorView: View {
 
             Divider()
 
-            Picker("Loudness", selection: loudnessPresetBinding) {
+            Picker("Loudness Target", selection: loudnessPresetBinding) {
                 ForEach(LoudnessPreset.allCases) { preset in
                     Text(preset.displayName).tag(preset)
                 }

@@ -1357,7 +1357,7 @@ final class EditorModel {
             selectedMarkerID = nil
             selectedOverlayID = nil
             selectedTransitionClipID = id
-            statusMessage = "Added transition."
+            statusMessage = "Added a transition."
         }
     }
 
@@ -1393,7 +1393,7 @@ final class EditorModel {
         performUndoable("Remove Transition") {
             setTransition(nil, onClip: id)
             selectedTransitionClipID = nil
-            statusMessage = "Removed transition."
+            statusMessage = "Removed the transition."
         }
     }
 

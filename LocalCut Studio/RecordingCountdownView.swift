@@ -29,7 +29,7 @@ struct RecordingCountdownView: View {
                         : "Recording started")
 
                 if model.countdownRemaining > 0 {
-                    Button("Cancel") {
+                    Button("Cancel Countdown") {
                         model.cancelCountdown()
                     }
                     .buttonStyle(.bordered)

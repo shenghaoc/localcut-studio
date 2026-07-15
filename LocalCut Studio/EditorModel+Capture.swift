@@ -256,7 +256,7 @@ extension EditorModel {
                 try await manager.enable()
                 replayManager = manager
             } catch {
-                statusMessage = "Could not enable replay buffer: \(error.localizedDescription)"
+                statusMessage = "Could not start replay buffer. Try restarting the capture session."
             }
         }
         replayBufferManager = replayManager
@@ -420,7 +420,7 @@ extension EditorModel {
                 let manifestFinalizationError = result.manifestFinalizationError
                 _ = await self.landCaptureSession(result)
                 if let manifestFinalizationError {
-                    self.statusMessage += " Manifest could not be finalized: \(manifestFinalizationError). This session may be re-offered for recovery on next launch."
+                    self.statusMessage += " Recording summary could not be saved: \(manifestFinalizationError). This session may be re-offered for recovery on next launch."
                 }
             } catch {
                 self.isRecording = false
@@ -522,7 +522,7 @@ extension EditorModel {
             isRecording = false
             isPaused = true
             recordingMicLevel = 0
-            statusMessage = "Recording paused."
+            statusMessage = "Recording paused. Press Resume to continue."
         } catch {
             if (error as? CaptureEngineError) == .notRecording {
                 recordingMonitorTask?.cancel()
@@ -530,7 +530,7 @@ extension EditorModel {
                 isRecording = false
                 isPaused = false
                 recordingMicLevel = 0
-                statusMessage = "Could not pause: \(error.localizedDescription)"
+                statusMessage = "Could not pause recording. Try stopping and restarting instead."
             } else {
                 recordingMonitorTask?.cancel()
                 recordingMonitorTask = nil
@@ -538,7 +538,7 @@ extension EditorModel {
                 isRecording = false
                 isPaused = true
                 recordingMicLevel = 0
-                statusMessage = "Recording paused with errors: \(error.localizedDescription)"
+                statusMessage = "Recording paused with errors. Some data may be missing."
             }
         }
     }
@@ -572,7 +572,7 @@ extension EditorModel {
             }
             statusMessage = panelExclusionWarning ?? "Recording…"
         } catch {
-            statusMessage = "Could not resume: \(error.localizedDescription)"
+            statusMessage = "Could not resume recording. Try stopping and restarting instead."
         }
     }
 
@@ -771,9 +771,9 @@ extension EditorModel {
             writerWarnings: recovery.issues.map { $0.localizedDescription })
         ProgramLanding.land(result: programResult, model: self)
         if recovery.issues.isEmpty {
-            statusMessage = "Recovered Program Mode session landed."
+            statusMessage = "Recovered Program Mode recording."
         } else {
-            statusMessage = "Recovered with \(recovery.issues.count) issue(s)."
+            statusMessage = "Recovered Program Mode recording with \(recovery.issues.count) issue(s)."
         }
         return true
     }
