@@ -161,13 +161,16 @@ struct CaptionsInspectorView: View {
     private func styleKeyframeEditor(_ line: CaptionLine, in track: CaptionTrack) -> some View {
         let localTime = model.captionStyleLocalPlayheadTime(line.id, in: track.id)
         let styleValues = model.captionStyleKeyframeValues(line.id, in: track.id)
+        let hasKeyframe = model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id)
+        let isEditable = localTime != nil
+        let keyframeCount = model.captionStyleKeyframeCount(line.id, in: track.id)
         DisclosureGroup {
             HStack {
                 Text(localTime.map { "At \(TimeFormatting.timecode($0.seconds))" } ?? "Move playhead over this line")
                     .font(.caption)
                     .foregroundStyle(localTime == nil ? .orange : .secondary)
                 Spacer()
-                Text("\(model.captionStyleKeyframeCount(line.id, in: track.id)) keyframe(s)")
+                Text("\(keyframeCount) keyframe(s)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -177,7 +180,7 @@ struct CaptionsInspectorView: View {
 
             ColorPicker("Fill", selection: captionStyleFillBinding(for: line, in: track),
                         supportsOpacity: true)
-                .disabled(localTime == nil)
+                .disabled(!isEditable)
                 .accessibilityLabel("Animated caption fill colour")
 
             LabeledSliderRow(
@@ -187,7 +190,7 @@ struct CaptionsInspectorView: View {
                 range: 0.1...4,
                 step: 0.05,
                 onEditingChanged: { editing in if !editing { model.commitCoalescedUndo() } })
-                .disabled(localTime == nil)
+                .disabled(!isEditable)
 
             LabeledSliderRow(
                 label: "X Offset",
@@ -196,7 +199,7 @@ struct CaptionsInspectorView: View {
                 range: -960...960,
                 step: 1,
                 onEditingChanged: { editing in if !editing { model.commitCoalescedUndo() } })
-                .disabled(localTime == nil)
+                .disabled(!isEditable)
 
             LabeledSliderRow(
                 label: "Y Offset",
@@ -205,7 +208,7 @@ struct CaptionsInspectorView: View {
                 range: -540...540,
                 step: 1,
                 onEditingChanged: { editing in if !editing { model.commitCoalescedUndo() } })
-                .disabled(localTime == nil)
+                .disabled(!isEditable)
 
             LabeledSliderRow(
                 label: "Opacity",
@@ -214,7 +217,7 @@ struct CaptionsInspectorView: View {
                 range: 0...1,
                 step: 0.01,
                 onEditingChanged: { editing in if !editing { model.commitCoalescedUndo() } })
-                .disabled(localTime == nil)
+                .disabled(!isEditable)
 
             LabeledSliderRow(
                 label: "Letter Spacing",
@@ -223,7 +226,7 @@ struct CaptionsInspectorView: View {
                 range: -32...64,
                 step: 0.5,
                 onEditingChanged: { editing in if !editing { model.commitCoalescedUndo() } })
-                .disabled(localTime == nil)
+                .disabled(!isEditable)
 
             HStack {
                 Button {
@@ -233,19 +236,19 @@ struct CaptionsInspectorView: View {
                 }
                 .help("Previous caption style keyframe")
                 .accessibilityLabel("Previous caption style keyframe")
-                .disabled(localTime == nil)
+                .disabled(!isEditable)
 
                 Button {
                     model.setCaptionStyleKeyframeValues(
                         styleValues,
                         lineID: line.id, in: track.id, coalesced: false)
                 } label: {
-                    Label(model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id) ? "Update" : "Add",
+                    Label(hasKeyframe ? "Update" : "Add",
                           systemImage: "diamond.fill")
                 }
-                .disabled(localTime == nil)
-                .help(model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id) ? "Update caption style keyframe" : "Add caption style keyframe")
-                .accessibilityLabel(model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id) ? "Update caption style keyframe" : "Add caption style keyframe")
+                .disabled(!isEditable)
+                .help(hasKeyframe ? "Update caption style keyframe" : "Add caption style keyframe")
+                .accessibilityLabel(hasKeyframe ? "Update caption style keyframe" : "Add caption style keyframe")
 
                 Button {
                     model.removeCaptionStyleKeyframeAtPlayhead(line.id, in: track.id)
@@ -254,7 +257,7 @@ struct CaptionsInspectorView: View {
                 }
                 .help("Remove caption style keyframe")
                 .accessibilityLabel("Remove caption style keyframe")
-                .disabled(!model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id))
+                .disabled(!hasKeyframe)
 
                 Button {
                     model.seekToNextCaptionStyleKeyframe(line.id, in: track.id)
@@ -263,14 +266,14 @@ struct CaptionsInspectorView: View {
                 }
                 .help("Next caption style keyframe")
                 .accessibilityLabel("Next caption style keyframe")
-                .disabled(localTime == nil)
+                .disabled(!isEditable)
 
                 Spacer()
 
                 Button("Clear") {
                     model.clearCaptionStyleKeyframes(line.id, in: track.id)
                 }
-                .disabled(model.captionStyleKeyframeCount(line.id, in: track.id) == 0)
+                .disabled(keyframeCount == 0)
                 .help("Remove all animated style keyframes for this caption line")
             }
             .buttonStyle(.borderless)
