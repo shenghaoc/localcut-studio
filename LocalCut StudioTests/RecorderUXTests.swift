@@ -1002,7 +1002,7 @@ struct RecordingTransportErrorHandlingTests {
         #expect(!model.isPaused)
         #expect(!model.isPausingRecording)
         #expect(model.recordingMicLevel == 0)
-        #expect(model.statusMessage == "Could not pause: No recording is running.")
+        #expect(model.statusMessage == "Could not pause: No recording is running. Try stopping and restarting the recording instead.")
     }
 
     @Test("Resume error is surfaced while keeping paused state retryable")
@@ -1015,7 +1015,7 @@ struct RecordingTransportErrorHandlingTests {
         #expect(model.isPaused)
         #expect(!model.isRecording)
         #expect(!model.isStartingRecording)
-        #expect(model.statusMessage == "Could not resume: Capture failed: No paused recording to resume.")
+        #expect(model.statusMessage == "Could not resume: Capture failed: No paused recording to resume. Try stopping and restarting the recording instead.")
     }
 
     @Test("Stop error clears stale recording UI state")

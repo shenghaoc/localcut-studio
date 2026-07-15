@@ -530,7 +530,7 @@ extension EditorModel {
                 isRecording = false
                 isPaused = false
                 recordingMicLevel = 0
-                statusMessage = "Could not pause recording. Try stopping and restarting instead."
+                statusMessage = "Could not pause: \(error.localizedDescription) Try stopping and restarting the recording instead."
             } else {
                 recordingMonitorTask?.cancel()
                 recordingMonitorTask = nil
@@ -572,7 +572,7 @@ extension EditorModel {
             }
             statusMessage = panelExclusionWarning ?? "Recording…"
         } catch {
-            statusMessage = "Could not resume recording. Try stopping and restarting instead."
+            statusMessage = "Could not resume: \(error.localizedDescription) Try stopping and restarting the recording instead."
         }
     }
 

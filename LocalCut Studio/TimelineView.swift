@@ -448,7 +448,6 @@ struct TimelineView: View {
                 .font(.caption2)
                 .lineLimit(1)
                 .foregroundStyle(.primary)
-                .help(marker.name)
                 .padding(.horizontal, 3)
                 .background(
                     RoundedRectangle(cornerRadius: 2)
@@ -462,6 +461,7 @@ struct TimelineView: View {
                 .frame(width: markerGlyphSize, height: markerGlyphSize)
                 .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
+                .help(marker.name)
                 // Pointing-hand cursor over the marker (declarative; replaces a
                 // manual NSCursor push/pop hover wrapper).
                 .pointerStyle(.link)
@@ -684,6 +684,7 @@ struct TimelineView: View {
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
         .focusable()
         .focused($focusedClipID, equals: clip.id)
+        .help(clipName ?? "Clip")
         .accessibilityLabel(nameLabel)
         .accessibilityValue(valueLabel)
         .accessibilityAddTraits(.isButton)
@@ -1144,7 +1145,6 @@ private struct ClipIdentityOverlay: View {
                 .imageScale(.small)
             Text(name)
                 .lineLimit(1)
-                .help(name)
         }
         .font(.caption2)
         .padding(.horizontal, 6)
