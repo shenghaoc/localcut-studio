@@ -2,7 +2,7 @@
 
 ## Register
 
-product
+This project follows the product register: design serves the product.
 
 ## Users
 

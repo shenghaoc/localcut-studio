@@ -50,24 +50,24 @@ components:
 
 LocalCut Studio is TeXShop for video — an austere, utilitarian tool where every pixel serves the content and nothing shouts for attention. The editor recedes so the work can advance. Visual noise is eliminated by default; decoration is absent.
 
-The system is built on native macOS materials and system colours, not custom palettes. It tracks light/dark appearance automatically, respects Reduce Motion and Dynamic Type, and uses SF Symbols for all iconography. The single deliberate colour choice — a warm Film Gold accent — is the only departure from system semantics, and it is used sparingly: selection highlights, the playhead, and key affordances.
+The system is built on native macOS materials and system colours, not custom palettes. It respects Reduce Motion and Dynamic Type, and uses SF Symbols for all iconography. The editor chrome is deliberately dark (`.preferredColorScheme(.dark)`) as a product choice; system colours still adapt within that mode. The single deliberate colour choice — a warm Film Gold accent — is the only departure from system semantics, and it is used sparingly: selection highlights, focus rings, and key affordances.
 
 **Key Characteristics:**
 - Dark chrome by default; system appearance adaptive
 - One accent (Film Gold), used on ≤10% of any screen
-- System semantic colors for backgrounds, text, and separators — never hard-coded greys
+- System semantic colours for backgrounds, text, and separators — never hard-coded greys
 - Liquid Glass for interactive floating controls; thin material for non-interactive badges
 - SF Pro throughout; no custom fonts
 - Grouped forms, capsule badges, borderless icon buttons
 
 This system explicitly rejects: glossy consumer aesthetics (Final Cut Pro), panel overload and visual noise (Kdenlive), cross-platform web-app reskinning, template-driven UIs, and decorative blurs or glass as default wallpaper.
 
-## 2. Colors
+## 2. Colours
 
 A restrained, system-anchored palette. The Film Gold accent is the only branded colour; everything else delegates to macOS semantic colours so the editor adapts to light/dark mode and high-contrast settings without maintenance.
 
 ### Primary
-- **Film Gold** (#F5AB42, native Display-P3 0.960/0.670/0.260): Selection highlights, playhead, focus rings, and the Export button. Used sparingly — its rarity is the point. Defined in `Assets.xcassets/AccentColor.colorset`.
+- **Film Gold** (#F5AB42, native Display-P3 0.960/0.670/0.260): Selection highlights, focus rings, and the Export button. Used sparingly — its rarity is the point. Defined in `Assets.xcassets/AccentColor.colorset`.
 
 ### Neutral
 - **Canvas Black** (`Color.black`): The preview background. Always black regardless of appearance — it is a letterbox, not a surface.
@@ -84,7 +84,7 @@ A restrained, system-anchored palette. The Film Gold accent is the only branded 
 - **Transition Icon White** (`Color.white`): Transition glyph icon on the timeline.
 
 ### Named Rules
-**The One Accent Rule.** Film Gold is used on ≤10% of any given screen. Its rarity is the point. If more than one element per panel is gold, something is wrong.
+**The One Accent Rule.** Film Gold is used on ≤10% of any given screen. Its rarity is the point. System controls that inherit the accent through `.tint()` (steppers, toggles, side-rail selections) are exempt — the rule targets bespoke gold highlights outside the standard control vocabulary.
 
 **The System-First Rule.** Never hard-code a grey. Backgrounds, text, and separators always delegate to system semantic colours (`underPageBackgroundColor`, `.secondary`, `separatorColor`) so the editor tracks appearance changes automatically.
 
@@ -108,9 +108,9 @@ A restrained, system-anchored palette. The Film Gold accent is the only branded 
 
 ## 4. Elevation
 
-Flat by default. The editor uses tonal layering (lighter surfaces above darker recessed ones) rather than shadows. The only exceptions are:
+Flat by default. The editor uses tonal layering (lighter surfaces above darker recessed ones) rather than shadows. The three exceptions are:
 
-- **Liquid Glass** (`.glassEffect(.regular.interactive())`): The floating transport controls over the preview canvas. This is the canonical Liquid Glass case per HIG — interactive controls floating over content.
+- **Liquid Glass** (`.glassEffect(.regular.interactive())`): The floating transport controls over the preview canvas and the diagnostics HUD. Both are canonical Liquid Glass cases per HIG — interactive controls floating over content.
 - **Thin Material** (`.thinMaterial`): Non-interactive badge capsules (format readout, safe-zone label). HIG: glass is reserved for interactive/functional layers; content-layer labels use standard material.
 
 There is no shadow vocabulary. Depth is conveyed through surface colour contrast alone: canvas black < lane surface < rail surface < panel background.
@@ -122,7 +122,7 @@ There is no shadow vocabulary. Depth is conveyed through surface colour contrast
 
 ### Buttons
 - **Shape:** System default (`.borderedProminent` uses system radius; borderless icon buttons have no visible shape).
-- **Primary:** `.borderedProminent` — Film Gold background, white label. Used for the single most important action on a screen (Import Media, Export).
+- **Primary:** `.borderedProminent` — Film Gold background with system-chosen foreground label. Used for the single most important action on a screen (Import Media, Export).
 - **Borderless:** `.buttonStyle(.borderless)` — no background, system tint for the icon. Default for toolbar and header icon buttons.
 - **Hover / Focus:** System default. Every icon-only button has `.help(...)` and `.accessibilityLabel(...)`.
 
@@ -159,7 +159,7 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 - **Structure:** Left gutter (track labels, 56pt wide) + horizontally scrollable content with time ruler (36pt height) + one lane per track (56pt height).
 - **Lanes:** `lcLane` background; clip blocks are rounded rectangles positioned by time.
 - **Playhead:** Red vertical line, draggable head, synchronized with `AVPlayer` time.
-- **Clip Colors:** Video clips = blue family, audio clips = green family, selected = Film Gold accent.
+- **Clip Colours:** Video clips = blue family, audio clips = green family, selected = Film Gold accent.
 - **Trim Handles:** White at 15% opacity on hover.
 
 ## 6. Do's and Don'ts
@@ -174,7 +174,7 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 - **Do** use the shared `EditorPanelHeader` pattern for every new panel.
 
 ### Don't:
-- **Don't** use more than one Film Gold element per panel. The accent earns its impact through restraint.
+- **Don't** use more than one bespoke Film Gold highlight per panel. System controls that inherit accent through `.tint()` are exempt. The accent earns its impact through restraint, not through detinting standard controls.
 - **Don't** import custom fonts. SF Pro is the only typeface.
 - **Don't** use cards. Organize content into panels separated by Dividers.
 - **Don't** nest cards inside cards — this is always wrong.
