@@ -26,6 +26,25 @@ private actor AppIntentStartSignal {
     }
 }
 
+private actor AppIntentReleaseGate {
+    private var isOpen = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 private enum AppIntentCancellationOutcome {
     case cancelled
     case completed
@@ -34,6 +53,12 @@ private enum AppIntentCancellationOutcome {
 
 @MainActor
 struct AppIntentsTests {
+    private func registryRouting(_ model: EditorModel) -> (ActiveDocumentRegistry, LocalCutAppIntentRouter) {
+        let registry = ActiveDocumentRegistry()
+        registry.register(model)
+        return (registry, LocalCutAppIntentRouter(documentRegistry: registry))
+    }
+
     @Test func allShortcutActionsHaveShortcuts() {
         #expect(LocalCutAppIntentRouter.Action.allCases.count == LocalCutAppShortcuts.appShortcuts.count)
     }
@@ -45,9 +70,9 @@ struct AppIntentsTests {
         #expect(ShowLocalCutDiagnosticsIntent.supportedModes == .foreground(.immediate))
     }
 
-    @Test func diagnosticsIntentRoutesToEditorModel() async throws {
+    @Test func diagnosticsIntentRoutesToActiveEditorModel() async throws {
         let model = EditorModel()
-        let router = LocalCutAppIntentRouter(model: model)
+        let (_, router) = registryRouting(model)
 
         try await router.perform(.showDiagnostics)
 
@@ -55,9 +80,21 @@ struct AppIntentsTests {
         #expect(model.statusMessage == "Diagnostics opened from Shortcuts.")
     }
 
+    @Test func intentWithNoActiveDocumentThrowsTypedError() async {
+        let router = LocalCutAppIntentRouter(documentRegistry: ActiveDocumentRegistry())
+
+        do {
+            try await router.perform(.showDiagnostics)
+            Issue.record("Expected noActiveDocument.")
+        } catch LocalCutAppIntentRouter.RouterError.noActiveDocument {
+        } catch {
+            Issue.record("Expected noActiveDocument, got \(error)")
+        }
+    }
+
     @Test func emptyTimelineExportIntentThrowsAndUpdatesStatus() async {
         let model = EditorModel()
-        let router = LocalCutAppIntentRouter(model: model)
+        let (_, router) = registryRouting(model)
 
         do {
             try await router.perform(.exportProject)
@@ -78,6 +115,8 @@ struct AppIntentsTests {
                 != LocalCutAppIntentRouter.RouterError.actionCancelled)
         #expect(LocalCutAppIntentRouter.RouterError.emptyTimeline
                 != LocalCutAppIntentRouter.RouterError.panelCancelled)
+        #expect(LocalCutAppIntentRouter.RouterError.noActiveDocument
+                != LocalCutAppIntentRouter.RouterError.targetDocumentClosed)
     }
 
     @Test func failedCommandOutcomeMapsToActionFailedRouterError() {
@@ -90,33 +129,80 @@ struct AppIntentsTests {
         }
     }
 
-    @Test func actionChainSerializesConcurrentActions() async throws {
-        let model = EditorModel()
+    @Test func actionChainSerializesAndCapturesEachActiveDocument() async throws {
+        let firstModel = EditorModel()
+        let secondModel = EditorModel()
+        let registry = ActiveDocumentRegistry()
+        registry.register(firstModel)
+        registry.register(secondModel)
+        registry.activate(firstModel)
         let tracker = AppIntentEventTracker()
-        let router = LocalCutAppIntentRouter(model: model) { action, _ in
-            tracker.events.append("start-\(action.rawValue)")
+        let router = LocalCutAppIntentRouter(documentRegistry: registry) { action, model in
+            let target = model === firstModel ? "first" : "second"
+            tracker.events.append("start-\(action.rawValue)-\(target)")
             try await Task.sleep(for: .milliseconds(10))
-            tracker.events.append("end-\(action.rawValue)")
+            tracker.events.append("end-\(action.rawValue)-\(target)")
         }
 
         let first = Task { try await router.perform(.newProject) }
         await Task.yield()
+        registry.activate(secondModel)
         let second = Task { try await router.perform(.importMedia) }
         try await first.value
         try await second.value
 
         #expect(tracker.events == [
-            "start-newProject",
-            "end-newProject",
-            "start-importMedia",
-            "end-importMedia"
+            "start-newProject-first",
+            "end-newProject-first",
+            "start-importMedia-second",
+            "end-importMedia-second"
         ])
+    }
+
+    @Test func queuedActionForClosedDocumentThrowsWithoutRetargeting() async throws {
+        let firstModel = EditorModel()
+        let secondModel = EditorModel()
+        let registry = ActiveDocumentRegistry()
+        registry.register(firstModel)
+        registry.register(secondModel)
+        registry.activate(firstModel)
+        let firstStarted = AppIntentStartSignal()
+        let releaseFirst = AppIntentReleaseGate()
+        let tracker = AppIntentEventTracker()
+        let router = LocalCutAppIntentRouter(documentRegistry: registry) { action, model in
+            if action == .newProject {
+                await firstStarted.markStarted()
+                await releaseFirst.wait()
+            }
+            tracker.events.append("\(action.rawValue)-\(model === firstModel ? "first" : "second")")
+        }
+
+        let first = Task { try await router.perform(.newProject) }
+        await firstStarted.waitUntilStarted()
+        let queued = Task { try await router.perform(.importMedia) }
+        // `perform` captures synchronously, then waits on the predecessor.
+        // Yield once so the queued task reaches that wait before its document
+        // is unregistered.
+        await Task.yield()
+        registry.unregister(firstModel)
+        await releaseFirst.open()
+
+        try await first.value
+        do {
+            try await queued.value
+            Issue.record("Expected targetDocumentClosed.")
+        } catch LocalCutAppIntentRouter.RouterError.targetDocumentClosed {
+        } catch {
+            Issue.record("Expected targetDocumentClosed, got \(error)")
+        }
+        #expect(tracker.events == ["newProject-first"])
     }
 
     @Test func cancelledActionDoesNotWaitForLongRunningPredecessor() async throws {
         let model = EditorModel()
+        let (registry, _) = registryRouting(model)
         let started = AppIntentStartSignal()
-        let router = LocalCutAppIntentRouter(model: model) { action, _ in
+        let router = LocalCutAppIntentRouter(documentRegistry: registry) { action, _ in
             if action == .newProject {
                 await started.markStarted()
                 try await Task.sleep(for: .seconds(60))

@@ -28,6 +28,107 @@ private final class PanelCancellationHandle: @unchecked Sendable {
     }
 }
 
+/// Centralizes the project-open panel policy so package selection remains
+/// regression-testable without coupling a test to an asynchronous menu action.
+@MainActor
+enum ProjectOpenPanelConfiguration {
+    static func apply(to panel: NSOpenPanel) {
+        // `.lcbundle` has an in-process filename-backed UTType rather than a
+        // Finder-registered document type. NSOpenPanel cannot match that
+        // runtime type for a directory, so leave the type filter unrestricted
+        // and validate through the panel delegate below. This keeps real
+        // bundles selectable without accepting an unrelated path as a project.
+        panel.allowsMultipleSelection = false
+        // LocalCut bundles are directories on disk, so accept directory
+        // candidates and validate their canonical project metadata at the
+        // panel boundary.
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        // Let AppKit present Launch Services-recognized packages as documents.
+        // An unregistered runtime `.lcbundle` may still appear as a folder, so
+        // the validator below remains the authority before loading it.
+        panel.treatsFilePackagesAsDirectories = false
+    }
+
+    static func isSupportedProjectURL(_ url: URL) -> Bool {
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return false
+        }
+
+        if isDirectory.boolValue {
+            // Use the same canonical metadata predicate as the production
+            // bundle loader so a synced or renamed bundle keeps its package
+            // save path after it is opened.
+            let projectJSON = url.appendingPathComponent(ProjectBundleLayout.projectJSON)
+            return FileManager.default.fileExists(atPath: projectJSON.path)
+        }
+        return url.pathExtension == ProjectDocument.fileExtension
+    }
+}
+
+/// Centralizes the project-save panel policy so the default document shape is
+/// explicit even when the panel also offers the legacy flat-file type.
+@MainActor
+enum ProjectSavePanelConfiguration {
+    static func apply(to panel: NSSavePanel, suggestedName: String) {
+        panel.allowedContentTypes = [.lcStudioProjectBundle, .lcStudioProject]
+        // `NSSavePanel` otherwise chooses its current type independently of
+        // the array order when the suggested name already has an extension,
+        // which can produce `Project.lcbundle.lcstudio`. Select the package
+        // type deliberately so a new save starts as the portable bundle.
+        panel.currentContentType = .lcStudioProjectBundle
+        panel.showsContentTypes = true
+        panel.nameFieldStringValue = "\(suggestedName).\(ProjectBundleLayout.fileExtension)"
+        panel.canCreateDirectories = true
+    }
+
+    static func filename(_ currentName: String, for contentType: UTType) -> String {
+        let baseName = URL(filePath: currentName).deletingPathExtension().lastPathComponent
+        let filenameExtension = contentType.preferredFilenameExtension ?? ProjectBundleLayout.fileExtension
+        return "\(baseName).\(filenameExtension)"
+    }
+}
+
+/// `NSSavePanel` owns the type popup; this narrow delegate keeps the filename
+/// extension aligned with the user's selected project representation.
+@MainActor
+private final class ProjectSavePanelTypeDelegate: NSObject, NSOpenSavePanelDelegate {
+    func panel(_ sender: Any, didSelect type: UTType?) {
+        guard let panel = sender as? NSSavePanel, let type else { return }
+        panel.nameFieldStringValue = ProjectSavePanelConfiguration.filename(
+            panel.nameFieldStringValue,
+            for: type)
+    }
+
+    func panel(_ sender: Any, displayNameFor type: UTType) -> String? {
+        switch type {
+        case .lcStudioProjectBundle:
+            "LocalCut Bundle (.lcbundle)"
+        case .lcStudioProject:
+            "LocalCut Project (.lcstudio)"
+        default:
+            nil
+        }
+    }
+}
+
+/// Keeps invalid folders from dismissing the project-open panel. The panel
+/// holds its delegate weakly, so `requestOpen()` captures an instance through
+/// the asynchronous completion handler for the full presentation lifetime.
+@MainActor
+private final class ProjectOpenPanelValidator: NSObject, NSOpenSavePanelDelegate {
+    func panel(_ sender: Any, validate url: URL) throws {
+        guard ProjectOpenPanelConfiguration.isSupportedProjectURL(url) else {
+            throw NSError(
+                domain: "LocalCutStudio.ProjectOpen",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Choose a LocalCut project (.lcstudio or .lcbundle)."]
+            )
+        }
+    }
+}
+
 /// AppKit panel/prompt glue for the document menu commands and the close flow.
 /// Kept apart from the pure persistence logic so the model's save/open/undo code
 /// stays free of panel presentation.
@@ -48,25 +149,7 @@ extension EditorModel {
     func requestOpen() {
         Task { [weak self] in
             guard let self else { return }
-            guard !blockDocumentCommandWhileRecording() else { return }
-            guard await confirmSaveIfNeeded() else { return }
-            let panel = NSOpenPanel()
-            panel.allowedContentTypes = [.lcStudioProjectBundle, .lcStudioProject]
-            panel.allowsMultipleSelection = false
-            // `.lcbundle` conforms to `.package`, so the panel treats it as a
-            // single double-clickable item. We do NOT enable
-            // `canChooseDirectories`: doing so lets the user pick arbitrary
-            // folders (Desktop, Documents) that have no `project.json` and
-            // would fail to open.
-            panel.canChooseDirectories = false
-            panel.canChooseFiles = true
-            let response = await withCheckedContinuation { continuation in
-                panel.begin { response in
-                    continuation.resume(returning: response)
-                }
-            }
-            guard response == .OK, let url = panel.url else { return }
-            await open(url: url)
+            _ = await performOpenProjectCommand()
         }
     }
 
@@ -135,6 +218,40 @@ extension EditorModel {
     }
 
     @discardableResult
+    func performOpenProjectCommand() async -> EditorCommandOutcome {
+        await performOpenProjectCommand(
+            confirmSave: { [self] in
+                await confirmSaveIfNeeded()
+            },
+            presentPanel: { [self] in
+                await presentProjectOpenPanel()
+            },
+            openProject: { [self] url in
+                await open(url: url)
+            })
+    }
+
+    /// Injectable command seam keeps the recording guard and URL validation
+    /// deterministic without coupling lifecycle tests to a live open panel.
+    @discardableResult
+    func performOpenProjectCommand(
+        confirmSave: @escaping @MainActor () async -> Bool,
+        presentPanel: @escaping @MainActor () async -> (NSApplication.ModalResponse, URL?),
+        openProject: @escaping @MainActor (URL) async -> Void
+    ) async -> EditorCommandOutcome {
+        guard !blockDocumentCommandWhileRecording() else { return .actionCancelled }
+        guard await confirmSave() else { return .actionCancelled }
+        let (response, url) = await presentPanel()
+        guard response == .OK, let url else { return .panelCancelled }
+        guard ProjectOpenPanelConfiguration.isSupportedProjectURL(url) else {
+            statusMessage = "Choose a LocalCut project (.lcstudio or .lcbundle)."
+            return .failed
+        }
+        await openProject(url)
+        return .completed
+    }
+
+    @discardableResult
     func performImportMediaCommand() async -> EditorCommandOutcome {
         await performImportMediaCommand(
             presentPanel: { [self] in
@@ -183,6 +300,20 @@ extension EditorModel {
             }
         }
         return (response, panel.urls)
+    }
+
+    private func presentProjectOpenPanel() async -> (NSApplication.ModalResponse, URL?) {
+        let panel = NSOpenPanel()
+        ProjectOpenPanelConfiguration.apply(to: panel)
+        let validator = ProjectOpenPanelValidator()
+        panel.delegate = validator
+        let response = await withCheckedContinuation { continuation in
+            panel.begin { [validator] response in
+                _ = validator
+                continuation.resume(returning: response)
+            }
+        }
+        return (response, panel.url)
     }
 
     @discardableResult
@@ -242,22 +373,11 @@ extension EditorModel {
         return (response, panel.url)
     }
 
-    /// File ▸ Export Timeline (.otio) — serializes the project to OpenTimelineIO
-    /// interchange format and writes to the user-selected location.
-    func requestExportOtio() {
-        guard totalDuration > 0 else { return }
-        let panel = NSSavePanel()
-        let otioType = UTType(filenameExtension: "otio") ?? .json
-        panel.allowedContentTypes = [otioType]
-        panel.nameFieldStringValue = "\(project.name).otio"
-        panel.canCreateDirectories = true
-        panel.begin { @MainActor [weak self] response in
-            guard response == .OK, let url = panel.url, let self else { return }
-            self.exportOtio(to: url)
-        }
-    }
-
-    private func exportOtio(to url: URL) {
+    /// Creates an in-memory OTIO document for the focused window's SwiftUI
+    /// file exporter. Serialization stays in the existing interchange layer;
+    /// only destination presentation moves out of the AppKit save panel.
+    func makeOtioExportRequest() -> InterchangeExportRequest? {
+        guard totalDuration > 0 else { return nil }
         let document = documentController.makeDocumentForSave(forBundle: false, model: self)
         // Snapshot media names before the Sendable closure.
         let mediaNames: [UUID: String] = Dictionary(
@@ -274,64 +394,25 @@ extension EditorModel {
         let (json, warnings) = serializeTimelineToOtio(document, options: options)
         if warnings.contains(where: { $0.kind == .serializationFailure }) {
             statusMessage = "OTIO export failed: serialization error."
-            return
+            return nil
         }
-        do {
-            try writeInterchangeString(json, to: url)
-            if warnings.isEmpty {
-                statusMessage = "Exported \(url.lastPathComponent)."
-            } else {
-                let warningText = warnings.prefix(3).map(\.description).joined(separator: "; ")
-                statusMessage = "Exported \(url.lastPathComponent) — \(warningText)"
-            }
-        } catch {
-            statusMessage = Self.failureStatusMessage(
-                summary: "Could not write OTIO file",
-                detail: error.localizedDescription,
-                recoverySuggestion: "Check that the destination has enough free space and isn't locked by another app.")
-        }
+        return InterchangeExportRequest(
+            document: InterchangeExportDocument(contents: json),
+            contentType: .localCutOtioExport,
+            // SwiftUI's file exporter derives and appends the content type's
+            // extension. Passing an already suffixed name produces `.otio.otio`.
+            defaultFilename: project.name,
+            warningSummary: warningSummary(warnings))
     }
 
-    /// File ▸ Export EDL (.edl) — serializes the selected video track to CMX3600
-    /// EDL format. If multiple video tracks exist, presents a track picker.
-    func requestExportEdl() {
-        guard totalDuration > 0 else { return }
-        guard !project.videoTracks.isEmpty else {
+    /// Creates an in-memory CMX3600 EDL document for the focused window's
+    /// SwiftUI file exporter after the scene chooses a video track.
+    func makeEdlExportRequest(trackIndex: Int) -> InterchangeExportRequest? {
+        guard totalDuration > 0 else { return nil }
+        guard project.videoTracks.indices.contains(trackIndex) else {
             statusMessage = "No video tracks to export."
-            return
+            return nil
         }
-
-        // If multiple video tracks, show a picker.
-        if project.videoTracks.count > 1 {
-            let alert = NSAlert()
-            alert.messageText = "Choose Video Track for EDL Export"
-            alert.informativeText = "CMX3600 EDL exports a single video track."
-            for (index, track) in project.videoTracks.enumerated() {
-                alert.addButton(withTitle: "\(track.name) (V\(index + 1))")
-            }
-            alert.addButton(withTitle: "Cancel")
-            let response = alert.runModal()
-            let trackIndex = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
-            guard trackIndex >= 0, trackIndex < project.videoTracks.count else { return }
-            exportEdl(trackIndex: trackIndex)
-        } else {
-            exportEdl(trackIndex: 0)
-        }
-    }
-
-    private func exportEdl(trackIndex: Int) {
-        let panel = NSSavePanel()
-        let edlType = UTType(filenameExtension: "edl") ?? .plainText
-        panel.allowedContentTypes = [edlType]
-        panel.nameFieldStringValue = "\(project.name).edl"
-        panel.canCreateDirectories = true
-        panel.begin { @MainActor [weak self] response in
-            guard response == .OK, let url = panel.url, let self else { return }
-            self.exportEdl(to: url, trackIndex: trackIndex)
-        }
-    }
-
-    private func exportEdl(to url: URL, trackIndex: Int) {
         let document = documentController.makeDocumentForSave(forBundle: false, model: self)
         let options = EdlSerializationOptions(
             title: project.name,
@@ -339,22 +420,18 @@ extension EditorModel {
         let (edl, warnings) = serializeTimelineToEdl(document, options: options)
         if warnings.contains(where: { $0.kind == .serializationFailure }) {
             statusMessage = "EDL export failed: serialization error."
-            return
+            return nil
         }
-        do {
-            try writeInterchangeString(edl, to: url)
-            if warnings.isEmpty {
-                statusMessage = "Exported \(url.lastPathComponent)."
-            } else {
-                let warningText = warnings.prefix(3).map(\.description).joined(separator: "; ")
-                statusMessage = "Exported \(url.lastPathComponent) — \(warningText)"
-            }
-        } catch {
-            statusMessage = Self.failureStatusMessage(
-                summary: "Could not write EDL file",
-                detail: error.localizedDescription,
-                recoverySuggestion: "Check that the destination has enough free space and isn't locked by another app.")
-        }
+        return InterchangeExportRequest(
+            document: InterchangeExportDocument(contents: edl),
+            contentType: .localCutEdlExport,
+            defaultFilename: project.name,
+            warningSummary: warningSummary(warnings))
+    }
+
+    private func warningSummary(_ warnings: [InterchangeWarning]) -> String? {
+        guard !warnings.isEmpty else { return nil }
+        return warnings.prefix(3).map(\.description).joined(separator: "; ")
     }
 
     private func resolveChapterMarkersBeforeExport() -> Bool {
@@ -446,11 +523,12 @@ extension EditorModel {
     /// the chosen URL.
     func runSavePanel() -> URL? {
         let panel = NSSavePanel()
-        // Bundle first so it's the default content type for new documents.
-        panel.allowedContentTypes = [.lcStudioProjectBundle, .lcStudioProject]
-        panel.nameFieldStringValue = "\(project.name).\(ProjectBundleLayout.fileExtension)"
-        panel.canCreateDirectories = true
-        return panel.runModal() == .OK ? panel.url : nil
+        let typeDelegate = ProjectSavePanelTypeDelegate()
+        panel.delegate = typeDelegate
+        ProjectSavePanelConfiguration.apply(to: panel, suggestedName: project.name)
+        let response = panel.runModal()
+        _ = typeDelegate // `NSSavePanel.delegate` is weak.
+        return response == .OK ? panel.url : nil
     }
 
     /// File ▸ Convert to Bundle… — writes a fresh `.lcbundle` alongside the
@@ -462,6 +540,7 @@ extension EditorModel {
             guard !blockDocumentCommandDuringCloseSave() else { return }
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.lcStudioProjectBundle]
+            panel.currentContentType = .lcStudioProjectBundle
             panel.nameFieldStringValue = "\(project.name).\(ProjectBundleLayout.fileExtension)"
             // Default the panel to the directory containing the current document.
             if let docURL = documentURL {
@@ -508,6 +587,15 @@ extension EditorModel {
     /// Synchronous variant for `windowShouldClose`, which must return a decision
     /// immediately. Returns `true` if the window may close.
     func confirmClose(window: NSWindow) -> Bool {
+        confirmClose(window: window, onSaveSucceeded: {})
+    }
+
+    /// Starts an async save when needed. The window bridge supplies the
+    /// completion handoff that replays the close after a successful save.
+    func confirmClose(
+        window _: NSWindow,
+        onSaveSucceeded: @escaping @MainActor () -> Void
+    ) -> Bool {
         guard !blockDocumentCommandDuringCloseSave() else { return false }
         guard !hasActiveRecordingLifecycle else {
             statusMessage = recordingLifecycleBlockMessage(action: "closing the window")
@@ -525,16 +613,17 @@ extension EditorModel {
             guard let url = documentURL ?? runSavePanel() else { return false }
             closeSaveInProgress = true
             statusMessage = "Saving \(url.lastPathComponent) before closing…"
-            Task { @MainActor [weak window] in
-                if documentURL == nil {
-                    await saveAs(url: url)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.documentURL == nil {
+                    await self.saveAs(url: url)
                 } else {
-                    await save()
+                    await self.save()
                 }
-                let shouldClose = !isDirty
-                closeSaveInProgress = false
-                if shouldClose {
-                    window?.performClose(nil)
+                let shouldClose = !self.isDirty
+                self.closeSaveInProgress = false
+                if shouldClose, !self.hasActiveRecordingLifecycle {
+                    onSaveSucceeded()
                 }
             }
             return false
@@ -549,16 +638,6 @@ extension EditorModel {
         guard closeSaveInProgress else { return false }
         statusMessage = "Finish saving before closing…"
         return true
-    }
-
-    private func writeInterchangeString(_ contents: String, to url: URL) throws {
-        let didAccess = url.startAccessingSecurityScopedResource()
-        defer {
-            if didAccess {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
-        try contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
     /// Document lifecycle commands (New/Open) must not run mid-recording: the

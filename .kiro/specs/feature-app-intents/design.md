@@ -13,12 +13,15 @@ the same user-visible status when an action is blocked, cancelled, or fails.
 
 ### App-scoped dependency
 
-`LocalCutStudioAppState` owns the single `EditorModel` and a matching `LocalCutAppIntentRouter`.
-`LocalCutStudioApp.init()` registers that router with `AppDependencyManager`, so App Intents resolve
-the same live editor session the window uses even if SwiftUI recreates the `App` value.
+`LocalCutStudioAppState` owns the router dependency, while
+`ActiveDocumentRegistry` owns weak registrations for live editor windows.
+`LocalCutStudioApp.init()` registers the router with `AppDependencyManager`, so
+App Intents can resolve the key/most-recent editor even if SwiftUI recreates
+the `App` value.
 
-This replaces the earlier "connect later from the first window appearance" design. Intents no
-longer depend on window timing to find a model.
+This replaces the earlier direct process-wide-model assumption. Before a window
+has registered (including cold launch), the router fails with a typed
+`noActiveDocument` error instead of guessing a target.
 
 ### Thin router, existing commands
 
@@ -28,7 +31,10 @@ longer depend on window timing to find a model.
 2. serializes concurrent invocations through an actor-backed barrier, and
 3. translates `EditorCommandOutcome` into intent-facing errors.
 
-The router does not own document logic, panel presentation, export validation, or diagnostics state.
+The router does not own document logic, panel presentation, export validation,
+diagnostics state, or an editor model. It captures the active registry token
+when an action is received and validates that exact target just before execution,
+so a queued action never retargets after a window closes.
 Those stay in the existing editor/model layer:
 
 - new project -> `EditorModel.performNewProjectCommand()`
@@ -90,3 +96,5 @@ Coverage stays focused on the bridge and the command/result edges:
 - new-project cancellation after confirm-save prompt,
 - import/export failure propagation,
 - export queue rejection after selecting a brand-new destination path.
+- no-active-document, active-editor capture, and closed-token routing behavior
+  (added by the native document lifecycle feature).

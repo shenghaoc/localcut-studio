@@ -6,15 +6,18 @@ import LocalCutCore
 // MARK: - Bundle content type
 
 extension UTType {
-    /// The `.lcbundle` project bundle: a directory the OS treats as one item.
-    /// Conforming to `.package` is what makes Finder open it as a double-click
-    /// target rather than browsing its insides. Full Launch Services adoption on
-    /// a fresh install still needs an Info.plist `UTExportedTypeDeclarations`
-    /// entry; the dynamic UTType here is enough for the in-app New/Open/Save
-    /// path. See `Project Bundles` design § UTType for the follow-up.
+    /// The `.lcbundle` project bundle: LocalCut's portable directory package.
+    /// The filename-backed dynamic type is intentional until the app ships a
+    /// full Launch Services declaration: it gives `NSSavePanel` the
+    /// `.lcbundle` tag. The save-panel policy explicitly selects this type as
+    /// its default when the legacy `.lcstudio` type is also offered.
+    /// `NSOpenPanel` validates bundle candidates at its URL boundary because a
+    /// runtime type alone does not register the package with Launch Services.
+    /// See `Project Bundles` design § UTType for the Finder/cold-launch
+    /// declaration follow-up.
     static let lcStudioProjectBundle = UTType(
-        exportedAs: "com.localcutstudio.project-bundle",
-        conformingTo: .package)
+        filenameExtension: ProjectBundleLayout.fileExtension,
+        conformingTo: .package) ?? .package
 }
 
 // MARK: - Fingerprints

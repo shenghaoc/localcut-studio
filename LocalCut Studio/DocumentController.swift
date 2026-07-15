@@ -301,7 +301,7 @@ final class DocumentController {
         var overlayAccesses: [URL] = []
         defer { stopOverlayAccesses(overlayAccesses) }
         do {
-            if url.pathExtension == ProjectBundleLayout.fileExtension {
+            if ProjectBundle.isBundle(url: url) {
                 guard model.project.coverFrame == nil else {
                     model.statusMessage = "Save failed: bundle cover generation requires the async Save path."
                     return false
@@ -619,7 +619,7 @@ final class DocumentController {
     }
 
     private func write(to url: URL, model: EditorModel) async {
-        if url.pathExtension == ProjectBundleLayout.fileExtension {
+        if ProjectBundle.isBundle(url: url) {
             await writeBundle(to: url, model: model)
         } else {
             await writeSingleFile(to: url, model: model)

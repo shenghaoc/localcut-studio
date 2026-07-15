@@ -2,7 +2,7 @@
 
 ## R1 — Bundle format
 
-- **R1.1** A `.lcbundle` is a directory the user-facing OS treats as one item (the UTType conforms to `.package`).
+- **R1.1** A `.lcbundle` is a portable directory package (`UTType` conforms to `.package`). Finder package presentation and double-click launch require the separately documented Launch Services declaration.
 - **R1.2** A well-formed `.lcbundle` contains, at minimum, `project.json`. `fingerprints.json` and `assets/` are present when the bundle has at least one bundled media item.
 - **R1.3** `project.json` is the existing `ProjectDocument` JSON shape with two added fields: `bundleFormat: "1"` at the top level, and an optional `bundleRelativePath` on each `MediaRef`. Both are optional from the decoder's perspective so single-file `.lcstudio` documents stay round-trip-compatible.
 - **R1.4** `currentSchemaVersion = 3` on first bundle save; documents written into the single-file format keep `schemaVersion = 2` (the PR #10 value).
@@ -11,7 +11,7 @@
 ## R2 — Open
 
 - **R2.1** Opening a `.lcbundle` reads `project.json`, resolves every `bundleRelativePath` against the bundle root without needing a security-scoped bookmark, and runs the existing bookmark-resolution path for any `MediaRef` without `bundleRelativePath`.
-- **R2.2** Opening a `.lcstudio` continues to work unchanged — both UTTypes are accepted by the open panel.
+- **R2.2** Opening a `.lcstudio` continues to work unchanged — the open panel validates and accepts either a regular `.lcstudio` file or a well-formed `.lcbundle` directory.
 - **R2.3** A missing or corrupt `fingerprints.json` is tolerated (the next save regenerates it).
 - **R2.4** A bundled asset whose on-disk SHA-256 differs from `fingerprints.json` surfaces a user-visible warning in `statusMessage` (the project still opens; the user decides whether to relink).
 - **R2.5** Mixed projects (some media bundled, some external-only via bookmark) load correctly. The two paths coexist on a single project.

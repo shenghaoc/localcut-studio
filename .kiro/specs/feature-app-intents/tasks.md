@@ -6,7 +6,10 @@
 
 - [x] **T1.1** Add `LocalCutAppIntentRouter` and the four App Intent entry points in `LocalCut Studio/AppIntents.swift`.
 - [x] **T1.2** Register the router through `AppDependencyManager` from `LocalCutStudioApp.init()`.
-- [x] **T1.3** Keep the router and main window on the same app-scoped `EditorModel` via `LocalCutStudioAppState`.
+- [x] **T1.3** The original app-scoped model wiring was superseded by
+  `ActiveDocumentRegistry`: the router now resolves the active editor token and
+  returns a typed error before any window registers. See
+  [Native document lifecycle](../feature-native-document-lifecycle/design.md).
 
 ## Command routing
 

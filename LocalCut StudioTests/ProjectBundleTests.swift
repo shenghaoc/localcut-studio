@@ -1,13 +1,90 @@
 import Testing
+import AppKit
 import Foundation
 import AVFoundation
 import CoreGraphics
+import UniformTypeIdentifiers
 import LocalCutCore
 @testable import LocalCut_Studio
 
 @MainActor
 @Suite("Project Bundles")
 struct ProjectBundleTests {
+
+    @Test("Bundle UTI carries the lcbundle filename tag for save panels")
+    func bundleUTIUsesBundleExtension() {
+        #expect(UTType.lcStudioProjectBundle.preferredFilenameExtension == ProjectBundleLayout.fileExtension)
+        #expect(UTType.lcStudioProjectBundle.conforms(to: .package))
+    }
+
+    @Test("Project save panel defaults to a bundle without appending lcstudio")
+    func projectSavePanelDefaultsToBundle() {
+        let panel = NSSavePanel()
+        ProjectSavePanelConfiguration.apply(to: panel, suggestedName: "Untitled")
+
+        #expect(panel.allowedContentTypes == [.lcStudioProjectBundle, .lcStudioProject])
+        #expect(panel.currentContentType == .lcStudioProjectBundle)
+        #expect(panel.showsContentTypes)
+        #expect(panel.nameFieldStringValue == "Untitled.\(ProjectBundleLayout.fileExtension)")
+        #expect(ProjectSavePanelConfiguration.filename("Untitled.lcstudio", for: .lcStudioProjectBundle)
+                == "Untitled.lcbundle")
+        #expect(ProjectSavePanelConfiguration.filename("Untitled.lcbundle", for: .lcStudioProject)
+                == "Untitled.lcstudio")
+    }
+
+    @Test("Async bundle save marks an unchanged project clean")
+    func asyncBundleSaveMarksStableProjectClean() async throws {
+        try await withTempDirectory("async-clean") { temporaryDirectory in
+            let model = EditorModel()
+            model.addMarkerAtPlayhead()
+            #expect(model.isDirty)
+
+            let bundleURL = temporaryDirectory.appendingPathComponent("Saved.lcbundle")
+            await model.saveAs(url: bundleURL)
+
+            #expect(model.documentURL == bundleURL)
+            #expect(!model.isDirty)
+        }
+    }
+
+    @Test("Project open panel selects bundles as documents")
+    func projectOpenPanelTreatsBundlesAsDocuments() {
+        let panel = NSOpenPanel()
+        ProjectOpenPanelConfiguration.apply(to: panel)
+
+        #expect(!panel.treatsFilePackagesAsDirectories)
+        #expect(panel.canChooseDirectories)
+        #expect(panel.canChooseFiles)
+        #expect(panel.allowedContentTypes.isEmpty)
+    }
+
+    @Test("Project open policy rejects unrelated folders")
+    func projectOpenPolicyValidatesDirectoryCandidates() throws {
+        try withTempDirectory("open-policy") { temporaryDirectory in
+            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(temporaryDirectory))
+
+            let bundle = temporaryDirectory.appendingPathComponent("Project.lcbundle")
+            try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: bundle.appendingPathComponent(ProjectBundleLayout.projectJSON))
+            #expect(ProjectOpenPanelConfiguration.isSupportedProjectURL(bundle))
+
+            let flatProject = temporaryDirectory.appendingPathComponent("Legacy.lcstudio")
+            try Data("{}".utf8).write(to: flatProject)
+            #expect(ProjectOpenPanelConfiguration.isSupportedProjectURL(flatProject))
+
+            let misleadingProjectDirectory = temporaryDirectory.appendingPathComponent("NotAProject.lcstudio")
+            try FileManager.default.createDirectory(at: misleadingProjectDirectory, withIntermediateDirectories: true)
+            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(misleadingProjectDirectory))
+
+            let emptyBundleDirectory = temporaryDirectory.appendingPathComponent("Empty.lcbundle")
+            try FileManager.default.createDirectory(at: emptyBundleDirectory, withIntermediateDirectories: true)
+            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(emptyBundleDirectory))
+
+            let misleadingBundleFile = temporaryDirectory.appendingPathComponent("NotABundle.lcbundle")
+            try Data("not a package".utf8).write(to: misleadingBundleFile)
+            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(misleadingBundleFile))
+        }
+    }
 
     // MARK: - Helpers
 
@@ -1018,6 +1095,19 @@ struct ProjectBundleTests {
             let lcbundle = tmp.appendingPathComponent("Sample.lcbundle")
             try FileManager.default.createDirectory(at: lcbundle, withIntermediateDirectories: true)
             #expect(ProjectBundle.isBundle(url: lcbundle) == true)
+
+            // A file-sync service may strip the canonical suffix while keeping
+            // the package contents. Reopen and subsequent saves must still
+            // use the bundle persistence path in that case.
+            let renamedBundle = tmp.appendingPathComponent("Synced Project")
+            try FileManager.default.createDirectory(at: renamedBundle, withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: renamedBundle.appendingPathComponent(ProjectBundleLayout.projectJSON))
+            #expect(ProjectBundle.isBundle(url: renamedBundle))
+
+            let model = EditorModel()
+            model.project.name = "Resaved Synced Project"
+            #expect(model.writeSynchronously(to: renamedBundle))
+            #expect(try ProjectBundle.read(url: renamedBundle).document.name == "Resaved Synced Project")
         }
     }
 }

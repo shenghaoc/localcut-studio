@@ -14,7 +14,9 @@ final class LocalCutAppIntentRouter {
         case showDiagnostics
     }
 
-    enum RouterError: LocalizedError, Equatable {
+    enum RouterError: LocalizedError, Equatable, Sendable {
+        case noActiveDocument
+        case targetDocumentClosed
         case emptyTimeline
         case actionCancelled
         case actionFailed
@@ -22,6 +24,10 @@ final class LocalCutAppIntentRouter {
 
         var errorDescription: String? {
             switch self {
+            case .noActiveDocument:
+                String(localized: "Open a LocalCut project before running this action.")
+            case .targetDocumentClosed:
+                String(localized: "The LocalCut project closed before the action could run.")
             case .emptyTimeline:
                 String(localized: "Add media to the timeline before exporting.")
             case .actionCancelled:
@@ -97,24 +103,28 @@ final class LocalCutAppIntentRouter {
         }
     }
 
-    private let model: EditorModel
+    private let documentRegistry: ActiveDocumentRegistry
     private let routeAction: @MainActor @Sendable (Action, EditorModel) async throws -> Void
     private var actionChain = TaskReference(finished: true)
 
     init(
-        model: EditorModel,
+        documentRegistry: ActiveDocumentRegistry,
         routeAction: @escaping @MainActor @Sendable (Action, EditorModel) async throws -> Void = LocalCutAppIntentRouter.route
     ) {
-        self.model = model
+        self.documentRegistry = documentRegistry
         self.routeAction = routeAction
     }
 
     func perform(_ action: Action) async throws {
+        guard let target = documentRegistry.activeTarget() else {
+            throw RouterError.noActiveDocument
+        }
         let predecessorRef = actionChain
         let currentRef = TaskReference()
         actionChain = currentRef
 
-        let model = self.model
+        let targetToken = target.token
+        let documentRegistry = self.documentRegistry
         let routeAction = self.routeAction
         let result = ActionResult()
         let predecessorBarrier = predecessorRef.barrier
@@ -123,6 +133,9 @@ final class LocalCutAppIntentRouter {
             await predecessorBarrier.wait()
             do {
                 try Task.checkCancellation()
+                guard let model = documentRegistry.model(for: targetToken) else {
+                    throw RouterError.targetDocumentClosed
+                }
                 try await routeAction(action, model)
                 await result.finish(with: .success(()))
             } catch {

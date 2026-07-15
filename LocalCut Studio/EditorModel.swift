@@ -14,33 +14,13 @@ import LocalCutPlatform
 ///
 /// `EditorModel` uses Swift's `@Observable` macro (Observation framework). Most
 /// stored properties are automatically tracked so that SwiftUI views re-render
-/// when they change. Properties annotated `@ObservationIgnored` fall into one of
-/// the exclusive categories below — each annotation **must** have a reason; see
-/// the grouping comments inline.
+/// when they change. Each ignored property has a reason documented alongside
+/// its owner. Common categories are stable services, framework handles,
+/// task/observer lifetimes, cache bookkeeping, and operation guards.
 ///
-/// **Category count table** (exclusive — counts sum to 47):
+/// **Cross-cutting notes:**
 ///
-/// | # | Category | Count | Properties | Why ignored |
-/// |---|----------|-------|------------|-------------|
-/// | 1 | Static / constant | 1 | `inspectorVisibleKey` | `static let` is never observed. |
-/// | 2 | Injected store | 1 | `defaultsStore` | Holds a `UserDefaults` reference; value never changes after init. |
-/// | 3 | Service / coordinator objects | 6 | `importService`, `projectEditingService`, `previewRebuildCoordinator`, `exportCoordinator`, `documentController`, `captureCoordinator` | Stable `let` identities. Some own lifecycle state, but SwiftUI never renders that state directly; their user-visible output is written to observed model properties. |
-/// | 4 | Framework objects | 4 | `floatingPanelController`, `beatAnalyzer`, `undoManager`, `replayBufferManager` | Opaque framework / helper types whose internal state is not meaningful to observe. Replay availability is projected through observed recording state, and failed startup explicitly clears the manager. |
-/// | 5 | Observer / notification handles | 3 | `timeObserver`, `endObserver`, `activeOverlaySourceRegistryID` | Opaque handles retained for lifecycle cleanup (`removeTimeObserver`, `removeObserver`, `releaseOverlaySources`). Never rendered. |
-/// | 6 | Task handles | 4 | `silenceDetectionTask`, `loudnessTask`, `recordingMonitorTask`, `beatAnalysisTask` | Transient `Task<Void, Never>?` values for cancel-on-restart lifecycle. Never rendered. |
-/// | 7 | Stale-cancellation tokens | 3 | `loudnessMeasurementToken`, `mutationRevision`, `sessionGeneration` | Monotonic counters compared across `await` boundaries to discard stale async results. Never rendered. |
-/// | 8 | Security-scoped cleanup | 3 | `accessedURLs`, `bundleAccessURL`, `recordingsFolderAccessURL` | `nonisolated(unsafe)` for `deinit` cleanup; balance `start/stopAccessingSecurityScopedResource()`. Never rendered. |
-/// | 9 | Caches / memoisation | 7 | `lutDisplayNames`, `beatAnalysisKeys`, `cachedProjectedBeatTimes`, `projectedBeatTimesRevision`, `lastProjectedBeatTimesRevision`, `clipIndex`, `lastBundleFingerprints` | Memoisation plumbing; consumers read the output through observed properties or computed accessors. Enabling observation causes spurious churn on batch updates (undo/redo, document restore). |
-/// | 10 | Undo coalescing plumbing | 5 | `coalescedUndoBefore`, `coalescedUndoName`, `coalescedUndoTarget`, `coalescedCommitTask`, `coalescedUndoWasDirty` | Gesture-internal before-snapshot and metadata. User-visible undo state (`canUndo`, `canRedo`, `undoTitle`, `redoTitle`, `isDirty`) IS observed. |
-/// | 11 | Capture / recorder internal state | 9 | `recordingPausedDuration`, `pauseStartedAt`, `lastRecordingRequest`, `lastRecordingSlots`, `retakeTimelinePositions`, `retakeUndoBefore`, `retakePreviousSlots`, `retakeTrackIndices`, `lastRecordingPiPPreset` | Retake slots, pause accounting, recording request snapshots. UI-facing flags (`isRecording`, `isPaused`, `hasLastRecordingTake`, `activePiPPreset`) ARE observed; these are backing plumbing. |
-/// | 12 | Document / operation guards | 1 | `closeSaveInProgress` | Re-entrancy guard for asynchronous document-close saves. It blocks duplicate operations but is never rendered. |
-///
-/// Total: 1+1+6+4+3+4+3+3+7+5+9+1 = **47**.
-///
-/// **Cross-cutting notes** (non-exclusive — may reference properties already
-/// counted above):
-///
-/// - **`nonisolated(unsafe)` overlap** — 11 properties carry both
+/// - **`nonisolated(unsafe)` overlap** — cleanup handles carry both
 ///   `@ObservationIgnored` and `nonisolated(unsafe)`: `silenceDetectionTask`,
 ///   `loudnessTask`, `timeObserver`, `endObserver`, `recordingMonitorTask`,
 ///   `beatAnalysisTask`, `activeOverlaySourceRegistryID`, `coalescedCommitTask`,
@@ -48,15 +28,13 @@ import LocalCutPlatform
 ///   `nonisolated(unsafe)` exists for `deinit` access; the `@ObservationIgnored`
 ///   exists because the properties are opaque handles or cleanup bookkeeping.
 ///   Neither annotation implies the other.
-/// - **Task handles appear in two groups** — `coalescedCommitTask` is counted
-///   under undo coalescing (#10) because its lifecycle is the coalesced gesture.
-///   The other four task handles (#6) are standalone. All share the same
-///   ignore rationale (cancel-on-restart, never rendered).
-/// - **`replayBufferManager`** is a framework object (#4), not capture-internal
-///   state (#11). The UI reads it only while observed `isRecording` is true;
+/// - **Task handles** include `coalescedCommitTask` for undo coalescing and
+///   standalone cancellation handles for capture or analysis work.
+/// - **`replayBufferManager`** is a framework object, not capture-internal
+///   state. The UI reads it only while observed `isRecording` is true;
 ///   failed capture startup disables and releases the manager before returning
 ///   with `isRecording == false`, then clears ring storage asynchronously.
-/// - **`closeSaveInProgress`** is a document/operation guard (#12), separate
+/// - **`closeSaveInProgress`** is a document/operation guard, separate
 ///   from capture state because it prevents duplicate asynchronous close-save
 ///   operations and is not rendered.
 ///
@@ -156,25 +134,6 @@ final class EditorModel {
     var showScopes: Bool = false
     var showSafeZones: Bool = false
     var selectedSafeZoneProfileID: String = SafeZoneLibrary.defaultProfileID
-
-    /// Whether the inspector side rail is shown. Lifted off the view's
-    /// `@SceneStorage` so the View ▸ Show Inspector menu command, its ⌥⌘I
-    /// shortcut, the toolbar button, and the collapsed-rail restore strip all
-    /// share one source of truth. Persisted app-wide via the injectable
-    /// `defaultsStore` (defaults to `UserDefaults.standard`; tests pass a
-    /// scratch suite so they don't write to the user's preferences).
-    var inspectorVisible: Bool = true {
-        didSet { defaultsStore.set(inspectorVisible, forKey: Self.inspectorVisibleKey) }
-    }
-
-    @ObservationIgnored
-    static let inspectorVisibleKey = "editor.inspectorVisible"
-
-    /// Backing store for persisted UI flags (`inspectorVisible` today; could
-    /// be extended). Holds the injected `UserDefaults` so tests can verify the
-    /// round-trip without polluting the user's defaults database.
-    @ObservationIgnored
-    private let defaultsStore: UserDefaults
 
     // Status / export
     var statusMessage = "Import media to begin."
@@ -462,15 +421,7 @@ final class EditorModel {
     /// Ignored: monotonic token for stale-cancellation; never rendered.
     @ObservationIgnored var sessionGeneration = 0
 
-    init(defaultsStore: UserDefaults = .standard) {
-        // Capture the injected defaults BEFORE setting any property whose
-        // didSet writes through it (currently `inspectorVisible`). The custom
-        // suite path is the test seam.
-        self.defaultsStore = defaultsStore
-        // Seed inspectorVisible from the store *after* the property is in
-        // place, so a true round-trip reads what tests wrote.
-        self.inspectorVisible = (defaultsStore.object(forKey: Self.inspectorVisibleKey) as? Bool) ?? true
-
+    init() {
         // Initialise the render queue first — it's the one `let` without an
         // inline default, so it must be set before any other access on self.
         self.renderQueue = RenderQueue()

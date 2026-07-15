@@ -133,10 +133,10 @@ code, driven from a tiny `Theme.swift` semantic token set:
 - **A timeline that reads as a surface.** Video/audio/caption lanes fill with
   `Color.lcLane` (a hair lighter than the window) so empty tracks look like
   tracks, not a void; the gutter/ruler sit on `Color.lcRail`.
-- **A comfortable default window.** `WindowConfigurator` sizes the editor to a
-  1360×860 canvas centred on the active screen on first launch only (one-shot
-  `UserDefaults` guard, deferred one runloop tick so it survives SwiftUI's
-  initial-layout sizing). Later launches keep whatever size the user left.
+- **A comfortable default window.** The original AppKit first-launch sizing was
+  superseded by the native-document-lifecycle feature: SwiftUI scene placement
+  supplies the 1360×860 default and fitted ideal placement while macOS owns
+  restoration. `WindowConfigurator` no longer mutates frames.
 - **Quieter Media chrome.** The "Copy imports into bundle" toggle moves from
   above the library to a small caption-weight footer — it is a save-time
   preference, not a primary action — and the empty state reads "No media yet"
@@ -174,14 +174,13 @@ are all standard SwiftUI/AppKit (no new paradigms):
   **View ▸ Show Inspector (⌥⌘I)** and **Go to Start (⌘↑)** join Show Diagnostics.
   The **Space** shortcut for play/pause is
   intentionally not a menu key-equivalent (those fire globally, swallowing
-  spaces typed into text fields) — it lives on a window-scoped `NSEvent` local monitor
-  (`EditorKeyHandler` in `TimelineView.swift`) that yields to focused text
-  inputs *and* any focused non-text control (so a Tab-focused checkbox /
-  button receives Space normally).
-- **Single source of truth for the inspector.** `isSideRailCollapsed`
-  (`@SceneStorage`) is lifted to `EditorModel.inspectorVisible` (UserDefaults-
-  persisted) so the menu toggle, toolbar button, and collapsed-rail restore
-  strip can't disagree.
+  spaces typed into text fields) — it lives on the focused timeline's SwiftUI
+  `onKeyPress` handler. SwiftUI gives text inputs and focused controls first
+  refusal, so a Tab-focused checkbox/button receives Space normally.
+- **Single source of truth for the inspector.** The inspector is restorable
+  `@SceneStorage` window presentation state. A focused binding keeps the menu
+  toggle, toolbar button, and collapsed-rail restore strip attached to the key
+  scene without putting presentation state in `EditorModel`.
 - **Appearance & accessibility settings honored:** the editor follows system
   light/dark appearance and control accent; Reduce Motion gates the scopes-panel
   transition/animation;

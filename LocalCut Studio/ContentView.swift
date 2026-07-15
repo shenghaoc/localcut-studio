@@ -4,12 +4,14 @@ import AppKit
 import UniformTypeIdentifiers
 import LocalCutCore
 
-/// Keeps cold-start App Intents and the visible window on the same editor model,
-/// even if SwiftUI recreates the `App` value during the process lifetime.
+/// Keeps App Intent routing stable while SwiftUI recreates the `App` value.
+/// The current custom-controller shell registers its editor model when the
+/// window becomes key; the router never owns that process-wide model directly.
 @MainActor
 private enum LocalCutStudioAppState {
     static let model = EditorModel()
-    static let appIntentRouter = LocalCutAppIntentRouter(model: model)
+    static let documentRegistry = ActiveDocumentRegistry()
+    static let appIntentRouter = LocalCutAppIntentRouter(documentRegistry: documentRegistry)
 }
 
 @main
@@ -47,6 +49,19 @@ struct LocalCutStudioApp: App {
 #endif
         }
         .defaultSize(width: 1360, height: 860)
+        .defaultWindowPlacement { content, context in
+            WindowPlacement(size: EditorWindowPlacement.fittedSize(
+                idealSize: content.sizeThatFits(.unspecified),
+                visibleRect: context.defaultDisplay.visibleRect
+            ))
+        }
+        .windowIdealPlacement { content, context in
+            WindowPlacement(size: EditorWindowPlacement.fittedSize(
+                idealSize: content.sizeThatFits(.unspecified),
+                visibleRect: context.defaultDisplay.visibleRect
+            ))
+        }
+        .restorationBehavior(.automatic)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
@@ -58,7 +73,7 @@ struct LocalCutStudioApp: App {
 
     @MainActor
     private var editorView: some View {
-        EditorView(model: model)
+        EditorView(model: model, documentRegistry: LocalCutStudioAppState.documentRegistry)
             .frame(minWidth: 1000, minHeight: 640)
     }
 }
@@ -98,13 +113,18 @@ struct RecorderCommands: Commands {
 /// creating a duplicate "View" entry.
 struct ViewCommands: Commands {
     @Bindable var model: EditorModel
+    @FocusedBinding(\.localCutInspectorVisibility) private var inspectorVisible
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
-            Toggle(isOn: $model.inspectorVisible) {
+            Toggle(isOn: Binding(
+                get: { inspectorVisible ?? true },
+                set: { inspectorVisible = $0 }
+            )) {
                 Text("Show Inspector")
             }
             .keyboardShortcut("i", modifiers: [.command, .option])
+            .disabled(inspectorVisible == nil)
 
             Toggle(isOn: $model.isDiagnosticsVisible) {
                 Text("Show Diagnostics")
@@ -114,9 +134,8 @@ struct ViewCommands: Commands {
             Divider()
 
             // Transport in the menu bar so playback has a discoverable home.
-            // The Space shortcut for play/pause is handled by `EditorKeyHandler`
-            // (a window-scoped NSEvent monitor in TimelineView.swift) — a bare
-            // `.space` menu key-equivalent is global in AppKit and would swallow
+            // The focused timeline handles Space with SwiftUI `onKeyPress`.
+            // A bare menu key equivalent would be global in AppKit and swallow
             // spaces typed into text fields (e.g. the marker-rename popover).
             Button(model.isPlaying ? "Pause" : "Play") { model.togglePlayPause() }
                 .disabled(model.totalDuration <= 0)
@@ -130,6 +149,7 @@ struct ViewCommands: Commands {
 /// File and Edit menu items backed by the editor's custom document controller.
 struct DocumentCommands: Commands {
     let model: EditorModel
+    @FocusedValue(\.localCutInterchangeExport) private var interchangeExport
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -172,10 +192,10 @@ struct DocumentCommands: Commands {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(model.totalDuration <= 0)
             Divider()
-            Button("Export Timeline (.otio)…") { model.requestExportOtio() }
-                .disabled(model.totalDuration <= 0)
-            Button("Export EDL (.edl)…") { model.requestExportEdl() }
-                .disabled(model.totalDuration <= 0)
+            Button("Export Timeline (.otio)…") { interchangeExport?(.otio) }
+                .disabled(model.totalDuration <= 0 || interchangeExport == nil)
+            Button("Export EDL (.edl)…") { interchangeExport?(.edl) }
+                .disabled(model.totalDuration <= 0 || interchangeExport == nil)
         }
         CommandGroup(replacing: .undoRedo) {
             Button(model.undoTitle) { model.undo() }
@@ -216,8 +236,8 @@ struct DocumentCommands: Commands {
             }
             .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             Divider()
-            // No key equivalent here: the timeline's EditorKeyHandler already owns
-            // the bare "m" key and correctly yields it to focused text fields. A
+            // No key equivalent here: the focused timeline owns the bare "m" key
+            // through SwiftUI `onKeyPress`, which yields it to text fields. A
             // bare-letter menu shortcut would instead hijack "m" while the user is
             // typing (rename popover, captions). The menu item stays for discovery.
             Button("Add Marker") { model.addMarkerAtPlayhead() }
@@ -243,6 +263,15 @@ struct DocumentCommands: Commands {
 /// browser editor's three-pane workspace.
 struct EditorView: View {
     @Bindable var model: EditorModel
+    let documentRegistry: ActiveDocumentRegistry
+
+    /// Presentation state belongs to a window, not to the project document or
+    /// its runtime media engine. Scene storage scopes this value to the window
+    /// and lets macOS restore it with the rest of the scene.
+    @SceneStorage("editor.inspectorVisible") private var inspectorVisible = true
+    @State private var pendingInterchangeExport: InterchangeExportRequest?
+    @State private var isInterchangeExporterPresented = false
+    @State private var isEdlTrackPickerPresented = false
 
     var body: some View {
         VSplitView {
@@ -254,14 +283,14 @@ struct EditorView: View {
                     .frame(minWidth: 380)
                     .layoutPriority(1)
 
-                if model.inspectorVisible {
+                if inspectorVisible {
                     EditorSideRailView(model: model) {
-                        model.inspectorVisible = false
+                        inspectorVisible = false
                     }
                     .frame(minWidth: 300, idealWidth: 340)
                 } else {
                     CollapsedSideRailView {
-                        model.inspectorVisible = true
+                        inspectorVisible = true
                     }
                     .frame(width: 44)
                 }
@@ -269,7 +298,7 @@ struct EditorView: View {
             .frame(minHeight: 320)
             .background(SplitViewAutosaveConfigurator(autosaveName: "editor.workspace.columns",
                                                        isVertical: true,
-                                                       isEnabled: model.inspectorVisible))
+                                                       isEnabled: inspectorVisible))
 
             TimelineView(model: model)
                 .frame(minHeight: 200, idealHeight: 260)
@@ -279,10 +308,41 @@ struct EditorView: View {
         .toolbar { toolbarContent }
         .navigationTitle(model.project.name)
         .safeAreaInset(edge: .bottom) { statusBar }
-        .onAppear { [weak model] in
+        .onAppear { [model] in
+            documentRegistry.activate(model)
             Task { [weak model] in await model?.scanRecoveredRecordings() }
         }
-        .onDisappear { model.teardownAudioMetering() }
+        .onDisappear {
+            documentRegistry.unregister(model)
+            model.teardownAudioMetering()
+        }
+        .focusedSceneValue(\.localCutInspectorVisibility, $inspectorVisible)
+        .focusedSceneValue(\.localCutInterchangeExport, InterchangeExportAction { kind in
+            beginInterchangeExport(kind)
+        })
+        .fileExporter(
+            isPresented: $isInterchangeExporterPresented,
+            document: pendingInterchangeExport?.document,
+            contentType: pendingInterchangeExport?.contentType ?? .plainText,
+            defaultFilename: pendingInterchangeExport?.defaultFilename
+        ) { result in
+            finishInterchangeExport(result)
+        }
+        .confirmationDialog(
+            "Choose Video Track for EDL Export",
+            isPresented: $isEdlTrackPickerPresented,
+            titleVisibility: .visible
+        ) {
+            ForEach(model.project.videoTracks.indices, id: \.self) { index in
+                let track = model.project.videoTracks[index]
+                Button("\(track.name) (V\(index + 1))") {
+                    prepareEdlExport(trackIndex: index)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("CMX3600 EDL exports a single video track.")
+        }
         .sheet(isPresented: $model.isRecorderPresented) {
             RecorderSetupView(model: model)
         }
@@ -292,7 +352,9 @@ struct EditorView: View {
                     .transition(.opacity)
             }
         }
-        .background(WindowConfigurator(model: model))
+        .background(WindowConfigurator(model: model) {
+            documentRegistry.activate(model)
+        })
         .overlay(alignment: .topTrailing) {
             if model.isDiagnosticsVisible {
                 DiagnosticsView(agent: model.diagnostics)
@@ -303,6 +365,42 @@ struct EditorView: View {
                     .padding(.trailing, 16)
                     .transition(.opacity)
             }
+        }
+    }
+
+    private func beginInterchangeExport(_ kind: InterchangeExportKind) {
+        switch kind {
+        case .otio:
+            guard let request = model.makeOtioExportRequest() else { return }
+            pendingInterchangeExport = request
+            isInterchangeExporterPresented = true
+        case .edl:
+            guard !model.project.videoTracks.isEmpty else {
+                model.statusMessage = "No video tracks to export."
+                return
+            }
+            if model.project.videoTracks.count == 1 {
+                prepareEdlExport(trackIndex: 0)
+            } else {
+                isEdlTrackPickerPresented = true
+            }
+        }
+    }
+
+    private func prepareEdlExport(trackIndex: Int) {
+        guard let request = model.makeEdlExportRequest(trackIndex: trackIndex) else { return }
+        pendingInterchangeExport = request
+        isInterchangeExporterPresented = true
+    }
+
+    private func finishInterchangeExport(_ result: Result<URL, Error>) {
+        guard let request = pendingInterchangeExport else { return }
+        defer { pendingInterchangeExport = nil }
+        switch result {
+        case .success(let url):
+            model.statusMessage = request.completedMessage(at: url)
+        case .failure(let error):
+            model.statusMessage = "Interchange export failed: \(error.localizedDescription)"
         }
     }
 
@@ -390,12 +488,12 @@ struct EditorView: View {
             }
 
             Button {
-                model.inspectorVisible.toggle()
+                inspectorVisible.toggle()
             } label: {
-                Label(model.inspectorVisible ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.right")
+                Label(inspectorVisible ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.right")
             }
-            .help(model.inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
-            .accessibilityLabel(model.inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
+            .help(inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
+            .accessibilityLabel(inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
 
             Spacer()
 
@@ -537,18 +635,18 @@ private struct CollapsedSideRailView: View {
     }
 }
 
-/// Bridges the SwiftUI window to AppKit so the title-bar edited dot, the
-/// represented document URL, and the save-on-close prompt reflect the model.
-/// The previous (SwiftUI) window delegate is preserved and forwarded to.
-/// Bridges the SwiftUI editor view to its hosting `NSWindow` so the title-bar
-/// edited dot, the represented document URL, and the save-on-close prompt all
-/// reflect the model. `internal` (not `private`) so tests can reach the
-/// `Coordinator.looksLikeSwiftUIDefaultSize` predicate that gates the first-
-/// launch frame override.
+/// The narrow AppKit bridge that remains while the macOS 26 custom document
+/// controller owns asynchronous package saves. It mirrors the edited state,
+/// protects close during recording or an async save, and reports key-window
+/// activation to focused App Intent routing. Scene APIs own placement and
+/// restoration; no frame manipulation lives here.
 struct WindowConfigurator: NSViewRepresentable {
     let model: EditorModel
+    let onWindowActivated: @MainActor () -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(model: model, onWindowActivated: onWindowActivated)
+    }
 
     func makeNSView(context: Context) -> NSView {
         let view = WindowTrackingView()
@@ -562,6 +660,7 @@ struct WindowConfigurator: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         let coordinator = context.coordinator
         coordinator.model = model
+        coordinator.onWindowActivated = onWindowActivated
         coordinator.attach(to: nsView.window)
     }
 
@@ -577,7 +676,12 @@ struct WindowConfigurator: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSWindowDelegate {
         var model: EditorModel
+        var onWindowActivated: @MainActor () -> Void
         weak var window: NSWindow?
+        /// Set only after the model's asynchronous save succeeds. The next
+        /// programmatic close is allowed through without asking SwiftUI's
+        /// original delegate to re-evaluate the already-confirmed close.
+        private var permitsDeferredClose = false
         /// Previous window delegate, restored on detach.
         ///
         /// **Isolation invariant:** Set/read on `@MainActor` in `attach(to:)`;
@@ -587,8 +691,9 @@ struct WindowConfigurator: NSViewRepresentable {
         /// message forwarding.
         nonisolated(unsafe) weak var previousDelegate: NSWindowDelegate?
 
-        init(model: EditorModel) {
+        init(model: EditorModel, onWindowActivated: @escaping @MainActor () -> Void) {
             self.model = model
+            self.onWindowActivated = onWindowActivated
         }
 
         func attach(to window: NSWindow?) {
@@ -616,59 +721,9 @@ struct WindowConfigurator: NSViewRepresentable {
                     previousDelegate = window.delegate
                     window.delegate = self
                 }
-                Self.applyInitialFrameIfNeeded(window)
             }
+            if window.isKeyWindow { onWindowActivated() }
             sync()
-        }
-
-        /// Size the editor to a comfortable canvas the first time it ever opens,
-        /// centred on the active screen. Guarded by a one-shot default so later
-        /// launches keep whatever size the user left it at.
-        private static var didEnqueueInitialFrame = false
-
-        private static func applyInitialFrameIfNeeded(_ window: NSWindow) {
-            let key = "editor.didSetInitialWindowFrame"
-            // `attach(to:)` can fire several times within one run-loop tick during
-            // window setup; the in-memory flag stops us enqueuing the deferred
-            // block more than once before the UserDefaults one-shot is written.
-            guard !didEnqueueInitialFrame, !UserDefaults.standard.bool(forKey: key) else { return }
-            didEnqueueInitialFrame = true
-            // Defer past SwiftUI's own first-layout sizing pass, which otherwise
-            // clobbers a frame set synchronously during attach. Only record the
-            // one-shot once the frame actually lands.
-            DispatchQueue.main.async {
-                // Upgrade safety (Codex P3 on d8c7ee2): if the window already
-                // has a non-default frame, AppKit/SwiftUI has restored a saved
-                // layout from a previous app version that pre-dates this
-                // one-shot marker. Honor that frame and just record the marker
-                // so future launches skip this branch entirely. Predicate is
-                // pulled into a pure helper so the gating is unit-testable.
-                let defaultSize = CGSize(width: 1360, height: 860)
-                guard looksLikeSwiftUIDefaultSize(window.frame.size, defaultSize: defaultSize) else {
-                    UserDefaults.standard.set(true, forKey: key)
-                    return
-                }
-                guard let screen = window.screen ?? NSScreen.main else { return }
-                let visible = screen.visibleFrame
-                let width = min(defaultSize.width, visible.width - 80)
-                let height = min(defaultSize.height, visible.height - 80)
-                let frame = NSRect(x: visible.midX - width / 2,
-                                   y: visible.midY - height / 2,
-                                   width: width, height: height)
-                window.setFrame(frame, display: true, animate: false)
-                UserDefaults.standard.set(true, forKey: key)
-            }
-        }
-
-        /// Pure helper that decides whether the window's current size matches
-        /// the SwiftUI `defaultSize` (within a 1 pt tolerance) — i.e. SwiftUI
-        /// has not yet been overridden by a restored frame. `nonisolated` so
-        /// tests can call it without main-actor ceremony, and so the
-        /// `applyInitialFrameIfNeeded` deferred block reaches it from the
-        /// `DispatchQueue.main.async` closure (audit P3).
-        nonisolated static func looksLikeSwiftUIDefaultSize(_ current: CGSize, defaultSize: CGSize) -> Bool {
-            abs(current.width - defaultSize.width) < 1
-                && abs(current.height - defaultSize.height) < 1
         }
 
         /// Mirrors the model's edited/URL state onto the window chrome.
@@ -678,12 +733,39 @@ struct WindowConfigurator: NSViewRepresentable {
         }
 
         func windowShouldClose(_ sender: NSWindow) -> Bool {
-            guard model.confirmClose(window: sender) else { return false }
-            // Respect SwiftUI's own close decision if it has one.
-            if let previousDelegate, previousDelegate.responds(to: #selector(windowShouldClose(_:))) {
-                return previousDelegate.windowShouldClose?(sender) ?? true
+            if permitsDeferredClose {
+                permitsDeferredClose = false
+                return true
             }
+            guard model.confirmClose(
+                window: sender,
+                // Retain this bridge until the asynchronous save completes.
+                // SwiftUI may replace the representable while the alert's
+                // close attempt is pending; a weak bridge would then drop the
+                // only path that finishes the already-approved close.
+                onSaveSucceeded: { [self, sender] in
+                    guard self.window === sender else { return }
+                    self.permitsDeferredClose = true
+                    // `performClose(_:)` is a user-action simulation. In
+                    // particular, SwiftUI's scene machinery can defer it
+                    // after an asynchronous alert callback, leaving a clean
+                    // saved document stranded in its window. The user has
+                    // already made the close decision and the save succeeded,
+                    // so close the window directly. Keep the one-shot permit
+                    // for AppKit configurations that still ask the delegate
+                    // while closing programmatically.
+                    sender.close()
+                }
+            ) else { return false }
+            // This bridge owns the close decision. A prior SwiftUI delegate
+            // can veto an already-clean or already-confirmed close, which
+            // would strand the document window after a successful save.
             return true
+        }
+
+        func windowDidBecomeKey(_ notification: Notification) {
+            onWindowActivated()
+            previousDelegate?.windowDidBecomeKey?(notification)
         }
 
         // Forward any delegate calls we don't implement to SwiftUI's delegate.
@@ -742,6 +824,6 @@ func formatElapsed(_ seconds: Double) -> String {
 }
 
 #Preview("Editor") {
-    EditorView(model: EditorModel())
+    EditorView(model: EditorModel(), documentRegistry: ActiveDocumentRegistry())
         .frame(width: 1180, height: 760)
 }

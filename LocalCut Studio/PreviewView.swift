@@ -45,8 +45,8 @@ private struct TransportControls: View {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .frame(width: 20)
             }
-            // Spacebar play/pause is handled by the window-level EditorKeyHandler
-            // (a local NSEvent monitor that defers to text-input first responders),
+            // Spacebar play/pause is handled by the focused timeline's SwiftUI
+            // `onKeyPress` handler, which gives text inputs first refusal,
             // not a `.keyboardShortcut` here: a key-equivalent — on a menu Command
             // *or* a view button — fires before a focused text field gets the
             // event, so it would swallow spaces typed into the marker-rename
