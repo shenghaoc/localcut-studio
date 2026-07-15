@@ -48,10 +48,6 @@ private func vectorscopePoint(_ point: VectorPoint, in plot: CGRect) -> CGPoint 
 struct ScopesView: View {
     let sampler: ScopeSampler
     @State private var kind: ScopeKind = .waveform
-    @State private var latest: ScopeSample?
-    @State private var displayedRevision: Int = -1
-
-    private static let refreshNanoseconds = UInt64(ScopeSampler.minIntervalSeconds * 1_000_000_000)
 
     init(sampler: ScopeSampler = .shared) {
         self.sampler = sampler
@@ -74,35 +70,54 @@ struct ScopesView: View {
 
             ZStack {
                 // Static background grid and text labels. Extracted into an Equatable
-                // child view so it only redraws when `kind` changes, not on every
-                // 30fps `latest` update from the parent body re-evaluation.
+                // child view so it only redraws when `kind` changes.
                 ScopeBackgroundView(kind: kind)
                     .equatable()
 
-                // Live trace data and empty state placeholder. This Canvas captures `latest`
-                // and redraws at 30 fps.
-                Canvas { context, size in
-                    switch kind {
-                    case .waveform:
-                        drawWaveformTrace(into: context, size: size, sample: latest)
-                    case .vectorscope:
-                        drawVectorscopeTrace(into: context, size: size, sample: latest)
-                    }
-                }
+                ScopeTraceView(kind: kind, sampler: sampler)
             }
             .background(Color.black)
             .cornerRadius(4)
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
-            .accessibilityLabel(kind == .waveform ? "Waveform scope" : "Vectorscope")
-            .accessibilityValue(latest == nil ? "No frames yet" : "Live")
         }
         .frame(minWidth: 200, idealWidth: 240, minHeight: 160, idealHeight: 220)
         // Scopes are a content readout, not chrome — sit them on the recessed
         // content surface (matching the timeline lanes) rather than a sidebar
         // material that would read as window chrome.
         .background(Color.lcLane)
-        .task { await refreshSamplesUntilCancelled() }
+    }
+
+}
+
+/// Extracted leaf view for the live trace. Isolating `@State latest` here prevents
+/// the 30fps refresh from forcing the entire parent `ScopesView` (and its Picker)
+/// to re-evaluate on every frame.
+private struct ScopeTraceView: View {
+    let kind: ScopeKind
+    let sampler: ScopeSampler
+
+    @State private var latest: ScopeSample?
+    @State private var displayedRevision: Int = -1
+
+    private static let refreshNanoseconds = UInt64(ScopeSampler.minIntervalSeconds * 1_000_000_000)
+
+    var body: some View {
+        Canvas { context, size in
+            switch kind {
+            case .waveform:
+                drawWaveformTrace(into: context, size: size, sample: latest)
+            case .vectorscope:
+                drawVectorscopeTrace(into: context, size: size, sample: latest)
+            }
+        }
+        .accessibilityLabel(kind == .waveform ? "Waveform scope" : "Vectorscope")
+        .accessibilityValue(latest == nil ? "No frames yet" : "Live")
+        .task(id: ObjectIdentifier(sampler)) {
+            latest = nil
+            displayedRevision = -1
+            await refreshSamplesUntilCancelled()
+        }
     }
 
     @MainActor
