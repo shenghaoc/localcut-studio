@@ -35,6 +35,8 @@ struct ClipTransformKeyframeEditor: View {
                           systemImage: model.selectedClipTransformKeyframeAtPlayhead == nil ? "plus.diamond.fill" : "diamond.fill")
                 }
                 .disabled(model.selectedClipTransformLocalPlayheadTime == nil)
+                .help(model.selectedClipTransformKeyframeAtPlayhead == nil ? "Add clip transform keyframe" : "Update clip transform keyframe")
+                .accessibilityLabel(model.selectedClipTransformKeyframeAtPlayhead == nil ? "Add clip transform keyframe" : "Update clip transform keyframe")
 
                 Button(role: .destructive) {
                     model.removeSelectedClipTransformKeyframe()

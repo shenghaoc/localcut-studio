@@ -244,6 +244,8 @@ struct CaptionsInspectorView: View {
                           systemImage: "diamond.fill")
                 }
                 .disabled(localTime == nil)
+                .help(model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id) ? "Update caption style keyframe" : "Add caption style keyframe")
+                .accessibilityLabel(model.hasCaptionStyleKeyframeAtPlayhead(line.id, in: track.id) ? "Update caption style keyframe" : "Add caption style keyframe")
 
                 Button {
                     model.removeCaptionStyleKeyframeAtPlayhead(line.id, in: track.id)
