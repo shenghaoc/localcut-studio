@@ -123,6 +123,7 @@ struct RecorderCommands: Commands {
 struct ViewCommands: Commands {
     @Bindable var model: EditorModel
     @FocusedBinding(\.localCutInspectorVisibility) private var inspectorVisible
+    @FocusedValue(\.localCutTimelineDuration) private var timelineDuration
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
@@ -147,10 +148,10 @@ struct ViewCommands: Commands {
             // A bare menu key equivalent would be global in AppKit and swallow
             // spaces typed into text fields (e.g. the marker-rename popover).
             Button(model.isPlaying ? "Pause" : "Play") { model.togglePlayPause() }
-                .disabled(model.totalDuration <= 0)
+                .disabled((timelineDuration ?? 0) <= 0)
             Button("Go to Start") { model.seek(toSeconds: 0) }
                 .keyboardShortcut(.upArrow, modifiers: .command)
-                .disabled(model.totalDuration <= 0)
+                .disabled((timelineDuration ?? 0) <= 0)
         }
     }
 }
@@ -159,6 +160,7 @@ struct ViewCommands: Commands {
 struct DocumentCommands: Commands {
     let model: EditorModel
     @FocusedValue(\.localCutInterchangeExport) private var interchangeExport
+    @FocusedValue(\.localCutTimelineDuration) private var timelineDuration
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -199,12 +201,12 @@ struct DocumentCommands: Commands {
             // and a standard shortcut.
             Button("Export…") { model.requestExport() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(model.totalDuration <= 0)
+                .disabled((timelineDuration ?? 0) <= 0)
             Divider()
             Button("Export Timeline (.otio)…") { interchangeExport?(.otio) }
-                .disabled(model.totalDuration <= 0 || interchangeExport == nil)
+                .disabled((timelineDuration ?? 0) <= 0 || interchangeExport == nil)
             Button("Export EDL (.edl)…") { interchangeExport?(.edl) }
-                .disabled(model.totalDuration <= 0 || interchangeExport == nil)
+                .disabled((timelineDuration ?? 0) <= 0 || interchangeExport == nil)
         }
         CommandGroup(replacing: .undoRedo) {
             Button(model.undoTitle) { model.undo() }
@@ -329,6 +331,7 @@ struct EditorView: View {
         .focusedSceneValue(\.localCutInterchangeExport, InterchangeExportAction { kind in
             beginInterchangeExport(kind)
         })
+        .focusedSceneValue(\.localCutTimelineDuration, model.totalDuration)
         .fileExporter(
             isPresented: $isInterchangeExporterPresented,
             document: pendingInterchangeExport?.document,

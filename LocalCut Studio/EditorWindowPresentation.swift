@@ -13,6 +13,10 @@ private struct InterchangeExportFocusedKey: FocusedValueKey {
     typealias Value = InterchangeExportAction
 }
 
+private struct TimelineDurationFocusedKey: FocusedValueKey {
+    typealias Value = Double
+}
+
 extension FocusedValues {
     var localCutInspectorVisibility: Binding<Bool>? {
         get { self[InspectorVisibilityFocusedKey.self] }
@@ -22,6 +26,11 @@ extension FocusedValues {
     var localCutInterchangeExport: InterchangeExportAction? {
         get { self[InterchangeExportFocusedKey.self] }
         set { self[InterchangeExportFocusedKey.self] = newValue }
+    }
+
+    var localCutTimelineDuration: Double? {
+        get { self[TimelineDurationFocusedKey.self] }
+        set { self[TimelineDurationFocusedKey.self] = newValue }
     }
 }
 
