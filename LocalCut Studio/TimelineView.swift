@@ -633,7 +633,7 @@ struct TimelineView: View {
         let nameLabel: Text = clipName.map(Text.init) ?? Text("Clip")
         // Announce the rippled (effective) start so VoiceOver matches the drawn
         // block position when an upstream transition has shortened the timeline.
-        let valueLabel = Text("Starts \(TimeFormatting.timecode(effectiveStart.seconds)), \(TimeFormatting.timecode(clip.outputDuration.seconds)) long")
+        let valueLabel = Text("Starts \(TimeFormatting.timecode(effectiveStart.seconds)), \(TimeFormatting.timecode(clip.outputDuration.seconds)) long").monospacedDigit()
 
         return ZStack {
             RoundedRectangle(cornerRadius: 6)

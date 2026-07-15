@@ -1155,6 +1155,7 @@ struct InspectorView: View {
             HStack {
                 Text(localTime.map { "At \(TimeFormatting.timecode($0.seconds))" } ?? "Move playhead over overlay")
                     .font(.caption)
+                    .monospacedDigit()
                     .foregroundStyle(localTime == nil ? .orange : .secondary)
                 Spacer()
                 if overlay.isAnimated {
@@ -1227,7 +1228,7 @@ struct InspectorView: View {
             if model.project.overlays.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("No overlays. Add an animated image, alpha video, or Lottie overlay to the project.")
-                        .font(.callout)
+                        .font(.body)
                         .foregroundStyle(.secondary)
                     addOverlayMenu
                         .buttonStyle(.borderedProminent)

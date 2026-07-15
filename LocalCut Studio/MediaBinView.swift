@@ -169,7 +169,7 @@ private struct RecoveredRecordingRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Recovered recording")
-                    .font(.subheadline)
+                    .font(.body)
                 Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -255,7 +255,7 @@ private struct MediaRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name)
                     .lineLimit(1)
-                    .font(.subheadline)
+                    .font(.body)
                 Text(TimeFormatting.timecode(item.durationSeconds))
                     .font(.caption)
                     .monospacedDigit()

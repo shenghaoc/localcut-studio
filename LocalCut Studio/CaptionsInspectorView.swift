@@ -20,7 +20,7 @@ struct CaptionsInspectorView: View {
             if model.project.captionTracks.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("No caption tracks. Import an SRT/VTT or add an empty track to begin.")
-                        .font(.callout)
+                        .font(.body)
                         .foregroundStyle(.secondary)
                     HStack {
                         Button("Import SRT/VTT…") { showSRTImporter = true }
@@ -116,11 +116,11 @@ struct CaptionsInspectorView: View {
             }
         } label: {
             HStack {
-                Text(track.name).bold()
+                Text(track.name).fontWeight(.semibold)
                 Spacer()
                 Text("\(track.lines.count) line(s)")
                     .foregroundStyle(.secondary)
-                    .font(.callout)
+                    .font(.caption)
             }
         }
     }
@@ -168,6 +168,7 @@ struct CaptionsInspectorView: View {
             HStack {
                 Text(localTime.map { "At \(TimeFormatting.timecode($0.seconds))" } ?? "Move playhead over this line")
                     .font(.caption)
+                    .monospacedDigit()
                     .foregroundStyle(localTime == nil ? .orange : .secondary)
                 Spacer()
                 Text("\(keyframeCount) keyframe(s)")
