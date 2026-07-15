@@ -51,8 +51,7 @@ final class ActiveDocumentRegistry {
     /// unregistered model is intentionally equivalent to registration so the
     /// view lifecycle stays resilient to SwiftUI reconstruction.
     func activate(_ model: EditorModel) {
-        let token = register(model)
-        activate(token)
+        register(model)
     }
 
     /// Removes a closed document from routing. A queued intent that captured its

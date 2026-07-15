@@ -462,7 +462,8 @@ extension EditorModel {
         case .alertSecondButtonReturn:
             repairChapterShortSpans(strategy: .drop)
         default:
-            statusMessage = "Export cancelled. Fix the chapter marker issues above, then try again."
+            statusMessage = String(
+                localized: "Export cancelled. Fix the chapter marker issues above, then try again.")
             return false
         }
 
@@ -481,7 +482,8 @@ extension EditorModel {
         alert.informativeText = chapterIssueSummary(issues)
         alert.addButton(withTitle: "OK")
         alert.runModal()
-        statusMessage = "\(issues.count) chapter marker issue(s) to fix before export."
+        statusMessage = String(
+            localized: "\(issues.count) chapter marker issue(s) to fix before export.")
     }
 
     private func chapterIssueSummary(_ issues: [ChapterExportIssue]) -> String {
@@ -636,7 +638,7 @@ extension EditorModel {
 
     private func blockDocumentCommandDuringCloseSave() -> Bool {
         guard closeSaveInProgress else { return false }
-        statusMessage = "Finish saving before closing…"
+        statusMessage = String(localized: "Finish saving before closing…")
         return true
     }
 
