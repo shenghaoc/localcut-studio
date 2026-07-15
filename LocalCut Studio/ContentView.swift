@@ -376,7 +376,7 @@ struct EditorView: View {
             isInterchangeExporterPresented = true
         case .edl:
             guard !model.project.videoTracks.isEmpty else {
-                model.statusMessage = "No video tracks to export."
+                model.statusMessage = String(localized: "No video tracks to export.")
                 return
             }
             if model.project.videoTracks.count == 1 {
@@ -400,7 +400,7 @@ struct EditorView: View {
         case .success(let url):
             model.statusMessage = request.completedMessage(at: url)
         case .failure(let error):
-            model.statusMessage = "Interchange export failed: \(error.localizedDescription)"
+            model.statusMessage = String(localized: "Interchange export failed: \(error.localizedDescription)")
         }
     }
 

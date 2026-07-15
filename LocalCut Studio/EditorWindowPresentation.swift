@@ -83,9 +83,9 @@ struct InterchangeExportRequest: Identifiable {
 
     func completedMessage(at url: URL) -> String {
         if let warningSummary {
-            "Exported \(url.lastPathComponent) — \(warningSummary)"
+            String(localized: "Exported \(url.lastPathComponent) — \(warningSummary)")
         } else {
-            "Exported \(url.lastPathComponent)."
+            String(localized: "Exported \(url.lastPathComponent).")
         }
     }
 }

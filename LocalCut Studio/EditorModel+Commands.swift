@@ -104,9 +104,9 @@ private final class ProjectSavePanelTypeDelegate: NSObject, NSOpenSavePanelDeleg
     func panel(_ sender: Any, displayNameFor type: UTType) -> String? {
         switch type {
         case .lcStudioProjectBundle:
-            "LocalCut Bundle (.lcbundle)"
+            String(localized: "LocalCut Bundle (.lcbundle)")
         case .lcStudioProject:
-            "LocalCut Project (.lcstudio)"
+            String(localized: "LocalCut Project (.lcstudio)")
         default:
             nil
         }
@@ -123,7 +123,7 @@ private final class ProjectOpenPanelValidator: NSObject, NSOpenSavePanelDelegate
             throw NSError(
                 domain: "LocalCutStudio.ProjectOpen",
                 code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Choose a LocalCut project (.lcstudio or .lcbundle)."]
+                userInfo: [NSLocalizedDescriptionKey: String(localized: "Choose a LocalCut project (.lcstudio or .lcbundle).")]
             )
         }
     }
@@ -244,7 +244,7 @@ extension EditorModel {
         let (response, url) = await presentPanel()
         guard response == .OK, let url else { return .panelCancelled }
         guard ProjectOpenPanelConfiguration.isSupportedProjectURL(url) else {
-            statusMessage = "Choose a LocalCut project (.lcstudio or .lcbundle)."
+            statusMessage = String(localized: "Choose a LocalCut project (.lcstudio or .lcbundle).")
             return .failed
         }
         await openProject(url)
@@ -393,7 +393,7 @@ extension EditorModel {
             })
         let (json, warnings) = serializeTimelineToOtio(document, options: options)
         if warnings.contains(where: { $0.kind == .serializationFailure }) {
-            statusMessage = "OTIO export failed: serialization error."
+            statusMessage = String(localized: "OTIO export failed: serialization error.")
             return nil
         }
         return InterchangeExportRequest(
@@ -410,7 +410,7 @@ extension EditorModel {
     func makeEdlExportRequest(trackIndex: Int) -> InterchangeExportRequest? {
         guard totalDuration > 0 else { return nil }
         guard project.videoTracks.indices.contains(trackIndex) else {
-            statusMessage = "No video tracks to export."
+            statusMessage = String(localized: "No video tracks to export.")
             return nil
         }
         let document = documentController.makeDocumentForSave(forBundle: false, model: self)
@@ -419,7 +419,7 @@ extension EditorModel {
             videoTrackIndex: trackIndex)
         let (edl, warnings) = serializeTimelineToEdl(document, options: options)
         if warnings.contains(where: { $0.kind == .serializationFailure }) {
-            statusMessage = "EDL export failed: serialization error."
+            statusMessage = String(localized: "EDL export failed: serialization error.")
             return nil
         }
         return InterchangeExportRequest(
@@ -612,7 +612,7 @@ extension EditorModel {
         case .alertFirstButtonReturn:        // Save
             guard let url = documentURL ?? runSavePanel() else { return false }
             closeSaveInProgress = true
-            statusMessage = "Saving \(url.lastPathComponent) before closing…"
+            statusMessage = String(localized: "Saving \(url.lastPathComponent) before closing…")
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if self.documentURL == nil {
