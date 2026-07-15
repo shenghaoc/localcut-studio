@@ -11,11 +11,8 @@
 ## R2 — Dependency wiring
 
 - **R2.1** App Intents resolve through `AppDependencyManager`, not a view-lifecycle callback.
-- **R2.2** The router resolves the focused or most recently active registered
-  editor through `ActiveDocumentRegistry`; it does not retain an `EditorModel`.
-- **R2.3** Before any editor scene registers (including cold launch), intent
-  routing fails with a clear typed no-active-document error instead of depending
-  on a process-wide model.
+- **R2.2** The router and visible editor share the same app-scoped `EditorModel` instance for the process lifetime.
+- **R2.3** Intent routing must not depend on whether a window has already appeared.
 
 ## R3 — Routing behaviour
 

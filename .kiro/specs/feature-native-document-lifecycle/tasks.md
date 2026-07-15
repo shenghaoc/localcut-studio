@@ -5,54 +5,56 @@
 
 ## Investigation and decision
 
-- [x] **T1.1** Audit `LocalCutStudioApp`, `DocumentCommands`,
-  `WindowConfigurator`, `DocumentController`, `EditorModel`, command and
-  persistence extensions, App Intents, timeline, split-view bridge, project
-  model/bundle, and their relevant tests.
-- [x] **T1.2** Compare the original project-persistence T2.1 custom-controller
-  decision with the current macOS 26 SDK and actual persistence behaviour.
-- [x] **T1.3** Add a compile-tested `ReferenceFileDocument` + `DocumentGroup`
-  adapter spike in `NativeDocumentLifecycleSpikeTests.swift` that covers flat
-  and package wrapper forms.
-- [x] **T1.4** Record the explicit macOS 26 **no-go** for a production
-  `DocumentGroup` migration, with the documented URL/async/FileWrapper reason.
+- [x] **T1.1** Audit app shell, document controller, commands, App Intents,
+  timeline, and related tests.
+- [x] **T1.2** Compare the original project-persistence custom-controller
+  decision with the macOS 26 SDK surface.
+- [x] **T1.3** Compile-tested `ReferenceFileDocument` + `DocumentGroup` probe in
+  `DocumentGroupCompatibilityTests.swift` (flat + package content types).
+- [x] **T1.4** Record the production **no-go** as an engineering trade-off:
+  retain the custom file-based controller rather than duplicate the package
+  pipeline for `FileWrapper` callbacks.
 
-## Active-document routing
+## File-based project classification
 
-- [x] **T2.1** Add `ActiveDocumentRegistry` with stable weak editor tokens,
-  activation ordering, unregister behaviour, and no silent retargeting.
-- [x] **T2.2** Route `LocalCutAppIntentRouter` through the registry; add typed
-  `noActiveDocument` and `targetDocumentClosed` errors.
-- [x] **T2.3** Register on scene appearance/key-window activation and unregister
-  on disappearance while retaining the existing serialized command paths.
-- [x] **T2.4** Test no-window, one-active-editor, two-editor capture, stable
-  tokens, close/no-retargeting, and cancellation/serialization behaviour.
+- [x] **T2.1** Add `ProjectStorageKind` + `ProjectLocationInspector` with full
+  metadata validation for bundles.
+- [x] **T2.2** Persist storage kind with `documentURL`; Save uses stored kind;
+  Save As uses destination representation.
+- [x] **T2.3** Replace loose `project.json` existence sniffs; update
+  `ProjectBundle.isBundle` to real validation.
+- [x] **T2.4** Tests for valid/invalid `.lcstudio` / `.lcbundle` / extensionless
+  bundle / empty JSON / malformed / unrelated directory / save routing.
+
+## App Intent readiness
+
+- [x] **T3.1** Replace multi-document-shaped registry with
+  `ActiveEditorRegistry` (window readiness only).
+- [x] **T3.2** Cold-launch wait for New / Diagnostics / Import / Export;
+  typed `editorUnavailable` and `targetWindowClosed`.
+- [x] **T3.3** Cancellation-safe readiness wait; serialized actions; no silent
+  retargeting.
+- [x] **T3.4** Tests for cold-launch, timeout, cancellation, serialization,
+  window-lost queue failure.
 
 ## SwiftUI shell cleanup
 
-- [x] **T3.1** Move inspector presentation state to `@SceneStorage` and expose
-  a focused View-menu binding.
-- [x] **T3.2** Replace the timeline raw `NSEvent` monitor with focused
-  `onKeyPress`, `onDeleteCommand`, and a tested pure policy mapper.
-- [x] **T3.3** Replace manual initial-frame logic with scene default/ideal
-  placement and automatic restoration; add placement-policy tests.
-- [x] **T3.4** Narrow `WindowConfigurator` to URL/dirty/close/key activation and
-  retain the split-divider bridge for its still-missing SwiftUI capability.
-- [x] **T3.5** Move OTIO/EDL destination presentation to `fileExporter` and EDL
-  track selection to `confirmationDialog`; retain `NSSavePanel` for queued
-  AVFoundation renders.
+- [x] **T4.1** Inspector `@SceneStorage` + focused View-menu binding.
+- [x] **T4.2** Timeline `onKeyPress` + pure policy; one-shot initial focus;
+  click reclaims focus without steal-on-reappear.
+- [x] **T4.3** Scene placement/restoration; narrow `WindowConfigurator`.
+- [x] **T4.4** OTIO/EDL via `fileExporter`; retain `NSSavePanel` for queued
+  video export.
+- [x] **T4.5** `TimelineFocusUITests` harness for focus transitions (policy
+  unit tests remain mapping-only).
 
 ## Documentation and verification
 
-- [x] **T4.1** Add this unnumbered feature spec and link it from `AGENTS.md`.
-- [x] **T4.2** Update durable architecture, persistence, and testing guidance to
-  describe selected ownership, routing, manual checks, and the no-go boundary.
-- [x] **V1** Focused lifecycle suites pass under `xcodebuild test`.
-- [x] **V2** Run the full macOS scheme test suite, core SwiftPM tests, and
-  diff hygiene.
-- [ ] **V3** Complete the remaining honest manual lifecycle checklist before
-  merge: destructive **Don't Save** (requires explicit confirmation at the
-  time of the action), real privacy-granted recording, queued render, external
-  bundle-change/relink, and Shortcuts app invocation. The automated test suite
-  covers the command guards and active-document routing; these are retained as
-  live integration checks.
+- [x] **T5.1** Feature spec is the detailed source of truth; historical specs
+  get short supersession notes only.
+- [x] **T5.2** Architecture/testing steering use “local filesystem URL”
+  language and accurate DocumentGroup trade-off wording.
+- [x] **V1** Focused suites pass under `xcodebuild test`.
+- [x] **V2** Full macOS scheme tests, core SwiftPM tests, `git diff --check`.
+- [ ] **V3** Manual checklist in `.kiro/steering/testing.md` — complete live
+  GUI checks or keep the PR draft with outstanding items listed honestly.

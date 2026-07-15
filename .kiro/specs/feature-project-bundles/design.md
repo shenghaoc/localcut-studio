@@ -1,10 +1,13 @@
 # Design: Project Bundles (P23 native equivalent)
 
+> **Ownership note:** Open/save panel validation and explicit `ProjectStorageKind` classification are owned by [`feature-native-document-lifecycle`](../feature-native-document-lifecycle/design.md). A directory is accepted only after full bundle metadata validation.
+
+
 > Status: **Implemented**. Infrastructure prerequisite for Phase 30 (already merged with the simpler single-file doc — the migration path lets existing Phase 30 projects upgrade), Phase 34 (beat tools), Phase 38 (look packs), and Phase 48 (OTIO export).
 
 ## Goal
 
-Move the project document from a single JSON file (`.lcstudio`) to a **directory package** (`.lcbundle`) that bundles the JSON together with copies (or hard links) of the media it references and a sidecar of file fingerprints. Copying or zipping the directory ships a self-contained edit. Full Finder package presentation and double-click launch need the separate Launch Services declaration documented below.
+Move the project document from a single JSON file (`.lcstudio`) to a **directory package** (`.lcbundle`) that bundles the JSON together with copies (or hard links) of the media it references and a sidecar of file fingerprints. The package looks and behaves as one item in Finder — double-clicking it opens the project; copying it copies the media; emailing the zip ships a self-contained edit.
 
 The single-file `.lcstudio` format keeps working and is the migration source. Existing Phase 30 projects open unchanged and can be **Converted to Bundle…** in one menu action, which writes a new `.lcbundle` alongside the original and leaves the original untouched.
 
@@ -33,25 +36,14 @@ MyProject.lcbundle/                       (directory, declared as a UTType confo
 ```swift
 extension UTType {
     static let lcStudioProjectBundle = UTType(
-        filenameExtension: "lcbundle",
+        exportedAs: "com.localcutstudio.project-bundle",
         conformingTo: .package)
 }
 ```
 
-The filename-backed dynamic type deliberately gives `NSSavePanel` the
-`.lcbundle` extension, avoiding a default name such as
-`MyProject.lcbundle.lcstudio` when both legacy and package formats are allowed.
-The existing `lcStudioProject` UTType is preserved for opening old documents.
+Conforming to `.package` is the key step: it makes Finder treat the directory as a single, double-clickable item, hides the inner files from casual browsing, and gates copy/move on the whole bundle rather than per-file. The existing `lcStudioProject` UTType is preserved for opening old documents; the open panel accepts both.
 
-Until the app ships a bundled `UTExportedTypeDeclarations` entry, Launch
-Services does not classify an existing `.lcbundle` directory as that dynamic
-type. `ProjectOpenPanelConfiguration` therefore leaves the in-app panel's type
-filter unrestricted and its retained validation delegate accepts only a real
-bundle directory (or a regular `.lcstudio` file); invalid selections stay in
-the panel with a clear error. This keeps both formats openable without
-pretending the runtime type is Finder registration.
-
-Full Finder double-click integration on a fresh install still needs an Info.plist `UTExportedTypeDeclarations` entry — Launch Services only learns about a custom package type from a bundled Info.plist. Wiring that into the Xcode `INFOPLIST_KEY_*` build settings is a small follow-up outside this spec's scope; the validation-gated in-app path is fully functional today.
+Full Finder double-click integration on a fresh install still needs an Info.plist `UTExportedTypeDeclarations` entry — the dynamic UTType is enough for in-app New/Open/Save/Save As under the sandbox, but Launch Services only learns about a custom package type from a bundled Info.plist. Wiring that into the Xcode `INFOPLIST_KEY_*` build settings is a small follow-up outside this spec's scope; the in-app path is fully functional today.
 
 ## Save path
 

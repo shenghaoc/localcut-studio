@@ -38,6 +38,10 @@ struct TimelineView: View {
     @FocusState private var focusedClipID: Clip.ID?
     @FocusState private var focusedTransitionClipID: Clip.ID?
     @FocusState private var receivesTimelineShortcuts: Bool
+    /// One-shot initial focus so transport shortcuts work without a click on
+    /// first layout. Subsequent appears must not steal focus from text fields,
+    /// buttons, or the inspector.
+    @State private var didRequestInitialTimelineFocus = false
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
 
@@ -111,7 +115,17 @@ struct TimelineView: View {
         }
         .focusable()
         .focused($receivesTimelineShortcuts)
-        .onAppear { receivesTimelineShortcuts = true }
+        .accessibilityIdentifier("timeline-root")
+        .onAppear {
+            guard !didRequestInitialTimelineFocus else { return }
+            didRequestInitialTimelineFocus = true
+            receivesTimelineShortcuts = true
+        }
+        .simultaneousGesture(TapGesture().onEnded {
+            // Clicking the timeline claims shortcut focus without blocking
+            // clip drag / trim gestures on child views.
+            receivesTimelineShortcuts = true
+        })
         .onKeyPress { press in
             switch TimelineShortcutPolicy.action(for: press) {
             case .ignore:

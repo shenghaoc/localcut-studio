@@ -12,7 +12,7 @@
 
 ## Lifecycle
 
-- [x] **T2.1** Choose custom controller over `DocumentGroup`/`ReferenceFileDocument`; wire New/Open/Open Recent/Save/Save As + shortcuts. The macOS 26 no-go evidence is recorded in [Native document lifecycle](../feature-native-document-lifecycle/design.md).
+- [x] **T2.1** Choose custom controller over `DocumentGroup`/`ReferenceFileDocument`; wire New/Open/Open Recent/Save/Save As + shortcuts.
 - [x] **T2.2** Dirty tracking, async save-on-close prompt, window title reflects name + edited state.
 - [x] **T2.3** Atomic save.
 

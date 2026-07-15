@@ -1,57 +1,56 @@
 import Testing
 @testable import LocalCut_Studio
 
-/// Window presentation state now belongs to SwiftUI scene storage. The unit
-/// boundary we can exercise deterministically is focused document routing: a
-/// key window must resolve to its own editor, and a closed token must never be
-/// redirected to another open editor.
+/// Editor readiness for App Intents. The GUI has one process-wide editor model;
+/// this suite only covers window readiness and generation stability.
 @MainActor
-@Suite("Active document routing")
-struct ActiveDocumentRegistryTests {
-    @Test func mostRecentlyActivatedEditorIsTheActiveTarget() {
-        let first = EditorModel()
-        let second = EditorModel()
-        let registry = ActiveDocumentRegistry()
-
-        registry.register(first)
-        registry.register(second)
-        registry.activate(first)
-
-        let target = registry.activeTarget()
-        #expect(target?.model === first)
-    }
-
-    @Test func registeringTheSameEditorKeepsItsTokenStable() {
+@Suite("Editor window readiness")
+struct ActiveEditorRegistryTests {
+    @Test func markReadyExposesTheEditor() {
         let model = EditorModel()
-        let registry = ActiveDocumentRegistry()
+        let registry = ActiveEditorRegistry()
 
-        let original = registry.register(model)
-        let repeatRegistration = registry.register(model)
+        registry.markReady(model)
 
-        #expect(original == repeatRegistration)
+        #expect(registry.readyEditor() === model)
+        #expect(registry.capture().wasReady)
     }
 
-    @Test func closedTokenDoesNotRetargetToAnotherEditor() {
-        let first = EditorModel()
-        let second = EditorModel()
-        let registry = ActiveDocumentRegistry()
-
-        let firstToken = registry.register(first)
-        registry.register(second)
-        registry.activate(first)
-        registry.unregister(first)
-
-        #expect(registry.model(for: firstToken) == nil)
-        #expect(registry.activeTarget()?.model === second)
-    }
-
-    @Test func unregisteringTheLastEditorLeavesNoActiveTarget() {
+    @Test func reMarkingTheSameEditorKeepsGenerationStable() {
         let model = EditorModel()
-        let registry = ActiveDocumentRegistry()
+        let registry = ActiveEditorRegistry()
 
-        registry.register(model)
-        registry.unregister(model)
+        registry.markReady(model)
+        let generation = registry.generation
+        registry.markReady(model)
 
-        #expect(registry.activeTarget() == nil)
+        #expect(registry.generation == generation)
+        #expect(registry.editor(matchingGeneration: generation) === model)
+    }
+
+    @Test func markUnavailableClearsReadiness() {
+        let model = EditorModel()
+        let registry = ActiveEditorRegistry()
+
+        registry.markReady(model)
+        let generation = registry.generation
+        registry.markUnavailable(model)
+
+        #expect(registry.readyEditor() == nil)
+        #expect(registry.editor(matchingGeneration: generation) == nil)
+        #expect(!registry.capture().wasReady)
+    }
+
+    @Test func waitUntilReadyResumesWhenEditorAppears() async throws {
+        let model = EditorModel()
+        let registry = ActiveEditorRegistry()
+
+        let waiter = Task {
+            try await registry.waitUntilReady(timeout: .seconds(2))
+        }
+        await Task.yield()
+        registry.markReady(model)
+        try await waiter.value
+        #expect(registry.readyEditor() === model)
     }
 }

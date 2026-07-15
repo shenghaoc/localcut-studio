@@ -42,6 +42,7 @@ final class DocumentController {
         model.silenceDetectionTask = nil
         model.silenceProposals = []
         model.documentURL = nil
+        model.projectStorageKind = nil
         model.isDirty = false
         model.unresolvedMedia = []
         model.totalDuration = 0
@@ -127,16 +128,20 @@ final class DocumentController {
 
     func open(url: URL, model: EditorModel) async {
         let initialAccess = url.startAccessingSecurityScopedResource()
-        let isBundle = ProjectBundle.isBundle(url: url)
         var didTransferAccess = false
         defer {
             if initialAccess, !didTransferAccess {
                 url.stopAccessingSecurityScopedResource()
             }
         }
+        guard let descriptor = ProjectLocationInspector.inspect(url) else {
+            model.statusMessage = String(localized: "Open failed: not a LocalCut project (.lcstudio or .lcbundle).")
+            return
+        }
         do {
-            if isBundle {
-                let bundleURL = url
+            switch descriptor.storageKind {
+            case .bundle:
+                let bundleURL = descriptor.url
                 let (raw, mismatches) = try await Task.detached {
                     let data = try ProjectBundle.readData(url: bundleURL)
                     let parsedFingerprints = data.fingerprintsJSON
@@ -147,16 +152,19 @@ final class DocumentController {
                     return (data, mismatched)
                 }.value
                 let contents = try ProjectBundle.decode(raw)
-                await load(document: contents.document, from: url, bundleURL: url,
+                await load(document: contents.document, from: descriptor.url, bundleURL: descriptor.url,
+                           storageKind: .bundle,
                            bundleAccessDidStart: initialAccess,
                            bundleFingerprints: contents.fingerprints,
                            externallyEditedAssets: mismatches,
                            model: model)
                 didTransferAccess = initialAccess
-            } else {
-                let data = try await Task.detached { try Data(contentsOf: url) }.value
+            case .singleFile:
+                let fileURL = descriptor.url
+                let data = try await Task.detached { try Data(contentsOf: fileURL) }.value
                 let document = try ProjectDocument(data: data)
-                await load(document: document, from: url, bundleURL: nil,
+                await load(document: document, from: fileURL, bundleURL: nil,
+                           storageKind: .singleFile,
                            bundleFingerprints: FingerprintIndex(),
                            externallyEditedAssets: [],
                            model: model)
@@ -174,6 +182,7 @@ final class DocumentController {
     func load(document: ProjectDocument,
               from url: URL?,
               bundleURL: URL? = nil,
+              storageKind: ProjectStorageKind? = nil,
               bundleAccessDidStart: Bool = false,
               bundleFingerprints: FingerprintIndex = FingerprintIndex(),
               externallyEditedAssets: [String] = [],
@@ -181,6 +190,17 @@ final class DocumentController {
         releaseSession(model: model)
 
         model.lastBundleFingerprints = bundleFingerprints
+        // Prefer the caller-supplied classification; fall back only when load
+        // is used without a prior open descriptor (tests / internal paths).
+        if let storageKind {
+            model.projectStorageKind = storageKind
+        } else if bundleURL != nil {
+            model.projectStorageKind = .bundle
+        } else if url != nil {
+            model.projectStorageKind = .singleFile
+        } else {
+            model.projectStorageKind = nil
+        }
 
         if let bundleURL, bundleAccessDidStart {
             adoptBundleAccess(bundleURL, didStart: true, model: model)
@@ -285,14 +305,26 @@ final class DocumentController {
 
     func save(model: EditorModel) async {
         guard let url = model.documentURL else { return }
-        await write(to: url, model: model)
+        guard let kind = storageKindForWrite(to: url, model: model) else {
+            model.statusMessage = String(localized: "Save failed: choose Save As to pick a LocalCut project format.")
+            return
+        }
+        await write(to: url, storageKind: kind, model: model)
     }
 
     func saveAs(url: URL, model: EditorModel) async {
-        await write(to: url, model: model)
+        guard let kind = storageKindForWrite(to: url, model: model, isSaveAs: true) else {
+            model.statusMessage = String(localized: "Save failed: choose a LocalCut project (.lcstudio or .lcbundle).")
+            return
+        }
+        await write(to: url, storageKind: kind, model: model)
     }
 
     func writeSynchronously(to url: URL, model: EditorModel) -> Bool {
+        guard let kind = storageKindForWrite(to: url, model: model, isSaveAs: model.documentURL == nil) else {
+            model.statusMessage = String(localized: "Save failed: choose a LocalCut project (.lcstudio or .lcbundle).")
+            return false
+        }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let originalPaths = model.project.mediaItems.map { ($0, $0.bundleRelativePath) }
@@ -301,7 +333,7 @@ final class DocumentController {
         var overlayAccesses: [URL] = []
         defer { stopOverlayAccesses(overlayAccesses) }
         do {
-            if ProjectBundle.isBundle(url: url) {
+            if kind == .bundle {
                 guard model.project.coverFrame == nil else {
                     model.statusMessage = "Save failed: bundle cover generation requires the async Save path."
                     return false
@@ -338,7 +370,7 @@ final class DocumentController {
                 PaddedBackgroundBundleResolver.adoptSingleFileBookmark(from: document.paddedBackground, model: model)
                 model.statusMessage = "Saved \(url.lastPathComponent)."
             }
-            adoptSaved(url: url, model: model)
+            adoptSaved(url: url, storageKind: kind, model: model)
             return true
         } catch {
             for (item, path) in originalPaths {
@@ -352,6 +384,31 @@ final class DocumentController {
                 recoverySuggestion: "Check available disk space and try Save As to a different location.")
             return false
         }
+    }
+
+    /// Resolves the storage kind for a write without re-sniffing disk contents.
+    /// In-place Save uses the session's stored kind; Save As uses the panel
+    /// destination's explicit representation (extension / content type).
+    private func storageKindForWrite(
+        to url: URL,
+        model: EditorModel,
+        isSaveAs: Bool = false
+    ) -> ProjectStorageKind? {
+        let standardized = url.standardizedFileURL
+        if !isSaveAs,
+           let stored = model.projectStorageKind,
+           model.documentURL?.standardizedFileURL == standardized {
+            return stored
+        }
+        if let kind = ProjectLocationInspector.storageKindForSaveDestination(url: url) {
+            return kind
+        }
+        // Extensionless in-place save of a previously validated bundle only.
+        if model.documentURL?.standardizedFileURL == standardized,
+           model.projectStorageKind == .bundle {
+            return .bundle
+        }
+        return nil
     }
 
     func makeDocumentForSave(forBundle: Bool = false, model: EditorModel) -> ProjectDocument {
@@ -542,7 +599,7 @@ final class DocumentController {
             adoptBundleAccess(bundleURL, didStart: scoped, model: model)
             didTransferAccess = scoped
 
-            adoptSaved(url: bundleURL, model: model)
+            adoptSaved(url: bundleURL, storageKind: .bundle, model: model)
             await model.rebuild()
             var notes: [String] = []
             if let coverWarning = coverPreparation.warning { notes.append(coverWarning) }
@@ -618,10 +675,11 @@ final class DocumentController {
         item.captureSourceID = ref.captureSourceID
     }
 
-    private func write(to url: URL, model: EditorModel) async {
-        if ProjectBundle.isBundle(url: url) {
+    private func write(to url: URL, storageKind: ProjectStorageKind, model: EditorModel) async {
+        switch storageKind {
+        case .bundle:
             await writeBundle(to: url, model: model)
-        } else {
+        case .singleFile:
             await writeSingleFile(to: url, model: model)
         }
     }
@@ -636,7 +694,7 @@ final class DocumentController {
             try await Task.detached { try data.write(to: url, options: .atomic) }.value
             adoptSingleFileOverlayBookmarks(from: document.overlays, model: model)
             PaddedBackgroundBundleResolver.adoptSingleFileBookmark(from: document.paddedBackground, model: model)
-            adoptSaved(url: url, cleanIfRevision: savedRevision, model: model)
+            adoptSaved(url: url, storageKind: .singleFile, cleanIfRevision: savedRevision, model: model)
             model.statusMessage = "Saved \(url.lastPathComponent)."
         } catch is CancellationError {
             return
@@ -702,7 +760,7 @@ final class DocumentController {
             adoptBundleAccess(bundleURL, didStart: scoped, model: model)
             didTransferAccess = scoped
 
-            adoptSaved(url: bundleURL, cleanIfRevision: savedRevision, model: model)
+            adoptSaved(url: bundleURL, storageKind: .bundle, cleanIfRevision: savedRevision, model: model)
             var notes: [String] = []
             if let coverWarning = coverPreparation.warning { notes.append(coverWarning) }
             if !otioOk { notes.append("OTIO sidecar write failed") }
@@ -861,7 +919,7 @@ final class DocumentController {
         guard let relativePath = overlay.bundleRelativePath,
               ProjectBundleLayout.isSafeAssetRelativePath(relativePath),
               let bundleURL = model.documentURL,
-              ProjectBundle.isBundle(url: bundleURL) else {
+              model.projectStorageKind == .bundle else {
             return nil
         }
         let didAccess = bundleURL.startAccessingSecurityScopedResource()
@@ -896,8 +954,14 @@ final class DocumentController {
         return warnings
     }
 
-    private func adoptSaved(url: URL, cleanIfRevision revision: Int? = nil, model: EditorModel) {
+    private func adoptSaved(
+        url: URL,
+        storageKind: ProjectStorageKind,
+        cleanIfRevision revision: Int? = nil,
+        model: EditorModel
+    ) {
         model.documentURL = url
+        model.projectStorageKind = storageKind
         model.project.name = url.deletingPathExtension().lastPathComponent
         if revision == nil || revision == model.mutationRevision { model.isDirty = false }
         NSDocumentController.shared.noteNewRecentDocumentURL(url)

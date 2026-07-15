@@ -44,32 +44,28 @@ Any non-trivial logic change **must** ship with tests; the test count must not d
 ## Native document lifecycle manual check
 
 Run this checklist whenever document/window shell code changes. These are GUI
-behaviours; do not claim them as unit-test coverage.
+behaviours; do not claim pure unit tests as proof of focus transitions or
+Shortcuts cold-launch UX.
 
-1. Create a new project, import local media, and save as `.lcbundle`.
-2. Close, reopen the bundle, and verify media, edits, dirty title state, and
-   undo/redo survive.
-3. Make an edit, then close and exercise **Save**, **Don't Save**, and
-   **Cancel**. A failed save must leave the window open and dirty.
-4. Verify Open, Open Recent, Save As between allowed `.lcstudio` / `.lcbundle`
-   forms, missing-media relinking, and external bundle-change warning behaviour.
-5. Invoke an App Intent with one active window and confirm it reaches that
-   editor. Before a window appears, verify the intent reports the typed
-   no-active-document condition rather than mutating an arbitrary model.
-6. The current macOS 26 custom-controller architecture does **not** present
-   independent document scenes, so opening two GUI documents is not applicable.
-   The registry's two-editor routing is covered by deterministic tests instead.
-7. Start recording, then try New, Open, and Close; all document replacement / close
-   paths must remain blocked until recording is safely finished.
-8. Queue a video render, choose a new output destination, and verify output access
-   remains valid through queue execution/retry.
-9. In marker names, captions, and inspector fields, press Space, M, Shift-M, and
-   Delete. Text editing and a keyboard-focused button/toggle must keep their
-   native key behaviour; timeline shortcuts must only act after the timeline is
-   focused.
-10. Check a fresh window on a normal and constrained display, then relaunch to
-    verify macOS restoration and split-view divider persistence. Collapse and
-    re-expand the inspector to ensure its saved expanded width is not clobbered.
+1. New project.
+2. Save as `.lcbundle`.
+3. Save as legacy `.lcstudio`.
+4. Reopen both forms.
+5. Close with Save / Don’t Save / Cancel.
+6. Failed save leaves the window open and dirty.
+7. Recording blocks New, Open, and Close (real privacy permissions).
+8. Queued render retains output access through execution and retry.
+9. External bundle modification warning; missing-media relinking.
+10. Cold-launch each App Intent through Shortcuts (New, Diagnostics, Import, Export).
+11. Marker/caption text fields keep Space, M, Shift-M, Backspace, Forward Delete.
+12. Keyboard-focused button/toggle keeps Space; timeline shortcuts only while timeline focused.
+13. Timeline focus recovers after leaving a marker rename or caption editor.
+14. Window placement/restoration on a constrained display; split-view divider
+    persistence through inspector collapse/re-expansion.
+
+Automated coverage: `ProjectLocationInspector` / storage-kind tests,
+`ActiveEditorRegistry` readiness tests, pure `TimelineShortcutPolicy` mapping,
+and `TimelineFocusUITests` harness transitions.
 
 ## Quality gate
 

@@ -1,5 +1,9 @@
 # Design: Design-System Integration Polish
 
+> **Ownership note:** Inspector presentation, window placement, and timeline
+> keyboard focus ownership are superseded by
+> [`feature-native-document-lifecycle`](../feature-native-document-lifecycle/design.md).
+>
 > Status: **Implemented**. Presentation-led polish with narrow computed model
 > helpers for error copy and keyframe navigation; no model fields, document
 > schema, engine pipeline, or composition-math changes.
@@ -133,10 +137,10 @@ code, driven from a tiny `Theme.swift` semantic token set:
 - **A timeline that reads as a surface.** Video/audio/caption lanes fill with
   `Color.lcLane` (a hair lighter than the window) so empty tracks look like
   tracks, not a void; the gutter/ruler sit on `Color.lcRail`.
-- **A comfortable default window.** The original AppKit first-launch sizing was
-  superseded by the native-document-lifecycle feature: SwiftUI scene placement
-  supplies the 1360×860 default and fitted ideal placement while macOS owns
-  restoration. `WindowConfigurator` no longer mutates frames.
+- **A comfortable default window.** `WindowConfigurator` sizes the editor to a
+  1360×860 canvas centred on the active screen on first launch only (one-shot
+  `UserDefaults` guard, deferred one runloop tick so it survives SwiftUI's
+  initial-layout sizing). Later launches keep whatever size the user left.
 - **Quieter Media chrome.** The "Copy imports into bundle" toggle moves from
   above the library to a small caption-weight footer — it is a save-time
   preference, not a primary action — and the empty state reads "No media yet"

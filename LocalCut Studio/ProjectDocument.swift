@@ -59,7 +59,7 @@ extension ProjectDocument {
 
     private mutating func addQueueBundleAssetBookmarks(from bundleURL: URL?) {
         guard let bundleURL,
-              ProjectBundle.isBundle(url: bundleURL) else { return }
+              ProjectLocationInspector.isValidatedBundle(bundleURL) else { return }
 
         let didAccess = bundleURL.startAccessingSecurityScopedResource()
         defer { if didAccess { bundleURL.stopAccessingSecurityScopedResource() } }

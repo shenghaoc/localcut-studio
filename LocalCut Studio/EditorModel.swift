@@ -355,8 +355,12 @@ final class EditorModel {
     }
 
     // MARK: Document state
-    /// The file backing the current project, or `nil` for an unsaved one.
+    /// Local filesystem URL for the current project file or bundle directory,
+    /// or `nil` for an unsaved project.
     var documentURL: URL?
+    /// Explicit storage representation established by Open / Save As. Save
+    /// dispatches from this value rather than re-sniffing the path.
+    var projectStorageKind: ProjectStorageKind?
     /// Whether the project has unsaved changes (drives the window's edited dot).
     var isDirty = false
     /// True while a window-close Save choice is already writing asynchronously.

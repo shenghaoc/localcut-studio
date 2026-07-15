@@ -56,9 +56,9 @@
   control accent; keep the preview canvas black as a content surface.
 - [x] **T7.3** Fill timeline video/audio/caption lanes with `Color.lcLane` so empty
   tracks read as surfaces.
-- [x] **T7.4** The original `WindowConfigurator` first-launch sizing was
-  superseded by [Native document lifecycle](../feature-native-document-lifecycle/design.md):
-  scene placement/restoration now owns the 1360×860 default without frame mutation.
+- [x] **T7.4** `WindowConfigurator` sizes the editor to 1360×860 centred on first
+  launch only (one-shot `UserDefaults` guard, deferred one runloop tick); add
+  `.defaultSize` as a fallback.
 - [x] **T7.5** Move the "Copy imports into bundle" toggle to a caption-weight
   footer; empty state reads "No media yet" with `film.stack`.
 - [x] **T7.6** `.labelsHidden()` on the side-rail segmented switchers so the
@@ -79,8 +79,9 @@
   individually reachable elements.
 - [x] **T8.4** Give the side-rail segmented switcher `.isHeader` so rotor users
   reach a pane heading after the per-pane `EditorPanelHeader` was dropped.
-- [x] **T8.5** The original deferred-frame guard was removed with the native
-  scene-placement migration; `WindowConfigurator` no longer performs placement.
+- [x] **T8.5** Guard `WindowConfigurator.applyInitialFrameIfNeeded` with an
+  in-memory flag so repeated `attach(to:)` calls don't enqueue the deferred
+  frame block more than once.
 
 ## HIG conformance pass (Design Principles + Designing for macOS)
 
@@ -90,13 +91,14 @@
   bare menu/toolbar key equivalent; clips/transitions use the timeline-scoped
   `onDeleteCommand` so text editing keeps Backspace; clip blocks and transition
   glyphs are focusable so either selection can receive that command. Spacebar
-  play/pause is handled by focused SwiftUI `onKeyPress` in `TimelineView.swift`
-  rather than a menu key-equivalent — a bare `.space` menu shortcut is global in
-  AppKit and would swallow spaces typed into text inputs. Focused controls get
-  first refusal. Remove dead `exportTapped()`.
-- [x] **T9.2** The original model-owned inspector flag was superseded by
-  scene-scoped `@SceneStorage` plus a focused binding; toolbar, layout,
-  collapsed-rail, and menu remain synchronized per key scene.
+  play/pause is handled by the window-scoped `EditorKeyHandler` local monitor (in
+  `TimelineView.swift`) rather than a menu key-equivalent — a bare `.space` menu
+  shortcut is global in AppKit and would swallow spaces typed into text inputs.
+  The monitor also exempts focused non-text first responders (NSControl +
+  SwiftUI-hosted controls) so a Tab-focused checkbox/button receives Space
+  normally. Remove dead `exportTapped()`.
+- [x] **T9.2** Lift `isSideRailCollapsed` → `EditorModel.inspectorVisible`
+  (UserDefaults-persisted); update toolbar, layout, collapsed-rail, and menu.
 - [x] **T9.3** Honor Reduce Motion on the scopes transition/animation; adaptive
   marker stroke (`separatorColor`); clip-kind glyph; format-badge VoiceOver
   label; scopes `accessibilityValue`; secondary tool picker `.isHeader`.

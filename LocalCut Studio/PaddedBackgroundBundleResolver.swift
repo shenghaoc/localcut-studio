@@ -50,7 +50,7 @@ enum PaddedBackgroundBundleResolver {
         guard let relativePath = preset.imageBundleRelativePath,
               ProjectBundleLayout.isSafeAssetRelativePath(relativePath),
               let bundleURL = model.documentURL,
-              ProjectBundle.isBundle(url: bundleURL) else {
+              model.projectStorageKind == .bundle else {
             return nil
         }
         let didAccess = bundleURL.startAccessingSecurityScopedResource()
@@ -86,7 +86,7 @@ enum PaddedBackgroundBundleResolver {
         guard let relative = preset.imageBundleRelativePath,
               ProjectBundleLayout.isSafeAssetRelativePath(relative),
               let bundleURL = model.documentURL,
-              ProjectBundle.isBundle(url: bundleURL) else { return nil }
+              model.projectStorageKind == .bundle else { return nil }
         let sourceURL = bundleURL.appendingPathComponent(relative)
         guard FileManager.default.isReadableFile(atPath: sourceURL.path) else { return nil }
         return sourceURL

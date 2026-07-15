@@ -5,6 +5,10 @@ import Foundation
 /// App Intents may be invoked while the app is foregrounded by Shortcuts, Siri,
 /// or Spotlight; the actions stay thin and reuse the same model commands as the
 /// menu bar so document prompts, panels, and validation remain consistent.
+///
+/// The app owns one process-wide `EditorModel`. Cold-launch intents wait for the
+/// editor window to become ready instead of requiring a previously opened
+/// project file.
 @MainActor
 final class LocalCutAppIntentRouter {
     enum Action: String, CaseIterable, Sendable {
@@ -15,8 +19,10 @@ final class LocalCutAppIntentRouter {
     }
 
     enum RouterError: LocalizedError, Equatable, Sendable {
-        case noActiveDocument
-        case targetDocumentClosed
+        /// The editor window never became available (or timed out waiting).
+        case editorUnavailable
+        /// A window-dependent action lost its editor before it could run.
+        case targetWindowClosed
         case emptyTimeline
         case actionCancelled
         case actionFailed
@@ -24,10 +30,10 @@ final class LocalCutAppIntentRouter {
 
         var errorDescription: String? {
             switch self {
-            case .noActiveDocument:
-                String(localized: "Open a LocalCut project before running this action.")
-            case .targetDocumentClosed:
-                String(localized: "The LocalCut project closed before the action could run.")
+            case .editorUnavailable:
+                String(localized: "LocalCut Studio’s editor window is not available.")
+            case .targetWindowClosed:
+                String(localized: "The LocalCut editor window closed before the action could run.")
             case .emptyTimeline:
                 String(localized: "Add media to the timeline before exporting.")
             case .actionCancelled:
@@ -103,29 +109,36 @@ final class LocalCutAppIntentRouter {
         }
     }
 
-    private let documentRegistry: ActiveDocumentRegistry
+    private let editorRegistry: ActiveEditorRegistry
     private let routeAction: @MainActor @Sendable (Action, EditorModel) async throws -> Void
+    private let readinessTimeout: Duration
+    private let clock: ContinuousClock
     private var actionChain = TaskReference(finished: true)
 
     init(
-        documentRegistry: ActiveDocumentRegistry,
+        editorRegistry: ActiveEditorRegistry,
+        readinessTimeout: Duration = .seconds(15),
+        clock: ContinuousClock = ContinuousClock(),
         routeAction: @escaping @MainActor @Sendable (Action, EditorModel) async throws -> Void = LocalCutAppIntentRouter.route
     ) {
-        self.documentRegistry = documentRegistry
+        self.editorRegistry = editorRegistry
+        self.readinessTimeout = readinessTimeout
+        self.clock = clock
         self.routeAction = routeAction
     }
 
     func perform(_ action: Action) async throws {
-        guard let target = documentRegistry.activeTarget() else {
-            throw RouterError.noActiveDocument
-        }
+        // Capture readiness at enqueue time so cold-launch waits are distinct
+        // from "the window closed while this action was queued".
+        let capture = editorRegistry.capture()
         let predecessorRef = actionChain
         let currentRef = TaskReference()
         actionChain = currentRef
 
-        let targetToken = target.token
-        let documentRegistry = self.documentRegistry
+        let editorRegistry = self.editorRegistry
         let routeAction = self.routeAction
+        let readinessTimeout = self.readinessTimeout
+        let clock = self.clock
         let result = ActionResult()
         let predecessorBarrier = predecessorRef.barrier
         let currentBarrier = currentRef.barrier
@@ -133,9 +146,12 @@ final class LocalCutAppIntentRouter {
             await predecessorBarrier.wait()
             do {
                 try Task.checkCancellation()
-                guard let model = documentRegistry.model(for: targetToken) else {
-                    throw RouterError.targetDocumentClosed
-                }
+                let model = try await Self.resolveEditor(
+                    capture: capture,
+                    registry: editorRegistry,
+                    timeout: readinessTimeout,
+                    clock: clock
+                )
                 try await routeAction(action, model)
                 await result.finish(with: .success(()))
             } catch {
@@ -158,6 +174,39 @@ final class LocalCutAppIntentRouter {
         }
     }
 
+    private static func resolveEditor(
+        capture: ActiveEditorRegistry.Capture,
+        registry: ActiveEditorRegistry,
+        timeout: Duration,
+        clock: ContinuousClock
+    ) async throws -> EditorModel {
+        if capture.wasReady {
+            // Window was available when the intent was enqueued. If it closed,
+            // fail precisely — do not wait for a later window and retarget.
+            guard let model = registry.editor(matchingGeneration: capture.generation) else {
+                throw RouterError.targetWindowClosed
+            }
+            return model
+        }
+
+        // Cold launch: wait for the editor window without claiming a project
+        // was already open.
+        do {
+            try await registry.waitUntilReady(timeout: timeout, clock: clock)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch ActiveEditorRegistry.WaitError.timedOut {
+            throw RouterError.editorUnavailable
+        } catch {
+            throw RouterError.editorUnavailable
+        }
+        try Task.checkCancellation()
+        guard let model = registry.readyEditor() else {
+            throw RouterError.editorUnavailable
+        }
+        return model
+    }
+
     private static func route(_ action: Action, on model: EditorModel) async throws {
         switch action {
         case .newProject:
@@ -165,7 +214,6 @@ final class LocalCutAppIntentRouter {
         case .importMedia:
             try throwIfNeeded(await model.performImportMediaCommand())
         case .exportProject:
-            // check totalDuration before calling command to throw the correct error type
             guard model.totalDuration > 0 else {
                 model.statusMessage = RouterError.emptyTimeline.errorDescription ?? ""
                 throw RouterError.emptyTimeline

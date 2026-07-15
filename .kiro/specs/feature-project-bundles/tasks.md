@@ -4,11 +4,7 @@
 
 ## Format
 
-- [x] **T1.1** Declare filename-backed `UTType.lcStudioProjectBundle`
-  (`lcbundle`, conforming to `.package`) alongside the existing
-  `lcStudioProject`. The native-document-lifecycle follow-up uses the filename
-  tag so `NSSavePanel` defaults to a real `.lcbundle` rather than appending
-  `.lcstudio`.
+- [x] **T1.1** Declare `UTType.lcStudioProjectBundle` (`com.localcutstudio.project-bundle`, conforming to `.package`) alongside the existing `lcStudioProject` in `ProjectDocument.swift`.
 - [x] **T1.2** Bump `ProjectDocument.currentSchemaVersion` to 3. Single-file `.lcstudio` saves continue to write `schemaVersion = 2` to stay readable by older builds; bundle saves write 3.
 - [x] **T1.3** Add `bundleFormat: String?` to `ProjectDocument` (`"1"` when written into a bundle, `nil` otherwise) and `bundleRelativePath: String?` to `MediaRef`. Both decode leniently.
 
@@ -27,7 +23,7 @@
 - [x] **T4.1** `EditorModel.open(url:)` detects whether the URL is a directory and dispatches to bundle-load vs single-file-load. The existing single-file path is preserved; bundled assets resolve via direct file URLs (no security-scoped bookmark required — see R5.1).
 - [x] **T4.2** `EditorModel.write(to:)` detects the URL extension. `.lcbundle` writes through `ProjectBundle.write`; `.lcstudio` writes the legacy single-file JSON.
 - [x] **T4.3** `EditorModel.convertToBundle(url:)` builds a fresh `ProjectDocument` snapshot of the current project, copies every resolved media item into `assets/`, fingerprints them, writes the bundle, adopts the new URL — leaving the original `.lcstudio` untouched (R4.2 / R4.3).
-- [x] **T4.4** Open panel accepts both on-disk forms through URL-boundary validation (a real `.lcbundle` directory or regular `.lcstudio` file). Save panel defaults to `lcStudioProjectBundle` for new documents; the user can still pick `lcStudioProject` to keep the legacy format.
+- [x] **T4.4** Open panel accepts both `lcStudioProject` and `lcStudioProjectBundle`. Save panel defaults to `lcStudioProjectBundle` for new documents; the user can still pick `lcStudioProject` to keep the legacy format.
 - [x] **T4.5** **Convert to Bundle…** command in the File menu, wired to `EditorModel.requestConvertToBundle()`. Disabled when the current document is already a bundle (or is unsaved — Save As goes straight to the bundle in that case).
 - [x] **T4.6** Media-bin import UI exposes a "Copy into Bundle" checkbox; imported items carry the chosen `wantsBundling` value into bundle saves.
 

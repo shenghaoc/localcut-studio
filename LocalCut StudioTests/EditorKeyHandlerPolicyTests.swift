@@ -3,10 +3,9 @@ import SwiftUI
 import Testing
 @testable import LocalCut_Studio
 
-// The focused timeline uses SwiftUI `onKeyPress`, rather than a window-wide
-// NSEvent monitor. These tests preserve the pure key/modifier policy while UI
-// verification covers SwiftUI's first-responder routing for text fields and
-// other controls.
+// Pure key → action mapping for the focused timeline's `onKeyPress` policy.
+// These tests do **not** prove SwiftUI focus transitions; see
+// `TimelineFocusUITests` for text-field / button / timeline focus routing.
 
 private func decide(
     _ key: TimelineShortcutPolicy.Key,

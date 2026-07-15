@@ -51,19 +51,7 @@ enum ProjectOpenPanelConfiguration {
     }
 
     static func isSupportedProjectURL(_ url: URL) -> Bool {
-        var isDirectory = ObjCBool(false)
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
-            return false
-        }
-
-        if isDirectory.boolValue {
-            // Use the same canonical metadata predicate as the production
-            // bundle loader so a synced or renamed bundle keeps its package
-            // save path after it is opened.
-            let projectJSON = url.appendingPathComponent(ProjectBundleLayout.projectJSON)
-            return FileManager.default.fileExists(atPath: projectJSON.path)
-        }
-        return url.pathExtension == ProjectDocument.fileExtension
+        ProjectLocationInspector.isSupportedProjectLocation(url)
     }
 }
 

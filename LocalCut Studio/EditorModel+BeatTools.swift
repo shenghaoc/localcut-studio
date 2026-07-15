@@ -352,7 +352,7 @@ extension EditorModel {
     }
 
     func beatCacheDirectoryURL() -> URL {
-        if let documentURL, ProjectBundle.isBundle(url: documentURL) {
+        if let documentURL, projectStorageKind == .bundle {
             return bundleBeatCacheDirectoryURL(for: documentURL)
         }
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first

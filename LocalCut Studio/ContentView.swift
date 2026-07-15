@@ -5,13 +5,14 @@ import UniformTypeIdentifiers
 import LocalCutCore
 
 /// Keeps App Intent routing stable while SwiftUI recreates the `App` value.
-/// The current custom-controller shell registers its editor model when the
-/// window becomes key; the router never owns that process-wide model directly.
+/// The shell marks the single process-wide editor ready when its window
+/// appears; cold-launch intents wait for that readiness instead of requiring
+/// a previously opened project file.
 @MainActor
 private enum LocalCutStudioAppState {
     static let model = EditorModel()
-    static let documentRegistry = ActiveDocumentRegistry()
-    static let appIntentRouter = LocalCutAppIntentRouter(documentRegistry: documentRegistry)
+    static let editorRegistry = ActiveEditorRegistry()
+    static let appIntentRouter = LocalCutAppIntentRouter(editorRegistry: editorRegistry)
 }
 
 @main
@@ -33,6 +34,11 @@ struct LocalCutStudioApp: App {
         ProcessInfo.processInfo.arguments.contains("--localcut-ui-test-recorder-harness")
             || ProcessInfo.processInfo.environment["LOCALCUT_UI_TEST_RECORDER_HARNESS"] == "1"
     }
+
+    private var runsTimelineFocusUITestHarness: Bool {
+        ProcessInfo.processInfo.arguments.contains("--localcut-ui-test-timeline-focus-harness")
+            || ProcessInfo.processInfo.environment["LOCALCUT_UI_TEST_TIMELINE_FOCUS_HARNESS"] == "1"
+    }
 #endif
 
     var body: some Scene {
@@ -41,6 +47,9 @@ struct LocalCutStudioApp: App {
             if runsRecorderUITestHarness {
                 RecorderUITestHarnessView()
                     .frame(minWidth: 420, minHeight: 320)
+            } else if runsTimelineFocusUITestHarness {
+                TimelineFocusUITestHarnessView()
+                    .frame(minWidth: 480, minHeight: 360)
             } else {
                 editorView
             }
@@ -73,7 +82,7 @@ struct LocalCutStudioApp: App {
 
     @MainActor
     private var editorView: some View {
-        EditorView(model: model, documentRegistry: LocalCutStudioAppState.documentRegistry)
+        EditorView(model: model, editorRegistry: LocalCutStudioAppState.editorRegistry)
             .frame(minWidth: 1000, minHeight: 640)
     }
 }
@@ -263,7 +272,7 @@ struct DocumentCommands: Commands {
 /// browser editor's three-pane workspace.
 struct EditorView: View {
     @Bindable var model: EditorModel
-    let documentRegistry: ActiveDocumentRegistry
+    let editorRegistry: ActiveEditorRegistry
 
     /// Presentation state belongs to a window, not to the project document or
     /// its runtime media engine. Scene storage scopes this value to the window
@@ -309,11 +318,11 @@ struct EditorView: View {
         .navigationTitle(model.project.name)
         .safeAreaInset(edge: .bottom) { statusBar }
         .onAppear { [model] in
-            documentRegistry.activate(model)
+            editorRegistry.markReady(model)
             Task { [weak model] in await model?.scanRecoveredRecordings() }
         }
         .onDisappear {
-            documentRegistry.unregister(model)
+            editorRegistry.markUnavailable(model)
             model.teardownAudioMetering()
         }
         .focusedSceneValue(\.localCutInspectorVisibility, $inspectorVisible)
@@ -353,7 +362,7 @@ struct EditorView: View {
             }
         }
         .background(WindowConfigurator(model: model) {
-            documentRegistry.activate(model)
+            editorRegistry.markReady(model)
         })
         .overlay(alignment: .topTrailing) {
             if model.isDiagnosticsVisible {
@@ -635,10 +644,10 @@ private struct CollapsedSideRailView: View {
     }
 }
 
-/// The narrow AppKit bridge that remains while the macOS 26 custom document
+/// The narrow AppKit bridge that remains while the macOS 26 custom file-based
 /// controller owns asynchronous package saves. It mirrors the edited state,
-/// protects close during recording or an async save, and reports key-window
-/// activation to focused App Intent routing. Scene APIs own placement and
+/// protects close during recording or an async save, and marks the editor
+/// window ready for App Intent routing. Scene APIs own placement and
 /// restoration; no frame manipulation lives here.
 struct WindowConfigurator: NSViewRepresentable {
     let model: EditorModel
@@ -824,6 +833,6 @@ func formatElapsed(_ seconds: Double) -> String {
 }
 
 #Preview("Editor") {
-    EditorView(model: EditorModel(), documentRegistry: ActiveDocumentRegistry())
+    EditorView(model: EditorModel(), editorRegistry: ActiveEditorRegistry())
         .frame(width: 1180, height: 760)
 }
