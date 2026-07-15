@@ -80,7 +80,7 @@ struct ClipTransformKeyframeEditor: View {
                 get: { Double(model.selectedClipTransformAtPlayhead.tx) },
                 set: { model.updateSelectedClipTransformKeyframeValue(value.replacing(translateX: Float($0))) }),
                       format: .number.precision(.fractionLength(3)))
-                .frame(width: 72)
+                .frame(minWidth: 72)
                 .multilineTextAlignment(.trailing)
         }
         LabeledContent("Pan Y") {
@@ -88,7 +88,7 @@ struct ClipTransformKeyframeEditor: View {
                 get: { Double(model.selectedClipTransformAtPlayhead.ty) },
                 set: { model.updateSelectedClipTransformKeyframeValue(value.replacing(translateY: Float($0))) }),
                       format: .number.precision(.fractionLength(3)))
-                .frame(width: 72)
+                .frame(minWidth: 72)
                 .multilineTextAlignment(.trailing)
         }
         HStack {

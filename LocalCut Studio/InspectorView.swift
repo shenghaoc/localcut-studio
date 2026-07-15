@@ -905,7 +905,7 @@ struct InspectorView: View {
                     TextField("Width", value: customWidthBinding, format: .number)
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
-                        .frame(width: 80)
+                        .frame(minWidth: 80)
                         .help("Enter a custom canvas width in pixels")
                         .accessibilityLabel("Custom canvas width in pixels")
                 }
@@ -913,7 +913,7 @@ struct InspectorView: View {
                     TextField("Height", value: customHeightBinding, format: .number)
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
-                        .frame(width: 80)
+                        .frame(minWidth: 80)
                         .help("Enter a custom canvas height in pixels")
                         .accessibilityLabel("Custom canvas height in pixels")
                 }

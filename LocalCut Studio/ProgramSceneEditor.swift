@@ -108,7 +108,7 @@ struct SceneEditorSheet: View {
             }
             .padding()
         }
-        .frame(width: 460)
+        .frame(minWidth: 460)
         .frame(minHeight: 420)
     }
 

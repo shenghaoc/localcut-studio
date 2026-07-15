@@ -148,7 +148,7 @@ struct RecorderSetupView: View {
             Divider()
             footer
         }
-        .frame(width: 440, height: 560)
+        .frame(minWidth: 440, minHeight: 560)
         .task { await loadSources() }
     }
 

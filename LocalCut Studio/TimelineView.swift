@@ -11,8 +11,9 @@ struct TimelineView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let rulerHeight: CGFloat = 36
-    private let laneHeight: CGFloat = 56
-    private let gutterWidth: CGFloat = 56
+    @ScaledMetric(relativeTo: .body) private var laneHeight: CGFloat = 56
+    @ScaledMetric(relativeTo: .body) private var gutterWidth: CGFloat = 56
+    @ScaledMetric(relativeTo: .caption2) private var markerLabelWidth: CGFloat = 60
     private let edgeZoneWidth: CGFloat = 8
     private let markerGlyphSize: CGFloat = 12
     /// Cached system separator colour for the marker stroke. Computed once
@@ -208,7 +209,7 @@ struct TimelineView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             Slider(value: $model.pixelsPerSecond, in: 20...300)
-                .frame(width: 140)
+                .frame(minWidth: 100)
                 .accessibilityLabel("Timeline zoom")
             Image(systemName: "plus.magnifyingglass")
                 .foregroundStyle(.secondary)
@@ -441,7 +442,7 @@ struct TimelineView: View {
         // outline tracks Dark Mode and Increase Contrast; selected stays on gold.
         let strokeColor: Color = isSelected ? .lcAccent : Self.markerSeparatorStroke
         let strokeWidth: CGFloat = isSelected ? 2 : 1
-        let labelWidth: CGFloat = 60
+        let labelWidth = markerLabelWidth
         VStack(spacing: 1) {
             Text(marker.name)
                 .font(.caption2)
@@ -484,7 +485,7 @@ struct TimelineView: View {
         HStack(spacing: 8) {
             TextField("Name", text: $renameDraft)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 160)
+                .frame(minWidth: 120)
                 .onSubmit { commitRenameIfActive(); renamingMarkerID = nil }
             Button("Done") {
                 commitRenameIfActive()

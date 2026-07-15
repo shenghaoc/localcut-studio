@@ -184,7 +184,7 @@ struct ScreencastInspectorView: View {
                 get: { binding.wrappedValue.stepNumber },
                 set: { var c = binding.wrappedValue; c.stepNumber = max(1, $0); binding.wrappedValue = c }),
                       format: .number)
-            .frame(width: 60)
+            .frame(minWidth: 60)
         }
     }
 
@@ -237,7 +237,7 @@ struct ScreencastInspectorView: View {
                     get: { Double(binding.wrappedValue.positionOffset.width) },
                     set: { var c = binding.wrappedValue; c.positionOffset.width = CGFloat($0); binding.wrappedValue = c }),
                           format: .number.precision(.fractionLength(3)))
-                    .frame(width: 72)
+                    .frame(minWidth: 72)
                     .multilineTextAlignment(.trailing)
             }
             LabeledContent("Position Y") {
@@ -245,7 +245,7 @@ struct ScreencastInspectorView: View {
                     get: { Double(binding.wrappedValue.positionOffset.height) },
                     set: { var c = binding.wrappedValue; c.positionOffset.height = CGFloat($0); binding.wrappedValue = c }),
                           format: .number.precision(.fractionLength(3)))
-                    .frame(width: 72)
+                    .frame(minWidth: 72)
                     .multilineTextAlignment(.trailing)
             }
             HStack {
@@ -345,7 +345,7 @@ struct ScreencastInspectorView: View {
                 get: { Double(model.selectedCalloutTransformAtPlayhead.tx) },
                 set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(translateX: Float($0))) }),
                       format: .number.precision(.fractionLength(0)))
-                .frame(width: 72)
+                .frame(minWidth: 72)
                 .multilineTextAlignment(.trailing)
         }
         LabeledContent("Keyframe Y") {
@@ -353,7 +353,7 @@ struct ScreencastInspectorView: View {
                 get: { Double(model.selectedCalloutTransformAtPlayhead.ty) },
                 set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(translateY: Float($0))) }),
                       format: .number.precision(.fractionLength(0)))
-                .frame(width: 72)
+                .frame(minWidth: 72)
                 .multilineTextAlignment(.trailing)
         }
         HStack {

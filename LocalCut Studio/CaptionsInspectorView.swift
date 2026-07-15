@@ -293,7 +293,7 @@ struct CaptionsInspectorView: View {
                 .foregroundStyle(.secondary)
             TextField(label, value: value, format: .number.precision(.fractionLength(2)))
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 64)
+                .frame(minWidth: 64)
                 .monospacedDigit()
                 .accessibilityLabel(accessibilityLabel)
                 .onSubmit { model.commitCoalescedUndo() }
