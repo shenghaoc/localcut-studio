@@ -3,7 +3,7 @@ import CoreGraphics
 /// Pure placement policy for a newly created editor window. SwiftUI applies it
 /// through the scene APIs, allowing macOS restoration to remain authoritative
 /// for windows that the person has already positioned.
-nonisolated enum EditorWindowPlacement {
+enum EditorWindowPlacement {
     static let preferredSize = CGSize(width: 1360, height: 860)
     static let displayInset: CGFloat = 80
 
