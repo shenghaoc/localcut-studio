@@ -203,7 +203,7 @@ struct DocumentCommands: Commands {
             Button("Add Transition at Selected Cut") { model.addTransitionToSelectedClip() }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(!model.canAddTransitionAtSelection)
-            Button("Remove Transition") { model.removeSelectedTransition() }
+            Button("Delete Transition") { model.removeSelectedTransition() }
                 .disabled(model.selectedTransitionClipID == nil)
             // Mirror the destructive toolbar button so deleting a clip/transition
             // has a menu home; the scoped timeline handler owns the Delete key.
