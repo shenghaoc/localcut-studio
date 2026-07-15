@@ -113,7 +113,11 @@ private struct ScopeTraceView: View {
         }
         .accessibilityLabel(kind == .waveform ? "Waveform scope" : "Vectorscope")
         .accessibilityValue(latest == nil ? "No frames yet" : "Live")
-        .task { await refreshSamplesUntilCancelled() }
+        .task(id: ObjectIdentifier(sampler)) {
+            latest = nil
+            displayedRevision = -1
+            await refreshSamplesUntilCancelled()
+        }
     }
 
     @MainActor
