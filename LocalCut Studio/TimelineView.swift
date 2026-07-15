@@ -8,6 +8,7 @@ import LocalCutDomain
 /// draggable playhead. Zoom is controlled by `model.pixelsPerSecond`.
 struct TimelineView: View {
     @Bindable var model: EditorModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let rulerHeight: CGFloat = 36
     private let laneHeight: CGFloat = 56
@@ -339,8 +340,12 @@ struct TimelineView: View {
                 // width), so scrolling synchronously would read the anchor's
                 // pre-layout geometry and target the previous position.
                 DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.18)) {
+                    if reduceMotion {
                         proxy.scrollTo(TimelineScrollAnchor.viewportTarget, anchor: .leading)
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            proxy.scrollTo(TimelineScrollAnchor.viewportTarget, anchor: .leading)
+                        }
                     }
                 }
             }
@@ -442,6 +447,7 @@ struct TimelineView: View {
                 .font(.caption2)
                 .lineLimit(1)
                 .foregroundStyle(.primary)
+                .help(marker.name)
                 .padding(.horizontal, 3)
                 .background(
                     RoundedRectangle(cornerRadius: 2)
@@ -553,6 +559,7 @@ struct TimelineView: View {
                     .lineLimit(1)
                     .padding(.horizontal, 6)
                     .foregroundStyle(.primary)
+                    .help(label)
             }
             .frame(width: width, height: laneHeight - 14)
             .offset(x: x, y: 7)
@@ -1136,6 +1143,7 @@ private struct ClipIdentityOverlay: View {
                 .imageScale(.small)
             Text(name)
                 .lineLimit(1)
+                .help(name)
         }
         .font(.caption2)
         .padding(.horizontal, 6)

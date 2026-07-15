@@ -653,13 +653,13 @@ final class EditorModel {
         }
 
         guard url.startAccessingSecurityScopedResource() else {
-            statusMessage = "Could not access \(url.lastPathComponent)."
+            statusMessage = "Could not access \(url.lastPathComponent). Grant permission in System Settings > Privacy & Security > Files and Folders, then try again."
             return
         }
         defer { url.stopAccessingSecurityScopedResource() }
 
         guard let bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) else {
-            statusMessage = "Could not store access to \(url.lastPathComponent)."
+            statusMessage = "Could not store access to \(url.lastPathComponent). Try reopening the file after restarting the app."
             return
         }
 
@@ -1506,7 +1506,7 @@ final class EditorModel {
                 player.seek(to: .zero)
                 if project.voiceCleanup.requiresOfflineProcessing {
                     audioBus.seekLivePreview(to: .zero) { [weak self] message in
-                        self?.statusMessage = "Live voice cleanup unavailable: \(message)"
+                        self?.statusMessage = "Live voice cleanup unavailable: \(message). Export to apply voice cleanup offline."
                     }
                 }
             }
@@ -1533,7 +1533,7 @@ final class EditorModel {
         player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
         if project.voiceCleanup.requiresOfflineProcessing {
             audioBus.seekLivePreview(to: time) { [weak self] message in
-                self?.statusMessage = "Live voice cleanup unavailable: \(message)"
+                self?.statusMessage = "Live voice cleanup unavailable: \(message). Export to apply voice cleanup offline."
             }
             if isPlaying {
                 audioBus.resumeLivePreview()
@@ -1550,7 +1550,7 @@ final class EditorModel {
             audioBus.prepareLive()
         }
         if let error = audioBus.lastStartError {
-            statusMessage = "Live metering unavailable: \(error)"
+            statusMessage = "Live metering unavailable: \(error). Check that no other app is using the microphone."
         } else if audioBus.isLiveRunning {
             statusMessage = "Live metering started."
         }

@@ -40,6 +40,7 @@ struct RenderQueueInspectorView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        .help(presetSubtitle(preset))
                 }
                 Spacer()
                 Button("Add to Queue…") {
@@ -121,6 +122,7 @@ struct RenderQueueInspectorView: View {
                     Text(job.outputDisplayName)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(job.outputDisplayName)
                     Text(job.preset.name)
                         .font(.caption)
                         .foregroundStyle(.secondary)

@@ -162,7 +162,7 @@ final class DocumentController {
                            model: model)
             }
         } catch {
-            model.statusMessage = "Open failed: \(error.localizedDescription)"
+            model.statusMessage = "Open failed: \(error.localizedDescription). Try reopening from File > Open Recent, or check that the project file hasn't been moved."
         }
     }
 
@@ -341,7 +341,7 @@ final class DocumentController {
             }
             model.project.overlayBundlePaths = originalOverlayPaths
             model.project.paddedBackground = originalPaddedBackground
-            model.statusMessage = "Save failed: \(error.localizedDescription)"
+            model.statusMessage = "Save failed: \(error.localizedDescription). Check available disk space and try Save As to a different location."
             return false
         }
     }
@@ -631,7 +631,7 @@ final class DocumentController {
             adoptSaved(url: url, cleanIfRevision: savedRevision, model: model)
             model.statusMessage = "Saved \(url.lastPathComponent)."
         } catch {
-            model.statusMessage = "Save failed: \(error.localizedDescription)"
+            model.statusMessage = "Save failed: \(error.localizedDescription). Check available disk space and try Save As to a different location."
         }
     }
 
@@ -703,7 +703,7 @@ final class DocumentController {
             model.project.overlayBundlePaths = originalOverlayPaths
             model.project.coverFrame?.bundleRelativePath = originalCoverPath
             model.project.paddedBackground = originalPaddedBackground
-            model.statusMessage = "Save failed: \(error.localizedDescription)"
+            model.statusMessage = "Save failed: \(error.localizedDescription). Check available disk space and try Save As to a different location."
         }
     }
 

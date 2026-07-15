@@ -11,6 +11,10 @@ struct InspectorView: View {
     @Bindable var model: EditorModel
     @State private var showLUTImporter = false
     @State private var showLookImporter = false
+    @State private var showProjectSettings = false
+    @State private var showOverlayList = false
+    @State private var showScreencastTools = false
+    @State private var showTutorialFinishing = false
 
     var body: some View {
         // The side rail's segmented switcher (EditorSideRailView) is the sole
@@ -42,10 +46,22 @@ struct InspectorView: View {
             }
 
             CoverInspectorView(model: model)
-            projectSection
-            overlayListSection
-            ScreencastInspectorView(model: model)
-            TutorialFinishingInspectorView(model: model)
+
+            DisclosureGroup("Project Settings", isExpanded: $showProjectSettings) {
+                projectSection
+            }
+
+            DisclosureGroup("Overlay List", isExpanded: $showOverlayList) {
+                overlayListSection
+            }
+
+            DisclosureGroup("Screencast Tools", isExpanded: $showScreencastTools) {
+                ScreencastInspectorView(model: model)
+            }
+
+            DisclosureGroup("Tutorial Finishing", isExpanded: $showTutorialFinishing) {
+                TutorialFinishingInspectorView(model: model)
+            }
         }
         .formStyle(.grouped)
         .fileImporter(
@@ -390,6 +406,7 @@ struct InspectorView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .help(model.selectedClipLUTName ?? "Applied")
                         Button(role: .destructive) {
                             model.removeLUT()
                         } label: {

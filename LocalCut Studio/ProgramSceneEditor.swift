@@ -153,6 +153,7 @@ struct SceneLayerEditorRow: View {
                 Toggle(isOn: $layer.visible) {
                     Text(layerTitle)
                         .lineLimit(1)
+                        .help(layerTitle)
                 }
                 Spacer()
                 Button(role: .destructive) {

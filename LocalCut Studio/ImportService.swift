@@ -34,7 +34,7 @@ final class ImportService {
                 loaded.append(item)
             } catch {
                 if didAccess { url.stopAccessingSecurityScopedResource() }
-                model.statusMessage = "Could not import \(url.lastPathComponent): \(error.localizedDescription)"
+                model.statusMessage = "Could not import \(url.lastPathComponent): \(error.localizedDescription). Check that the file is a supported media format and hasn't been moved or deleted."
             }
         }
         guard !loaded.isEmpty else { return .failed }

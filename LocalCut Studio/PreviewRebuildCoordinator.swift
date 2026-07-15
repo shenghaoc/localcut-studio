@@ -97,7 +97,7 @@ final class PreviewRebuildCoordinator {
                         })
                     cleanupPreviewRunning = true
                 } catch {
-                    model.statusMessage = "Live voice cleanup unavailable: \(error.localizedDescription)"
+                    model.statusMessage = "Live voice cleanup unavailable: \(error.localizedDescription). Export to apply voice cleanup offline."
                     model.audioBus.stopLivePreviewAudio()
                 }
             } else if needsLoudnessGain {
@@ -141,7 +141,7 @@ final class PreviewRebuildCoordinator {
                 }
             }
         } catch {
-            model.statusMessage = "Preview build failed: \(error.localizedDescription)"
+            model.statusMessage = "Preview build failed: \(error.localizedDescription). Check that all media files are still accessible and not corrupted."
         }
     }
 

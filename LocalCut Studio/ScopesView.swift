@@ -247,7 +247,7 @@ private struct ScopeBackgroundView: View, Equatable {
             line.addLine(to: CGPoint(x: frameRect.maxX, y: y))
             context.stroke(line, with: .color(Self.gridColor), lineWidth: 0.5)
             let label = Text("\(Int(fraction * 100))")
-                .font(.system(size: 8))
+                .font(.caption2)
                 .foregroundStyle(.white.opacity(0.5))
             // Anchor .bottomLeading keeps text above the line; clamp to min Y
             // so the top "100" label isn't clipped at the frame edge.
@@ -283,7 +283,7 @@ private struct ScopeBackgroundView: View, Equatable {
             let box = CGRect(x: center.x - 4, y: center.y - 4, width: 8, height: 8)
             context.stroke(Path(box), with: .color(target.color.opacity(0.55)), lineWidth: 0.8)
             let label = Text(target.label)
-                .font(.system(size: 7, weight: .semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(target.color.opacity(0.65))
             context.draw(label, at: CGPoint(x: center.x + 5, y: center.y), anchor: .leading)
         }

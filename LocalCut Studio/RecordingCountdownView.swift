@@ -6,6 +6,7 @@ struct RecordingCountdownView: View {
     @Bindable var model: EditorModel
 
     @State private var scale: CGFloat = 1.0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: EditorModel) {
         self.model = model
@@ -21,8 +22,8 @@ struct RecordingCountdownView: View {
                 Text(model.countdownRemaining > 0 ? "\(model.countdownRemaining)" : "Recording")
                     .font(.largeTitle.weight(.bold))
                     .foregroundStyle(.white)
-                    .scaleEffect(scale)
-                    .animation(.easeInOut(duration: 0.3), value: scale)
+                    .scaleEffect(reduceMotion ? 1.0 : scale)
+                    .animation(reduceMotion ? .none : .easeInOut(duration: 0.3), value: scale)
                     .accessibilityLabel(model.countdownRemaining > 0
                         ? "Starting in \(model.countdownRemaining) seconds"
                         : "Recording started")
@@ -56,6 +57,7 @@ struct RecordingCountdownView: View {
     }
 
     private func pulse() {
+        guard !reduceMotion else { return }
         withAnimation(.easeInOut(duration: 0.15)) { scale = 1.2 }
         withAnimation(.easeInOut(duration: 0.2).delay(0.15)) { scale = 1.0 }
     }
