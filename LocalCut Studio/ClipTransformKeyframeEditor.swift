@@ -7,6 +7,8 @@ struct ClipTransformKeyframeEditor: View {
     @Bindable var model: EditorModel
 
     var body: some View {
+        let hasKeyframe = model.selectedClipTransformKeyframeAtPlayhead != nil
+
         DisclosureGroup("Clip Transform Keyframes") {
             LabeledContent("Local Time") {
                 Text(model.selectedClipTransformLocalPlayheadTime.map { TimeFormatting.timecode($0.seconds) } ?? "--:--")
@@ -31,10 +33,12 @@ struct ClipTransformKeyframeEditor: View {
                 Button {
                     model.addOrUpdateSelectedClipTransformKeyframe()
                 } label: {
-                    Label(model.selectedClipTransformKeyframeAtPlayhead == nil ? "Add" : "Update",
-                          systemImage: model.selectedClipTransformKeyframeAtPlayhead == nil ? "plus.diamond.fill" : "diamond.fill")
+                    Label(hasKeyframe ? "Update" : "Add",
+                          systemImage: hasKeyframe ? "diamond.fill" : "plus.diamond.fill")
                 }
                 .disabled(model.selectedClipTransformLocalPlayheadTime == nil)
+                .help(hasKeyframe ? "Update clip transform keyframe" : "Add clip transform keyframe")
+                .accessibilityLabel(hasKeyframe ? "Update clip transform keyframe" : "Add clip transform keyframe")
 
                 Button(role: .destructive) {
                     model.removeSelectedClipTransformKeyframe()
@@ -43,7 +47,7 @@ struct ClipTransformKeyframeEditor: View {
                 }
                 .help("Remove keyframe")
                 .accessibilityLabel("Remove clip transform keyframe")
-                .disabled(model.selectedClipTransformKeyframeAtPlayhead == nil)
+                .disabled(!hasKeyframe)
 
                 Button {
                     model.seekToNextSelectedClipTransformKeyframe()
@@ -55,7 +59,7 @@ struct ClipTransformKeyframeEditor: View {
             }
             .controlSize(.small)
 
-            if model.selectedClipTransformKeyframeAtPlayhead != nil {
+            if hasKeyframe {
                 keyframeValueEditor
             }
 
