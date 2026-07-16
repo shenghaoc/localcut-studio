@@ -162,12 +162,26 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 - **Clip Colours:** Video clips = blue family, audio clips = green family, selected = Film Gold accent.
 - **Trim Handles:** White at 15% opacity on hover.
 
+### View Modifiers
+- **`.monospacedCaption()`** — Applies `.font(.caption)`, `.monospacedDigit()`, and `.foregroundStyle(.secondary)` in one call. Use for secondary numeric labels (timecodes, counts, bitrates). Defined in `Theme.swift`.
+- **`.tappable()`** — Applies `.contentShape(Rectangle())` so small tappable elements (lane segments, timeline clips) respond reliably across their full frame. Defined in `Theme.swift`.
+
+### Keyframe Navigation Bar
+`KeyframeNavBar` is a reusable four-button HStack (previous / add-or-update / remove / next) with `.controlSize(.small)`. Used across speed, look, skin-smooth, clip-transform, and callout-transform keyframe editors. Accepts callbacks and disabled-state booleans; the add/update button label and icon toggle based on `hasKeyframeAtPlayhead`.
+
+### Spacing Tokens
+- **`CGFloat.lcInsetStandard`** (12 pt): Standard inset for panel content and grouped sections.
+- **`CGFloat.lcInsetCompact`** (8 pt): Compact inset for dense rows, badges, and inline controls.
+
+### Status Dot
+`StatusDot(color:)` is an 8×8 pt `Circle` fill indicator. Available for new status and selection pips; existing selection-dot patterns that use conditional `.fill()` may stay as-is when the conditional treatment is clearer inline.
+
 ## 6. Do's and Don'ts
 
 ### Do:
 - **Do** use system semantic colours for all backgrounds, text, and separators — never hard-code a grey.
 - **Do** use SF Symbols for all iconography, with `.help(...)` tooltip and `.accessibilityLabel(...)` on every icon-only control.
-- **Do** use `.monospacedDigit()` on every timecode, duration, and frame number.
+- **Do** use `.monospacedDigit()` on every timecode, duration, and frame number — prefer `.monospacedCaption()` when the text is also secondary and caption-sized.
 - **Do** use Liquid Glass (`.glassEffect`) only for interactive controls floating over content — never as decoration.
 - **Do** respect light/dark appearance automatically; test every panel in both modes.
 - **Do** disable (don't hide) temporarily unavailable actions, and explain why via `.help`.

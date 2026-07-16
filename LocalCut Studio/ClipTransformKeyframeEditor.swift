@@ -21,43 +21,18 @@ struct ClipTransformKeyframeEditor: View {
                     .monospacedDigit()
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    model.seekToPreviousSelectedClipTransformKeyframe()
-                } label: {
-                    Image(systemName: "backward.end.fill")
-                }
-                .help("Previous keyframe")
-                .accessibilityLabel("Previous clip transform keyframe")
-
-                Button {
-                    model.addOrUpdateSelectedClipTransformKeyframe()
-                } label: {
-                    Label(hasKeyframe ? "Update" : "Add",
-                          systemImage: hasKeyframe ? "diamond.fill" : "plus.diamond.fill")
-                }
-                .disabled(model.selectedClipTransformLocalPlayheadTime == nil)
-                .help(hasKeyframe ? "Update clip transform keyframe" : "Add clip transform keyframe")
-                .accessibilityLabel(hasKeyframe ? "Update clip transform keyframe" : "Add clip transform keyframe")
-
-                Button(role: .destructive) {
-                    model.removeSelectedClipTransformKeyframe()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .help("Remove keyframe")
-                .accessibilityLabel("Remove clip transform keyframe")
-                .disabled(!hasKeyframe)
-
-                Button {
-                    model.seekToNextSelectedClipTransformKeyframe()
-                } label: {
-                    Image(systemName: "forward.end.fill")
-                }
-                .help("Next keyframe")
-                .accessibilityLabel("Next clip transform keyframe")
-            }
-            .controlSize(.small)
+            KeyframeNavBar(
+                keyframeKind: "clip transform",
+                canGoToPrevious: true,
+                canAddOrUpdate: model.selectedClipTransformLocalPlayheadTime != nil,
+                canRemove: hasKeyframe,
+                canGoToNext: true,
+                hasKeyframeAtPlayhead: hasKeyframe,
+                onPrevious: { model.seekToPreviousSelectedClipTransformKeyframe() },
+                onAddOrUpdate: { model.addOrUpdateSelectedClipTransformKeyframe() },
+                onRemove: { model.removeSelectedClipTransformKeyframe() },
+                onNext: { model.seekToNextSelectedClipTransformKeyframe() }
+            )
 
             if hasKeyframe {
                 keyframeValueEditor

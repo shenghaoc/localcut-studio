@@ -67,9 +67,7 @@ struct SilenceReviewSheet: View {
                     .font(.body.monospacedDigit())
                 HStack(spacing: 8) {
                     Text(String(format: "%.1fs", proposal.silenceRange.duration.seconds))
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                        .monospacedCaption()
                     Text(proposal.suggestedAction == .trim ? "Trim" : "Split")
                         .font(.caption)
                         .foregroundStyle(.secondary)

@@ -295,41 +295,18 @@ struct ScreencastInspectorView: View {
                     .monospacedDigit()
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    model.seekToPreviousSelectedCalloutTransformKeyframe()
-                } label: {
-                    Image(systemName: "backward.end.fill")
-                }
-                .help("Previous keyframe")
-                .accessibilityLabel("Previous callout transform keyframe")
-
-                Button {
-                    model.addOrUpdateSelectedCalloutTransformKeyframe()
-                } label: {
-                    Label(model.selectedCalloutTransformKeyframeAtPlayhead == nil ? "Add" : "Update",
-                          systemImage: model.selectedCalloutTransformKeyframeAtPlayhead == nil ? "plus.diamond.fill" : "diamond.fill")
-                }
-                .disabled(model.selectedCalloutLocalPlayheadTime == nil)
-
-                Button(role: .destructive) {
-                    model.removeSelectedCalloutTransformKeyframe()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .help("Remove keyframe")
-                .accessibilityLabel("Remove callout transform keyframe")
-                .disabled(model.selectedCalloutTransformKeyframeAtPlayhead == nil)
-
-                Button {
-                    model.seekToNextSelectedCalloutTransformKeyframe()
-                } label: {
-                    Image(systemName: "forward.end.fill")
-                }
-                .help("Next keyframe")
-                .accessibilityLabel("Next callout transform keyframe")
-            }
-            .controlSize(.small)
+            KeyframeNavBar(
+                keyframeKind: "callout transform",
+                canGoToPrevious: true,
+                canAddOrUpdate: model.selectedCalloutLocalPlayheadTime != nil,
+                canRemove: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
+                canGoToNext: true,
+                hasKeyframeAtPlayhead: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
+                onPrevious: { model.seekToPreviousSelectedCalloutTransformKeyframe() },
+                onAddOrUpdate: { model.addOrUpdateSelectedCalloutTransformKeyframe() },
+                onRemove: { model.removeSelectedCalloutTransformKeyframe() },
+                onNext: { model.seekToNextSelectedCalloutTransformKeyframe() }
+            )
 
             if model.selectedCalloutTransformKeyframeAtPlayhead != nil {
                 calloutKeyframeValueEditor

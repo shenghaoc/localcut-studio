@@ -243,7 +243,7 @@ struct ProgramPanel: View {
     private func sceneRow(_ scene: SceneDefinition) -> some View {
         HStack {
             Circle()
-                .fill(programState.currentSceneId == scene.id ? Color.accentColor : Color.clear)
+                .fill(programState.currentSceneId == scene.id ? Color.lcAccent : Color.clear)
                 .frame(width: 8, height: 8)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {

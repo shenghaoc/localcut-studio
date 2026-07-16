@@ -39,8 +39,7 @@ struct MarkersInspectorView: View {
                 model.seekToMarker(id: marker.id)
             } label: {
                 Text(TimeFormatting.timecode(marker.time.seconds))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .monospacedCaption()
             }
             .buttonStyle(.borderless)
             .help("Seek to marker")

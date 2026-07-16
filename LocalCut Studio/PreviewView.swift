@@ -139,12 +139,6 @@ struct PreviewView: View {
             } description: {
                 Text("Import media, then drag a clip to the timeline.")
                     .foregroundStyle(.secondary)
-            } actions: {
-                Button("Import Media…") {
-                    model.requestImport()
-                }
-                .buttonStyle(.borderedProminent)
-                .help("Import media")
             }
             .padding(24)
         }

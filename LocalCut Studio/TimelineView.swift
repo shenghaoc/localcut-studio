@@ -1083,7 +1083,7 @@ private struct RulerBackgroundCanvas: View, Equatable {
                 line.addLine(to: CGPoint(x: x, y: rulerHeight))
                 context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
                 if isMajor {
-                    let text = Text(TimeFormatting.timecode(t)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                    let text = Text(TimeFormatting.timecode(t)).font(.caption2.monospaced()).foregroundStyle(.secondary)
                     context.draw(text, at: CGPoint(x: x + 2, y: tickTop), anchor: .topLeading)
                 }
                 i += 1

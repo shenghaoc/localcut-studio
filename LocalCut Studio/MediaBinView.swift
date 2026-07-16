@@ -257,9 +257,7 @@ private struct MediaRow: View {
                     .lineLimit(1)
                     .font(.body)
                 Text(TimeFormatting.timecode(item.durationSeconds))
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .monospacedCaption()
             }
             Spacer(minLength: 0)
         }

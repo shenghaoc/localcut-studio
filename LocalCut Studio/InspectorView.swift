@@ -182,42 +182,18 @@ struct InspectorView: View {
                         .monospacedDigit()
                 }
 
-                HStack(spacing: 8) {
-                    Button {
-                        model.seekToPreviousSelectedClipSpeedKeyframe()
-                    } label: {
-                        Image(systemName: "backward.end.fill")
-                    }
-                    .help("Previous keyframe")
-                    .accessibilityLabel("Previous speed keyframe")
-                    .disabled(!hasPreviousSpeedKeyframe)
-
-                    Button {
-                        model.addOrUpdateSelectedClipSpeedKeyframe()
-                    } label: {
-                        Label(speedKeyframeActionTitle, systemImage: speedKeyframeActionIcon)
-                    }
-                    .disabled(model.selectedClipSourceLocalPlayheadTime == nil)
-
-                    Button(role: .destructive) {
-                        model.removeSelectedClipSpeedKeyframe()
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .help("Remove keyframe")
-                    .accessibilityLabel("Remove speed keyframe")
-                    .disabled(model.selectedClipSpeedKeyframeAtPlayhead == nil)
-
-                    Button {
-                        model.seekToNextSelectedClipSpeedKeyframe()
-                    } label: {
-                        Image(systemName: "forward.end.fill")
-                    }
-                    .help("Next keyframe")
-                    .accessibilityLabel("Next speed keyframe")
-                    .disabled(!hasNextSpeedKeyframe)
-                }
-                .controlSize(.small)
+                KeyframeNavBar(
+                    keyframeKind: "speed",
+                    canGoToPrevious: hasPreviousSpeedKeyframe,
+                    canAddOrUpdate: model.selectedClipSourceLocalPlayheadTime != nil,
+                    canRemove: model.selectedClipSpeedKeyframeAtPlayhead != nil,
+                    canGoToNext: hasNextSpeedKeyframe,
+                    hasKeyframeAtPlayhead: model.selectedClipSpeedKeyframeAtPlayhead != nil,
+                    onPrevious: { model.seekToPreviousSelectedClipSpeedKeyframe() },
+                    onAddOrUpdate: { model.addOrUpdateSelectedClipSpeedKeyframe() },
+                    onRemove: { model.removeSelectedClipSpeedKeyframe() },
+                    onNext: { model.seekToNextSelectedClipSpeedKeyframe() }
+                )
             }
 
             HStack {
@@ -406,7 +382,6 @@ struct InspectorView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                            .help(model.selectedClipLUTName ?? "Applied")
                         Button(role: .destructive) {
                             model.removeLUT()
                         } label: {
@@ -661,42 +636,18 @@ struct InspectorView: View {
                     .monospacedDigit()
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    model.seekToPreviousLookStrengthKeyframe(kind)
-                } label: {
-                    Image(systemName: "backward.end.fill")
-                }
-                .help("Previous keyframe")
-                .accessibilityLabel("Previous \(kind.displayName) keyframe")
-                .disabled(!hasPreviousLookKeyframe(kind))
-
-                Button {
-                    model.addOrUpdateLookStrengthKeyframe(kind)
-                } label: {
-                    Label(lookKeyframeActionTitle(kind), systemImage: lookKeyframeActionIcon(kind))
-                }
-                .disabled(model.selectedClipLookLocalPlayheadTime == nil)
-
-                Button(role: .destructive) {
-                    model.removeLookStrengthKeyframe(kind)
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .help("Remove keyframe")
-                .accessibilityLabel("Remove \(kind.displayName) keyframe")
-                .disabled(model.lookStrengthKeyframeAtPlayhead(kind) == nil)
-
-                Button {
-                    model.seekToNextLookStrengthKeyframe(kind)
-                } label: {
-                    Image(systemName: "forward.end.fill")
-                }
-                .help("Next keyframe")
-                .accessibilityLabel("Next \(kind.displayName) keyframe")
-                .disabled(!hasNextLookKeyframe(kind))
-            }
-            .controlSize(.small)
+            KeyframeNavBar(
+                keyframeKind: kind.displayName,
+                canGoToPrevious: hasPreviousLookKeyframe(kind),
+                canAddOrUpdate: model.selectedClipLookLocalPlayheadTime != nil,
+                canRemove: model.lookStrengthKeyframeAtPlayhead(kind) != nil,
+                canGoToNext: hasNextLookKeyframe(kind),
+                hasKeyframeAtPlayhead: model.lookStrengthKeyframeAtPlayhead(kind) != nil,
+                onPrevious: { model.seekToPreviousLookStrengthKeyframe(kind) },
+                onAddOrUpdate: { model.addOrUpdateLookStrengthKeyframe(kind) },
+                onRemove: { model.removeLookStrengthKeyframe(kind) },
+                onNext: { model.seekToNextLookStrengthKeyframe(kind) }
+            )
         }
     }
 
@@ -752,42 +703,18 @@ struct InspectorView: View {
                         .monospacedDigit()
                 }
 
-                HStack(spacing: 8) {
-                    Button {
-                        model.seekToPreviousSelectedClipSkinSmoothStrengthKeyframe()
-                    } label: {
-                        Image(systemName: "backward.end.fill")
-                    }
-                    .help("Previous keyframe")
-                    .accessibilityLabel("Previous skin-smooth keyframe")
-                    .disabled(!hasPreviousSkinSmoothKeyframe)
-
-                    Button {
-                        model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe()
-                    } label: {
-                        Label(skinSmoothKeyframeActionTitle, systemImage: skinSmoothKeyframeActionIcon)
-                    }
-                    .disabled(model.selectedClipSourceLocalPlayheadTime == nil)
-
-                    Button(role: .destructive) {
-                        model.removeSelectedClipSkinSmoothStrengthKeyframe()
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .help("Remove keyframe")
-                    .accessibilityLabel("Remove skin-smooth keyframe")
-                    .disabled(model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead == nil)
-
-                    Button {
-                        model.seekToNextSelectedClipSkinSmoothStrengthKeyframe()
-                    } label: {
-                        Image(systemName: "forward.end.fill")
-                    }
-                    .help("Next keyframe")
-                    .accessibilityLabel("Next skin-smooth keyframe")
-                    .disabled(!hasNextSkinSmoothKeyframe)
-                }
-                .controlSize(.small)
+                KeyframeNavBar(
+                    keyframeKind: "skin-smooth",
+                    canGoToPrevious: hasPreviousSkinSmoothKeyframe,
+                    canAddOrUpdate: model.selectedClipSourceLocalPlayheadTime != nil,
+                    canRemove: model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead != nil,
+                    canGoToNext: hasNextSkinSmoothKeyframe,
+                    hasKeyframeAtPlayhead: model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead != nil,
+                    onPrevious: { model.seekToPreviousSelectedClipSkinSmoothStrengthKeyframe() },
+                    onAddOrUpdate: { model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe() },
+                    onRemove: { model.removeSelectedClipSkinSmoothStrengthKeyframe() },
+                    onNext: { model.seekToNextSelectedClipSkinSmoothStrengthKeyframe() }
+                )
             }
 
             DisclosureGroup("Advanced") {
@@ -1245,7 +1172,7 @@ struct InspectorView: View {
                 ForEach(model.project.overlays) { overlay in
                     HStack {
                         Circle()
-                            .fill(model.selectedOverlayID == overlay.id ? Color.accentColor : Color.clear)
+                            .fill(model.selectedOverlayID == overlay.id ? Color.lcAccent : Color.clear)
                             .frame(width: 8, height: 8)
                             .accessibilityHidden(true)
                         Text(overlay.sourceType.displayName)
