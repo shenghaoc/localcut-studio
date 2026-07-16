@@ -52,8 +52,17 @@ struct CaptionsInspectorView: View {
             allowedContentTypes: captionContentTypes,
             allowsMultipleSelection: false
         ) { [weak model] result in
-            if case .success(let urls) = result, let url = urls.first {
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
                 Task { [weak model] in await model?.importCaptionTrack(from: url) }
+            case .failure(let error):
+                guard let message = FileImporterErrorPresentation.statusMessage(
+                    summary: "Could not open captions",
+                    error: error,
+                    recoverySuggestion: "Choose a readable SRT or VTT file and try again.")
+                else { return }
+                model?.statusMessage = message
             }
         }
         .fileImporter(
@@ -61,10 +70,19 @@ struct CaptionsInspectorView: View {
             allowedContentTypes: presetContentTypes,
             allowsMultipleSelection: false
         ) { result in
-            if case .success(let urls) = result, let url = urls.first, let trackID = pickerTrackID {
+            defer { pickerTrackID = nil }
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first, let trackID = pickerTrackID else { return }
                 importPreset(from: url, into: trackID)
+            case .failure(let error):
+                guard let message = FileImporterErrorPresentation.statusMessage(
+                    summary: "Could not open caption preset",
+                    error: error,
+                    recoverySuggestion: "Choose a readable caption preset and try again.")
+                else { return }
+                model.statusMessage = message
             }
-            pickerTrackID = nil
         }
     }
 
@@ -129,20 +147,25 @@ struct CaptionsInspectorView: View {
     @ViewBuilder
     private func lineRow(_ line: CaptionLine, in track: CaptionTrack) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                compactSecondsField("Start",
-                                    value: captionStartBinding(for: line, in: track),
-                                    accessibilityLabel: "Caption line start")
-                compactSecondsField("Duration",
-                                    value: captionDurationBinding(for: line, in: track),
-                                    accessibilityLabel: "Caption line duration")
-                Spacer()
-                Button(role: .destructive) {
-                    model.removeCaptionLine(line.id, in: track.id)
-                } label: { Image(systemName: "minus.circle") }
-                    .buttonStyle(.borderless)
-                    .help("Remove line\(line.text.isEmpty ? "" : ": \(line.text)")")
-                    .accessibilityLabel("Remove caption line\(line.text.isEmpty ? "" : ": \(line.text)")")
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    captionTimingFields(for: line, in: track)
+                    Spacer()
+                    removeCaptionLineButton(line, in: track)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    compactSecondsField("Start",
+                                        value: captionStartBinding(for: line, in: track),
+                                        accessibilityLabel: "Caption line start")
+                    compactSecondsField("Duration",
+                                        value: captionDurationBinding(for: line, in: track),
+                                        accessibilityLabel: "Caption line duration")
+                    HStack {
+                        Spacer()
+                        removeCaptionLineButton(line, in: track)
+                    }
+                }
             }
             TextField("Caption text", text: Binding(
                 get: { line.text },
@@ -156,6 +179,27 @@ struct CaptionsInspectorView: View {
             styleKeyframeEditor(line, in: track)
         }
         .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func captionTimingFields(for line: CaptionLine, in track: CaptionTrack) -> some View {
+        compactSecondsField("Start",
+                            value: captionStartBinding(for: line, in: track),
+                            accessibilityLabel: "Caption line start")
+        compactSecondsField("Duration",
+                            value: captionDurationBinding(for: line, in: track),
+                            accessibilityLabel: "Caption line duration")
+    }
+
+    private func removeCaptionLineButton(_ line: CaptionLine, in track: CaptionTrack) -> some View {
+        Button(role: .destructive) {
+            model.removeCaptionLine(line.id, in: track.id)
+        } label: {
+            Image(systemName: "minus.circle")
+        }
+        .buttonStyle(.borderless)
+        .help("Remove line\(line.text.isEmpty ? "" : ": \(line.text)")")
+        .accessibilityLabel("Remove caption line\(line.text.isEmpty ? "" : ": \(line.text)")")
     }
 
     @ViewBuilder

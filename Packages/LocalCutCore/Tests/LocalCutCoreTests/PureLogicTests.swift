@@ -70,6 +70,96 @@ func keyframedFloatShiftRebasesAtSplit() {
     #expect(shifted.keyframes.map { $0.value } == [5, 10])
 }
 
+@Test("Keyframed<Float>: Bezier-preserving shift keeps the surviving curve")
+func keyframedFloatBezierShiftPreservesCurve() {
+    let track = Keyframed<Float>(
+        keyframes: [
+            Keyframe(
+                time: time(0),
+                value: 1,
+                outgoingHandle: KeyframeHandle(x: 0.25, y: 1)),
+            Keyframe(
+                time: time(10),
+                value: 3,
+                incomingHandle: KeyframeHandle(x: 0.25, y: 1)),
+        ],
+        defaultValue: 1)
+
+    let shifted = track.shiftedPreservingBezier(by: time(4))
+
+    for localSeconds in [0.0, 1.0, 3.0, 6.0] {
+        let actual = shifted.bezierValue(at: time(localSeconds))
+        let expected = track.bezierValue(at: time(localSeconds + 4))
+        #expect(approximatelyEqual(Double(actual), Double(expected), tolerance: 0.001))
+    }
+}
+
+@Test("Keyframed<Float>: exact Bezier split retains trailing keyframes")
+func keyframedFloatExactSplitRetainsTail() {
+    let track = Keyframed<Float>(
+        keyframes: [
+            Keyframe(time: time(0), value: 1),
+            Keyframe(time: time(5), value: 2),
+            Keyframe(time: time(10), value: 3),
+        ],
+        defaultValue: 1)
+
+    let split = track.splitPreservingBezier(at: time(5))
+
+    #expect(split.right.keyframes.map(\.time) == [time(0), time(5)])
+    #expect(split.right.keyframes.map(\.value) == [2, 3])
+}
+
+@Test("Keyframed<Float>: outside-range split keeps constant extensions")
+func keyframedFloatOutsideRangeSplitIsConstant() {
+    let firstIncoming = KeyframeHandle(x: 0.5, y: 9)
+    let lastOutgoing = KeyframeHandle(x: 0.5, y: -9)
+    let track = Keyframed<Float>(
+        keyframes: [
+            Keyframe(time: time(2), value: 1, incomingHandle: firstIncoming),
+            Keyframe(time: time(8), value: 3, outgoingHandle: lastOutgoing),
+        ],
+        defaultValue: 0)
+
+    let before = track.splitPreservingBezier(at: time(1)).right
+    let after = track.splitPreservingBezier(at: time(9)).left
+
+    #expect(before.keyframes[1].incomingHandle == nil)
+    #expect(approximatelyEqual(Double(before.bezierValue(at: time(0.5))), 1))
+    #expect(after.keyframes[after.keyframes.count - 2].outgoingHandle == nil)
+    #expect(approximatelyEqual(Double(after.bezierValue(at: time(8.5))), 3))
+}
+
+@Test("Skin smoothing clamps overshooting and invalid Bezier strength")
+func skinSmoothBezierStrengthIsSanitized() {
+    var overshooting = SkinSmoothEffect()
+    overshooting.strength = Keyframed<Float>(
+        keyframes: [
+            Keyframe(
+                time: time(0),
+                value: 0.2,
+                outgoingHandle: KeyframeHandle(x: 0.25, y: 2)),
+            Keyframe(
+                time: time(2),
+                value: 0.8,
+                incomingHandle: KeyframeHandle(x: 0.25, y: 2)),
+        ],
+        defaultValue: 0.2)
+    #expect(overshooting.strength(at: time(1)) == 1)
+
+    var invalid = SkinSmoothEffect()
+    invalid.strength = Keyframed<Float>(
+        keyframes: [
+            Keyframe(
+                time: time(0),
+                value: 0.2,
+                outgoingHandle: KeyframeHandle(x: 0.25, y: .nan)),
+            Keyframe(time: time(2), value: 0.8),
+        ],
+        defaultValue: 0.2)
+    #expect(invalid.strength(at: time(1)) == 0)
+}
+
 @Test("Look effects clamp authored and keyframed values")
 func lookEffectsClampValues() {
     let incoming = KeyframeHandle(x: 0.2, y: 0.3)
@@ -109,6 +199,40 @@ func lookEffectsClampValues() {
     #expect(vignette.amount.keyframes[0].value == 1)
     #expect(vignette.radius == 0.05)
     #expect(vignette.softness == 1)
+}
+
+@Test("Look effect evaluation is finite and effect-bounded")
+func lookEffectEvaluationIsSanitized() {
+    let overshooting = Keyframed<Float>(
+        keyframes: [
+            Keyframe(
+                time: time(0),
+                value: 0.2,
+                outgoingHandle: KeyframeHandle(x: 0.25, y: 2)),
+            Keyframe(
+                time: time(2),
+                value: 0.8,
+                incomingHandle: KeyframeHandle(x: 0.25, y: 2)),
+        ],
+        defaultValue: 0.2)
+    let invalid = Keyframed<Float>(
+        keyframes: [
+            Keyframe(
+                time: time(0),
+                value: 0.2,
+                outgoingHandle: KeyframeHandle(x: 0.25, y: .nan)),
+            Keyframe(time: time(2), value: 0.8),
+        ],
+        defaultValue: .nan)
+
+    #expect(Effect.grain(GrainEffect(amount: overshooting))
+        .evaluatedLookStrength(at: time(1)) == 1)
+    #expect(Effect.halation(HalationEffect(strength: invalid))
+        .evaluatedLookStrength(at: time(1)) == 0)
+    #expect(Effect.vignette(VignetteEffect(amount: invalid))
+        .evaluatedLookStrength(at: nil) == 0)
+    #expect(Effect.skinSmooth(SkinSmoothEffect())
+        .evaluatedLookStrength(at: time(1)) == nil)
 }
 
 @Test("Decoding look effect models clamps stored values")

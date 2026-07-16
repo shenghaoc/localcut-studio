@@ -117,6 +117,28 @@ struct MemoryPressureHandlerTests {
             maxDimension: 16) != nil)
     }
 
+    @Test("padded-background cache retains each render dimension independently")
+    func paddedBackgroundCacheKeysByRenderDimension() throws {
+        PaddedBackgroundRenderer.purgeCache()
+        defer { PaddedBackgroundRenderer.purgeCache() }
+
+        let context = CIContext()
+        let preview = try #require(context.createCGImage(
+            CIImage(color: .blue).cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16)),
+            from: CGRect(x: 0, y: 0, width: 16, height: 16)))
+        let export = try #require(context.createCGImage(
+            CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: 32, height: 32)),
+            from: CGRect(x: 0, y: 0, width: 32, height: 32)))
+        let bookmark = Data("shared-background".utf8)
+
+        PaddedBackgroundRenderer.cacheImage(preview, for: bookmark, maxDimension: 16)
+        PaddedBackgroundRenderer.cacheImage(export, for: bookmark, maxDimension: 32)
+
+        #expect(PaddedBackgroundRenderer.cacheEntryCount == 2)
+        #expect(PaddedBackgroundRenderer.cachedImage(for: bookmark, maxDimension: 16)?.width == 16)
+        #expect(PaddedBackgroundRenderer.cachedImage(for: bookmark, maxDimension: 32)?.width == 32)
+    }
+
     @Test("preview registry cleanup preserves active, in-flight, and transient registries")
     func previewRegistryCleanupPreservesActiveAndTransient() throws {
         let activeID = try #require(EffectCompositor.registerOverlaySources(

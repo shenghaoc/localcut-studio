@@ -15,6 +15,32 @@ struct KeyframeNavBar: View {
     let onRemove: () -> Void
     let onNext: () -> Void
 
+    private var previousGuidance: String {
+        canGoToPrevious
+            ? "Moves the playhead to the previous \(keyframeKind) keyframe."
+            : "No earlier \(keyframeKind) keyframe is available."
+    }
+
+    private var addOrUpdateGuidance: String {
+        let action = hasKeyframeAtPlayhead ? "update" : "add"
+        if canAddOrUpdate {
+            return "\(action.capitalized)s the \(keyframeKind) keyframe at the playhead."
+        }
+        return "Move the playhead into the editable range to \(action) a \(keyframeKind) keyframe."
+    }
+
+    private var removeGuidance: String {
+        canRemove
+            ? "Removes the \(keyframeKind) keyframe at the playhead."
+            : "No \(keyframeKind) keyframe is at the playhead."
+    }
+
+    private var nextGuidance: String {
+        canGoToNext
+            ? "Moves the playhead to the next \(keyframeKind) keyframe."
+            : "No later \(keyframeKind) keyframe is available."
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Button {
@@ -22,8 +48,9 @@ struct KeyframeNavBar: View {
             } label: {
                 Image(systemName: "backward.end.fill")
             }
-            .help("Previous keyframe")
+            .help(previousGuidance)
             .accessibilityLabel("Previous \(keyframeKind) keyframe")
+            .accessibilityHint(previousGuidance)
             .disabled(!canGoToPrevious)
 
             Button {
@@ -35,20 +62,20 @@ struct KeyframeNavBar: View {
                 )
             }
             .disabled(!canAddOrUpdate)
-            .help(hasKeyframeAtPlayhead
-                  ? "Update \(keyframeKind) keyframe"
-                  : "Add \(keyframeKind) keyframe")
+            .help(addOrUpdateGuidance)
             .accessibilityLabel(hasKeyframeAtPlayhead
                                 ? "Update \(keyframeKind) keyframe"
                                 : "Add \(keyframeKind) keyframe")
+            .accessibilityHint(addOrUpdateGuidance)
 
             Button(role: .destructive) {
                 onRemove()
             } label: {
                 Image(systemName: "trash")
             }
-            .help("Remove keyframe")
+            .help(removeGuidance)
             .accessibilityLabel("Remove \(keyframeKind) keyframe")
+            .accessibilityHint(removeGuidance)
             .disabled(!canRemove)
 
             Button {
@@ -56,8 +83,9 @@ struct KeyframeNavBar: View {
             } label: {
                 Image(systemName: "forward.end.fill")
             }
-            .help("Next keyframe")
+            .help(nextGuidance)
             .accessibilityLabel("Next \(keyframeKind) keyframe")
+            .accessibilityHint(nextGuidance)
             .disabled(!canGoToNext)
         }
         .controlSize(.small)

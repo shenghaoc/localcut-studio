@@ -161,8 +161,13 @@ final class DocumentController {
                            externallyEditedAssets: [],
                            model: model)
             }
+        } catch is CancellationError {
+            return
         } catch {
-            model.statusMessage = "Open failed: \(error.localizedDescription). Try reopening from File > Open Recent, or check that the project file hasn't been moved."
+            model.statusMessage = EditorModel.failureStatusMessage(
+                summary: "Open failed",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Try reopening from File > Open Recent, or check that the project file hasn't been moved.")
         }
     }
 
@@ -341,7 +346,10 @@ final class DocumentController {
             }
             model.project.overlayBundlePaths = originalOverlayPaths
             model.project.paddedBackground = originalPaddedBackground
-            model.statusMessage = "Save failed: \(error.localizedDescription). Check available disk space and try Save As to a different location."
+            model.statusMessage = EditorModel.failureStatusMessage(
+                summary: "Save failed",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Check available disk space and try Save As to a different location.")
             return false
         }
     }
@@ -630,8 +638,13 @@ final class DocumentController {
             PaddedBackgroundBundleResolver.adoptSingleFileBookmark(from: document.paddedBackground, model: model)
             adoptSaved(url: url, cleanIfRevision: savedRevision, model: model)
             model.statusMessage = "Saved \(url.lastPathComponent)."
+        } catch is CancellationError {
+            return
         } catch {
-            model.statusMessage = "Save failed: \(error.localizedDescription). Check available disk space and try Save As to a different location."
+            model.statusMessage = EditorModel.failureStatusMessage(
+                summary: "Save failed",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Check available disk space and try Save As to a different location.")
         }
     }
 
@@ -696,6 +709,14 @@ final class DocumentController {
             model.statusMessage = notes.isEmpty
                 ? "Saved \(bundleURL.lastPathComponent)."
                 : "Saved \(bundleURL.lastPathComponent); \(notes.joined(separator: "; "))"
+        } catch is CancellationError {
+            for (item, path) in originalPaths {
+                item.bundleRelativePath = path
+            }
+            model.project.overlayBundlePaths = originalOverlayPaths
+            model.project.coverFrame?.bundleRelativePath = originalCoverPath
+            model.project.paddedBackground = originalPaddedBackground
+            return
         } catch {
             for (item, path) in originalPaths {
                 item.bundleRelativePath = path
@@ -703,7 +724,10 @@ final class DocumentController {
             model.project.overlayBundlePaths = originalOverlayPaths
             model.project.coverFrame?.bundleRelativePath = originalCoverPath
             model.project.paddedBackground = originalPaddedBackground
-            model.statusMessage = "Save failed: \(error.localizedDescription). Check available disk space and try Save As to a different location."
+            model.statusMessage = EditorModel.failureStatusMessage(
+                summary: "Save failed",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Check available disk space and try Save As to a different location.")
         }
     }
 

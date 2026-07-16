@@ -80,7 +80,7 @@ extension EditorModel {
               callout.transformKeyframes.isAnimated else {
             return staticTransform(for: callout)
         }
-        return callout.transformKeyframes.value(at: localTime)
+        return callout.transformKeyframes.bezierValue(at: localTime)
     }
 
     var selectedCalloutTransformKeyframeAtPlayhead: Keyframe<Transform2D>? {
@@ -131,7 +131,7 @@ extension EditorModel {
         let existingID = selectedCalloutTransformKeyframeAtPlayhead?.id
         let wasAnimated = callout.transformKeyframes.isAnimated
         let value = wasAnimated
-            ? callout.transformKeyframes.value(at: localTime)
+            ? callout.transformKeyframes.bezierValue(at: localTime)
             : staticTransform(for: callout)
 
         performUndoable(existingID == nil ? "Add Callout Keyframe" : "Update Callout Keyframe") {

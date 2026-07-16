@@ -112,9 +112,17 @@ struct MediaBinView: View {
             allowedContentTypes: [.movie, .video, .audiovisualContent, .audio, .mpeg4Movie, .quickTimeMovie],
             allowsMultipleSelection: true
         ) { [weak model] result in
-            if case .success(let urls) = result {
+            switch result {
+            case .success(let urls):
                 guard let wantsBundling = model?.copyImportsIntoBundle else { return }
                 Task { [weak model] in await model?.importMedia(urls: urls, wantsBundling: wantsBundling) }
+            case .failure(let error):
+                guard let message = FileImporterErrorPresentation.statusMessage(
+                    summary: "Could not open media files",
+                    error: error,
+                    recoverySuggestion: "Choose supported media files that are still accessible, then try again.")
+                else { return }
+                model?.statusMessage = message
             }
         }
         .onChange(of: model.selectedMediaID) { _, newValue in

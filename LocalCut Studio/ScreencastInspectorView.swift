@@ -19,6 +19,24 @@ struct ScreencastInspectorView: View {
                 [.image]
             }
         }
+
+        var failureSummary: String {
+            switch self {
+            case .eventLog:
+                "Could not open event log"
+            case .backgroundImage:
+                "Could not open background image"
+            }
+        }
+
+        var failureRecoverySuggestion: String {
+            switch self {
+            case .eventLog:
+                "Choose a readable JSON event log and try again."
+            case .backgroundImage:
+                "Choose a readable image and try again."
+            }
+        }
     }
 
     @Bindable var model: EditorModel
@@ -44,17 +62,23 @@ struct ScreencastInspectorView: View {
                     let completedRequest = fileImportRequest
                     fileImportRequest = nil
 
-                    guard case .success(let urls) = result,
-                          let url = urls.first,
-                          let completedRequest else {
-                        return
-                    }
-
-                    switch completedRequest {
-                    case .eventLog:
-                        model.importScreencastEventLog(url: url)
-                    case .backgroundImage:
-                        model.applyPaddedBackgroundImage(url: url)
+                    switch result {
+                    case .success(let urls):
+                        guard let url = urls.first, let completedRequest else { return }
+                        switch completedRequest {
+                        case .eventLog:
+                            model.importScreencastEventLog(url: url)
+                        case .backgroundImage:
+                            model.applyPaddedBackgroundImage(url: url)
+                        }
+                    case .failure(let error):
+                        guard let completedRequest,
+                              let message = FileImporterErrorPresentation.statusMessage(
+                                summary: completedRequest.failureSummary,
+                                error: error,
+                                recoverySuggestion: completedRequest.failureRecoverySuggestion)
+                        else { return }
+                        model.statusMessage = message
                     }
                 }
             autoZoomSection

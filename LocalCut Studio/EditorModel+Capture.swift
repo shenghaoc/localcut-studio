@@ -256,7 +256,10 @@ extension EditorModel {
                 try await manager.enable()
                 replayManager = manager
             } catch {
-                statusMessage = "Could not start replay buffer. Try restarting the capture session."
+                statusMessage = Self.failureStatusMessage(
+                    summary: "Could not start replay buffer",
+                    detail: error.localizedDescription,
+                    recoverySuggestion: "Try restarting the capture session.")
             }
         }
         replayBufferManager = replayManager

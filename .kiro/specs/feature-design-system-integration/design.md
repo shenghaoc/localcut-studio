@@ -1,7 +1,8 @@
 # Design: Design-System Integration Polish
 
-> Status: **Implemented**. Pure view-layer polish; no engine, model, or
-> composition-math changes.
+> Status: **Implemented**. Presentation-led polish with narrow computed model
+> helpers for error copy and keyframe navigation; no model fields, document
+> schema, engine pipeline, or composition-math changes.
 
 ## Goal
 
@@ -13,8 +14,10 @@ shipping editor matches the design reference while keeping repo-native
 behaviour (real `AVPlayer` preview, `LocalCutCore` timecode, undo, persistence).
 
 Scope is deliberately narrow: shared chrome, timeline playhead affordance,
-inspector media imagery, render-preset metadata, and VoiceOver labelling.
-Nothing here touches `CMTime` math, the compositor, or the document schema.
+inspector media imagery, render-preset metadata, VoiceOver labelling, and the
+computed state needed to keep those controls honest. Nothing here changes
+stored model state, `CMTime` composition math, the compositor, or the document
+schema.
 
 ## Surfaces
 
@@ -88,6 +91,28 @@ The integration also closes the VoiceOver gaps the design pass surfaced:
 - The timeline ruler stays reachable to VoiceOver as the direct scrub target:
   it reports the current playhead time, supports adjustable increment/decrement
   scrubbing, and leaves only decorative tick/marker label drawing hidden.
+
+## Final review hardening
+
+The pre-merge review applies the same design contract to adjacent inspector
+surfaces touched by the integration:
+
+- Error copy in the affected import, document, preview, capture, detection, and
+  interchange paths is built from the actual failure plus a concise recovery
+  action, with punctuation normalized centrally; cancellation remains a
+  non-error.
+- `KeyframeNavBar` uses model-derived neighbour availability with the same
+  half-frame tolerance as seeking, and disabled controls expose their reason in
+  help and accessibility hints.
+- Project and overlay groups use one collapsible Form section each, avoiding
+  nested containers and duplicate headings.
+- Caption timing fields use an adaptive horizontal/vertical layout so scaled
+  text does not overflow the narrow inspector.
+- Transition removal uses the native destructive verb “Delete” consistently in
+  its menu, inspector, undo action, and success status.
+- `PRODUCT.md` and `DESIGN.md` distinguish the deliberate forced-dark editor
+  from adaptive semantic/high-contrast behavior and document only primitives
+  that have production call sites.
 
 ## Visual identity pass
 
@@ -167,7 +192,12 @@ are all standard SwiftUI/AppKit (no new paradigms):
   inline `Text` with `.foregroundStyle(.secondary)`;
   Master Gain uses the shared `LabeledSliderRow`; the scopes pane sits on the
   recessed content surface (`lcLane`) rather than a chrome material; timeline
-  fonts use `caption2`/monospaced text styles instead of raw point sizes.
+  and scopes labels use `caption2`/monospaced text styles instead of
+  raw point sizes; the top waveform label anchors below its graticule line so
+  larger Dynamic Type sizes remain inside the Canvas.
+- **Unambiguous form labels.** The recorder Audio section uses “Microphone” for
+  the enable toggle and “Input Device” for device selection, so adjacent
+  controls do not produce duplicate visual or VoiceOver labels.
 - **Pointer feedback.** The ruler shows a resize cursor + "Drag to scrub"
   tooltip; marker diamonds show the pointing-hand cursor (the trim handles
   already used `resizeLeftRight`, matching the macOS 27 pointer set).

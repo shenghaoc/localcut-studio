@@ -1,4 +1,5 @@
 import AppIntents
+import AppKit
 import Testing
 @testable import LocalCut_Studio
 
@@ -227,6 +228,41 @@ struct AppIntentsTests {
 
         #expect(outcome == .failed)
         #expect(model.statusMessage == "Could not import \(inputURL.lastPathComponent): metadata unavailable")
+    }
+
+    @Test func importPanelCancellationPreservesStatus() async {
+        let model = EditorModel()
+        model.statusMessage = "Ready to import."
+
+        let outcome = await model.performImportMediaCommand(
+            presentPanel: {
+                (.cancel, [])
+            },
+            importMediaAction: { _ in
+                Issue.record("Import action should not run after panel cancellation.")
+                return .completed
+            })
+
+        #expect(outcome == .panelCancelled)
+        #expect(model.statusMessage == "Ready to import.")
+    }
+
+    @Test func exportPanelCancellationPreservesStatus() async {
+        let model = EditorModel()
+        model.totalDuration = 1
+        model.statusMessage = "Ready to export."
+
+        let outcome = await model.performExportProjectCommand(
+            presentPanel: {
+                (.cancel, nil)
+            },
+            exportProject: { _ in
+                Issue.record("Export action should not run after panel cancellation.")
+                return .completed
+            })
+
+        #expect(outcome == .panelCancelled)
+        #expect(model.statusMessage == "Ready to export.")
     }
 
     @Test func exportCoordinatorPropagatesQueueRejection() async {

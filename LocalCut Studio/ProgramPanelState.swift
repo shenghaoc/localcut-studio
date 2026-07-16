@@ -64,20 +64,28 @@ final class ProgramPanelState {
         defer { isRefreshingSources = false }
 
         var refreshed: [ProgramCaptureSource] = []
+        var screenSourceFailureMessage: String?
         do {
             let screenOptions = try await CaptureSourceCatalog.screenOptions()
             refreshed.append(contentsOf: screenOptions.map(Self.descriptor(for:)))
+        } catch is CancellationError {
+            return
         } catch {
-            statusMessage = "Could not refresh screen sources. Check Screen Recording permissions in System Settings."
+            screenSourceFailureMessage = EditorModel.failureStatusMessage(
+                summary: "Could not refresh screen sources",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Check Screen Recording permissions in System Settings, then try again.")
         }
 
         refreshed.append(contentsOf: CaptureSourceCatalog.webcamOptions().map(Self.webcamDescriptor(for:)))
         refreshed.append(contentsOf: CaptureSourceCatalog.microphoneOptions().map(Self.microphoneDescriptor(for:)))
         sourceBindings = refreshed
         updateBudgetReadout()
-        if sources.isEmpty, statusMessage.isEmpty {
+        if let screenSourceFailureMessage {
+            statusMessage = screenSourceFailureMessage
+        } else if sources.isEmpty {
             statusMessage = "No capture sources found."
-        } else if !sources.isEmpty {
+        } else {
             statusMessage = "Found \(sources.count) capture source\(sources.count == 1 ? "" : "s")."
         }
     }

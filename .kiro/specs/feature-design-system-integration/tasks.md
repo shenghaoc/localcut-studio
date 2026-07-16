@@ -1,7 +1,7 @@
 # Tasks: Design-System Integration Polish
 
-> Status: **Implemented**. View-layer only; see [design](./design.md) and
-> [requirements](./requirements.md).
+> Status: **Implemented**. Presentation-led, with narrow computed model helpers;
+> see [design](./design.md) and [requirements](./requirements.md).
 
 ## Shared header
 
@@ -10,8 +10,10 @@
   with the title carrying `.isHeader`; Timeline passes `verticalPadding: 6`
   (R1.1, R1.2).
 - [x] **T1.2** Add the `Trailing == EmptyView` convenience init (R1.3).
-- [x] **T1.3** Route `InspectorView`, `MediaBinView`, and `TimelineView`
-  headers through `EditorPanelHeader`, each keeping its own separator (R1.4).
+- [x] **T1.3** Route `MediaBinView` and `TimelineView` headers through
+  `EditorPanelHeader`, each keeping its own separator; use the Inspector side
+  rail's segmented pane switcher as its single visible and VoiceOver heading
+  (R1.4).
 
 ## Timeline chrome
 
@@ -103,7 +105,8 @@
 - [x] **T9.4** Standard controls/materials: status bar `.bar`; Preserve Pitch +
   Beauty toggles → checkbox; inspector timecodes `monospacedDigit`; render-queue
   inline `Text` placeholder; Master Gain via `LabeledSliderRow`; scopes on
-  `lcLane`; timeline fonts → text styles; Align-Window reset.
+  `lcLane`; timeline/scopes fonts → text styles, with the top waveform label
+  anchored below its line for Dynamic Type; Align-Window reset.
 - [x] **T9.5** Pointer feedback: ruler resize cursor + scrub tooltip; marker
   pointing-hand cursor; ruler VoiceOver label/value + adjustable scrub action.
 - [x] **T9.6** Unify list-row selection on the system selection colour (media
@@ -161,6 +164,28 @@
   `lcTrimHover`) to `Theme.swift`; make transition glyphs focusable and expose
   selected state so timeline-scoped Delete and VoiceOver work after selection.
 
+## Final pre-merge review hardening
+
+- [x] **T11.1** Harden the affected picker, import, document, preview, capture,
+  detection, and interchange failures with underlying detail plus one
+  punctuation-safe recovery suggestion; ignore intentional cancellation
+  without swallowing real failures, bound batch announcements, and keep the
+  full truncated status available through help and accessibility (R7.1).
+- [x] **T11.2** Give speed, look, and skin keyframe navigation model-derived
+  neighbour availability using the seek tolerance; explain disabled shared-nav
+  controls through help and accessibility hints (R7.2).
+- [x] **T11.3** Flatten Project and Overlay grouped-Form content so collapsible
+  sections do not contain nested sections or duplicate headings (R7.3).
+- [x] **T11.4** Add an adaptive vertical fallback for scaled caption timing
+  controls in the narrow inspector (R7.4).
+- [x] **T11.5** Reconcile forced-dark/high-contrast behavior, functional HUD
+  glass, badge recipes, and shipping design primitives across `PRODUCT.md`,
+  `DESIGN.md`, and `Theme.swift` (R7.5).
+- [x] **T11.6** Use “Delete Transition” consistently in the menu, inspector,
+  undo action, and success status (R7.6).
+- [x] **T11.7** Disambiguate the recorder microphone toggle from its adjacent
+  “Input Device” picker for visual and VoiceOver users (R7.7).
+
 ## Verification
 
 - [x] **T6.1** `xcodebuild test` (Debug, macOS) compiles the app without new
@@ -169,7 +194,9 @@
 - [x] **T6.3** Add focused pure tests for ruler adjustment step limits, project
   boundary clamping, and the empty-project case (R2.3, R6.2).
 - [x] **T6.4** Stabilize the recorder UI flow test by activating its identified
-  buttons directly instead of relying on window-level synthetic key delivery;
-  keep every recorder-state and gap-collapse assertion unchanged.
-- [x] **T6.2** Confirm no model/schema/composition change and that the
-  standalone `app/` prototype is not merged (R6.3).
+  buttons directly instead of relying on window-level synthetic key delivery,
+  and re-activate the app before each click so an unrelated foreground window
+  cannot intercept the action; keep every recorder-state and gap-collapse
+  assertion unchanged.
+- [x] **T6.2** Confirm no stored model field/schema/composition-math change and
+  that the standalone `app/` prototype is not merged (R6.3).

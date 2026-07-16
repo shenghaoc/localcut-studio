@@ -49,11 +49,11 @@ struct InspectorView: View {
             CoverInspectorView(model: model)
 
             Section("Project Settings", isExpanded: $showProjectSettings) {
-                projectSection
+                projectSettingsContent
             }
 
-            Section("Overlay List", isExpanded: $showOverlayList) {
-                overlayListSection
+            Section("Overlays", isExpanded: $showOverlayList) {
+                overlayListContent
             }
 
             Section("Screencast Tools", isExpanded: $showScreencastTools) {
@@ -70,8 +70,17 @@ struct InspectorView: View {
             allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data],
             allowsMultipleSelection: false
         ) { result in
-            if case .success(let urls) = result, let url = urls.first {
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
                 model.importLUT(url: url)
+            case .failure(let error):
+                guard let message = FileImporterErrorPresentation.statusMessage(
+                    summary: "Could not open LUT",
+                    error: error,
+                    recoverySuggestion: "Choose a readable .cube LUT and try again.")
+                else { return }
+                model.statusMessage = message
             }
         }
         .fileImporter(
@@ -79,10 +88,19 @@ struct InspectorView: View {
             allowedContentTypes: [.localCutLookPreset],
             allowsMultipleSelection: false
         ) { [weak model] result in
-            if case .success(let urls) = result, let url = urls.first {
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
                 Task { [weak model] in
                     await model?.importLookPreset(url: url)
                 }
+            case .failure(let error):
+                guard let message = FileImporterErrorPresentation.statusMessage(
+                    summary: "Could not open look preset",
+                    error: error,
+                    recoverySuggestion: "Choose a readable LocalCut look preset and try again.")
+                else { return }
+                model?.statusMessage = message
             }
         }
     }
@@ -154,7 +172,10 @@ struct InspectorView: View {
                     model.commitCoalescedUndo()
                 })
 
-            LabeledContent("Output", value: TimeFormatting.timecode(model.selectedClipOutputDuration.seconds))
+            LabeledContent("Output") {
+                Text(TimeFormatting.timecode(model.selectedClipOutputDuration.seconds))
+                    .monospacedDigit()
+            }
 
             Toggle("Preserve Pitch", isOn: preservePitchBinding)
                 .toggleStyle(.checkbox)
@@ -185,10 +206,10 @@ struct InspectorView: View {
 
                 KeyframeNavBar(
                     keyframeKind: "speed",
-                    canGoToPrevious: hasPreviousSpeedKeyframe,
+                    canGoToPrevious: model.hasPreviousSelectedClipSpeedKeyframe,
                     canAddOrUpdate: model.selectedClipSourceLocalPlayheadTime != nil,
                     canRemove: model.selectedClipSpeedKeyframeAtPlayhead != nil,
-                    canGoToNext: hasNextSpeedKeyframe,
+                    canGoToNext: model.hasNextSelectedClipSpeedKeyframe,
                     hasKeyframeAtPlayhead: model.selectedClipSpeedKeyframeAtPlayhead != nil,
                     onPrevious: { model.seekToPreviousSelectedClipSpeedKeyframe() },
                     onAddOrUpdate: { model.addOrUpdateSelectedClipSpeedKeyframe() },
@@ -242,22 +263,6 @@ struct InspectorView: View {
         return TimeFormatting.timecode(localTime.seconds)
     }
 
-    private var hasPreviousSpeedKeyframe: Bool {
-        guard let localTime = model.selectedClipSourceLocalPlayheadTime,
-              let clip = model.selectedClip else { return false }
-        return clip.speedCurve.keyframes.contains {
-            $0.time.seconds < localTime.seconds
-        }
-    }
-
-    private var hasNextSpeedKeyframe: Bool {
-        guard let localTime = model.selectedClipSourceLocalPlayheadTime,
-              let clip = model.selectedClip else { return false }
-        return clip.speedCurve.keyframes.contains {
-            $0.time.seconds > localTime.seconds
-        }
-    }
-
     // MARK: - Transition
 
     @ViewBuilder
@@ -301,7 +306,7 @@ struct InspectorView: View {
             Button(role: .destructive) {
                 model.removeSelectedTransition()
             } label: {
-                Label("Remove Transition", systemImage: "trash")
+                Label("Delete Transition", systemImage: "trash")
             }
             .controlSize(.small)
         }
@@ -631,10 +636,10 @@ struct InspectorView: View {
 
             KeyframeNavBar(
                 keyframeKind: kind.displayName,
-                canGoToPrevious: hasPreviousLookKeyframe(kind),
+                canGoToPrevious: model.hasPreviousLookStrengthKeyframe(kind),
                 canAddOrUpdate: model.selectedClipLookLocalPlayheadTime != nil,
                 canRemove: model.lookStrengthKeyframeAtPlayhead(kind) != nil,
-                canGoToNext: hasNextLookKeyframe(kind),
+                canGoToNext: model.hasNextLookStrengthKeyframe(kind),
                 hasKeyframeAtPlayhead: model.lookStrengthKeyframeAtPlayhead(kind) != nil,
                 onPrevious: { model.seekToPreviousLookStrengthKeyframe(kind) },
                 onAddOrUpdate: { model.addOrUpdateLookStrengthKeyframe(kind) },
@@ -649,16 +654,6 @@ struct InspectorView: View {
         return TimeFormatting.timecode(localTime.seconds)
     }
 
-    private func hasPreviousLookKeyframe(_ kind: LookEffectKind) -> Bool {
-        guard let localTime = model.selectedClipLookLocalPlayheadTime else { return false }
-        return model.lookStrengthKeyframes(kind).contains { $0.time.seconds < localTime.seconds }
-    }
-
-    private func hasNextLookKeyframe(_ kind: LookEffectKind) -> Bool {
-        guard let localTime = model.selectedClipLookLocalPlayheadTime else { return false }
-        return model.lookStrengthKeyframes(kind).contains { $0.time.seconds > localTime.seconds }
-    }
-
     // MARK: - Beauty / Skin Smoothing
 
     @ViewBuilder
@@ -666,8 +661,8 @@ struct InspectorView: View {
         Section("Beauty") {
             LabeledSliderRow(
                 label: "Strength",
-                display: "\(Int(model.selectedClipSkinSmooth.strength.defaultValue * 100))%",
-                value: skinSmoothBinding(\.strength.defaultValue),
+                display: "\(Int(model.selectedClipSkinSmoothDefaultStrength * 100))%",
+                value: skinSmoothDefaultStrengthBinding,
                 range: 0...1
             )
 
@@ -690,10 +685,10 @@ struct InspectorView: View {
 
                 KeyframeNavBar(
                     keyframeKind: "skin-smooth",
-                    canGoToPrevious: hasPreviousSkinSmoothKeyframe,
+                    canGoToPrevious: model.hasPreviousSelectedClipSkinSmoothStrengthKeyframe,
                     canAddOrUpdate: model.selectedClipSourceLocalPlayheadTime != nil,
                     canRemove: model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead != nil,
-                    canGoToNext: hasNextSkinSmoothKeyframe,
+                    canGoToNext: model.hasNextSelectedClipSkinSmoothStrengthKeyframe,
                     hasKeyframeAtPlayhead: model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead != nil,
                     onPrevious: { model.seekToPreviousSelectedClipSkinSmoothStrengthKeyframe() },
                     onAddOrUpdate: { model.addOrUpdateSelectedClipSkinSmoothStrengthKeyframe() },
@@ -750,18 +745,15 @@ struct InspectorView: View {
         return TimeFormatting.timecode(localTime.seconds)
     }
 
-    private var hasPreviousSkinSmoothKeyframe: Bool {
-        guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return false }
-        return model.selectedClipSkinSmooth.strength.keyframes.contains {
-            $0.time.seconds < localTime.seconds
-        }
-    }
-
-    private var hasNextSkinSmoothKeyframe: Bool {
-        guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return false }
-        return model.selectedClipSkinSmooth.strength.keyframes.contains {
-            $0.time.seconds > localTime.seconds
-        }
+    private var skinSmoothDefaultStrengthBinding: Binding<Float> {
+        Binding(
+            get: { model.selectedClipSkinSmoothDefaultStrength },
+            set: { newValue in
+                model.updateSelectedClipSkinSmooth { smooth in
+                    smooth.strength.defaultValue = newValue
+                }
+            }
+        )
     }
 
     private func skinSmoothBinding(_ keyPath: WritableKeyPath<SkinSmoothEffect, Float>) -> Binding<Float> {
@@ -794,8 +786,9 @@ struct InspectorView: View {
     }
 
     @ViewBuilder
-    private var projectSection: some View {
-        Section("Project") {
+    private var projectSettingsContent: some View {
+        Group {
+            inspectorSubsectionHeading("Canvas")
             Picker("Aspect", selection: aspectBinding) {
                 ForEach(ProjectAspect.builtIns) { aspect in
                     Text(aspect.displayName).tag(aspect)
@@ -834,8 +827,9 @@ struct InspectorView: View {
             }
             .help("Choose the project frame rate in frames per second")
             .accessibilityLabel("Project frame rate")
-        }
-        Section("Safe Zones") {
+
+            Divider()
+            inspectorSubsectionHeading("Safe Zones")
             Toggle("Show Safe Zones", isOn: $model.showSafeZones)
                 .help("Overlay platform-specific safe-zone guides on the preview canvas")
                 .onChange(of: model.showSafeZones) { _, newValue in
@@ -857,8 +851,9 @@ struct InspectorView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        }
-        Section("Colour") {
+
+            Divider()
+            inspectorSubsectionHeading("Colour")
             Picker("Working Space", selection: workingColourSpaceBinding) {
                 ForEach(WorkingColourSpace.allCases) { space in
                     Text(space.displayName).tag(space)
@@ -875,6 +870,13 @@ struct InspectorView: View {
             Toggle("Show scopes", isOn: $model.showScopes)
                 .help("Show waveform and vectorscope panels beside the preview")
         }
+    }
+
+    private func inspectorSubsectionHeading(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .accessibilityAddTraits(.isHeader)
     }
 
 
@@ -1127,8 +1129,8 @@ struct InspectorView: View {
     @State private var pendingOverlayType: OverlaySourceType = .animatedImage
 
     @ViewBuilder
-    private var overlayListSection: some View {
-        Section("Overlays") {
+    private var overlayListContent: some View {
+        Group {
             if model.project.overlays.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("No overlays. Add an animated image, alpha video, or Lottie overlay to the project.")
@@ -1180,10 +1182,19 @@ struct InspectorView: View {
             allowedContentTypes: pendingOverlayType.allowedContentTypes,
             allowsMultipleSelection: false
         ) { [weak model] result in
-            if case .success(let urls) = result, let url = urls.first {
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
                 Task { [weak model] in
                     await model?.importOverlay(from: url, sourceType: pendingOverlayType)
                 }
+            case .failure(let error):
+                guard let message = FileImporterErrorPresentation.statusMessage(
+                    summary: "Could not open overlay",
+                    error: error,
+                    recoverySuggestion: "Choose a readable overlay file and try again.")
+                else { return }
+                model?.statusMessage = message
             }
         }
     }

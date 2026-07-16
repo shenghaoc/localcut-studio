@@ -789,6 +789,18 @@ final class EditorModel {
         return nearestSpeedKeyframe(to: time)
     }
 
+    var hasPreviousSelectedClipSpeedKeyframe: Bool {
+        guard let clip = selectedClip,
+              let localTime = selectedClipSourceLocalPlayheadTime else { return false }
+        return previousSelectedClipSpeedKeyframe(in: clip, before: localTime) != nil
+    }
+
+    var hasNextSelectedClipSpeedKeyframe: Bool {
+        guard let clip = selectedClip,
+              let localTime = selectedClipSourceLocalPlayheadTime else { return false }
+        return nextSelectedClipSpeedKeyframe(in: clip, after: localTime) != nil
+    }
+
     /// Source-local time at the playhead for the selected clip, or nil when the
     /// playhead falls outside the clip's authored range. Maps the output-domain
     /// playhead back through the speed curve to clip-source time. Shared by the
@@ -864,22 +876,20 @@ final class EditorModel {
 
     func seekToPreviousSelectedClipSpeedKeyframe() {
         guard let clip = selectedClip,
-              let localTime = selectedClipSourceLocalPlayheadTime else { return }
-        let tolerance = speedKeyframeHitToleranceSeconds
-        guard let previous = clip.speedCurve.keyframes.last(where: {
-            $0.time.seconds < localTime.seconds - tolerance
-        }) else { return }
+              let localTime = selectedClipSourceLocalPlayheadTime,
+              let previous = previousSelectedClipSpeedKeyframe(
+                in: clip,
+                before: localTime) else { return }
         let outputOffset = clip.outputOffset(forSourceOffset: previous.time)
         seek(toSeconds: effectiveTimelineTime(forAuthored: clip.timelineStart + outputOffset).seconds)
     }
 
     func seekToNextSelectedClipSpeedKeyframe() {
         guard let clip = selectedClip,
-              let localTime = selectedClipSourceLocalPlayheadTime else { return }
-        let tolerance = speedKeyframeHitToleranceSeconds
-        guard let next = clip.speedCurve.keyframes.first(where: {
-            $0.time.seconds > localTime.seconds + tolerance
-        }) else { return }
+              let localTime = selectedClipSourceLocalPlayheadTime,
+              let next = nextSelectedClipSpeedKeyframe(
+                in: clip,
+                after: localTime) else { return }
         let outputOffset = clip.outputOffset(forSourceOffset: next.time)
         seek(toSeconds: effectiveTimelineTime(forAuthored: clip.timelineStart + outputOffset).seconds)
     }
@@ -894,6 +904,26 @@ final class EditorModel {
 
     private var speedKeyframeHitToleranceSeconds: Double {
         0.5 / max(1, project.frameRate)
+    }
+
+    private func previousSelectedClipSpeedKeyframe(
+        in clip: Clip,
+        before localTime: CMTime
+    ) -> Keyframe<Float>? {
+        let tolerance = speedKeyframeHitToleranceSeconds
+        return clip.speedCurve.keyframes.last {
+            $0.time.seconds < localTime.seconds - tolerance
+        }
+    }
+
+    private func nextSelectedClipSpeedKeyframe(
+        in clip: Clip,
+        after localTime: CMTime
+    ) -> Keyframe<Float>? {
+        let tolerance = speedKeyframeHitToleranceSeconds
+        return clip.speedCurve.keyframes.first {
+            $0.time.seconds > localTime.seconds + tolerance
+        }
     }
 
     private func nearestSpeedKeyframe(to time: CMTime) -> Keyframe<Float>? {
@@ -1088,14 +1118,28 @@ final class EditorModel {
 
     var selectedClipSkinSmoothStrengthAtPlayhead: Float {
         guard let time = selectedClipSourceLocalPlayheadTime else {
-            return selectedClipSkinSmooth.strength.defaultValue
+            return selectedClipSkinSmoothDefaultStrength
         }
-        return selectedClipSkinSmooth.strength.value(at: time)
+        return selectedClipSkinSmooth.strength(at: time)
+    }
+
+    var selectedClipSkinSmoothDefaultStrength: Float {
+        SkinSmoothEffect.clampedStrength(selectedClipSkinSmooth.strength.defaultValue)
     }
 
     var selectedClipSkinSmoothStrengthKeyframeAtPlayhead: Keyframe<Float>? {
         guard let time = selectedClipSourceLocalPlayheadTime else { return nil }
         return nearestSkinSmoothStrengthKeyframe(to: time)
+    }
+
+    var hasPreviousSelectedClipSkinSmoothStrengthKeyframe: Bool {
+        guard let localTime = selectedClipSourceLocalPlayheadTime else { return false }
+        return previousSelectedClipSkinSmoothStrengthKeyframe(before: localTime) != nil
+    }
+
+    var hasNextSelectedClipSkinSmoothStrengthKeyframe: Bool {
+        guard let localTime = selectedClipSourceLocalPlayheadTime else { return false }
+        return nextSelectedClipSkinSmoothStrengthKeyframe(after: localTime) != nil
     }
 
     func addOrUpdateSelectedClipSkinSmoothStrengthKeyframe() {
@@ -1106,7 +1150,7 @@ final class EditorModel {
         }
 
         let existingID = selectedClipSkinSmoothStrengthKeyframeAtPlayhead?.id
-        let value = selectedClipSkinSmooth.strength.defaultValue
+        let value = selectedClipSkinSmoothDefaultStrength
         performUndoable(existingID == nil ? "Add Skin Smooth Keyframe" : "Update Skin Smooth Keyframe") {
             mutateSelectedSkinSmooth(clipID: id) { smooth in
                 if let existingID {
@@ -1136,11 +1180,9 @@ final class EditorModel {
 
     func seekToPreviousSelectedClipSkinSmoothStrengthKeyframe() {
         guard let clip = selectedClip,
-              let localTime = selectedClipSourceLocalPlayheadTime else { return }
-        let tolerance = skinSmoothKeyframeHitToleranceSeconds
-        guard let previous = selectedClipSkinSmooth.strength.keyframes.last(where: {
-            $0.time.seconds < localTime.seconds - tolerance
-        }) else { return }
+              let localTime = selectedClipSourceLocalPlayheadTime,
+              let previous = previousSelectedClipSkinSmoothStrengthKeyframe(
+                before: localTime) else { return }
         // Keyframe times are clip-source-relative; map back to the output domain
         // so the seek lands on the right frame for retimed clips.
         let outputOffset = clip.outputOffset(forSourceOffset: previous.time)
@@ -1149,11 +1191,9 @@ final class EditorModel {
 
     func seekToNextSelectedClipSkinSmoothStrengthKeyframe() {
         guard let clip = selectedClip,
-              let localTime = selectedClipSourceLocalPlayheadTime else { return }
-        let tolerance = skinSmoothKeyframeHitToleranceSeconds
-        guard let next = selectedClipSkinSmooth.strength.keyframes.first(where: {
-            $0.time.seconds > localTime.seconds + tolerance
-        }) else { return }
+              let localTime = selectedClipSourceLocalPlayheadTime,
+              let next = nextSelectedClipSkinSmoothStrengthKeyframe(
+                after: localTime) else { return }
         // Keyframe times are clip-source-relative; map back to the output domain
         // so the seek lands on the right frame for retimed clips.
         let outputOffset = clip.outputOffset(forSourceOffset: next.time)
@@ -1162,6 +1202,24 @@ final class EditorModel {
 
     private var skinSmoothKeyframeHitToleranceSeconds: Double {
         0.5 / max(1, project.frameRate)
+    }
+
+    private func previousSelectedClipSkinSmoothStrengthKeyframe(
+        before localTime: CMTime
+    ) -> Keyframe<Float>? {
+        let tolerance = skinSmoothKeyframeHitToleranceSeconds
+        return selectedClipSkinSmooth.strength.keyframes.last {
+            $0.time.seconds < localTime.seconds - tolerance
+        }
+    }
+
+    private func nextSelectedClipSkinSmoothStrengthKeyframe(
+        after localTime: CMTime
+    ) -> Keyframe<Float>? {
+        let tolerance = skinSmoothKeyframeHitToleranceSeconds
+        return selectedClipSkinSmooth.strength.keyframes.first {
+            $0.time.seconds > localTime.seconds + tolerance
+        }
     }
 
     private func nearestSkinSmoothStrengthKeyframe(to time: CMTime) -> Keyframe<Float>? {
@@ -1412,10 +1470,10 @@ final class EditorModel {
     /// Removes the selected transition, restoring the plain cut (R3.3).
     func removeSelectedTransition() {
         guard let id = selectedTransitionClipID else { return }
-        performUndoable("Remove Transition") {
+        performUndoable("Delete Transition") {
             setTransition(nil, onClip: id)
             selectedTransitionClipID = nil
-            statusMessage = "Removed the transition."
+            statusMessage = "Deleted the transition."
         }
     }
 

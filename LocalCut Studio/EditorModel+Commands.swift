@@ -152,7 +152,6 @@ extension EditorModel {
     ) async -> EditorCommandOutcome {
         let (response, urls) = await presentPanel()
         guard response == .OK, !urls.isEmpty else {
-            statusMessage = String(localized: "Import cancelled.")
             return .panelCancelled
         }
         return await importMediaAction(urls)
@@ -209,7 +208,6 @@ extension EditorModel {
         guard resolveChapterMarkersBeforeExport() else { return .actionCancelled }
         let (response, url) = await presentPanel()
         guard response == .OK, let url else {
-            statusMessage = String(localized: "Export cancelled.")
             return .panelCancelled
         }
         return await exportProject(url)
@@ -287,7 +285,10 @@ extension EditorModel {
                 statusMessage = "Exported \(url.lastPathComponent) — \(warningText)"
             }
         } catch {
-            statusMessage = "Could not write OTIO file. Check that the destination has enough free space and isn't locked by another app."
+            statusMessage = Self.failureStatusMessage(
+                summary: "Could not write OTIO file",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Check that the destination has enough free space and isn't locked by another app.")
         }
     }
 
@@ -349,7 +350,10 @@ extension EditorModel {
                 statusMessage = "Exported \(url.lastPathComponent) — \(warningText)"
             }
         } catch {
-            statusMessage = "Could not write EDL file. Check that the destination has enough free space and isn't locked by another app."
+            statusMessage = Self.failureStatusMessage(
+                summary: "Could not write EDL file",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Check that the destination has enough free space and isn't locked by another app.")
         }
     }
 

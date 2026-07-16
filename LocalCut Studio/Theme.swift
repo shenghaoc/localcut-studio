@@ -1,16 +1,5 @@
 import SwiftUI
 
-// MARK: - Spacing Tokens
-
-/// Semantic spacing constants so repeated padding values carry intent
-/// rather than being arbitrary numbers scattered across views.
-extension CGFloat {
-    /// Standard inset for panel content and grouped sections (12 pt).
-    static let lcInsetStandard: CGFloat = 12
-    /// Compact inset for dense rows, badges, and inline controls (8 pt).
-    static let lcInsetCompact: CGFloat = 8
-}
-
 // MARK: - View Modifiers
 
 extension View {
@@ -22,12 +11,6 @@ extension View {
             .font(.caption)
             .monospacedDigit()
             .foregroundStyle(.secondary)
-    }
-
-    /// Expands the hit target to the full frame so small tappable
-    /// elements (lane segments, timeline clips) respond reliably.
-    func tappable() -> some View {
-        self.contentShape(Rectangle())
     }
 }
 
@@ -77,19 +60,4 @@ extension Color {
 
     /// Transition glyph icon colour — white for the timeline transition icon.
     static let lcTransitionIcon = Color.white
-}
-
-// MARK: - Reusable Primitives
-
-/// A small status or selection indicator dot (8×8 pt, capsule).
-/// Used for connection-state dots, selection indicators, and
-/// recording-status pips across panels.
-struct StatusDot: View {
-    let color: Color
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 8, height: 8)
-    }
 }

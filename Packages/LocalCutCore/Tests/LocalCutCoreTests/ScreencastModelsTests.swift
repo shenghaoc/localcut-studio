@@ -27,6 +27,212 @@ struct Transform2DTests {
         #expect(abs(mid.tx - 50) < 0.001)
     }
 
+    @Test("Transform keyframes apply temporal Bezier easing")
+    func temporalBezierEasing() {
+        let duration = CMTime(seconds: 2, preferredTimescale: 600)
+        let target = Transform2D(translateX: 0.8, translateY: -0.4, scale: 2, rotation: 0)
+        let track = Keyframed(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: Transform2D.identity,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 0)),
+                Keyframe(
+                    time: duration,
+                    value: target,
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 0)),
+            ],
+            defaultValue: Transform2D.identity)
+
+        let midpoint = track.bezierValue(
+            at: CMTime(seconds: 1, preferredTimescale: 600))
+
+        // Symmetric x controls map the midpoint to parameter 0.5. With both y
+        // controls at zero, temporal progress is 0.125 rather than 0.5.
+        #expect(abs(midpoint.tx - 0.1) < 0.002)
+        #expect(abs(midpoint.ty - -0.05) < 0.002)
+        #expect(abs(midpoint.decomposedScale - 1.125) < 0.002)
+    }
+
+    @Test("Transform temporal controls clamp to normalized progress")
+    func temporalBezierControlsClampToNormalizedProgress() {
+        let end = CMTime(seconds: 2, preferredTimescale: 600)
+        let target = Transform2D(translateX: 0.8, translateY: 0, scale: 2, rotation: 0)
+        let outOfRange = Keyframed(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: Transform2D.identity,
+                    outgoingHandle: KeyframeHandle(x: 1.0 / 3.0, y: -1.0 / 6.0)),
+                Keyframe(
+                    time: end,
+                    value: target,
+                    incomingHandle: KeyframeHandle(x: 1.0 / 3.0, y: 7.0 / 6.0)),
+            ],
+            defaultValue: Transform2D.identity)
+        let clamped = Keyframed(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: Transform2D.identity,
+                    outgoingHandle: KeyframeHandle(x: 1.0 / 3.0, y: 0)),
+                Keyframe(
+                    time: end,
+                    value: target,
+                    incomingHandle: KeyframeHandle(x: 1.0 / 3.0, y: 1)),
+            ],
+            defaultValue: Transform2D.identity)
+
+        for seconds in [0.25, 0.5, 1.0, 1.5] {
+            let sample = CMTime(seconds: seconds, preferredTimescale: 600)
+            #expect(outOfRange.bezierValue(at: sample) == clamped.bezierValue(at: sample))
+        }
+
+        let split = outOfRange.splitPreservingBezier(
+            at: CMTime(seconds: 1, preferredTimescale: 600))
+        let quarter = CMTime(seconds: 0.5, preferredTimescale: 600)
+        let expectedLeft = outOfRange.bezierValue(at: quarter)
+        let expectedRight = outOfRange.bezierValue(
+            at: CMTime(seconds: 1.5, preferredTimescale: 600))
+        let actualLeft = split.left.bezierValue(at: quarter)
+        let actualRight = split.right.bezierValue(at: quarter)
+        #expect(abs(actualLeft.tx - expectedLeft.tx) < 0.002)
+        #expect(abs(actualLeft.decomposedScale - expectedLeft.decomposedScale) < 0.002)
+        #expect(abs(actualRight.tx - expectedRight.tx) < 0.002)
+        #expect(abs(actualRight.decomposedScale - expectedRight.decomposedScale) < 0.002)
+    }
+
+    @Test("Transform keyframes without handles remain linear")
+    func bezierEvaluatorLinearFallback() {
+        let track = Keyframed(
+            keyframes: [
+                Keyframe(time: .zero, value: Transform2D.identity),
+                Keyframe(
+                    time: CMTime(seconds: 2, preferredTimescale: 600),
+                    value: Transform2D(translateX: 0.8, translateY: 0, scale: 2, rotation: 0)),
+            ],
+            defaultValue: Transform2D.identity)
+        let midpoint = CMTime(seconds: 1, preferredTimescale: 600)
+
+        #expect(track.bezierValue(at: midpoint) == track.value(at: midpoint))
+        #expect(abs(track.bezierValue(at: midpoint).tx - 0.4) < 0.001)
+    }
+
+    @Test("Splitting malformed transform handles preserves linear fallback")
+    func malformedHandleSplitPreservesLinearFallback() {
+        let end = CMTime(seconds: 2, preferredTimescale: 600)
+        let cut = CMTime(seconds: 1, preferredTimescale: 600)
+        let target = Transform2D(translateX: 0.8, translateY: -0.4, scale: 2, rotation: 0.3)
+        let tracks = [
+            Keyframed(
+                keyframes: [
+                    Keyframe(
+                        time: .zero,
+                        value: Transform2D.identity,
+                        outgoingHandle: KeyframeHandle(x: 0.2, y: .nan)),
+                    Keyframe(
+                        time: end,
+                        value: target,
+                        incomingHandle: KeyframeHandle(x: 0.2, y: 0.8)),
+                ],
+                defaultValue: Transform2D.identity),
+            Keyframed(
+                keyframes: [
+                    Keyframe(
+                        time: .zero,
+                        value: Transform2D.identity,
+                        outgoingHandle: KeyframeHandle(x: 0.2, y: 0.2)),
+                    Keyframe(
+                        time: end,
+                        value: target,
+                        incomingHandle: KeyframeHandle(x: 0.2, y: .infinity)),
+                ],
+                defaultValue: Transform2D.identity),
+        ]
+
+        for track in tracks {
+            let split = track.splitPreservingBezier(at: cut)
+            for seconds in [0.25, 0.5, 0.75] {
+                let localTime = CMTime(seconds: seconds, preferredTimescale: 600)
+                let expectedLeft = track.bezierValue(at: localTime)
+                let expectedRight = track.bezierValue(at: cut + localTime)
+                let actualLeft = split.left.bezierValue(at: localTime)
+                let actualRight = split.right.bezierValue(at: localTime)
+
+                #expect(abs(actualLeft.tx - expectedLeft.tx) < 0.002)
+                #expect(abs(actualLeft.decomposedScale - expectedLeft.decomposedScale) < 0.002)
+                #expect(abs(actualRight.tx - expectedRight.tx) < 0.002)
+                #expect(abs(actualRight.decomposedScale - expectedRight.decomposedScale) < 0.002)
+            }
+        }
+    }
+
+    @Test("Splitting and shifting transform keyframes preserves Bezier motion")
+    func splitAndShiftPreserveBezierMotion() {
+        let track = Keyframed(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: Transform2D.identity,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 0)),
+                Keyframe(
+                    time: CMTime(seconds: 2, preferredTimescale: 600),
+                    value: Transform2D(translateX: 0.8, translateY: -0.4, scale: 2, rotation: 0),
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 0)),
+            ],
+            defaultValue: Transform2D.identity)
+        let cut = CMTime(seconds: 1, preferredTimescale: 600)
+        let split = track.splitPreservingBezier(at: cut)
+        let shifted = track.shiftedPreservingBezier(by: cut)
+
+        for seconds in [0.0, 0.25, 0.5, 1.0] {
+            let localTime = CMTime(seconds: seconds, preferredTimescale: 600)
+            let expected = track.bezierValue(at: cut + localTime)
+            let splitValue = split.right.bezierValue(at: localTime)
+            let shiftedValue = shifted.bezierValue(at: localTime)
+            #expect(abs(splitValue.tx - expected.tx) < 0.002)
+            #expect(abs(splitValue.decomposedScale - expected.decomposedScale) < 0.002)
+            #expect(abs(shiftedValue.tx - expected.tx) < 0.002)
+            #expect(abs(shiftedValue.decomposedScale - expected.decomposedScale) < 0.002)
+        }
+
+        let leftSample = CMTime(seconds: 0.5, preferredTimescale: 600)
+        let expectedLeft = track.bezierValue(at: leftSample)
+        let actualLeft = split.left.bezierValue(at: leftSample)
+        #expect(abs(actualLeft.tx - expectedLeft.tx) < 0.002)
+        #expect(abs(actualLeft.decomposedScale - expectedLeft.decomposedScale) < 0.002)
+    }
+
+    @Test("Outside-range transform splits clear newly active handles")
+    func outsideRangeSplitClearsHandles() {
+        let first = Transform2D(translateX: 0.2, translateY: 0, scale: 1.2, rotation: 0)
+        let last = Transform2D(translateX: 0.8, translateY: 0, scale: 1.8, rotation: 0)
+        let track = Keyframed(
+            keyframes: [
+                Keyframe(
+                    time: CMTime(seconds: 2, preferredTimescale: 600),
+                    value: first,
+                    incomingHandle: KeyframeHandle(x: 0.5, y: 4)),
+                Keyframe(
+                    time: CMTime(seconds: 8, preferredTimescale: 600),
+                    value: last,
+                    outgoingHandle: KeyframeHandle(x: 0.5, y: -4)),
+            ],
+            defaultValue: Transform2D.identity)
+
+        let before = track.splitPreservingBezier(
+            at: CMTime(seconds: 1, preferredTimescale: 600)).right
+        let after = track.splitPreservingBezier(
+            at: CMTime(seconds: 9, preferredTimescale: 600)).left
+
+        #expect(before.keyframes[1].incomingHandle == nil)
+        #expect(before.bezierValue(
+            at: CMTime(seconds: 0.5, preferredTimescale: 600)) == first)
+        #expect(after.keyframes[after.keyframes.count - 2].outgoingHandle == nil)
+        #expect(after.bezierValue(
+            at: CMTime(seconds: 8.5, preferredTimescale: 600)) == last)
+    }
+
     @Test("Decomposed scale and rotation round-trip")
     func decomposedScaleRotation() {
         let t = Transform2D(translateX: 10, translateY: 20, scale: 2, rotation: .pi / 4)

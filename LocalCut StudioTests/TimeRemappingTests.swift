@@ -787,6 +787,94 @@ struct TimeRemappingKeyframeRebaseTests {
         #expect(s.strength.keyframes.map { $0.time } == [trTime(0), trTime(2)])
     }
 
+    @Test("Trim preserves transform and all source-local effect Bezier curves")
+    func trimPreservesSourceLocalBezierCurves() throws {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
+        media.duration = trTime(12)
+        media.hasVideo = true
+        model.project.mediaItems.append(media)
+
+        let scalarTrack = Keyframed<Float>(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: 0.1,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 0.1)),
+                Keyframe(
+                    time: trTime(10),
+                    value: 0.9,
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 0.1)),
+            ],
+            defaultValue: 0.1)
+        let transformTrack = Keyframed<Transform2D>(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: .identity,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 0)),
+                Keyframe(
+                    time: trTime(10),
+                    value: Transform2D(
+                        translateX: 0.8, translateY: -0.4, scale: 2, rotation: 0),
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 0)),
+            ],
+            defaultValue: .identity)
+        var smooth = SkinSmoothEffect()
+        smooth.strength = scalarTrack
+        var clip = Clip(
+            mediaID: media.id,
+            sourceStart: .zero,
+            duration: trTime(10),
+            timelineStart: .zero)
+        clip.transformKeyframes = transformTrack
+        clip.effects = [
+            .skinSmooth(smooth),
+            .grain(GrainEffect(amount: scalarTrack)),
+            .halation(HalationEffect(strength: scalarTrack)),
+            .vignette(VignetteEffect(amount: scalarTrack)),
+        ]
+        model.project.videoTracks[0].clips = [clip]
+
+        model.trimClip(id: clip.id, edge: .left, to: trTime(4))
+
+        let trimmed = try #require(model.project.videoTracks[0].clips.first)
+        let localSample = trTime(3)
+        let originalSample = trTime(7)
+        let actualTransform = trimmed.transformKeyframes.bezierValue(at: localSample)
+        let expectedTransform = transformTrack.bezierValue(at: originalSample)
+        #expect(abs(actualTransform.tx - expectedTransform.tx) < 0.002)
+        #expect(abs(actualTransform.decomposedScale - expectedTransform.decomposedScale) < 0.002)
+
+        let trimmedTracks = trimmed.effects.compactMap { effect -> Keyframed<Float>? in
+            switch effect {
+            case .skinSmooth(let effect): effect.strength
+            case .grain, .halation, .vignette: effect.lookStrength
+            case .colourGrade, .lut: nil
+            }
+        }
+        #expect(trimmedTracks.count == 4)
+        for track in trimmedTracks {
+            #expect(abs(
+                track.bezierValue(at: localSample)
+                    - scalarTrack.bezierValue(at: originalSample)) < 0.002)
+        }
+
+        model.trimClip(id: clip.id, edge: .right, to: trTime(8))
+
+        let tailTrimmed = try #require(model.project.videoTracks[0].clips.first)
+        #expect(tailTrimmed.transformKeyframes.keyframes.allSatisfy { $0.time <= trTime(4) })
+        for effect in tailTrimmed.effects {
+            let track: Keyframed<Float>?
+            switch effect {
+            case .skinSmooth(let effect): track = effect.strength
+            case .grain, .halation, .vignette: track = effect.lookStrength
+            case .colourGrade, .lut: track = nil
+            }
+            #expect(track?.keyframes.allSatisfy { $0.time <= trTime(4) } ?? true)
+        }
+    }
+
     // MARK: - Parameterised trim rebasing tests
 
     enum TrimRebaseCase: String, CaseIterable, Sendable {

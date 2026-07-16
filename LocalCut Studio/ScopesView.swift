@@ -249,10 +249,14 @@ private struct ScopeBackgroundView: View, Equatable {
             let label = Text("\(Int(fraction * 100))")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.5))
-            // Anchor .bottomLeading keeps text above the line; clamp to min Y
-            // so the top "100" label isn't clipped at the frame edge.
-            let labelY = max(y, frameRect.minY + 9)
-            context.draw(label, at: CGPoint(x: frameRect.minX + 4, y: labelY), anchor: .bottomLeading)
+            let isTopLine = fraction == 1
+            // Keep the top label below its line and every other label above its
+            // line. This avoids a fixed point-size clearance that would clip
+            // the Dynamic Type-aware caption at larger accessibility sizes.
+            context.draw(
+                label,
+                at: CGPoint(x: frameRect.minX + 4, y: y),
+                anchor: isTopLine ? .topLeading : .bottomLeading)
         }
     }
 

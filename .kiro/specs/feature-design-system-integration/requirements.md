@@ -11,8 +11,10 @@
   rotor heading navigation reaches each primary pane.
 - **R1.3** A trailing-less convenience init (`Trailing == EmptyView`) covers
   headers with no actions.
-- **R1.4** Inspector, Media bin, and Timeline headers are expressed through
-  `EditorPanelHeader`; each call site keeps its own surrounding separator.
+- **R1.4** Media bin and Timeline headers are expressed through
+  `EditorPanelHeader`; each call site keeps its own surrounding separator. The
+  Inspector side rail uses its segmented pane switcher as the single visible
+  and VoiceOver heading so the active pane is not announced twice.
 
 ## R2 — Timeline chrome
 
@@ -68,3 +70,26 @@
   cover the ruler adjustment step and project-boundary clamping.
 - **R6.3** No model field, schema version, or composition time-range math
   changes; the standalone `app/` prototype is not merged.
+
+## R7 — Final review hardening
+
+- **R7.1** Failure paths hardened in this pass (native pickers; media/caption
+  import; project open/save; preview, replay, program-source, and silence work;
+  OTIO/EDL export) preserve the underlying error detail, add one actionable
+  recovery suggestion without duplicate punctuation, and keep intentional
+  cancellation silent. Batch-import announcements stay bounded, while a
+  truncated status line exposes the full message through pointer help and its
+  accessibility label.
+- **R7.2** Shared keyframe navigation derives previous/next availability with
+  the same tolerance as its seek action. Disabled controls explain why in both
+  pointer help and accessibility hints.
+- **R7.3** Collapsible grouped Forms do not wrap nested `Section` containers or
+  duplicate visual/VoiceOver headings.
+- **R7.4** Caption timing controls reflow vertically when the inspector cannot
+  fit their scaled horizontal layout.
+- **R7.5** Design context accurately records forced-dark chrome, functional HUD
+  glass, distinct content/chrome badge recipes, and only shipping primitives.
+- **R7.6** The destructive transition action uses “Delete Transition”
+  consistently in menus, inspector copy, undo naming, and completion status.
+- **R7.7** Adjacent recorder controls expose distinct labels: “Microphone” for
+  the enable toggle and “Input Device” for microphone device selection.

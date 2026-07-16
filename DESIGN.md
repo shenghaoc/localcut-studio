@@ -32,10 +32,14 @@ spacing:
   lg: "16px"
   xl: "24px"
 components:
-  badge:
+  content-badge:
     backgroundColor: "system: .thinMaterial"
     rounded: "{rounded.capsule}"
     padding: "10px horizontal, 5px vertical"
+  chrome-count-pill:
+    backgroundColor: "system: .quaternary"
+    rounded: "{rounded.capsule}"
+    padding: "6px horizontal, 2px vertical"
   transport-controls:
     backgroundColor: "system: .regular.interactive glass"
     rounded: "{rounded.capsule}"
@@ -53,7 +57,7 @@ LocalCut Studio is TeXShop for video — an austere, utilitarian tool where ever
 The system is built on native macOS materials and system colours, not custom palettes. It respects Reduce Motion and Dynamic Type, and uses SF Symbols for all iconography. The editor chrome is deliberately dark (`.preferredColorScheme(.dark)`) as a product choice; system colours still adapt within that mode. The single deliberate colour choice — a warm Film Gold accent — is the only departure from system semantics, and it is used sparingly: selection highlights, focus rings, and key affordances.
 
 **Key Characteristics:**
-- Dark chrome by default; system appearance adaptive
+- Deliberately dark editor chrome; system semantic colours and accessibility contrast remain adaptive
 - One accent (Film Gold), used on ≤10% of any screen
 - System semantic colours for backgrounds, text, and separators — never hard-coded greys
 - Liquid Glass for interactive floating controls; thin material for non-interactive badges
@@ -64,7 +68,7 @@ This system explicitly rejects: glossy consumer aesthetics (Final Cut Pro), pane
 
 ## 2. Colours
 
-A restrained, system-anchored palette. The Film Gold accent is the only branded colour; everything else delegates to macOS semantic colours so the editor adapts to light/dark mode and high-contrast settings without maintenance.
+A restrained, system-anchored palette. The Film Gold accent is the only branded colour; everything else delegates to macOS semantic colours so the forced-dark editor continues to honor high-contrast settings without a parallel custom palette.
 
 ### Primary
 - **Film Gold** (#F5AB42, native Display-P3 0.960/0.670/0.260): Selection highlights, focus rings, and the Export button. Used sparingly — its rarity is the point. Defined in `Assets.xcassets/AccentColor.colorset`.
@@ -86,7 +90,7 @@ A restrained, system-anchored palette. The Film Gold accent is the only branded 
 ### Named Rules
 **The One Accent Rule.** Film Gold is used on ≤10% of any given screen. Its rarity is the point. System controls that inherit the accent through `.tint()` (steppers, toggles, side-rail selections) are exempt — the rule targets bespoke gold highlights outside the standard control vocabulary.
 
-**The System-First Rule.** Never hard-code a grey. Backgrounds, text, and separators always delegate to system semantic colours (`underPageBackgroundColor`, `.secondary`, `separatorColor`) so the editor tracks appearance changes automatically.
+**The System-First Rule.** Never hard-code a grey. Backgrounds, text, and separators always delegate to system semantic colours (`underPageBackgroundColor`, `.secondary`, `separatorColor`) so the dark editor tracks system contrast and semantic-colour changes automatically.
 
 ## 3. Typography
 
@@ -169,17 +173,9 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 
 ### View Modifiers
 - **`.monospacedCaption()`** — Applies `.font(.caption)`, `.monospacedDigit()`, and `.foregroundStyle(.secondary)` in one call. Use for secondary numeric labels (timecodes, counts, bitrates). Defined in `Theme.swift`.
-- **`.tappable()`** — Applies `.contentShape(Rectangle())` so small tappable elements (lane segments, timeline clips) respond reliably across their full frame. Defined in `Theme.swift`.
 
 ### Keyframe Navigation Bar
 `KeyframeNavBar` is a reusable four-button HStack (previous / add-or-update / remove / next) with `.controlSize(.small`). Used across speed, look, skin-smooth, clip-transform, and callout-transform keyframe editors. Accepts callbacks and disabled-state booleans; the add/update button label and icon toggle based on `hasKeyframeAtPlayhead`. **Previous/next must reflect real neighbour keyframes** (`canGoToPrevious` / `canGoToNext`) — never hard-code `true`; match the seek helper’s tolerance when one exists.
-
-### Spacing Tokens
-- **`CGFloat.lcInsetStandard`** (12 pt): Standard inset for panel content and grouped sections.
-- **`CGFloat.lcInsetCompact`** (8 pt): Compact inset for dense rows, badges, and inline controls.
-
-### Status Dot
-`StatusDot(color:)` is an 8×8 pt `Circle` fill indicator. Available for new status and selection pips; existing selection-dot patterns that use conditional `.fill()` may stay as-is when the conditional treatment is clearer inline.
 
 ## 6. Do's and Don'ts
 
@@ -187,8 +183,8 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 - **Do** use system semantic colours for all backgrounds, text, and separators — never hard-code a grey.
 - **Do** use SF Symbols for all iconography, with `.help(...)` tooltip and `.accessibilityLabel(...)` on every icon-only control.
 - **Do** use `.monospacedDigit()` on every timecode, duration, and frame number — prefer `.monospacedCaption()` when the text is also secondary and caption-sized.
-- **Do** use Liquid Glass (`.glassEffect`) only for interactive controls floating over content — never as decoration.
-- **Do** respect light/dark appearance automatically; test every panel in both modes.
+- **Do** use Liquid Glass (`.glassEffect`) only for interactive controls or compact functional HUDs floating over content — never as decoration.
+- **Do** preserve semantic system colours and verify every panel in forced-dark and increased-contrast states.
 - **Do** disable (don't hide) temporarily unavailable actions, and explain why via `.help`.
 - **Do** use the shared `EditorPanelHeader` pattern for every new panel.
 
@@ -198,7 +194,7 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 - **Don't** use cards. Organize content into panels separated by Dividers.
 - **Don't** nest cards inside cards — this is always wrong.
 - **Don't** use glassmorphism, blurs, or materials as decorative wallpaper.
-- **Don't** hard-code light-mode-only or dark-mode-only colours that break when the system appearance changes.
+- **Don't** hard-code colours that bypass semantic contrast behavior or become illegible inside the forced-dark editor.
 - **Don't** reskin macOS to look like a cross-platform web app. Native controls, native materials, native conventions.
 - **Don't** overload panels. If a screen has more than one primary action button, reconsider the hierarchy.
 - **Don't** let text overflow its container — test every panel at the largest Dynamic Type size.

@@ -15,7 +15,7 @@ extension EditorModel {
               clip.transformKeyframes.isAnimated else {
             return clip.transformKeyframes.defaultValue
         }
-        return clip.transformKeyframes.value(at: localTime)
+        return clip.transformKeyframes.bezierValue(at: localTime)
     }
 
     var selectedClipTransformKeyframeAtPlayhead: Keyframe<Transform2D>? {
