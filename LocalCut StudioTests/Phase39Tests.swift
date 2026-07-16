@@ -232,6 +232,19 @@ struct Phase39Tests {
         #expect(!EditorModel.supportsCoverImageDestination(type))
     }
 
+    @Test("Cover export preserves generation errors before attempting a write")
+    func coverExportPreservesGenerationError() async {
+        let model = EditorModel()
+        model.project.coverFrame = CoverFrameDoc(time: CMTimeCode(.zero))
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("empty-cover-\(UUID().uuidString).png")
+
+        await model.exportCover(to: destination)
+
+        #expect(model.statusMessage == "Could not generate cover image: Nothing to export - the timeline is empty.")
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+    }
+
     @Test("Cover preview invalidation ignores annotations and tracks visible content")
     func coverPreviewInvalidationKeyScopesToVisibleContent() {
         let project = Project()

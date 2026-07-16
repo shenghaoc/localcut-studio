@@ -990,6 +990,20 @@ struct RecordingGapCollapseTests {
 @MainActor
 struct RecordingTransportErrorHandlingTests {
 
+    @Test("Recovery messages handle punctuated and unpunctuated error details")
+    func recoveryMessagePunctuation() {
+        #expect(EditorModel.failureStatusMessage(
+            summary: "Could not pause",
+            detail: "No recording is running.",
+            recoverySuggestion: "Try stopping and restarting the recording instead.")
+            == "Could not pause: No recording is running. Try stopping and restarting the recording instead.")
+        #expect(EditorModel.failureStatusMessage(
+            summary: "Could not resume",
+            detail: "The writer stopped unexpectedly",
+            recoverySuggestion: "Try stopping and restarting the recording instead.")
+            == "Could not resume: The writer stopped unexpectedly. Try stopping and restarting the recording instead.")
+    }
+
     @Test("Pause error from stale coordinator state resets recording UI")
     func pauseErrorFromStaleCoordinatorStateResetsRecordingUI() async {
         let model = EditorModel()

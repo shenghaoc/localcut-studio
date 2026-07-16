@@ -11,6 +11,7 @@ import LocalCutDomain
 struct CaptionsInspectorView: View {
     @Bindable var model: EditorModel
 
+    @ScaledMetric(relativeTo: .body) private var compactSecondsFieldWidth: CGFloat = 64
     @State private var showSRTImporter = false
     @State private var showPresetImporter = false
     @State private var pickerTrackID: CaptionTrack.ID?
@@ -294,7 +295,7 @@ struct CaptionsInspectorView: View {
                 .foregroundStyle(.secondary)
             TextField(label, value: value, format: .number.precision(.fractionLength(2)))
                 .textFieldStyle(.roundedBorder)
-                .frame(minWidth: 64)
+                .frame(width: compactSecondsFieldWidth)
                 .monospacedDigit()
                 .accessibilityLabel(accessibilityLabel)
                 .onSubmit { model.commitCoalescedUndo() }

@@ -15,6 +15,7 @@ struct InspectorView: View {
     @State private var showOverlayList = false
     @State private var showScreencastTools = false
     @State private var showTutorialFinishing = false
+    @ScaledMetric(relativeTo: .body) private var canvasFieldWidth: CGFloat = 80
 
     var body: some View {
         // The side rail's segmented switcher (EditorSideRailView) is the sole
@@ -47,19 +48,19 @@ struct InspectorView: View {
 
             CoverInspectorView(model: model)
 
-            DisclosureGroup("Project Settings", isExpanded: $showProjectSettings) {
+            Section("Project Settings", isExpanded: $showProjectSettings) {
                 projectSection
             }
 
-            DisclosureGroup("Overlay List", isExpanded: $showOverlayList) {
+            Section("Overlay List", isExpanded: $showOverlayList) {
                 overlayListSection
             }
 
-            DisclosureGroup("Screencast Tools", isExpanded: $showScreencastTools) {
+            Section("Screencast Tools", isExpanded: $showScreencastTools) {
                 ScreencastInspectorView(model: model)
             }
 
-            DisclosureGroup("Tutorial Finishing", isExpanded: $showTutorialFinishing) {
+            Section("Tutorial Finishing", isExpanded: $showTutorialFinishing) {
                 TutorialFinishingInspectorView(model: model)
             }
         }
@@ -239,14 +240,6 @@ struct InspectorView: View {
     private var speedKeyframePlayheadLabel: String {
         guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return "Outside clip" }
         return TimeFormatting.timecode(localTime.seconds)
-    }
-
-    private var speedKeyframeActionTitle: String {
-        model.selectedClipSpeedKeyframeAtPlayhead == nil ? "Add" : "Update"
-    }
-
-    private var speedKeyframeActionIcon: String {
-        model.selectedClipSpeedKeyframeAtPlayhead == nil ? "plus.diamond.fill" : "diamond.fill"
     }
 
     private var hasPreviousSpeedKeyframe: Bool {
@@ -656,14 +649,6 @@ struct InspectorView: View {
         return TimeFormatting.timecode(localTime.seconds)
     }
 
-    private func lookKeyframeActionTitle(_ kind: LookEffectKind) -> String {
-        model.lookStrengthKeyframeAtPlayhead(kind) == nil ? "Add" : "Update"
-    }
-
-    private func lookKeyframeActionIcon(_ kind: LookEffectKind) -> String {
-        model.lookStrengthKeyframeAtPlayhead(kind) == nil ? "plus.diamond.fill" : "diamond.fill"
-    }
-
     private func hasPreviousLookKeyframe(_ kind: LookEffectKind) -> Bool {
         guard let localTime = model.selectedClipLookLocalPlayheadTime else { return false }
         return model.lookStrengthKeyframes(kind).contains { $0.time.seconds < localTime.seconds }
@@ -765,14 +750,6 @@ struct InspectorView: View {
         return TimeFormatting.timecode(localTime.seconds)
     }
 
-    private var skinSmoothKeyframeActionTitle: String {
-        model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead == nil ? "Add" : "Update"
-    }
-
-    private var skinSmoothKeyframeActionIcon: String {
-        model.selectedClipSkinSmoothStrengthKeyframeAtPlayhead == nil ? "plus.diamond.fill" : "diamond.fill"
-    }
-
     private var hasPreviousSkinSmoothKeyframe: Bool {
         guard let localTime = model.selectedClipSourceLocalPlayheadTime else { return false }
         return model.selectedClipSkinSmooth.strength.keyframes.contains {
@@ -832,7 +809,7 @@ struct InspectorView: View {
                     TextField("Width", value: customWidthBinding, format: .number)
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
-                        .frame(minWidth: 80)
+                        .frame(width: canvasFieldWidth)
                         .help("Enter a custom canvas width in pixels")
                         .accessibilityLabel("Custom canvas width in pixels")
                 }
@@ -840,7 +817,7 @@ struct InspectorView: View {
                     TextField("Height", value: customHeightBinding, format: .number)
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
-                        .frame(minWidth: 80)
+                        .frame(width: canvasFieldWidth)
                         .help("Enter a custom canvas height in pixels")
                         .accessibilityLabel("Custom canvas height in pixels")
                 }

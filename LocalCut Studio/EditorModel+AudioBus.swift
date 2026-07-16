@@ -180,7 +180,10 @@ extension EditorModel {
             } catch {
                 guard token == loudnessMeasurementToken else { return }
                 loudnessTask = nil
-                statusMessage = "Loudness measurement failed. Try again with the full project timeline."
+                statusMessage = Self.failureStatusMessage(
+                    summary: "Loudness measurement failed",
+                    detail: error.localizedDescription,
+                    recoverySuggestion: "Check that the project's audio files are still accessible, then try again.")
             }
         }
     }

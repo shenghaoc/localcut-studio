@@ -420,7 +420,11 @@ extension EditorModel {
                 let manifestFinalizationError = result.manifestFinalizationError
                 _ = await self.landCaptureSession(result)
                 if let manifestFinalizationError {
-                    self.statusMessage += " Recording summary could not be saved: \(manifestFinalizationError). This session may be re-offered for recovery on next launch."
+                    let warning = Self.failureStatusMessage(
+                        summary: "Recording summary could not be saved",
+                        detail: manifestFinalizationError,
+                        recoverySuggestion: "This session may be re-offered for recovery on next launch.")
+                    self.statusMessage += " \(warning)"
                 }
             } catch {
                 self.isRecording = false
@@ -530,7 +534,10 @@ extension EditorModel {
                 isRecording = false
                 isPaused = false
                 recordingMicLevel = 0
-                statusMessage = "Could not pause: \(error.localizedDescription) Try stopping and restarting the recording instead."
+                statusMessage = Self.failureStatusMessage(
+                    summary: "Could not pause",
+                    detail: error.localizedDescription,
+                    recoverySuggestion: "Try stopping and restarting the recording instead.")
             } else {
                 recordingMonitorTask?.cancel()
                 recordingMonitorTask = nil
@@ -538,7 +545,10 @@ extension EditorModel {
                 isRecording = false
                 isPaused = true
                 recordingMicLevel = 0
-                statusMessage = "Recording paused with errors. Some data may be missing."
+                statusMessage = Self.failureStatusMessage(
+                    summary: "Recording paused with errors",
+                    detail: error.localizedDescription,
+                    recoverySuggestion: "Some data may be missing.")
             }
         }
     }
@@ -572,7 +582,10 @@ extension EditorModel {
             }
             statusMessage = panelExclusionWarning ?? "Recording…"
         } catch {
-            statusMessage = "Could not resume: \(error.localizedDescription) Try stopping and restarting the recording instead."
+            statusMessage = Self.failureStatusMessage(
+                summary: "Could not resume",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Try stopping and restarting the recording instead.")
         }
     }
 

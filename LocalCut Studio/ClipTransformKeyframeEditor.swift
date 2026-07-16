@@ -5,6 +5,7 @@ import LocalCutDomain
 
 struct ClipTransformKeyframeEditor: View {
     @Bindable var model: EditorModel
+    @ScaledMetric(relativeTo: .body) private var numericFieldWidth: CGFloat = 72
 
     var body: some View {
         let hasKeyframe = model.selectedClipTransformKeyframeAtPlayhead != nil
@@ -55,7 +56,7 @@ struct ClipTransformKeyframeEditor: View {
                 get: { Double(model.selectedClipTransformAtPlayhead.tx) },
                 set: { model.updateSelectedClipTransformKeyframeValue(value.replacing(translateX: Float($0))) }),
                       format: .number.precision(.fractionLength(3)))
-                .frame(minWidth: 72)
+                .frame(width: numericFieldWidth)
                 .multilineTextAlignment(.trailing)
         }
         LabeledContent("Pan Y") {
@@ -63,7 +64,7 @@ struct ClipTransformKeyframeEditor: View {
                 get: { Double(model.selectedClipTransformAtPlayhead.ty) },
                 set: { model.updateSelectedClipTransformKeyframeValue(value.replacing(translateY: Float($0))) }),
                       format: .number.precision(.fractionLength(3)))
-                .frame(minWidth: 72)
+                .frame(width: numericFieldWidth)
                 .multilineTextAlignment(.trailing)
         }
         HStack {

@@ -179,6 +179,28 @@ final class EditorModel {
     // Status / export
     var statusMessage = "Import media to begin."
 
+    /// Builds a user-visible failure message while keeping an underlying error
+    /// and its recovery suggestion as separate sentences. Localized error
+    /// descriptions are inconsistent about trailing punctuation, so callers
+    /// should use this instead of interpolating an unconditional period.
+    nonisolated static func failureStatusMessage(summary: String,
+                                                  detail: String,
+                                                  recoverySuggestion: String? = nil) -> String {
+        let summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        var message = detail.isEmpty ? summary : "\(summary): \(detail)"
+
+        guard let recoverySuggestion else { return message }
+        let recovery = recoverySuggestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !recovery.isEmpty else { return message }
+        if let finalCharacter = message.last,
+           !".!?…".contains(finalCharacter) {
+            message.append(".")
+        }
+        message += " \(recovery)"
+        return message
+    }
+
     /// Serial render queue, owned for the lifetime of the editor. Loaded once
     /// during init so a queue saved by the previous session resumes cleanly.
     /// Replaces the legacy `isExporting` / `exportProgress` fields — progress
@@ -1506,7 +1528,10 @@ final class EditorModel {
                 player.seek(to: .zero)
                 if project.voiceCleanup.requiresOfflineProcessing {
                     audioBus.seekLivePreview(to: .zero) { [weak self] message in
-                        self?.statusMessage = "Live voice cleanup unavailable: \(message). Export to apply voice cleanup offline."
+                        self?.statusMessage = Self.failureStatusMessage(
+                            summary: "Live voice cleanup unavailable",
+                            detail: message,
+                            recoverySuggestion: "Export to apply voice cleanup offline.")
                     }
                 }
             }
@@ -1533,7 +1558,10 @@ final class EditorModel {
         player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
         if project.voiceCleanup.requiresOfflineProcessing {
             audioBus.seekLivePreview(to: time) { [weak self] message in
-                self?.statusMessage = "Live voice cleanup unavailable: \(message). Export to apply voice cleanup offline."
+                self?.statusMessage = Self.failureStatusMessage(
+                    summary: "Live voice cleanup unavailable",
+                    detail: message,
+                    recoverySuggestion: "Export to apply voice cleanup offline.")
             }
             if isPlaying {
                 audioBus.resumeLivePreview()
@@ -1550,7 +1578,10 @@ final class EditorModel {
             audioBus.prepareLive()
         }
         if let error = audioBus.lastStartError {
-            statusMessage = "Live metering unavailable: \(error). Check that no other app is using the microphone."
+            statusMessage = Self.failureStatusMessage(
+                summary: "Live metering unavailable",
+                detail: error,
+                recoverySuggestion: "Check the selected audio output in System Settings > Sound, then try again.")
         } else if audioBus.isLiveRunning {
             statusMessage = "Live metering started."
         }

@@ -35,7 +35,7 @@ components:
   badge:
     backgroundColor: "system: .thinMaterial"
     rounded: "{rounded.capsule}"
-    padding: "10px 5px horizontal, 5px vertical"
+    padding: "10px horizontal, 5px vertical"
   transport-controls:
     backgroundColor: "system: .regular.interactive glass"
     rounded: "{rounded.capsule}"
