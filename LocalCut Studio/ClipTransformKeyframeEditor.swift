@@ -24,10 +24,10 @@ struct ClipTransformKeyframeEditor: View {
 
             KeyframeNavBar(
                 keyframeKind: "clip transform",
-                canGoToPrevious: true,
+                canGoToPrevious: model.hasPreviousSelectedClipTransformKeyframe,
                 canAddOrUpdate: model.selectedClipTransformLocalPlayheadTime != nil,
                 canRemove: hasKeyframe,
-                canGoToNext: true,
+                canGoToNext: model.hasNextSelectedClipTransformKeyframe,
                 hasKeyframeAtPlayhead: hasKeyframe,
                 onPrevious: { model.seekToPreviousSelectedClipTransformKeyframe() },
                 onAddOrUpdate: { model.addOrUpdateSelectedClipTransformKeyframe() },

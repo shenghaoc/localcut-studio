@@ -316,10 +316,10 @@ struct ScreencastInspectorView: View {
 
             KeyframeNavBar(
                 keyframeKind: "callout transform",
-                canGoToPrevious: true,
+                canGoToPrevious: model.hasPreviousSelectedCalloutTransformKeyframe,
                 canAddOrUpdate: model.selectedCalloutLocalPlayheadTime != nil,
                 canRemove: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
-                canGoToNext: true,
+                canGoToNext: model.hasNextSelectedCalloutTransformKeyframe,
                 hasKeyframeAtPlayhead: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
                 onPrevious: { model.seekToPreviousSelectedCalloutTransformKeyframe() },
                 onAddOrUpdate: { model.addOrUpdateSelectedCalloutTransformKeyframe() },

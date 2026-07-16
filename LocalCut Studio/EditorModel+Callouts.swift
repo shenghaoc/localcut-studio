@@ -93,6 +93,28 @@ extension EditorModel {
         selectedCallout?.transformKeyframes.keyframes.count ?? 0
     }
 
+    /// Whether a previous callout-transform keyframe exists before the playhead
+    /// (same tolerance as `seekToPreviousSelectedCalloutTransformKeyframe`).
+    var hasPreviousSelectedCalloutTransformKeyframe: Bool {
+        guard let callout = selectedCallout,
+              let localTime = selectedCalloutLocalPlayheadTime else { return false }
+        let tolerance = calloutKeyframeHitToleranceSeconds
+        return callout.transformKeyframes.keyframes.contains {
+            $0.time.seconds < localTime.seconds - tolerance
+        }
+    }
+
+    /// Whether a next callout-transform keyframe exists after the playhead
+    /// (same tolerance as `seekToNextSelectedCalloutTransformKeyframe`).
+    var hasNextSelectedCalloutTransformKeyframe: Bool {
+        guard let callout = selectedCallout,
+              let localTime = selectedCalloutLocalPlayheadTime else { return false }
+        let tolerance = calloutKeyframeHitToleranceSeconds
+        return callout.transformKeyframes.keyframes.contains {
+            $0.time.seconds > localTime.seconds + tolerance
+        }
+    }
+
     /// Adds or updates a transform keyframe at the current playhead. The first
     /// keyframe promotes the static transform into the animation track and
     /// neutralises the static fields so the compositor does not double-apply it.

@@ -163,7 +163,11 @@ nonisolated enum KeystrokeOverlayRenderer {
         let pillPath = CGPath(roundedRect: pillRect, cornerWidth: cornerRadius,
                               cornerHeight: cornerRadius, transform: nil)
         context.saveGState()
-        context.setFillColor(Self.pillBackground.copy(alpha: CGFloat(frame.opacity) * 0.92)!)
+        // `copy(alpha:)` can return nil under rare graphics states; fall back to the
+        // opaque pill colour rather than force-unwrapping.
+        let fill = Self.pillBackground.copy(alpha: CGFloat(frame.opacity) * 0.92)
+            ?? Self.pillBackground
+        context.setFillColor(fill)
         context.addPath(pillPath)
         context.fillPath()
         context.restoreGState()

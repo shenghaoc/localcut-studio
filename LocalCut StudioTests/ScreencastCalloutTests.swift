@@ -81,6 +81,68 @@ struct ScreencastCalloutTransformKeyframeTests {
         #expect(updatedClip.transformKeyframes.keyframes.isEmpty)
     }
 
+    @Test("Clip transform prev/next enablement matches neighbour keyframes")
+    func clipTransformNavEnablement() {
+        let model = EditorModel()
+        let clip = Clip(
+            mediaID: UUID(),
+            sourceStart: .zero,
+            duration: CMTime(seconds: 8, preferredTimescale: 600),
+            timelineStart: .zero)
+        model.project.videoTracks[0].clips = [clip]
+        model.selectedClipID = clip.id
+
+        for time in [1.0, 3.0, 5.0] {
+            model.currentTime = time
+            model.addOrUpdateSelectedClipTransformKeyframe()
+        }
+
+        model.currentTime = 0.5
+        #expect(!model.hasPreviousSelectedClipTransformKeyframe)
+        #expect(model.hasNextSelectedClipTransformKeyframe)
+
+        model.currentTime = 3.0
+        #expect(model.hasPreviousSelectedClipTransformKeyframe)
+        #expect(model.hasNextSelectedClipTransformKeyframe)
+
+        model.currentTime = 5.5
+        #expect(model.hasPreviousSelectedClipTransformKeyframe)
+        #expect(!model.hasNextSelectedClipTransformKeyframe)
+    }
+
+    @Test("Callout transform prev/next enablement matches neighbour keyframes")
+    func calloutTransformNavEnablement() {
+        let model = EditorModel()
+        let calloutID = UUID()
+        let start = CMTime(seconds: 0, preferredTimescale: 600)
+        model.project.callouts = [
+            CalloutClip(
+                id: calloutID,
+                kind: .box,
+                timeRange: CMTimeRange(
+                    start: start,
+                    duration: CMTime(seconds: 8, preferredTimescale: 600))),
+        ]
+        model.selectedCalloutID = calloutID
+
+        for time in [1.0, 3.0, 5.0] {
+            model.currentTime = time
+            model.addOrUpdateSelectedCalloutTransformKeyframe()
+        }
+
+        model.currentTime = 0.5
+        #expect(!model.hasPreviousSelectedCalloutTransformKeyframe)
+        #expect(model.hasNextSelectedCalloutTransformKeyframe)
+
+        model.currentTime = 3.0
+        #expect(model.hasPreviousSelectedCalloutTransformKeyframe)
+        #expect(model.hasNextSelectedCalloutTransformKeyframe)
+
+        model.currentTime = 5.5
+        #expect(model.hasPreviousSelectedCalloutTransformKeyframe)
+        #expect(!model.hasNextSelectedCalloutTransformKeyframe)
+    }
+
     @Test("Each callout kind renders a deterministic non-empty snapshot")
     func eachCalloutKindRendersSnapshot() throws {
         let size = CGSize(width: 96, height: 64)

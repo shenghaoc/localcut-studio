@@ -108,10 +108,11 @@ A restrained, system-anchored palette. The Film Gold accent is the only branded 
 
 ## 4. Elevation
 
-Flat by default. The editor uses tonal layering (lighter surfaces above darker recessed ones) rather than shadows. The three exceptions are:
+Flat by default. The editor uses tonal layering (lighter surfaces above darker recessed ones) rather than shadows. Glass and materials appear only as functional responses to context:
 
-- **Liquid Glass** (`.glassEffect(.regular.interactive())`): The floating transport controls over the preview canvas and the diagnostics HUD. Both are canonical Liquid Glass cases per HIG — interactive controls floating over content.
-- **Thin Material** (`.thinMaterial`): Non-interactive badge capsules (format readout, safe-zone label). HIG: glass is reserved for interactive/functional layers; content-layer labels use standard material.
+- **Interactive Liquid Glass** (`.glassEffect(.regular.interactive())`): Floating transport controls over the preview canvas — controls the user clicks.
+- **Functional Liquid Glass** (`.glassEffect(in:)` without `.interactive()`): Diagnostics HUD floating over content — readable chrome, not a primary control surface.
+- **Thin Material** (`.thinMaterial`): Non-interactive content-layer badge capsules (format readout, safe-zone label). HIG: glass is reserved for interactive/functional layers; content-layer labels use standard material.
 
 There is no shadow vocabulary. Depth is conveyed through surface colour contrast alone: canvas black < lane surface < rail surface < panel background.
 
@@ -127,10 +128,14 @@ There is no shadow vocabulary. Depth is conveyed through surface colour contrast
 - **Hover / Focus:** System default. Every icon-only button has `.help(...)` and `.accessibilityLabel(...)`.
 
 ### Badges
-- **Style:** `.thinMaterial` background in a Capsule shape.
-- **Typography:** `.caption` with `.monospacedDigit()`.
-- **Padding:** Horizontal 10pt, vertical 5pt.
-- **Use:** Non-interactive informational labels overlaid on content (format readout, safe-zone name, media count pill).
+Two recipes — do not conflate them:
+
+- **Content badge** (over video / canvas): `.thinMaterial` capsule, `.caption` (`.monospacedDigit()` when numeric), horizontal 10pt / vertical 5pt. Used for format readout and safe-zone name.
+- **Chrome count pill** (panel headers): `.quaternary` capsule, `.caption.monospacedDigit()`, horizontal 6pt / vertical 2pt. Used for the Media Bin item count — not thin material.
+
+### Empty States
+- **Media Bin:** `ContentUnavailableView` with description + primary **Import Media** (`.borderedProminent`).
+- **Preview:** Same pattern when there is no preview item — description plus primary **Import Media…** that calls `requestImport()`, matching the Media Bin affordance so first-run guidance is actionable from either surface.
 
 ### Transport Controls
 - **Style:** Liquid Glass capsule (`.glassEffect(.regular.interactive())`).
@@ -167,7 +172,7 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 - **`.tappable()`** — Applies `.contentShape(Rectangle())` so small tappable elements (lane segments, timeline clips) respond reliably across their full frame. Defined in `Theme.swift`.
 
 ### Keyframe Navigation Bar
-`KeyframeNavBar` is a reusable four-button HStack (previous / add-or-update / remove / next) with `.controlSize(.small)`. Used across speed, look, skin-smooth, clip-transform, and callout-transform keyframe editors. Accepts callbacks and disabled-state booleans; the add/update button label and icon toggle based on `hasKeyframeAtPlayhead`.
+`KeyframeNavBar` is a reusable four-button HStack (previous / add-or-update / remove / next) with `.controlSize(.small`). Used across speed, look, skin-smooth, clip-transform, and callout-transform keyframe editors. Accepts callbacks and disabled-state booleans; the add/update button label and icon toggle based on `hasKeyframeAtPlayhead`. **Previous/next must reflect real neighbour keyframes** (`canGoToPrevious` / `canGoToNext`) — never hard-code `true`; match the seek helper’s tolerance when one exists.
 
 ### Spacing Tokens
 - **`CGFloat.lcInsetStandard`** (12 pt): Standard inset for panel content and grouped sections.
