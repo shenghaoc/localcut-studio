@@ -176,7 +176,7 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 - **`.monospacedCaption()`** — Applies `.font(.caption)`, `.monospacedDigit()`, and `.foregroundStyle(.secondary)` in one call. Use for secondary numeric labels (timecodes, counts, bitrates). Defined in `Theme.swift`.
 
 ### Keyframe Navigation Bar
-`KeyframeNavBar` is a reusable four-button HStack (previous / add-or-update / remove / next) with `.controlSize(.small`). Used across speed, look, skin-smooth, clip-transform, and callout-transform keyframe editors. Accepts callbacks and disabled-state booleans; the add/update button label and icon toggle based on `hasKeyframeAtPlayhead`. **Previous/next must reflect real neighbour keyframes** (`canGoToPrevious` / `canGoToNext`) — never hard-code `true`; match the seek helper’s tolerance when one exists.
+`KeyframeNavBar` is a reusable four-button HStack (previous / add-or-update / remove / next) that uses the small control size via `.controlSize(.small)`. It appears across speed, look, skin-smooth, clip-transform, and callout-transform keyframe editors. Accepts callbacks and disabled-state booleans; the add/update button label and icon toggle based on `hasKeyframeAtPlayhead`. **Previous/next must reflect real neighbour keyframes** (`canGoToPrevious` / `canGoToNext`) — never hard-code `true`; match the seek helper’s tolerance when one exists.
 
 ## 6. Do's and Don'ts
 
