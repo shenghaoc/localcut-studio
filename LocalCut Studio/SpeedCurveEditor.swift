@@ -134,7 +134,7 @@ struct SpeedCurveEditor: View {
                 path.addLine(to: point)
             }
         }
-        context.stroke(path, with: .color(.accentColor), lineWidth: 2.5)
+        context.stroke(path, with: .color(.lcAccent), lineWidth: 2.5)
     }
 
     private func drawHandles(context: inout GraphicsContext,
@@ -204,7 +204,7 @@ struct SpeedCurveEditor: View {
                               y: point.y - keyframeRadius,
                               width: keyframeRadius * 2,
                               height: keyframeRadius * 2)
-            context.fill(Path(ellipseIn: rect), with: .color(.accentColor))
+            context.fill(Path(ellipseIn: rect), with: .color(.lcAccent))
             return
         }
 
@@ -218,7 +218,7 @@ struct SpeedCurveEditor: View {
                               y: point.y - keyframeRadius,
                               width: keyframeRadius * 2,
                               height: keyframeRadius * 2)
-            context.fill(Path(ellipseIn: rect), with: .color(.accentColor))
+            context.fill(Path(ellipseIn: rect), with: .color(.lcAccent))
             context.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.8)), lineWidth: 1)
         }
     }

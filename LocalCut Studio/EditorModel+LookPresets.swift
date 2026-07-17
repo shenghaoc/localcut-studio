@@ -397,8 +397,12 @@ extension EditorModel {
         selectedClipSourceLocalPlayheadTime
     }
 
+    private func selectedClipLookEffect(_ kind: LookEffectKind) -> Effect? {
+        selectedClip?.effects.first { $0.lookKind == kind }
+    }
+
     private func selectedClipLookStrength(_ kind: LookEffectKind) -> Keyframed<Float> {
-        if let effect = selectedClip?.effects.first(where: { $0.lookKind == kind }),
+        if let effect = selectedClipLookEffect(kind),
            let track = effect.lookStrength {
             return track
         }
@@ -410,14 +414,23 @@ extension EditorModel {
     }
 
     func lookStrengthAtPlayhead(_ kind: LookEffectKind) -> Float {
-        let track = selectedClipLookStrength(kind)
-        guard let time = selectedClipLookLocalPlayheadTime else { return track.defaultValue }
-        return track.value(at: time)
+        selectedClipLookEffect(kind)?
+            .evaluatedLookStrength(at: selectedClipLookLocalPlayheadTime) ?? 0
     }
 
     func lookStrengthKeyframeAtPlayhead(_ kind: LookEffectKind) -> Keyframe<Float>? {
         guard let time = selectedClipLookLocalPlayheadTime else { return nil }
         return nearestLookKeyframe(kind, to: time)
+    }
+
+    func hasPreviousLookStrengthKeyframe(_ kind: LookEffectKind) -> Bool {
+        guard let localTime = selectedClipLookLocalPlayheadTime else { return false }
+        return previousLookStrengthKeyframe(kind, before: localTime) != nil
+    }
+
+    func hasNextLookStrengthKeyframe(_ kind: LookEffectKind) -> Bool {
+        guard let localTime = selectedClipLookLocalPlayheadTime else { return false }
+        return nextLookStrengthKeyframe(kind, after: localTime) != nil
     }
 
     func addOrUpdateLookStrengthKeyframe(_ kind: LookEffectKind) {
@@ -459,28 +472,46 @@ extension EditorModel {
 
     func seekToPreviousLookStrengthKeyframe(_ kind: LookEffectKind) {
         guard let clip = selectedClip,
-              let localTime = selectedClipLookLocalPlayheadTime else { return }
-        let tolerance = lookKeyframeHitToleranceSeconds
-        guard let previous = selectedClipLookStrength(kind).keyframes.last(where: {
-            $0.time.seconds < localTime.seconds - tolerance
-        }) else { return }
+              let localTime = selectedClipLookLocalPlayheadTime,
+              let previous = previousLookStrengthKeyframe(
+                kind,
+                before: localTime) else { return }
         let outputOffset = clip.outputOffset(forSourceOffset: previous.time)
         seek(toSeconds: effectiveTimelineTime(forAuthored: clip.timelineStart + outputOffset).seconds)
     }
 
     func seekToNextLookStrengthKeyframe(_ kind: LookEffectKind) {
         guard let clip = selectedClip,
-              let localTime = selectedClipLookLocalPlayheadTime else { return }
-        let tolerance = lookKeyframeHitToleranceSeconds
-        guard let next = selectedClipLookStrength(kind).keyframes.first(where: {
-            $0.time.seconds > localTime.seconds + tolerance
-        }) else { return }
+              let localTime = selectedClipLookLocalPlayheadTime,
+              let next = nextLookStrengthKeyframe(
+                kind,
+                after: localTime) else { return }
         let outputOffset = clip.outputOffset(forSourceOffset: next.time)
         seek(toSeconds: effectiveTimelineTime(forAuthored: clip.timelineStart + outputOffset).seconds)
     }
 
     private var lookKeyframeHitToleranceSeconds: Double {
         0.5 / max(1, project.frameRate)
+    }
+
+    private func previousLookStrengthKeyframe(
+        _ kind: LookEffectKind,
+        before localTime: CMTime
+    ) -> Keyframe<Float>? {
+        let tolerance = lookKeyframeHitToleranceSeconds
+        return selectedClipLookStrength(kind).keyframes.last {
+            $0.time.seconds < localTime.seconds - tolerance
+        }
+    }
+
+    private func nextLookStrengthKeyframe(
+        _ kind: LookEffectKind,
+        after localTime: CMTime
+    ) -> Keyframe<Float>? {
+        let tolerance = lookKeyframeHitToleranceSeconds
+        return selectedClipLookStrength(kind).keyframes.first {
+            $0.time.seconds > localTime.seconds + tolerance
+        }
     }
 
     private func nearestLookKeyframe(_ kind: LookEffectKind, to time: CMTime) -> Keyframe<Float>? {

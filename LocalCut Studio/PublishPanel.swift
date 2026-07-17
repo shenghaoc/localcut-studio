@@ -93,8 +93,7 @@ struct PublishPanel: View {
                     Text("Video Bitrate").font(.caption)
                     Spacer()
                     Text("\(publishState.videoBitrate) kbps")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .monospacedCaption()
                 }
                 Slider(
                     value: Binding(
@@ -111,8 +110,7 @@ struct PublishPanel: View {
                 Text("Audio Bitrate").font(.caption)
                 Spacer()
                 Text("\(publishState.audioBitrate) kbps Opus")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .monospacedCaption()
             }
             .accessibilityElement(children: .combine)
 
@@ -121,8 +119,7 @@ struct PublishPanel: View {
                     Text("Keyframe Interval (Best Effort)").font(.caption)
                     Spacer()
                     Text("\(publishState.keyframeInterval)s")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .monospacedCaption()
                 }
             }
             .accessibilityLabel("Keyframe interval")

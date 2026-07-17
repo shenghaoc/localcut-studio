@@ -445,7 +445,10 @@ extension EditorModel {
         let sourceStart = clip.sourceStart + sourceOffset
         let duration = CMTimeMaximum(sourceEndOffset - sourceOffset, .zero)
         let speedCurve = slicedKeyframeTrack(clip.speedCurve, from: sourceOffset, duration: duration)
-        let effects = mapSkinSmoothStrength(in: clip.effects) {
+        let transformKeyframes = clip.transformKeyframes
+            .splitPreservingBezier(at: sourceOffset).right
+            .splitPreservingBezier(at: duration).left
+        let effects = clip.effects.mapSourceLocalKeyframeTracks {
             slicedKeyframeTrack($0, from: sourceOffset, duration: duration)
         }
 
@@ -455,6 +458,7 @@ extension EditorModel {
             first.sourceStart = sourceStart
             first.duration = duration
             first.speedCurve = speedCurve
+            first.transformKeyframes = transformKeyframes
             first.effects = effects
             return first
         }
@@ -463,8 +467,10 @@ extension EditorModel {
                     duration: duration,
                     timelineStart: timelineStart,
                     opacity: clip.opacity,
+                    geometry: clip.geometry,
                     effects: effects,
                     volumeEnvelope: clip.volumeEnvelope,
+                    transformKeyframes: transformKeyframes,
                     speedCurve: speedCurve,
                     preservePitch: clip.preservePitch,
                     pitchAlgorithm: clip.pitchAlgorithm)
@@ -472,56 +478,9 @@ extension EditorModel {
 
     private func slicedKeyframeTrack(_ track: Keyframed<Float>, from sourceOffset: CMTime, duration: CMTime)
         -> Keyframed<Float> {
-        guard track.isAnimated else { return track }
-        let endOffset = sourceOffset + duration
-        let startValue = track.bezierValue(at: sourceOffset)
-        let endValue = track.bezierValue(at: endOffset)
-        var keyframes: [Keyframe<Float>] = []
-
-        if let exactStart = track.keyframes.first(where: { $0.time == sourceOffset }) {
-            keyframes.append(Keyframe<Float>(
-                id: exactStart.id,
-                time: .zero,
-                value: startValue,
-                incomingHandle: exactStart.incomingHandle,
-                outgoingHandle: exactStart.outgoingHandle))
-        } else {
-            keyframes.append(Keyframe<Float>(time: .zero, value: startValue))
-        }
-
-        keyframes.append(contentsOf: track.keyframes.compactMap { keyframe in
-            guard keyframe.time > sourceOffset, keyframe.time < endOffset else { return nil }
-            return Keyframe<Float>(
-                id: keyframe.id,
-                time: keyframe.time - sourceOffset,
-                value: keyframe.value,
-                incomingHandle: keyframe.incomingHandle,
-                outgoingHandle: keyframe.outgoingHandle)
-        })
-
-        if duration > .zero {
-            if let exactEnd = track.keyframes.first(where: { $0.time == endOffset }) {
-                keyframes.append(Keyframe<Float>(
-                    id: exactEnd.id,
-                    time: duration,
-                    value: endValue,
-                    incomingHandle: exactEnd.incomingHandle,
-                    outgoingHandle: exactEnd.outgoingHandle))
-            } else if keyframes.last?.time != duration {
-                keyframes.append(Keyframe<Float>(time: duration, value: endValue))
-            }
-        }
-
-        return Keyframed<Float>(keyframes: keyframes, defaultValue: track.defaultValue)
-    }
-
-    private func mapSkinSmoothStrength(in effects: [Effect],
-                                       _ transform: (Keyframed<Float>) -> Keyframed<Float>) -> [Effect] {
-        effects.map { effect in
-            guard case .skinSmooth(var smooth) = effect else { return effect }
-            smooth.strength = transform(smooth.strength)
-            return .skinSmooth(smooth)
-        }
+        track
+            .splitPreservingBezier(at: sourceOffset).right
+            .splitPreservingBezier(at: duration).left
     }
 
     private func nearestBeat(to time: CMTime, targets: [CMTime], window: Double) -> CMTime? {

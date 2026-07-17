@@ -5,7 +5,7 @@
 ## Zoom-n-pan
 
 - [x] **T1.1** Define preset library (slow zoom-in, pan, snap-zoom-on-click, etc.).
-- [x] **T1.2** Stamp `[Keyframe<CGAffineTransform>]` on the selected clip.
+- [x] **T1.2** Stamp `[Keyframe<Transform2D>]` into the selected clip's `Keyframed<Transform2D>` track.
 - [x] **T1.3** Enforce velocity / acceleration bounds at stamp time.
 
 ## Event log
@@ -27,13 +27,13 @@
 - [x] **T4.1** Arrow + box + step-number callout sources via title raster.
 - [x] **T4.2** Spotlight callout (radial mask) via CIKernel.
 - [x] **T4.3** Blur-region as a CIKernel under a keyframed transform.
-- [x] **T4.4** Inspector UI for static callout transforms and add/update/delete/seek/edit transform keyframes.
+- [x] **T4.4** Inspector UI for static callout transforms and add/update/delete/seek/edit transform keyframes; stored handles drive the same temporal Bezier evaluator used by preview and export.
 
 ## Padded background
 
 - [x] **T5.1** Preset model: background source, corner radius, shadow params, inset margin.
 - [x] **T5.2** Compositor preset application (whole-canvas layer group).
-- [x] **T5.3** Background image downsample at apply time.
+- [x] **T5.3** Lazy first-render ImageIO downsampling to the requested canvas dimension, with a bounded bookmark-and-dimension cache and memory-pressure purge.
 - [x] **T5.4** Background image picker, security-scoped single-file persistence, bundle-relative `.lcbundle` persistence, and render-queue snapshot restoration.
 
 ## Verification
@@ -42,3 +42,4 @@
 - [x] **T6.2** Determinism test for auto-zoom proposals.
 - [x] **T6.3** Smoke: capture session or imported log → propose → apply → export.
 - [x] **T6.4** `xcodebuild` (Debug, macOS) green.
+- [x] **T6.5** Focused tests for transform temporal Bezier easing, handle-free linear fallback, and clip/callout playhead evaluation.

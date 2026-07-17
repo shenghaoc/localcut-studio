@@ -187,6 +187,7 @@ struct ProgramPanel: View {
                             .font(.caption)
                             .lineLimit(1)
                             .opacity(binding.isEnabled ? 1.0 : 0.5)
+                            .help(binding.descriptor.displayName)
                         Spacer()
                         if binding.descriptor.kind.isVideo {
                             Text("\(binding.descriptor.width ?? 0)x\(binding.descriptor.height ?? 0)")
@@ -242,13 +243,14 @@ struct ProgramPanel: View {
     private func sceneRow(_ scene: SceneDefinition) -> some View {
         HStack {
             Circle()
-                .fill(programState.currentSceneId == scene.id ? Color.accentColor : Color.clear)
+                .fill(programState.currentSceneId == scene.id ? Color.lcAccent : Color.clear)
                 .frame(width: 8, height: 8)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(scene.name)
                     .font(.caption)
                     .lineLimit(1)
+                    .help(scene.name)
                 Text("\(scene.layers.count) layer\(scene.layers.count == 1 ? "" : "s")")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)

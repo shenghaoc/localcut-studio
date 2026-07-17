@@ -98,9 +98,9 @@ extension EditorModel {
         if let note = result.note {
             statusMessage = note
         } else if result.measuredLUFS.isFinite {
-            statusMessage = "Measured \(String(format: "%.1f", result.measuredLUFS)) LUFS; applying \(String(format: "%+.1f", result.gainDB)) dB."
+            statusMessage = "Loudness measured at \(String(format: "%.1f", result.measuredLUFS)) LUFS. Applying \(String(format: "%+.1f", result.gainDB)) dB gain."
         } else {
-            statusMessage = "Loudness could not be measured."
+            statusMessage = "Loudness could not be measured. The project may be too short or have no renderable audio."
         }
     }
 
@@ -180,7 +180,10 @@ extension EditorModel {
             } catch {
                 guard token == loudnessMeasurementToken else { return }
                 loudnessTask = nil
-                statusMessage = "Loudness measurement failed: \(error.localizedDescription)"
+                statusMessage = Self.failureStatusMessage(
+                    summary: "Loudness measurement failed",
+                    detail: error.localizedDescription,
+                    recoverySuggestion: "Check that the project's audio files are still accessible, then try again.")
             }
         }
     }

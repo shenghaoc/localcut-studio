@@ -80,7 +80,7 @@ extension EditorModel {
               callout.transformKeyframes.isAnimated else {
             return staticTransform(for: callout)
         }
-        return callout.transformKeyframes.value(at: localTime)
+        return callout.transformKeyframes.bezierValue(at: localTime)
     }
 
     var selectedCalloutTransformKeyframeAtPlayhead: Keyframe<Transform2D>? {
@@ -91,6 +91,28 @@ extension EditorModel {
 
     var selectedCalloutTransformKeyframeCount: Int {
         selectedCallout?.transformKeyframes.keyframes.count ?? 0
+    }
+
+    /// Whether a previous callout-transform keyframe exists before the playhead
+    /// (same tolerance as `seekToPreviousSelectedCalloutTransformKeyframe`).
+    var hasPreviousSelectedCalloutTransformKeyframe: Bool {
+        guard let callout = selectedCallout,
+              let localTime = selectedCalloutLocalPlayheadTime else { return false }
+        let tolerance = calloutKeyframeHitToleranceSeconds
+        return callout.transformKeyframes.keyframes.contains {
+            $0.time.seconds < localTime.seconds - tolerance
+        }
+    }
+
+    /// Whether a next callout-transform keyframe exists after the playhead
+    /// (same tolerance as `seekToNextSelectedCalloutTransformKeyframe`).
+    var hasNextSelectedCalloutTransformKeyframe: Bool {
+        guard let callout = selectedCallout,
+              let localTime = selectedCalloutLocalPlayheadTime else { return false }
+        let tolerance = calloutKeyframeHitToleranceSeconds
+        return callout.transformKeyframes.keyframes.contains {
+            $0.time.seconds > localTime.seconds + tolerance
+        }
     }
 
     /// Adds or updates a transform keyframe at the current playhead. The first
@@ -109,7 +131,7 @@ extension EditorModel {
         let existingID = selectedCalloutTransformKeyframeAtPlayhead?.id
         let wasAnimated = callout.transformKeyframes.isAnimated
         let value = wasAnimated
-            ? callout.transformKeyframes.value(at: localTime)
+            ? callout.transformKeyframes.bezierValue(at: localTime)
             : staticTransform(for: callout)
 
         performUndoable(existingID == nil ? "Add Callout Keyframe" : "Update Callout Keyframe") {

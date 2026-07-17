@@ -112,6 +112,90 @@ struct BeatToolsEditorTests {
         return (model, media, audioClip, videoClip)
     }
 
+    private func makeBezierBeatCutFixture() -> (
+        model: EditorModel,
+        original: Clip,
+        scalarTrack: Keyframed<Float>,
+        speedTrack: Keyframed<Float>,
+        transformTrack: Keyframed<Transform2D>
+    ) {
+        let model = EditorModel()
+        let media = MediaItem(url: URL(filePath: "/dev/null"))
+        media.duration = time(12)
+        media.hasVideo = true
+        media.hasAudio = true
+        model.project.mediaItems = [media]
+
+        let scalarTrack = Keyframed<Float>(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: 0.1,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 0.1)),
+                Keyframe(
+                    time: time(10),
+                    value: 0.9,
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 0.1)),
+            ],
+            defaultValue: 0.1)
+        let speedTrack = Keyframed<Float>(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: 1,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 1)),
+                Keyframe(
+                    time: time(10),
+                    value: 3,
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 1)),
+            ],
+            defaultValue: 1)
+        let transformTrack = Keyframed<Transform2D>(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: .identity,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 0)),
+                Keyframe(
+                    time: time(10),
+                    value: Transform2D(
+                        translateX: 0.8,
+                        translateY: -0.4,
+                        scale: 2,
+                        rotation: 0.3),
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 0)),
+            ],
+            defaultValue: .identity)
+        var skin = SkinSmoothEffect.neutral
+        skin.strength = scalarTrack
+        let sourceStart = time(2)
+        let clip = Clip(
+            mediaID: media.id,
+            sourceStart: sourceStart,
+            duration: time(10),
+            timelineStart: time(1),
+            geometry: ClipGeometry(
+                positionOffset: CGSize(width: 0.2, height: -0.1),
+                scale: 1.4,
+                mask: .roundedRect),
+            effects: [
+                .skinSmooth(skin),
+                .grain(GrainEffect(amount: scalarTrack)),
+                .halation(HalationEffect(strength: scalarTrack)),
+                .vignette(VignetteEffect(amount: scalarTrack)),
+            ],
+            transformKeyframes: transformTrack,
+            speedCurve: speedTrack)
+        model.project.videoTracks[0].clips = [clip]
+        model.project.audioTracks[0].clips = []
+        model.selectedClipID = clip.id
+        model.beatAnalyses[media.id] = BeatAnalysis(
+            tempoBPM: 120,
+            beatTimes: [sourceStart + time(3), sourceStart + time(7)],
+            confidence: 1)
+        return (model, clip, scalarTrack, speedTrack, transformTrack)
+    }
+
     @Test("Beat projection uses source-relative times plus global offset")
     func projectedBeatsUseClipMappingAndOffset() {
         let (model, _, _, _) = makeModel()
@@ -271,6 +355,57 @@ struct BeatToolsEditorTests {
         #expect(clips.allSatisfy { $0.outputDuration == time(2) })
     }
 
+    @Test("Cut at beats preserves and rebases every scalar Bezier track")
+    func cutAtBeatsPreservesScalarBezierTracks() throws {
+        let fixture = makeBezierBeatCutFixture()
+
+        fixture.model.cutSelectedClipAtBeats()
+
+        let pieces = fixture.model.project.videoTracks[0].clips
+            .sorted { $0.timelineStart < $1.timelineStart }
+        #expect(pieces.count == 3)
+        for piece in pieces {
+            let sourceOffset = piece.sourceStart - fixture.original.sourceStart
+            let sample = time(1)
+            #expect(abs(
+                piece.speedCurve.bezierValue(at: sample)
+                    - fixture.speedTrack.bezierValue(at: sourceOffset + sample)) < 0.002)
+            #expect(piece.speedCurve.keyframes.allSatisfy { $0.time <= piece.duration })
+
+            let pieceTracks = piece.effects.compactMap(sourceLocalTrack)
+            #expect(pieceTracks.count == 4)
+            for track in pieceTracks {
+                #expect(abs(
+                    track.bezierValue(at: sample)
+                        - fixture.scalarTrack.bezierValue(at: sourceOffset + sample)) < 0.002)
+                #expect(track.keyframes.allSatisfy { $0.time <= piece.duration })
+            }
+        }
+    }
+
+    @Test("Cut at beats preserves and rebases transform curves and static geometry")
+    func cutAtBeatsPreservesTransformBezierTracks() throws {
+        let fixture = makeBezierBeatCutFixture()
+
+        fixture.model.cutSelectedClipAtBeats()
+
+        let pieces = fixture.model.project.videoTracks[0].clips
+            .sorted { $0.timelineStart < $1.timelineStart }
+        #expect(pieces.count == 3)
+        for piece in pieces {
+            let sourceOffset = piece.sourceStart - fixture.original.sourceStart
+            let sample = time(1)
+            let actual = piece.transformKeyframes.bezierValue(at: sample)
+            let expected = fixture.transformTrack.bezierValue(at: sourceOffset + sample)
+            #expect(abs(actual.tx - expected.tx) < 0.002)
+            #expect(abs(actual.ty - expected.ty) < 0.002)
+            #expect(abs(actual.decomposedScale - expected.decomposedScale) < 0.002)
+            #expect(abs(actual.decomposedRotation - expected.decomposedRotation) < 0.002)
+            #expect(piece.transformKeyframes.keyframes.allSatisfy { $0.time <= piece.duration })
+            #expect(piece.geometry == fixture.original.geometry)
+        }
+    }
+
     @Test("Align to beat moves the selected clip to the nearest projected beat")
     func alignToBeat() throws {
         let (model, media, _, _) = makeModel()
@@ -404,5 +539,13 @@ struct BeatToolsEditorTests {
         #expect(reloaded == analysis)
         #expect(reopened.showBeatMarkers)
         #expect(!reopened.projectedBeatMarkers().isEmpty)
+    }
+
+    private func sourceLocalTrack(_ effect: Effect) -> Keyframed<Float>? {
+        switch effect {
+        case .skinSmooth(let smooth): smooth.strength
+        case .grain, .halation, .vignette: effect.lookStrength
+        case .colourGrade, .lut: nil
+        }
     }
 }

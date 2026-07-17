@@ -13,7 +13,7 @@ struct MarkersInspectorView: View {
             if model.project.markers.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("No markers. Press M while the timeline is focused, or use the button below.")
-                        .font(.callout)
+                        .font(.body)
                         .foregroundStyle(.secondary)
                     Button("Add at Playhead") { model.addMarkerAtPlayhead() }
                         .buttonStyle(.borderedProminent)
@@ -39,8 +39,7 @@ struct MarkersInspectorView: View {
                 model.seekToMarker(id: marker.id)
             } label: {
                 Text(TimeFormatting.timecode(marker.time.seconds))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .monospacedCaption()
             }
             .buttonStyle(.borderless)
             .help("Seek to marker")
@@ -61,9 +60,8 @@ struct MarkersInspectorView: View {
         }
         .padding(.vertical, 2)
         .background(
-            // Use the system selection colour for standard list-row selection
-            // (matches the media bin and honours the user's system accent),
-            // reserving the brand gold for the bespoke timeline affordances.
+            // Use the native list-row selection colour so this standard control
+            // follows the user's macOS accent and accessibility preferences.
             (model.selectedMarkerID == marker.id ? Color(.selectedContentBackgroundColor) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 4)))
         .contentShape(Rectangle())

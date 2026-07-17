@@ -27,7 +27,7 @@ extension EditorModel {
         let keyframes = ZoomPanPresetGenerator.generateKeyframes(for: preset, clipDuration: clip.duration)
 
         guard !keyframes.isEmpty else {
-            statusMessage = "Could not generate keyframes for this preset."
+            statusMessage = "Could not apply zoom/pan preset. Try a longer clip or a different preset."
             return
         }
 
@@ -197,7 +197,7 @@ extension EditorModel {
             preset.imageBundleRelativePath = nil
             project.paddedBackground = preset
         }
-        statusMessage = "Applied \(url.lastPathComponent) as padded background."
+        statusMessage = "Set \(url.lastPathComponent) as padded background."
         Task { [weak self] in await self?.rebuild() }
     }
 

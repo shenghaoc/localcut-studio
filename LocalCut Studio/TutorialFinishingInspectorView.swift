@@ -14,14 +14,14 @@ struct TutorialFinishingInspectorView: View {
     @State private var silenceParams = SilenceDetectionParameters()
 
     var body: some View {
-        Section("Tutorial Finishing") {
+        Group {
             silenceDetectionSection
+                .sheet(isPresented: $showSilenceReview) {
+                    SilenceReviewSheet(model: model, isPresented: $showSilenceReview)
+                }
             keystrokeOverlaySection
             chapterExportSection
             captionPresetSection
-        }
-        .sheet(isPresented: $showSilenceReview) {
-            SilenceReviewSheet(model: model, isPresented: $showSilenceReview)
         }
     }
 

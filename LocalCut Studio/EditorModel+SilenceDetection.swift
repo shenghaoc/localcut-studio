@@ -57,9 +57,14 @@ extension EditorModel {
                 } else {
                     self.statusMessage = "Found \(timelineProposals.count) silence(s). Review to apply."
                 }
+            } catch is CancellationError {
+                return
             } catch {
                 guard let self, self.silenceDetectionGeneration == detectionGen else { return }
-                self.statusMessage = "Silence detection failed: \(error.localizedDescription)"
+                self.statusMessage = Self.failureStatusMessage(
+                    summary: "Silence detection failed",
+                    detail: error.localizedDescription,
+                    recoverySuggestion: "Try again with different audio or a shorter selection.")
             }
         }
     }
@@ -108,7 +113,7 @@ extension EditorModel {
                 applySingleProposal(proposal)
             }
             silenceProposals = []
-            statusMessage = "Applied \(coalesced.count) silence cut(s)."
+            statusMessage = "Applied \(coalesced.count) silence cut(s) to the timeline."
             scheduleRebuild()
         }
     }
@@ -117,7 +122,7 @@ extension EditorModel {
     @MainActor
     func cancelSilenceReview() {
         silenceProposals = []
-        statusMessage = "Silence review cancelled."
+        statusMessage = "Silence review closed."
     }
 
     // MARK: - Private
@@ -176,6 +181,13 @@ extension EditorModel {
                     let leftSourceOffset = clip.sourceOffset(forOutputOffset: leftOutputOffset)
                     var left = clip
                     left.duration = leftSourceOffset
+                    left.speedCurve = clip.speedCurve
+                        .splitPreservingBezier(at: leftSourceOffset).left
+                    left.transformKeyframes = clip.transformKeyframes
+                        .splitPreservingBezier(at: leftSourceOffset).left
+                    left.effects = clip.effects.mapSourceLocalKeyframeTracks {
+                        $0.splitPreservingBezier(at: leftSourceOffset).left
+                    }
                     left.volumeEnvelope = Self.volumeEnvelope(
                         clip.volumeEnvelope,
                         slicedTo: CMTimeRange(start: .zero, duration: leftOutputOffset),
@@ -185,9 +197,8 @@ extension EditorModel {
 
                 // Right portion (after silence) — shifted left.
                 // Use Clip init to get a fresh UUID, avoiding duplicate IDs.
-                // Shift source-local keyframes (speedCurve, transformKeyframes)
-                // backward by rightSourceOffset so they stay aligned with the
-                // right portion's new sourceStart.
+                // Shift all source-local curves backward by rightSourceOffset
+                // so they stay aligned with the right portion's new sourceStart.
                 // Drop the original transition: the silence cut is not a
                 // transition boundary, so keeping it would make
                 // TransitionLayout treat the cut as a cross-dissolve/wipe.
@@ -201,7 +212,9 @@ extension EditorModel {
                         timelineStart: overlapEnd - silenceDuration,
                         opacity: clip.opacity,
                         geometry: clip.geometry,
-                        effects: clip.effects,
+                        effects: clip.effects.mapSourceLocalKeyframeTracks {
+                            $0.shiftedPreservingBezier(by: rightSourceOffset)
+                        },
                         transition: nil,
                         volumeEnvelope: Self.volumeEnvelope(
                             clip.volumeEnvelope,
@@ -209,8 +222,10 @@ extension EditorModel {
                                 start: rightOutputOffset,
                                 duration: clip.outputDuration - rightOutputOffset),
                             originalOutputDuration: clip.outputDuration),
-                        transformKeyframes: clip.transformKeyframes.shifted(by: rightSourceOffset),
-                        speedCurve: clip.speedCurve.shifted(by: rightSourceOffset),
+                        transformKeyframes: clip.transformKeyframes
+                            .shiftedPreservingBezier(by: rightSourceOffset),
+                        speedCurve: clip.speedCurve
+                            .shiftedPreservingBezier(by: rightSourceOffset),
                         preservePitch: clip.preservePitch,
                         pitchAlgorithm: clip.pitchAlgorithm)
                     newClips.append(right)

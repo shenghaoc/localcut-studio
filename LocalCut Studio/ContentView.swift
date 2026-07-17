@@ -203,7 +203,7 @@ struct DocumentCommands: Commands {
             Button("Add Transition at Selected Cut") { model.addTransitionToSelectedClip() }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(!model.canAddTransitionAtSelection)
-            Button("Remove Transition") { model.removeSelectedTransition() }
+            Button("Delete Transition") { model.removeSelectedTransition() }
                 .disabled(model.selectedTransitionClipID == nil)
             // Mirror the destructive toolbar button so deleting a clip/transition
             // has a menu home; the scoped timeline handler owns the Delete key.
@@ -278,8 +278,6 @@ struct EditorView: View {
                                                    isVertical: false))
         .toolbar { toolbarContent }
         .navigationTitle(model.project.name)
-        .tint(.lcAccent)
-        .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) { statusBar }
         .onAppear { [weak model] in
             Task { [weak model] in await model?.scanRecoveredRecordings() }
@@ -454,9 +452,11 @@ struct EditorView: View {
                 Text(model.statusMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .allowsHitTesting(false)
+                    .help(model.statusMessage)
                     .accessibilityLabel(model.statusMessage)
                     .accessibilityAddTraits(.updatesFrequently)
                 Spacer()

@@ -15,7 +15,7 @@ extension EditorModel {
               clip.transformKeyframes.isAnimated else {
             return clip.transformKeyframes.defaultValue
         }
-        return clip.transformKeyframes.value(at: localTime)
+        return clip.transformKeyframes.bezierValue(at: localTime)
     }
 
     var selectedClipTransformKeyframeAtPlayhead: Keyframe<Transform2D>? {
@@ -26,6 +26,28 @@ extension EditorModel {
 
     var selectedClipTransformKeyframeCount: Int {
         selectedClip?.transformKeyframes.keyframes.count ?? 0
+    }
+
+    /// Whether a previous clip-transform keyframe exists before the playhead
+    /// (same tolerance as `seekToPreviousSelectedClipTransformKeyframe`).
+    var hasPreviousSelectedClipTransformKeyframe: Bool {
+        guard let clip = selectedClip,
+              let localTime = selectedClipTransformLocalPlayheadTime else { return false }
+        let tolerance = clipTransformKeyframeHitToleranceSeconds
+        return clip.transformKeyframes.keyframes.contains {
+            $0.time.seconds < localTime.seconds - tolerance
+        }
+    }
+
+    /// Whether a next clip-transform keyframe exists after the playhead
+    /// (same tolerance as `seekToNextSelectedClipTransformKeyframe`).
+    var hasNextSelectedClipTransformKeyframe: Bool {
+        guard let clip = selectedClip,
+              let localTime = selectedClipTransformLocalPlayheadTime else { return false }
+        let tolerance = clipTransformKeyframeHitToleranceSeconds
+        return clip.transformKeyframes.keyframes.contains {
+            $0.time.seconds > localTime.seconds + tolerance
+        }
     }
 
     @MainActor

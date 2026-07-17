@@ -13,12 +13,18 @@ nonisolated enum PaddedBackgroundRenderer {
     /// 8 entries ≈ 264 MB — reasonable for a background cache.
     private static let maxCacheEntries = 8
 
-    /// Cache for resolved background images, keyed by bookmark data.
+    private struct ImageCacheKey: Hashable {
+        let bookmark: Data
+        let maxDimension: Int
+    }
+
+    /// Cache for resolved background images, keyed by bookmark and requested
+    /// render dimension so preview and export thumbnails can coexist.
     /// Avoids re-resolving security-scoped bookmarks and re-downsampling on
     /// every video-composition request. When the cache exceeds
     /// `maxCacheEntries`, all entries are cleared to reclaim memory.
     private static let imageCache = OSAllocatedUnfairLock<
-        [Data: (image: CGImage, width: Int, height: Int)]
+        [ImageCacheKey: CGImage]
     >(uncheckedState: [:])
 
     /// Clear the cache (e.g. when the project is closed or the preset changes).
@@ -32,21 +38,17 @@ nonisolated enum PaddedBackgroundRenderer {
 
     static func cachedImage(for bookmark: Data, maxDimension: Int) -> CGImage? {
         imageCache.withLock { cache in
-            guard let cached = cache[bookmark],
-                  cached.width == maxDimension,
-                  cached.height == maxDimension else {
-                return nil
-            }
-            return cached.image
+            cache[ImageCacheKey(bookmark: bookmark, maxDimension: maxDimension)]
         }
     }
 
     static func cacheImage(_ image: CGImage, for bookmark: Data, maxDimension: Int) {
         imageCache.withLock { cache in
-            cache[bookmark] = (image, maxDimension, maxDimension)
+            let key = ImageCacheKey(bookmark: bookmark, maxDimension: maxDimension)
+            cache[key] = image
             if cache.count > maxCacheEntries {
                 cache.removeAll()
-                cache[bookmark] = (image, maxDimension, maxDimension)
+                cache[key] = image
             }
         }
     }

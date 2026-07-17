@@ -1,5 +1,4 @@
 import Foundation
-import CoreMedia
 import LocalCutCore
 
 // MARK: - Keystroke Overlay (Phase 44)

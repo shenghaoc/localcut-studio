@@ -236,6 +236,105 @@ struct Phase44TutorialFinishingTests {
         #expect(abs(ramp.toVolume - 0.8) < 0.0001)
     }
 
+    @Test("Silence splits preserve source-local Bezier curves")
+    func silenceSplitPreservesSourceLocalBezierCurves() throws {
+        let model = EditorModel()
+        let scalarTrack = Keyframed<Float>(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: 0.1,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 0.1)),
+                Keyframe(
+                    time: time(10),
+                    value: 0.9,
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 0.1)),
+            ],
+            defaultValue: 0.1)
+        let speedTrack = Keyframed<Float>(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: 1,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 1)),
+                Keyframe(
+                    time: time(10),
+                    value: 3,
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 1)),
+            ],
+            defaultValue: 1)
+        let transformTrack = Keyframed<Transform2D>(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: .identity,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 0)),
+                Keyframe(
+                    time: time(10),
+                    value: Transform2D(translateX: 0.8, translateY: -0.4, scale: 2, rotation: 0),
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 0)),
+            ],
+            defaultValue: .identity)
+        var skin = SkinSmoothEffect.neutral
+        skin.strength = scalarTrack
+        let effects: [Effect] = [
+            .skinSmooth(skin),
+            .grain(GrainEffect(amount: scalarTrack)),
+            .halation(HalationEffect(strength: scalarTrack)),
+            .vignette(VignetteEffect(amount: scalarTrack)),
+        ]
+        let clip = Clip(
+            mediaID: UUID(),
+            sourceStart: .zero,
+            duration: time(10),
+            timelineStart: .zero,
+            effects: effects,
+            transformKeyframes: transformTrack,
+            speedCurve: speedTrack)
+        model.project.videoTracks[0].clips = [clip]
+
+        let leftSourceCut = time(4)
+        let rightSourceCut = time(6)
+        let silenceStart = clip.outputOffset(forSourceOffset: leftSourceCut)
+        let silenceEnd = clip.outputOffset(forSourceOffset: rightSourceCut)
+        model.silenceProposals = [
+            ProposedCut(
+                silenceRange: CMTimeRange(start: silenceStart, end: silenceEnd),
+                unpaddedSilenceRange: CMTimeRange(start: silenceStart, end: silenceEnd)),
+        ]
+
+        model.applySelectedSilenceProposals()
+
+        let clips = model.project.videoTracks[0].clips.sorted { $0.timelineStart < $1.timelineStart }
+        #expect(clips.count == 2)
+        let left = try #require(clips.first)
+        let right = try #require(clips.last)
+        let originalRightOffset = right.sourceStart - clip.sourceStart
+        let sample = time(1)
+        let originalSample = originalRightOffset + sample
+
+        #expect(abs(
+            right.speedCurve.bezierValue(at: sample)
+                - speedTrack.bezierValue(at: originalSample)) < 0.002)
+        let rightTransform = right.transformKeyframes.bezierValue(at: sample)
+        let expectedTransform = transformTrack.bezierValue(at: originalSample)
+        #expect(abs(rightTransform.tx - expectedTransform.tx) < 0.002)
+        #expect(abs(rightTransform.decomposedScale - expectedTransform.decomposedScale) < 0.002)
+
+        let originalEffectTracks = effects.compactMap(sourceLocalTrack)
+        let rightEffectTracks = right.effects.compactMap(sourceLocalTrack)
+        #expect(originalEffectTracks.count == 4)
+        #expect(rightEffectTracks.count == 4)
+        for (original, rebased) in zip(originalEffectTracks, rightEffectTracks) {
+            #expect(abs(
+                rebased.bezierValue(at: sample)
+                    - original.bezierValue(at: originalSample)) < 0.002)
+        }
+
+        #expect(left.speedCurve.keyframes.allSatisfy { $0.time <= left.duration })
+        #expect(left.transformKeyframes.keyframes.allSatisfy { $0.time <= left.duration })
+    }
+
     @Test("Keystroke overlays participate in the shared video composition")
     func keystrokeOverlaysParticipateInVideoComposition() async throws {
         let tmp = FileManager.default.temporaryDirectory
@@ -281,6 +380,14 @@ struct Phase44TutorialFinishingTests {
 
     private func approximatelyEqual(_ a: Double, _ b: Double, tolerance: Double = 0.001) -> Bool {
         abs(a - b) <= tolerance
+    }
+
+    private func sourceLocalTrack(_ effect: Effect) -> Keyframed<Float>? {
+        switch effect {
+        case .skinSmooth(let smooth): smooth.strength
+        case .grain, .halation, .vignette: effect.lookStrength
+        case .colourGrade, .lut: nil
+        }
     }
 
     private func silenceFixtureSamples() -> [Float] {

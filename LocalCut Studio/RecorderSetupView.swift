@@ -89,7 +89,7 @@ struct RecorderSetupView: View {
 
                 Section("Audio") {
                     Toggle("Microphone", isOn: $includeMicrophone)
-                    Picker("Input", selection: $selectedMicrophoneID) {
+                    Picker("Input Device", selection: $selectedMicrophoneID) {
                         Text("None").tag(Optional<String>.none)
                         ForEach(microphoneOptions) { device in
                             Text(device.title).tag(Optional(device.id))
@@ -148,7 +148,7 @@ struct RecorderSetupView: View {
             Divider()
             footer
         }
-        .frame(width: 440, height: 560)
+        .frame(minWidth: 440, minHeight: 560)
         .task { await loadSources() }
     }
 

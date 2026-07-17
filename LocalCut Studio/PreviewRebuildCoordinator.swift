@@ -93,11 +93,17 @@ final class PreviewRebuildCoordinator {
                         audioMix: built.audioMix,
                         startTime: CMTime(seconds: min(resumeAt, built.duration), preferredTimescale: 600),
                         onFailure: { [weak model] message in
-                            model?.statusMessage = "Live voice cleanup unavailable: \(message)"
+                            model?.statusMessage = EditorModel.failureStatusMessage(
+                                summary: "Live voice cleanup unavailable",
+                                detail: message,
+                                recoverySuggestion: "Export to apply voice cleanup offline.")
                         })
                     cleanupPreviewRunning = true
                 } catch {
-                    model.statusMessage = "Live voice cleanup unavailable: \(error.localizedDescription)"
+                    model.statusMessage = EditorModel.failureStatusMessage(
+                        summary: "Live voice cleanup unavailable",
+                        detail: error.localizedDescription,
+                        recoverySuggestion: "Export to apply voice cleanup offline.")
                     model.audioBus.stopLivePreviewAudio()
                 }
             } else if needsLoudnessGain {
@@ -140,8 +146,13 @@ final class PreviewRebuildCoordinator {
                     model.audioBus.resumeLivePreview()
                 }
             }
+        } catch is CancellationError {
+            return
         } catch {
-            model.statusMessage = "Preview build failed: \(error.localizedDescription)"
+            model.statusMessage = EditorModel.failureStatusMessage(
+                summary: "Preview build failed",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Check that all media files are still accessible and not corrupted.")
         }
     }
 

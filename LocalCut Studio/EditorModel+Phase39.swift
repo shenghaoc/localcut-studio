@@ -61,9 +61,19 @@ extension EditorModel {
         }
     }
 
+    @MainActor
     func exportCover(to url: URL) async {
+        let data: Data
         do {
-            let data = try await makeCoverImageData()
+            data = try await makeCoverImageData()
+        } catch {
+            statusMessage = Self.failureStatusMessage(
+                summary: "Could not generate cover image",
+                detail: error.localizedDescription)
+            return
+        }
+
+        do {
             try await Task.detached {
                 let didStart = url.startAccessingSecurityScopedResource()
                 defer { if didStart { url.stopAccessingSecurityScopedResource() } }
@@ -71,7 +81,10 @@ extension EditorModel {
             }.value
             statusMessage = "Exported cover \(url.lastPathComponent)."
         } catch {
-            statusMessage = "Cover export failed: \(error.localizedDescription)"
+            statusMessage = Self.failureStatusMessage(
+                summary: "Could not save cover image",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Check that the destination has enough space and you have write permission.")
         }
     }
 

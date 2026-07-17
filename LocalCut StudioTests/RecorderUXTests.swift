@@ -990,6 +990,20 @@ struct RecordingGapCollapseTests {
 @MainActor
 struct RecordingTransportErrorHandlingTests {
 
+    @Test("Recovery messages handle punctuated and unpunctuated error details")
+    func recoveryMessagePunctuation() {
+        #expect(EditorModel.failureStatusMessage(
+            summary: "Could not pause",
+            detail: "No recording is running.",
+            recoverySuggestion: "Try stopping and restarting the recording instead.")
+            == "Could not pause: No recording is running. Try stopping and restarting the recording instead.")
+        #expect(EditorModel.failureStatusMessage(
+            summary: "Could not resume",
+            detail: "The writer stopped unexpectedly",
+            recoverySuggestion: "Try stopping and restarting the recording instead.")
+            == "Could not resume: The writer stopped unexpectedly. Try stopping and restarting the recording instead.")
+    }
+
     @Test("Pause error from stale coordinator state resets recording UI")
     func pauseErrorFromStaleCoordinatorStateResetsRecordingUI() async {
         let model = EditorModel()
@@ -1002,7 +1016,7 @@ struct RecordingTransportErrorHandlingTests {
         #expect(!model.isPaused)
         #expect(!model.isPausingRecording)
         #expect(model.recordingMicLevel == 0)
-        #expect(model.statusMessage == "Could not pause: No recording is running.")
+        #expect(model.statusMessage == "Could not pause: No recording is running. Try stopping and restarting the recording instead.")
     }
 
     @Test("Resume error is surfaced while keeping paused state retryable")
@@ -1015,7 +1029,7 @@ struct RecordingTransportErrorHandlingTests {
         #expect(model.isPaused)
         #expect(!model.isRecording)
         #expect(!model.isStartingRecording)
-        #expect(model.statusMessage == "Could not resume: Capture failed: No paused recording to resume.")
+        #expect(model.statusMessage == "Could not resume: Capture failed: No paused recording to resume. Try stopping and restarting the recording instead.")
     }
 
     @Test("Stop error clears stale recording UI state")

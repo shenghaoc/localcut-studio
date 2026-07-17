@@ -683,7 +683,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // media in-point. Subtract it. Reuse the outer `sourceTime` (line 475).
         if layer.transformKeyframes.isAnimated {
             let kfLocalTime = max(.zero, sourceTime - layer.clipSourceStart)
-            let kfValue = layer.transformKeyframes.value(at: kfLocalTime)
+            let kfValue = layer.transformKeyframes.bezierValue(at: kfLocalTime)
             if kfValue != .identity {
                 let renderSize = request.renderContext.size
                 let cx = renderSize.width / 2
@@ -959,7 +959,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
         // Evaluate keyframed transform if animated.
         let localTime = CMTimeMaximum(time - callout.timeRange.start, .zero)
         let kfTransform = callout.transformKeyframes.isAnimated
-            ? callout.transformKeyframes.value(at: localTime)
+            ? callout.transformKeyframes.bezierValue(at: localTime)
             : .identity
 
         // For spotlight and blur-region, the image is a full-canvas composite,
@@ -1602,7 +1602,7 @@ final class EffectCompositor: NSObject, AVVideoCompositing {
     nonisolated func applySkinSmooth(_ image: CIImage, params: SkinSmoothEffect, at time: CMTime) -> CIImage? {
         guard !params.bypass else { return nil }
 
-        let strength = params.strength.value(at: time)
+        let strength = params.strength(at: time)
         guard strength > 0 else { return nil }
 
         // Step 1: Generate skin-tone probability mask

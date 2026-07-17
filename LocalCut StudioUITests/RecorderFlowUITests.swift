@@ -38,6 +38,10 @@ final class RecorderFlowUITests: XCTestCase {
 
     @MainActor
     private func clickButton(_ identifier: String, in app: XCUIApplication) {
+        // A different foreground app can cover the runner between recorder
+        // state transitions. Re-activate our app immediately before resolving
+        // and clicking the control so the flow is independent of desktop focus.
+        app.activate()
         let button = app.buttons[identifier]
         XCTAssertTrue(button.waitForExistence(timeout: 2))
         button.click()

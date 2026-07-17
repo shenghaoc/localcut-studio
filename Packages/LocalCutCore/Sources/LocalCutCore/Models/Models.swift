@@ -117,15 +117,28 @@ public struct SkinSmoothEffect: Hashable, Codable, Sendable {
 
     public static var neutral: SkinSmoothEffect { SkinSmoothEffect() }
 
+    /// Evaluates the authored curve and sanitizes it for UI and render use.
+    /// Bezier handles may intentionally overshoot their keyframe values, while
+    /// corrupted persisted handles can be non-finite; the effect contract is
+    /// always a finite strength in `0...1`.
+    public func strength(at time: CMTime) -> Float {
+        Self.clampedStrength(strength.bezierValue(at: time))
+    }
+
+    public static func clampedStrength(_ value: Float) -> Float {
+        guard value.isFinite else { return 0 }
+        return max(0, min(1, value))
+    }
+
     public mutating func clamp() {
         maskWarmthBias = max(-1, min(1, maskWarmthBias))
         maskLuminanceGate = max(0, min(1, maskLuminanceGate))
         let clampedKeyframes = strength.keyframes.map { kf in
-            Keyframe(id: kf.id, time: kf.time, value: max(0, min(1, kf.value)),
+            Keyframe(id: kf.id, time: kf.time, value: Self.clampedStrength(kf.value),
                      incomingHandle: kf.incomingHandle,
                      outgoingHandle: kf.outgoingHandle)
         }
-        let clampedDefault = max(0, min(1, strength.defaultValue))
+        let clampedDefault = Self.clampedStrength(strength.defaultValue)
         strength = Keyframed<Float>(keyframes: clampedKeyframes, defaultValue: clampedDefault)
     }
 }
@@ -193,7 +206,7 @@ public struct GrainEffect: Hashable, Codable, Sendable {
     }
 
     public func amount(at time: CMTime) -> Float {
-        clamped(amount.value(at: time), to: 0...1)
+        clamped(amount.bezierValue(at: time), to: 0...1)
     }
 }
 
@@ -243,7 +256,7 @@ public struct HalationEffect: Hashable, Codable, Sendable {
     }
 
     public func strength(at time: CMTime) -> Float {
-        clamped(strength.value(at: time), to: 0...1)
+        clamped(strength.bezierValue(at: time), to: 0...1)
     }
 }
 
@@ -289,7 +302,7 @@ public struct VignetteEffect: Hashable, Codable, Sendable {
     }
 
     public func amount(at time: CMTime) -> Float {
-        clamped(amount.value(at: time), to: -1...1)
+        clamped(amount.bezierValue(at: time), to: -1...1)
     }
 }
 
@@ -438,6 +451,25 @@ extension Effect {
         case .halation(let h): h.strength
         case .vignette(let v): v.amount
         case .colourGrade, .lut, .skinSmooth: nil
+        }
+    }
+
+    /// Evaluates a look effect's primary parameter using the same finite,
+    /// effect-specific bounds as the render pipeline. Pass `nil` when the
+    /// playhead is outside the selected clip to obtain the sanitized default.
+    public func evaluatedLookStrength(at time: CMTime?) -> Float? {
+        switch self {
+        case .grain(let grain):
+            return time.map(grain.amount(at:))
+                ?? clamped(grain.amount.defaultValue, to: 0...1)
+        case .halation(let halation):
+            return time.map(halation.strength(at:))
+                ?? clamped(halation.strength.defaultValue, to: 0...1)
+        case .vignette(let vignette):
+            return time.map(vignette.amount(at:))
+                ?? clamped(vignette.amount.defaultValue, to: -1...1)
+        case .colourGrade, .lut, .skinSmooth:
+            return nil
         }
     }
 

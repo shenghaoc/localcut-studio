@@ -19,6 +19,12 @@ nonisolated enum KeystrokeOverlayRenderer {
         let position: CGPoint
     }
 
+    // MARK: - Constants
+
+    /// Dark near‑black pill background (no AppKit dependency — thread‑safe
+    /// for Core Graphics render path).
+    private static let pillBackground = CGColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1.0)
+
     /// Evaluates which keystroke events are visible at the given time and
     /// returns their visual frames.
     static func evaluate(
@@ -153,12 +159,15 @@ nonisolated enum KeystrokeOverlayRenderer {
         let pillY = frame.position.y - pillHeight / 2
         let pillRect = CGRect(x: pillX, y: pillY, width: pillWidth, height: pillHeight)
 
-        // Draw pill background.
+        // Draw pill background — dark near‑black with the frame's opacity applied.
         let pillPath = CGPath(roundedRect: pillRect, cornerWidth: cornerRadius,
                               cornerHeight: cornerRadius, transform: nil)
         context.saveGState()
-        context.setFillColor(CGColor(red: 0.1, green: 0.1, blue: 0.12,
-                                     alpha: CGFloat(frame.opacity) * 0.92))
+        // `copy(alpha:)` can return nil under rare graphics states; fall back to the
+        // opaque pill colour rather than force-unwrapping.
+        let fill = Self.pillBackground.copy(alpha: CGFloat(frame.opacity) * 0.92)
+            ?? Self.pillBackground
+        context.setFillColor(fill)
         context.addPath(pillPath)
         context.fillPath()
         context.restoreGState()

@@ -8,12 +8,17 @@ import LocalCutDomain
 /// draggable playhead. Zoom is controlled by `model.pixelsPerSecond`.
 struct TimelineView: View {
     @Bindable var model: EditorModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let rulerHeight: CGFloat = 36
-    private let laneHeight: CGFloat = 56
-    private let gutterWidth: CGFloat = 56
+    @ScaledMetric(relativeTo: .body) private var laneHeight: CGFloat = 56
+    @ScaledMetric(relativeTo: .body) private var gutterWidth: CGFloat = 56
+    @ScaledMetric(relativeTo: .caption2) private var markerLabelWidth: CGFloat = 60
+    @ScaledMetric(relativeTo: .body) private var markerRenameFieldWidth: CGFloat = 160
+    private let zoomSliderWidth: CGFloat = 140
     private let edgeZoneWidth: CGFloat = 8
     private let markerGlyphSize: CGFloat = 12
+    private static let rulerCoordinateSpace = "timelineRuler"
     /// Cached system separator colour for the marker stroke. Computed once
     /// (per type) rather than allocated per glyph per ruler tick (audit P3).
     private static let markerSeparatorStroke: Color = Color(nsColor: .separatorColor)
@@ -207,7 +212,7 @@ struct TimelineView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             Slider(value: $model.pixelsPerSecond, in: 20...300)
-                .frame(width: 140)
+                .frame(width: zoomSliderWidth)
                 .accessibilityLabel("Timeline zoom")
             Image(systemName: "plus.magnifyingglass")
                 .foregroundStyle(.secondary)
@@ -339,8 +344,12 @@ struct TimelineView: View {
                 // width), so scrolling synchronously would read the anchor's
                 // pre-layout geometry and target the previous position.
                 DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.18)) {
+                    if reduceMotion {
                         proxy.scrollTo(TimelineScrollAnchor.viewportTarget, anchor: .leading)
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            proxy.scrollTo(TimelineScrollAnchor.viewportTarget, anchor: .leading)
+                        }
                     }
                 }
             }
@@ -369,10 +378,9 @@ struct TimelineView: View {
         let beatMarkers = model.showBeatMarkers ? model.projectedBeatMarkers() : []
         let selectedMarkerID = model.selectedMarkerID
         return ZStack(alignment: .topLeading) {
-            // Scrub gesture lives on the Canvas — *not* the ZStack — so the
-            // marker glyph's `onTapGesture` actually wins on a press that lands
-            // on a glyph. `DragGesture(minimumDistance: 0)` on the outer ZStack
-            // would otherwise intercept every touch (Gemini review #3).
+            // The primary scrub gesture lives on the Canvas — *not* the ZStack —
+            // and marker labels mirror it so their tooltips do not block scrubs.
+            // Keeping the gesture off the outer ZStack lets diamond taps win.
             RulerBackgroundCanvas(
                 pps: pps,
                 rulerHeight: rulerHeight,
@@ -400,14 +408,15 @@ struct TimelineView: View {
         }
         .frame(height: rulerHeight)
         .background(Color.lcRail)
+        .coordinateSpace(.named(Self.rulerCoordinateSpace))
     }
 
     /// Scrub gesture that also clears any marker selection on a fresh press,
     /// so dragging the playhead off the marker band releases focus from a
-    /// previously-selected marker. Lives on the Canvas — *not* the parent
-    /// ZStack — so marker glyph taps still win when the press lands on a glyph.
+    /// previously-selected marker. It is attached to the Canvas and marker
+    /// labels — not the parent ZStack — so diamond taps still win.
     private var rulerScrubGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.rulerCoordinateSpace))
             .onChanged { value in
                 if model.selectedMarkerID != nil { model.selectedMarkerID = nil }
                 // Fast seek during drag; the playhead head's gesture handles
@@ -423,11 +432,9 @@ struct TimelineView: View {
     /// One marker glyph + label drawn at the marker's `time`. The popover
     /// reopens whenever `renamingMarkerID` matches this marker's id.
     ///
-    /// Only the diamond glyph is hit-tested (Codex review #4); the floating
-    /// label above sits inside a 60pt-wide layout box so it can centre and
-    /// overflow neighbouring glyphs visually, but with `allowsHitTesting(false)`
-    /// so clicks past the diamond fall through to the ruler scrub gesture
-    /// instead of selecting the marker.
+    /// The diamond remains the marker's only selection target. The floating
+    /// label mirrors the ruler's scrub gesture so it can expose the full marker
+    /// name on hover without swallowing clicks that should scrub the ruler.
     @ViewBuilder
     private func markerGlyph(_ marker: TimelineMarker, isSelected: Bool) -> some View {
         let x = CGFloat(marker.time.seconds) * pps
@@ -436,7 +443,7 @@ struct TimelineView: View {
         // outline tracks Dark Mode and Increase Contrast; selected stays on gold.
         let strokeColor: Color = isSelected ? .lcAccent : Self.markerSeparatorStroke
         let strokeWidth: CGFloat = isSelected ? 2 : 1
-        let labelWidth: CGFloat = 60
+        let labelWidth = markerLabelWidth
         VStack(spacing: 1) {
             Text(marker.name)
                 .font(.caption2)
@@ -447,7 +454,10 @@ struct TimelineView: View {
                     RoundedRectangle(cornerRadius: 2)
                         .fill(.regularMaterial.opacity(0.8)))
                 .frame(width: labelWidth)
-                .allowsHitTesting(false)
+                .contentShape(Rectangle())
+                .help(marker.name)
+                .pointerStyle(.columnResize)
+                .gesture(rulerScrubGesture)
                 .accessibilityHidden(true)
             MarkerDiamond()
                 .fill(fill)
@@ -455,6 +465,7 @@ struct TimelineView: View {
                 .frame(width: markerGlyphSize, height: markerGlyphSize)
                 .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
+                .help(marker.name)
                 // Pointing-hand cursor over the marker (declarative; replaces a
                 // manual NSCursor push/pop hover wrapper).
                 .pointerStyle(.link)
@@ -478,7 +489,7 @@ struct TimelineView: View {
         HStack(spacing: 8) {
             TextField("Name", text: $renameDraft)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 160)
+                .frame(width: markerRenameFieldWidth)
                 .onSubmit { commitRenameIfActive(); renamingMarkerID = nil }
             Button("Done") {
                 commitRenameIfActive()
@@ -553,6 +564,7 @@ struct TimelineView: View {
                     .lineLimit(1)
                     .padding(.horizontal, 6)
                     .foregroundStyle(.primary)
+                    .help(label)
             }
             .frame(width: width, height: laneHeight - 14)
             .offset(x: x, y: 7)
@@ -676,6 +688,7 @@ struct TimelineView: View {
         .gesture(bodyDragGesture(clip: clip, kind: kind, trackID: trackID, trackIndex: trackIndex, shift: shift))
         .focusable()
         .focused($focusedClipID, equals: clip.id)
+        .help(clipName ?? "Clip")
         .accessibilityLabel(nameLabel)
         .accessibilityValue(valueLabel)
         .accessibilityAddTraits(.isButton)
@@ -1074,7 +1087,7 @@ private struct RulerBackgroundCanvas: View, Equatable {
                 line.addLine(to: CGPoint(x: x, y: rulerHeight))
                 context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
                 if isMajor {
-                    let text = Text(TimeFormatting.timecode(t)).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                    let text = Text(TimeFormatting.timecode(t)).font(.caption2.monospaced()).foregroundStyle(.secondary)
                     context.draw(text, at: CGPoint(x: x + 2, y: tickTop), anchor: .topLeading)
                 }
                 i += 1

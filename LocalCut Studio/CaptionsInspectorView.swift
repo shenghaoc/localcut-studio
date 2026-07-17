@@ -11,6 +11,7 @@ import LocalCutDomain
 struct CaptionsInspectorView: View {
     @Bindable var model: EditorModel
 
+    @ScaledMetric(relativeTo: .body) private var compactSecondsFieldWidth: CGFloat = 64
     @State private var showSRTImporter = false
     @State private var showPresetImporter = false
     @State private var pickerTrackID: CaptionTrack.ID?
@@ -20,7 +21,7 @@ struct CaptionsInspectorView: View {
             if model.project.captionTracks.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("No caption tracks. Import an SRT/VTT or add an empty track to begin.")
-                        .font(.callout)
+                        .font(.body)
                         .foregroundStyle(.secondary)
                     HStack {
                         Button("Import SRT/VTT…") { showSRTImporter = true }
@@ -51,8 +52,17 @@ struct CaptionsInspectorView: View {
             allowedContentTypes: captionContentTypes,
             allowsMultipleSelection: false
         ) { [weak model] result in
-            if case .success(let urls) = result, let url = urls.first {
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
                 Task { [weak model] in await model?.importCaptionTrack(from: url) }
+            case .failure(let error):
+                guard let message = FileImporterErrorPresentation.statusMessage(
+                    summary: "Could not open captions",
+                    error: error,
+                    recoverySuggestion: "Choose a readable SRT or VTT file and try again.")
+                else { return }
+                model?.statusMessage = message
             }
         }
         .fileImporter(
@@ -60,10 +70,19 @@ struct CaptionsInspectorView: View {
             allowedContentTypes: presetContentTypes,
             allowsMultipleSelection: false
         ) { result in
-            if case .success(let urls) = result, let url = urls.first, let trackID = pickerTrackID {
+            defer { pickerTrackID = nil }
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first, let trackID = pickerTrackID else { return }
                 importPreset(from: url, into: trackID)
+            case .failure(let error):
+                guard let message = FileImporterErrorPresentation.statusMessage(
+                    summary: "Could not open caption preset",
+                    error: error,
+                    recoverySuggestion: "Choose a readable caption preset and try again.")
+                else { return }
+                model.statusMessage = message
             }
-            pickerTrackID = nil
         }
     }
 
@@ -116,11 +135,11 @@ struct CaptionsInspectorView: View {
             }
         } label: {
             HStack {
-                Text(track.name).bold()
+                Text(track.name).fontWeight(.semibold)
                 Spacer()
                 Text("\(track.lines.count) line(s)")
                     .foregroundStyle(.secondary)
-                    .font(.callout)
+                    .font(.caption)
             }
         }
     }
@@ -128,20 +147,20 @@ struct CaptionsInspectorView: View {
     @ViewBuilder
     private func lineRow(_ line: CaptionLine, in track: CaptionTrack) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                compactSecondsField("Start",
-                                    value: captionStartBinding(for: line, in: track),
-                                    accessibilityLabel: "Caption line start")
-                compactSecondsField("Duration",
-                                    value: captionDurationBinding(for: line, in: track),
-                                    accessibilityLabel: "Caption line duration")
-                Spacer()
-                Button(role: .destructive) {
-                    model.removeCaptionLine(line.id, in: track.id)
-                } label: { Image(systemName: "minus.circle") }
-                    .buttonStyle(.borderless)
-                    .help("Remove line\(line.text.isEmpty ? "" : ": \(line.text)")")
-                    .accessibilityLabel("Remove caption line\(line.text.isEmpty ? "" : ": \(line.text)")")
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    captionTimingFields(for: line, in: track)
+                    Spacer()
+                    removeCaptionLineButton(line, in: track)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    captionTimingFields(for: line, in: track)
+                    HStack {
+                        Spacer()
+                        removeCaptionLineButton(line, in: track)
+                    }
+                }
             }
             TextField("Caption text", text: Binding(
                 get: { line.text },
@@ -158,6 +177,27 @@ struct CaptionsInspectorView: View {
     }
 
     @ViewBuilder
+    private func captionTimingFields(for line: CaptionLine, in track: CaptionTrack) -> some View {
+        compactSecondsField("Start",
+                            value: captionStartBinding(for: line, in: track),
+                            accessibilityLabel: "Caption line start")
+        compactSecondsField("Duration",
+                            value: captionDurationBinding(for: line, in: track),
+                            accessibilityLabel: "Caption line duration")
+    }
+
+    private func removeCaptionLineButton(_ line: CaptionLine, in track: CaptionTrack) -> some View {
+        Button(role: .destructive) {
+            model.removeCaptionLine(line.id, in: track.id)
+        } label: {
+            Image(systemName: "minus.circle")
+        }
+        .buttonStyle(.borderless)
+        .help("Remove line\(line.text.isEmpty ? "" : ": \(line.text)")")
+        .accessibilityLabel("Remove caption line\(line.text.isEmpty ? "" : ": \(line.text)")")
+    }
+
+    @ViewBuilder
     private func styleKeyframeEditor(_ line: CaptionLine, in track: CaptionTrack) -> some View {
         let localTime = model.captionStyleLocalPlayheadTime(line.id, in: track.id)
         let styleValues = model.captionStyleKeyframeValues(line.id, in: track.id)
@@ -168,6 +208,7 @@ struct CaptionsInspectorView: View {
             HStack {
                 Text(localTime.map { "At \(TimeFormatting.timecode($0.seconds))" } ?? "Move playhead over this line")
                     .font(.caption)
+                    .monospacedDigit()
                     .foregroundStyle(localTime == nil ? .orange : .secondary)
                 Spacer()
                 Text("\(keyframeCount) keyframe(s)")
@@ -293,7 +334,7 @@ struct CaptionsInspectorView: View {
                 .foregroundStyle(.secondary)
             TextField(label, value: value, format: .number.precision(.fractionLength(2)))
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 64)
+                .frame(width: compactSecondsFieldWidth)
                 .monospacedDigit()
                 .accessibilityLabel(accessibilityLabel)
                 .onSubmit { model.commitCoalescedUndo() }

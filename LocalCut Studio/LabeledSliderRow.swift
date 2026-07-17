@@ -63,11 +63,10 @@ struct LabeledSliderRow<Value: BinaryFloatingPoint>: View where Value.Stride: Bi
                 .accessibilityLabel(spokenLabel ?? label)
                 .accessibilityValue(spokenValue ?? display)
         }
-        // The grouped Form draws a row separator at the row's bottom edge; with
-        // the slider as the bottom element the line otherwise hugs it and reads
-        // as a slider underline. A little bottom padding detaches the separator
-        // so it reads as a normal inter-row divider.
-        .padding(.bottom, 4)
+        // A grouped Form separator directly beneath a slider reads like a
+        // second track. Slider rows are already separated by their label and
+        // spacing, so remove that redundant underline.
+        .listRowSeparator(.hidden)
     }
 
     private var captionSpacing: CGFloat? {
@@ -126,4 +125,3 @@ struct LabeledSliderRow<Value: BinaryFloatingPoint>: View where Value.Stride: Bi
     .formStyle(.grouped)
     .frame(width: 320, height: 320)
 }
-

@@ -81,6 +81,137 @@ struct ScreencastCalloutTransformKeyframeTests {
         #expect(updatedClip.transformKeyframes.keyframes.isEmpty)
     }
 
+    @Test("Clip transform at the playhead honours temporal Bezier easing")
+    func clipTransformUsesBezierEasing() {
+        let track = easeInTransformTrack()
+        let clip = Clip(
+            mediaID: UUID(),
+            sourceStart: .zero,
+            duration: CMTime(seconds: 2, preferredTimescale: 600),
+            timelineStart: .zero,
+            transformKeyframes: track)
+        let model = EditorModel()
+        model.project.videoTracks[0].clips = [clip]
+        model.selectedClipID = clip.id
+        model.currentTime = 1
+
+        let transform = model.selectedClipTransformAtPlayhead
+        #expect(abs(transform.tx - 0.1) < 0.002)
+        #expect(abs(transform.decomposedScale - 1.125) < 0.002)
+    }
+
+    @Test("Splitting a clip preserves transform easing on both halves")
+    func clipSplitPreservesTransformEasing() throws {
+        let originalTrack = easeInTransformTrack()
+        let clip = Clip(
+            mediaID: UUID(),
+            sourceStart: .zero,
+            duration: CMTime(seconds: 2, preferredTimescale: 600),
+            timelineStart: .zero,
+            transformKeyframes: originalTrack)
+        let model = EditorModel()
+        model.project.videoTracks[0].clips = [clip]
+        model.selectedClipID = clip.id
+        model.currentTime = 1
+
+        model.splitSelectedClipAtPlayhead()
+
+        let clips = model.project.videoTracks[0].clips.sorted { $0.timelineStart < $1.timelineStart }
+        #expect(clips.count == 2)
+        let left = try #require(clips.first)
+        let right = try #require(clips.last)
+        let halfSecond = CMTime(seconds: 0.5, preferredTimescale: 600)
+        let leftValue = left.transformKeyframes.bezierValue(at: halfSecond)
+        let rightValue = right.transformKeyframes.bezierValue(at: halfSecond)
+        let expectedLeft = originalTrack.bezierValue(at: halfSecond)
+        let expectedRight = originalTrack.bezierValue(
+            at: CMTime(seconds: 1.5, preferredTimescale: 600))
+
+        #expect(abs(leftValue.tx - expectedLeft.tx) < 0.002)
+        #expect(abs(rightValue.tx - expectedRight.tx) < 0.002)
+        #expect(right.transformKeyframes.keyframes.first?.time == .zero)
+    }
+
+    @Test("Callout transform at the playhead honours temporal Bezier easing")
+    func calloutTransformUsesBezierEasing() {
+        let callout = CalloutClip(
+            kind: .box,
+            timeRange: CMTimeRange(
+                start: CMTime(seconds: 2, preferredTimescale: 600),
+                duration: CMTime(seconds: 2, preferredTimescale: 600)),
+            transformKeyframes: easeInTransformTrack())
+        let model = EditorModel()
+        model.project.callouts = [callout]
+        model.selectedCalloutID = callout.id
+        model.currentTime = 3
+
+        let transform = model.selectedCalloutTransformAtPlayhead
+        #expect(abs(transform.tx - 0.1) < 0.002)
+        #expect(abs(transform.decomposedScale - 1.125) < 0.002)
+    }
+
+    @Test("Clip transform prev/next enablement matches neighbour keyframes")
+    func clipTransformNavEnablement() {
+        let model = EditorModel()
+        let clip = Clip(
+            mediaID: UUID(),
+            sourceStart: .zero,
+            duration: CMTime(seconds: 8, preferredTimescale: 600),
+            timelineStart: .zero)
+        model.project.videoTracks[0].clips = [clip]
+        model.selectedClipID = clip.id
+
+        for time in [1.0, 3.0, 5.0] {
+            model.currentTime = time
+            model.addOrUpdateSelectedClipTransformKeyframe()
+        }
+
+        model.currentTime = 0.5
+        #expect(!model.hasPreviousSelectedClipTransformKeyframe)
+        #expect(model.hasNextSelectedClipTransformKeyframe)
+
+        model.currentTime = 3.0
+        #expect(model.hasPreviousSelectedClipTransformKeyframe)
+        #expect(model.hasNextSelectedClipTransformKeyframe)
+
+        model.currentTime = 5.5
+        #expect(model.hasPreviousSelectedClipTransformKeyframe)
+        #expect(!model.hasNextSelectedClipTransformKeyframe)
+    }
+
+    @Test("Callout transform prev/next enablement matches neighbour keyframes")
+    func calloutTransformNavEnablement() {
+        let model = EditorModel()
+        let calloutID = UUID()
+        let start = CMTime(seconds: 0, preferredTimescale: 600)
+        model.project.callouts = [
+            CalloutClip(
+                id: calloutID,
+                kind: .box,
+                timeRange: CMTimeRange(
+                    start: start,
+                    duration: CMTime(seconds: 8, preferredTimescale: 600))),
+        ]
+        model.selectedCalloutID = calloutID
+
+        for time in [1.0, 3.0, 5.0] {
+            model.currentTime = time
+            model.addOrUpdateSelectedCalloutTransformKeyframe()
+        }
+
+        model.currentTime = 0.5
+        #expect(!model.hasPreviousSelectedCalloutTransformKeyframe)
+        #expect(model.hasNextSelectedCalloutTransformKeyframe)
+
+        model.currentTime = 3.0
+        #expect(model.hasPreviousSelectedCalloutTransformKeyframe)
+        #expect(model.hasNextSelectedCalloutTransformKeyframe)
+
+        model.currentTime = 5.5
+        #expect(model.hasPreviousSelectedCalloutTransformKeyframe)
+        #expect(!model.hasNextSelectedCalloutTransformKeyframe)
+    }
+
     @Test("Each callout kind renders a deterministic non-empty snapshot")
     func eachCalloutKindRendersSnapshot() throws {
         let size = CGSize(width: 96, height: 64)
@@ -220,6 +351,21 @@ struct ScreencastCalloutTransformKeyframeTests {
         let exported = AVURLAsset(url: outputURL)
         let tracks = try await exported.loadTracks(withMediaType: .video)
         #expect(!tracks.isEmpty, "Imported event-log smoke export must contain video")
+    }
+
+    private func easeInTransformTrack() -> Keyframed<Transform2D> {
+        Keyframed(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: Transform2D.identity,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 0)),
+                Keyframe(
+                    time: CMTime(seconds: 2, preferredTimescale: 600),
+                    value: Transform2D(translateX: 0.8, translateY: -0.4, scale: 2, rotation: 0),
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 0)),
+            ],
+            defaultValue: Transform2D.identity)
     }
 
     private func checkerboardFixture(size: CGSize) -> CIImage {

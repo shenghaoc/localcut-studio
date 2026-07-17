@@ -5,6 +5,7 @@ import LocalCutDomain
 
 struct ClipTransformKeyframeEditor: View {
     @Bindable var model: EditorModel
+    @ScaledMetric(relativeTo: .body) private var numericFieldWidth: CGFloat = 72
 
     var body: some View {
         let hasKeyframe = model.selectedClipTransformKeyframeAtPlayhead != nil
@@ -21,43 +22,18 @@ struct ClipTransformKeyframeEditor: View {
                     .monospacedDigit()
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    model.seekToPreviousSelectedClipTransformKeyframe()
-                } label: {
-                    Image(systemName: "backward.end.fill")
-                }
-                .help("Previous keyframe")
-                .accessibilityLabel("Previous clip transform keyframe")
-
-                Button {
-                    model.addOrUpdateSelectedClipTransformKeyframe()
-                } label: {
-                    Label(hasKeyframe ? "Update" : "Add",
-                          systemImage: hasKeyframe ? "diamond.fill" : "plus.diamond.fill")
-                }
-                .disabled(model.selectedClipTransformLocalPlayheadTime == nil)
-                .help(hasKeyframe ? "Update clip transform keyframe" : "Add clip transform keyframe")
-                .accessibilityLabel(hasKeyframe ? "Update clip transform keyframe" : "Add clip transform keyframe")
-
-                Button(role: .destructive) {
-                    model.removeSelectedClipTransformKeyframe()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .help("Remove keyframe")
-                .accessibilityLabel("Remove clip transform keyframe")
-                .disabled(!hasKeyframe)
-
-                Button {
-                    model.seekToNextSelectedClipTransformKeyframe()
-                } label: {
-                    Image(systemName: "forward.end.fill")
-                }
-                .help("Next keyframe")
-                .accessibilityLabel("Next clip transform keyframe")
-            }
-            .controlSize(.small)
+            KeyframeNavBar(
+                keyframeKind: "clip transform",
+                canGoToPrevious: model.hasPreviousSelectedClipTransformKeyframe,
+                canAddOrUpdate: model.selectedClipTransformLocalPlayheadTime != nil,
+                canRemove: hasKeyframe,
+                canGoToNext: model.hasNextSelectedClipTransformKeyframe,
+                hasKeyframeAtPlayhead: hasKeyframe,
+                onPrevious: { model.seekToPreviousSelectedClipTransformKeyframe() },
+                onAddOrUpdate: { model.addOrUpdateSelectedClipTransformKeyframe() },
+                onRemove: { model.removeSelectedClipTransformKeyframe() },
+                onNext: { model.seekToNextSelectedClipTransformKeyframe() }
+            )
 
             if hasKeyframe {
                 keyframeValueEditor
@@ -80,7 +56,7 @@ struct ClipTransformKeyframeEditor: View {
                 get: { Double(model.selectedClipTransformAtPlayhead.tx) },
                 set: { model.updateSelectedClipTransformKeyframeValue(value.replacing(translateX: Float($0))) }),
                       format: .number.precision(.fractionLength(3)))
-                .frame(width: 72)
+                .frame(width: numericFieldWidth)
                 .multilineTextAlignment(.trailing)
         }
         LabeledContent("Pan Y") {
@@ -88,7 +64,7 @@ struct ClipTransformKeyframeEditor: View {
                 get: { Double(model.selectedClipTransformAtPlayhead.ty) },
                 set: { model.updateSelectedClipTransformKeyframeValue(value.replacing(translateY: Float($0))) }),
                       format: .number.precision(.fractionLength(3)))
-                .frame(width: 72)
+                .frame(width: numericFieldWidth)
                 .multilineTextAlignment(.trailing)
         }
         HStack {

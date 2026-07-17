@@ -91,24 +91,24 @@ final class ProjectEditingService {
             let outputOffset = playhead - clip.timelineStart
             let sourceOffset = clip.sourceOffset(forOutputOffset: outputOffset)
 
-            // Speed and skin-smooth keyframes are clip-source-relative. Split each
-            // track at the cut with an evaluated boundary keyframe so both halves
-            // preserve the original ramp; without it a lone surviving keyframe
-            // would flatten the ramp and the left half would no longer end exactly
-            // at the playhead.
+            // Clip animation tracks are source-relative. Split each curve at the
+            // cut so both halves preserve the original value and Bezier shape.
             let (leftSpeed, rightSpeed) = Self.splitKeyframeTrack(clip.speedCurve, at: sourceOffset)
+            let (leftTransform, rightTransform) = clip.transformKeyframes
+                .splitPreservingBezier(at: sourceOffset)
 
             var left = clip
             left.duration = sourceOffset
             left.speedCurve = leftSpeed
-            left.effects = Self.mapSkinSmoothStrength(in: clip.effects) {
+            left.transformKeyframes = leftTransform
+            left.effects = clip.effects.mapSourceLocalKeyframeTracks {
                 Self.splitKeyframeTrack($0, at: sourceOffset).left
             }
 
             // Carry the authored envelope to the right half so a split doesn't
             // silently drop volume automation. The render-time fade clamp already
             // trims fades that no longer fit either side's duration.
-            let rightEffects = Self.mapSkinSmoothStrength(in: clip.effects) {
+            let rightEffects = clip.effects.mapSourceLocalKeyframeTracks {
                 Self.splitKeyframeTrack($0, at: sourceOffset).right
             }
             let right = Clip(mediaID: clip.mediaID,
@@ -118,6 +118,7 @@ final class ProjectEditingService {
                              opacity: clip.opacity,
                              effects: rightEffects,
                              volumeEnvelope: clip.volumeEnvelope,
+                             transformKeyframes: rightTransform,
                              speedCurve: rightSpeed,
                              preservePitch: clip.preservePitch,
                              pitchAlgorithm: clip.pitchAlgorithm)
@@ -194,11 +195,12 @@ final class ProjectEditingService {
                     clip.sourceStart = newSourceStart
                     clip.timelineStart = newTimelineStart
                     clip.duration = CMTimeMaximum(clip.duration - actualSourceDelta, .zero)
-                    // Source origin moved by `actualSourceDelta`; rebase the
-                    // clip-source-relative speed and skin-smooth keyframes so the
-                    // ramps stay pinned to the same media frames after the trim.
+                    // Source origin moved by `actualSourceDelta`; rebase every
+                    // source-local curve so it stays pinned to the same frames.
                     clip.speedCurve = Self.rebaseKeyframeTrack(clip.speedCurve, originShiftedBy: actualSourceDelta)
-                    clip.effects = Self.mapSkinSmoothStrength(in: clip.effects) {
+                    clip.transformKeyframes = clip.transformKeyframes
+                        .shiftedPreservingBezier(by: actualSourceDelta)
+                    clip.effects = clip.effects.mapSourceLocalKeyframeTracks {
                         Self.rebaseKeyframeTrack($0, originShiftedBy: actualSourceDelta)
                     }
 
@@ -219,10 +221,12 @@ final class ProjectEditingService {
                         sourceDuration: maxSourceRemaining,
                         speedCurve: clip.speedCurve)
                     clip.duration = newDuration
-                    // Drop speed and skin-smooth keyframes past the new source
-                    // duration so stale out-of-range entries don't linger.
+                    // Drop source-local keyframes past the new duration while
+                    // preserving each curve at the new tail boundary.
                     clip.speedCurve = Self.clampKeyframeTrack(clip.speedCurve, toDuration: newDuration)
-                    clip.effects = Self.mapSkinSmoothStrength(in: clip.effects) {
+                    clip.transformKeyframes = clip.transformKeyframes
+                        .splitPreservingBezier(at: newDuration).left
+                    clip.effects = clip.effects.mapSourceLocalKeyframeTracks {
                         Self.clampKeyframeTrack($0, toDuration: newDuration)
                     }
                 }
@@ -378,55 +382,14 @@ final class ProjectEditingService {
     /// earlier). Keyframes that fall before the new origin are dropped.
     private static func rebaseKeyframeTrack(_ track: Keyframed<Float>, originShiftedBy sourceDelta: CMTime)
         -> Keyframed<Float> {
-        guard track.isAnimated else { return track }
-        var keyframes = track.keyframes.compactMap { kf -> Keyframe<Float>? in
-            let newTime = kf.time - sourceDelta
-            guard newTime >= .zero else { return nil }
-            return Keyframe<Float>(
-                id: kf.id,
-                time: newTime,
-                value: kf.value,
-                incomingHandle: kf.incomingHandle,
-                outgoingHandle: kf.outgoingHandle)
-        }
-
-        if sourceDelta > .zero {
-            let boundary = track.bezierValue(at: sourceDelta)
-            if let zeroIndex = keyframes.firstIndex(where: { $0.time == .zero }) {
-                keyframes[zeroIndex].value = boundary
-            } else {
-                keyframes.insert(Keyframe<Float>(time: .zero, value: boundary), at: 0)
-            }
-        }
-
-        return Keyframed<Float>(keyframes: keyframes, defaultValue: track.defaultValue)
+        track.shiftedPreservingBezier(by: sourceDelta)
     }
 
     /// Drops keyframes past `newDuration` from a clip-source-relative track,
     /// inserting a boundary keyframe at `newDuration` to preserve the ramp shape.
     private static func clampKeyframeTrack(_ track: Keyframed<Float>, toDuration newDuration: CMTime)
         -> Keyframed<Float> {
-        guard track.isAnimated else { return track }
-        let boundary = track.bezierValue(at: newDuration)
-        var keys = track.keyframes.filter { $0.time <= newDuration }
-        // Insert boundary at the new end if no keyframe sits there already.
-        if keys.last?.time != newDuration {
-            keys.append(Keyframe<Float>(time: newDuration, value: boundary))
-        }
-        return Keyframed<Float>(keyframes: keys, defaultValue: track.defaultValue)
-    }
-
-    /// Applies `transform` to every skin-smooth effect's strength track in
-    /// `effects`, leaving other effects untouched. Skin-smooth strength keyframes
-    /// are evaluated in clip-source-local time, so they must be rebased alongside
-    /// `speedCurve` whenever a source edit moves the clip's origin or duration.
-    private static func mapSkinSmoothStrength(in effects: [Effect],
-                                             _ transform: (Keyframed<Float>) -> Keyframed<Float>) -> [Effect] {
-        effects.map { effect in
-            guard case .skinSmooth(var smooth) = effect else { return effect }
-            smooth.strength = transform(smooth.strength)
-            return .skinSmooth(smooth)
-        }
+        track.splitPreservingBezier(at: newDuration).left
     }
 
     private func allTracks(in model: EditorModel) -> [Track] {
@@ -505,5 +468,34 @@ final class ProjectEditingService {
             }
         }
         return bestStart
+    }
+}
+
+extension Array where Element == Effect {
+    /// Maps every clip-source-local scalar animation track owned by an effect.
+    /// Colour-grade and LUT effects have no keyframed scalar track.
+    func mapSourceLocalKeyframeTracks(
+        _ transform: (Keyframed<Float>) -> Keyframed<Float>
+    ) -> [Effect] {
+        map { effect in
+            switch effect {
+            case .skinSmooth(var smooth):
+                smooth.strength = transform(smooth.strength)
+                return .skinSmooth(smooth)
+            case .grain(var grain):
+                // Editing can insert an overshooting Bezier boundary. Preserve
+                // that cubic here; each look node bounds its value when rendered.
+                grain.amount = transform(grain.amount)
+                return .grain(grain)
+            case .halation(var halation):
+                halation.strength = transform(halation.strength)
+                return .halation(halation)
+            case .vignette(var vignette):
+                vignette.amount = transform(vignette.amount)
+                return .vignette(vignette)
+            case .colourGrade, .lut:
+                return effect
+            }
+        }
     }
 }

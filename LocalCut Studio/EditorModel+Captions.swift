@@ -26,8 +26,13 @@ extension EditorModel {
                 statusMessage = "Imported \(lines.count) caption line(s) from \(url.lastPathComponent)."
                 scheduleRebuild()
             }
+        } catch is CancellationError {
+            return
         } catch {
-            statusMessage = "Could not import captions: \(error.localizedDescription)"
+            statusMessage = Self.failureStatusMessage(
+                summary: "Could not import captions from \(url.lastPathComponent)",
+                detail: error.localizedDescription,
+                recoverySuggestion: "Check that the file is a valid SRT or VTT export, then try again.")
         }
     }
 

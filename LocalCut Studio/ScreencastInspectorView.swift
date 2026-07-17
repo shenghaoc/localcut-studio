@@ -7,38 +7,81 @@ import UniformTypeIdentifiers
 /// Inspector section for Phase 43 screencast post-pack tools: zoom-n-pan
 /// presets, auto-zoom proposals, callouts, and padded background.
 struct ScreencastInspectorView: View {
+    private enum FileImportRequest {
+        case eventLog
+        case backgroundImage
+
+        var allowedContentTypes: [UTType] {
+            switch self {
+            case .eventLog:
+                [.json]
+            case .backgroundImage:
+                [.image]
+            }
+        }
+
+        var failureSummary: String {
+            switch self {
+            case .eventLog:
+                "Could not open event log"
+            case .backgroundImage:
+                "Could not open background image"
+            }
+        }
+
+        var failureRecoverySuggestion: String {
+            switch self {
+            case .eventLog:
+                "Choose a readable JSON event log and try again."
+            case .backgroundImage:
+                "Choose a readable image and try again."
+            }
+        }
+    }
+
     @Bindable var model: EditorModel
     @State private var showAutoZoomReview = false
-    @State private var showEventLogImporter = false
-    @State private var showBackgroundImageImporter = false
+    @State private var fileImportRequest: FileImportRequest?
+    @State private var isFileImporterPresented = false
+    @ScaledMetric(relativeTo: .body) private var compactNumericFieldWidth: CGFloat = 60
+    @ScaledMetric(relativeTo: .body) private var numericFieldWidth: CGFloat = 72
 
     var body: some View {
-        Section("Screencast Tools") {
+        Group {
             zoomPanSection
             calloutSection
             paddedBackgroundSection
+                .sheet(isPresented: $showAutoZoomReview) {
+                    AutoZoomReviewSheet(model: model, isPresented: $showAutoZoomReview)
+                }
+                .fileImporter(
+                    isPresented: $isFileImporterPresented,
+                    allowedContentTypes: fileImportRequest?.allowedContentTypes ?? [.data],
+                    allowsMultipleSelection: false
+                ) { result in
+                    let completedRequest = fileImportRequest
+                    fileImportRequest = nil
+
+                    switch result {
+                    case .success(let urls):
+                        guard let url = urls.first, let completedRequest else { return }
+                        switch completedRequest {
+                        case .eventLog:
+                            model.importScreencastEventLog(url: url)
+                        case .backgroundImage:
+                            model.applyPaddedBackgroundImage(url: url)
+                        }
+                    case .failure(let error):
+                        guard let completedRequest,
+                              let message = FileImporterErrorPresentation.statusMessage(
+                                summary: completedRequest.failureSummary,
+                                error: error,
+                                recoverySuggestion: completedRequest.failureRecoverySuggestion)
+                        else { return }
+                        model.statusMessage = message
+                    }
+                }
             autoZoomSection
-        }
-        .sheet(isPresented: $showAutoZoomReview) {
-            AutoZoomReviewSheet(model: model, isPresented: $showAutoZoomReview)
-        }
-        .fileImporter(
-            isPresented: $showEventLogImporter,
-            allowedContentTypes: [.json],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                model.importScreencastEventLog(url: url)
-            }
-        }
-        .fileImporter(
-            isPresented: $showBackgroundImageImporter,
-            allowedContentTypes: [.image],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                model.applyPaddedBackgroundImage(url: url)
-            }
         }
     }
 
@@ -184,7 +227,7 @@ struct ScreencastInspectorView: View {
                 get: { binding.wrappedValue.stepNumber },
                 set: { var c = binding.wrappedValue; c.stepNumber = max(1, $0); binding.wrappedValue = c }),
                       format: .number)
-            .frame(width: 60)
+            .frame(width: compactNumericFieldWidth)
         }
     }
 
@@ -237,7 +280,7 @@ struct ScreencastInspectorView: View {
                     get: { Double(binding.wrappedValue.positionOffset.width) },
                     set: { var c = binding.wrappedValue; c.positionOffset.width = CGFloat($0); binding.wrappedValue = c }),
                           format: .number.precision(.fractionLength(3)))
-                    .frame(width: 72)
+                    .frame(width: numericFieldWidth)
                     .multilineTextAlignment(.trailing)
             }
             LabeledContent("Position Y") {
@@ -245,7 +288,7 @@ struct ScreencastInspectorView: View {
                     get: { Double(binding.wrappedValue.positionOffset.height) },
                     set: { var c = binding.wrappedValue; c.positionOffset.height = CGFloat($0); binding.wrappedValue = c }),
                           format: .number.precision(.fractionLength(3)))
-                    .frame(width: 72)
+                    .frame(width: numericFieldWidth)
                     .multilineTextAlignment(.trailing)
             }
             HStack {
@@ -295,41 +338,18 @@ struct ScreencastInspectorView: View {
                     .monospacedDigit()
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    model.seekToPreviousSelectedCalloutTransformKeyframe()
-                } label: {
-                    Image(systemName: "backward.end.fill")
-                }
-                .help("Previous keyframe")
-                .accessibilityLabel("Previous callout transform keyframe")
-
-                Button {
-                    model.addOrUpdateSelectedCalloutTransformKeyframe()
-                } label: {
-                    Label(model.selectedCalloutTransformKeyframeAtPlayhead == nil ? "Add" : "Update",
-                          systemImage: model.selectedCalloutTransformKeyframeAtPlayhead == nil ? "plus.diamond.fill" : "diamond.fill")
-                }
-                .disabled(model.selectedCalloutLocalPlayheadTime == nil)
-
-                Button(role: .destructive) {
-                    model.removeSelectedCalloutTransformKeyframe()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .help("Remove keyframe")
-                .accessibilityLabel("Remove callout transform keyframe")
-                .disabled(model.selectedCalloutTransformKeyframeAtPlayhead == nil)
-
-                Button {
-                    model.seekToNextSelectedCalloutTransformKeyframe()
-                } label: {
-                    Image(systemName: "forward.end.fill")
-                }
-                .help("Next keyframe")
-                .accessibilityLabel("Next callout transform keyframe")
-            }
-            .controlSize(.small)
+            KeyframeNavBar(
+                keyframeKind: "callout transform",
+                canGoToPrevious: model.hasPreviousSelectedCalloutTransformKeyframe,
+                canAddOrUpdate: model.selectedCalloutLocalPlayheadTime != nil,
+                canRemove: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
+                canGoToNext: model.hasNextSelectedCalloutTransformKeyframe,
+                hasKeyframeAtPlayhead: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
+                onPrevious: { model.seekToPreviousSelectedCalloutTransformKeyframe() },
+                onAddOrUpdate: { model.addOrUpdateSelectedCalloutTransformKeyframe() },
+                onRemove: { model.removeSelectedCalloutTransformKeyframe() },
+                onNext: { model.seekToNextSelectedCalloutTransformKeyframe() }
+            )
 
             if model.selectedCalloutTransformKeyframeAtPlayhead != nil {
                 calloutKeyframeValueEditor
@@ -345,7 +365,7 @@ struct ScreencastInspectorView: View {
                 get: { Double(model.selectedCalloutTransformAtPlayhead.tx) },
                 set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(translateX: Float($0))) }),
                       format: .number.precision(.fractionLength(0)))
-                .frame(width: 72)
+                .frame(width: numericFieldWidth)
                 .multilineTextAlignment(.trailing)
         }
         LabeledContent("Keyframe Y") {
@@ -353,7 +373,7 @@ struct ScreencastInspectorView: View {
                 get: { Double(model.selectedCalloutTransformAtPlayhead.ty) },
                 set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(translateY: Float($0))) }),
                       format: .number.precision(.fractionLength(0)))
-                .frame(width: 72)
+                .frame(width: numericFieldWidth)
                 .multilineTextAlignment(.trailing)
         }
         HStack {
@@ -385,7 +405,7 @@ struct ScreencastInspectorView: View {
         DisclosureGroup("Padded Background") {
             if model.project.paddedBackground != nil {
                 Button("Choose Image…") {
-                    showBackgroundImageImporter = true
+                    presentFileImporter(for: .backgroundImage)
                 }
                 .accessibilityHint("Import an image for the padded background")
                 paddedBackgroundControls
@@ -397,7 +417,7 @@ struct ScreencastInspectorView: View {
                     model.applyPaddedBackground()
                 }
                 Button("Choose Image…") {
-                    showBackgroundImageImporter = true
+                    presentFileImporter(for: .backgroundImage)
                 }
             }
         }
@@ -462,13 +482,18 @@ struct ScreencastInspectorView: View {
     @ViewBuilder
     private var autoZoomSection: some View {
         Button("Import Event Log…") {
-            showEventLogImporter = true
+            presentFileImporter(for: .eventLog)
         }
         if model.hasAutoZoomProposals {
             Button("Review Auto-Zoom Proposals") {
                 showAutoZoomReview = true
             }
         }
+    }
+
+    private func presentFileImporter(for request: FileImportRequest) {
+        fileImportRequest = request
+        isFileImporterPresented = true
     }
 }
 

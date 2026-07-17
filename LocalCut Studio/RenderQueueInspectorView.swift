@@ -40,6 +40,7 @@ struct RenderQueueInspectorView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        .help(presetSubtitle(preset))
                 }
                 Spacer()
                 Button("Add to Queue…") {
@@ -89,7 +90,7 @@ struct RenderQueueInspectorView: View {
     private var queueList: some View {
         if model.renderQueue.jobs.isEmpty {
             Text("No renders queued. Add a preset above to queue a render.")
-                .font(.subheadline)
+                .font(.body)
                 .foregroundStyle(.secondary)
         } else {
             VStack(alignment: .leading, spacing: 4) {
@@ -121,6 +122,7 @@ struct RenderQueueInspectorView: View {
                     Text(job.outputDisplayName)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(job.outputDisplayName)
                     Text(job.preset.name)
                         .font(.caption)
                         .foregroundStyle(.secondary)

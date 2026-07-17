@@ -46,6 +46,7 @@ struct EditorSideRailView: View {
                 // rotor's Headings list, announcing the active pane, without a
                 // redundant title under tabs that already name the panel.
                 .accessibilityAddTraits(.isHeader)
+                .help("Switch between Inspector, Audio, Captions, and Tools panels")
 
                 Button {
                     onCollapse()
@@ -97,6 +98,7 @@ struct EditorSideRailView: View {
             .accessibilityLabel("Project tool")
             .accessibilityValue(tool.wrappedValue.title)
             .accessibilityAddTraits(.isHeader)
+            .help("Switch between Beats, Renders, Markers, Program, and Publish tools")
 
             Divider()
 
