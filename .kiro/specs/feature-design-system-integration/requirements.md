@@ -94,3 +94,6 @@
   consistently in menus, inspector copy, undo naming, and completion status.
 - **R7.7** Adjacent recorder controls expose distinct labels: “Microphone” for
   the enable toggle and “Input Device” for microphone device selection.
+- **R7.8** Split, trim, beat-cut, and silence-removal edits preserve source-local
+  look-effect Bezier curves even when their handles overshoot the rendered
+  strength range; effect evaluation remains bounded at render time.

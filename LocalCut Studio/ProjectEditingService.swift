@@ -482,9 +482,17 @@ extension Array where Element == Effect {
             case .skinSmooth(var smooth):
                 smooth.strength = transform(smooth.strength)
                 return .skinSmooth(smooth)
-            case .grain, .halation, .vignette:
-                guard let strength = effect.lookStrength else { return effect }
-                return effect.settingLookStrength(transform(strength))
+            case .grain(var grain):
+                // Editing can insert an overshooting Bezier boundary. Preserve
+                // that cubic here; each look node bounds its value when rendered.
+                grain.amount = transform(grain.amount)
+                return .grain(grain)
+            case .halation(var halation):
+                halation.strength = transform(halation.strength)
+                return .halation(halation)
+            case .vignette(var vignette):
+                vignette.amount = transform(vignette.amount)
+                return .vignette(vignette)
             case .colourGrade, .lut:
                 return effect
             }

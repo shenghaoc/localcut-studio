@@ -875,6 +875,57 @@ struct TimeRemappingKeyframeRebaseTests {
         }
     }
 
+    @Test("Split preserves overshooting look curves before render-time clamping")
+    func splitPreservesOvershootingLookCurves() throws {
+        let track = Keyframed<Float>(
+            keyframes: [
+                Keyframe(
+                    time: .zero,
+                    value: 0.2,
+                    outgoingHandle: KeyframeHandle(x: 0.25, y: 2)),
+                Keyframe(
+                    time: trTime(2),
+                    value: 0.8,
+                    incomingHandle: KeyframeHandle(x: 0.25, y: 2)),
+            ],
+            defaultValue: 0.2)
+        #expect(track.bezierValue(at: trTime(1)) > 1)
+
+        let model = EditorModel()
+        let clip = Clip(
+            mediaID: UUID(),
+            sourceStart: .zero,
+            duration: trTime(2),
+            timelineStart: .zero,
+            effects: [
+                .grain(GrainEffect(amount: track)),
+                .halation(HalationEffect(strength: track)),
+                .vignette(VignetteEffect(amount: track)),
+            ])
+        model.project.videoTracks[0].clips = [clip]
+        model.selectedClipID = clip.id
+        model.currentTime = 1
+
+        model.splitSelectedClipAtPlayhead()
+
+        let clips = model.project.videoTracks[0].clips.sorted { $0.timelineStart < $1.timelineStart }
+        let left = try #require(clips.first)
+        let right = try #require(clips.last)
+        #expect(clips.count == 2)
+        for index in left.effects.indices {
+            let leftEffect = left.effects[index]
+            let rightEffect = right.effects[index]
+            let leftTrack = try #require(leftEffect.lookStrength)
+            let rightTrack = try #require(rightEffect.lookStrength)
+            #expect(abs(leftTrack.bezierValue(at: trTime(0.5))
+                - track.bezierValue(at: trTime(0.5))) < 0.002)
+            #expect(abs(rightTrack.bezierValue(at: trTime(0.5))
+                - track.bezierValue(at: trTime(1.5))) < 0.002)
+            #expect((leftEffect.evaluatedLookStrength(at: trTime(1)) ?? 2) <= 1)
+            #expect((rightEffect.evaluatedLookStrength(at: .zero) ?? 2) <= 1)
+        }
+    }
+
     // MARK: - Parameterised trim rebasing tests
 
     enum TrimRebaseCase: String, CaseIterable, Sendable {

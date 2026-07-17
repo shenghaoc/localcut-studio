@@ -182,6 +182,8 @@
   undo action, and success status (R7.6).
 - [x] **T11.7** Disambiguate the recorder microphone toggle from its adjacent
   “Input Device” picker for visual and VoiceOver users (R7.7).
+- [x] **T11.8** Preserve overshooting grain, halation, and vignette Bezier curves
+  across source-local clip slicing while retaining render-time bounds (R7.8).
 
 ## Verification
 

@@ -108,6 +108,9 @@ surfaces touched by the integration:
   nested containers and duplicate headings.
 - Caption timing fields use an adaptive horizontal/vertical layout so scaled
   text does not overflow the narrow inspector.
+- Source-local grain, halation, and vignette tracks keep their subdivided Bezier
+  curves during clip slicing without re-clamping an overshooting boundary;
+  their render-time evaluators remain responsible for effect-specific bounds.
 - Transition removal uses the native destructive verb “Delete” consistently in
   its menu, inspector, undo action, and success status.
 - `PRODUCT.md` and `DESIGN.md` record the system-adaptive appearance and native

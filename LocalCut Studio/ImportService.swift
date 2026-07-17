@@ -61,7 +61,7 @@ final class ImportService {
         }
 
         let before = model.captureState()
-        model.project.mediaItems.append(contentsOf: loaded.map(\.item))
+        model.project.mediaItems.append(contentsOf: loaded.map { $0.item })
         model.registerImportUndo(name: "Import Media", before: before)
         model.markDirty()
         let successMessage = loaded.count == 1
