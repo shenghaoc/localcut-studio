@@ -249,7 +249,7 @@ private struct ScopeBackgroundView: View, Equatable {
             let label = Text("\(Int(fraction * 100))")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.5))
-            let isTopLine = fraction == 1
+            let isTopLine = abs(fraction - 1) < 0.001
             // Keep the top label below its line and every other label above its
             // line. This avoids a fixed point-size clearance that would clip
             // the Dynamic Type-aware caption at larger accessibility sizes.

@@ -155,12 +155,7 @@ struct CaptionsInspectorView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    compactSecondsField("Start",
-                                        value: captionStartBinding(for: line, in: track),
-                                        accessibilityLabel: "Caption line start")
-                    compactSecondsField("Duration",
-                                        value: captionDurationBinding(for: line, in: track),
-                                        accessibilityLabel: "Caption line duration")
+                    captionTimingFields(for: line, in: track)
                     HStack {
                         Spacer()
                         removeCaptionLineButton(line, in: track)
