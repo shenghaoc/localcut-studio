@@ -75,7 +75,9 @@ Recent / panel validation. It records an explicit `ProjectStorageKind`
 from that stored kind; Save As dispatches from the panel-selected destination
 representation. A directory is never accepted merely because a file named
 `project.json` exists — metadata must decode as a supported `ProjectDocument`
-with a supported `bundleFormat`.
+with a supported `bundleFormat`. Classification rejects project metadata larger
+than 10 MiB before reading or decoding it, so a renamed media file cannot force
+an unbounded synchronous allocation during open-panel validation.
 
 ### Window state and commands
 

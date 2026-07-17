@@ -1167,6 +1167,27 @@ struct ProjectBundleTests {
             try Data("{".utf8).write(to: malformedStudio)
             #expect(ProjectLocationInspector.inspect(malformedStudio) == nil)
 
+            let oversizedStudio = tmp.appendingPathComponent("RenamedVideo.lcstudio")
+            #expect(FileManager.default.createFile(atPath: oversizedStudio.path, contents: nil))
+            let oversizedStudioHandle = try FileHandle(forWritingTo: oversizedStudio)
+            try oversizedStudioHandle.truncate(
+                atOffset: UInt64(ProjectLocationInspector.maximumMetadataSize + 1))
+            try oversizedStudioHandle.close()
+            #expect(ProjectLocationInspector.inspect(oversizedStudio) == nil)
+
+            let oversizedBundle = tmp.appendingPathComponent("Oversized.lcbundle")
+            try FileManager.default.createDirectory(
+                at: oversizedBundle,
+                withIntermediateDirectories: true)
+            let oversizedProjectJSON = oversizedBundle.appendingPathComponent(
+                ProjectBundleLayout.projectJSON)
+            #expect(FileManager.default.createFile(atPath: oversizedProjectJSON.path, contents: nil))
+            let oversizedBundleHandle = try FileHandle(forWritingTo: oversizedProjectJSON)
+            try oversizedBundleHandle.truncate(
+                atOffset: UInt64(ProjectLocationInspector.maximumMetadataSize + 1))
+            try oversizedBundleHandle.close()
+            #expect(ProjectLocationInspector.inspect(oversizedBundle) == nil)
+
             // Extensionless synced bundle: accepted only with full metadata.
             let renamed = tmp.appendingPathComponent("Synced Project")
             try FileManager.default.createDirectory(at: renamed, withIntermediateDirectories: true)

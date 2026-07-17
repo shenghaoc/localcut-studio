@@ -22,7 +22,8 @@
   project/document services.
 - **R2.2** Open classification uses one inspector path that fully validates
   bundle metadata (`project.json` decode + supported `bundleFormat`). Existence
-  of `project.json` alone is insufficient.
+  of `project.json` alone is insufficient, and metadata reads are size-bounded
+  before decoding.
 - **R2.3** Session state stores `ProjectStorageKind` beside the local filesystem
   `documentURL`. Save dispatches from the stored kind; Save As from the
   panel-selected representation.

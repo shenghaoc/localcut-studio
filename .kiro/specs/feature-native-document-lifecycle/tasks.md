@@ -17,14 +17,15 @@
 
 ## File-based project classification
 
-- [x] **T2.1** Add `ProjectStorageKind` + `ProjectLocationInspector` with full
-  metadata validation for bundles.
+- [x] **T2.1** Add `ProjectStorageKind` + `ProjectLocationInspector` with full,
+  size-bounded metadata validation for single-file projects and bundles.
 - [x] **T2.2** Persist storage kind with `documentURL`; Save uses stored kind;
   Save As uses destination representation.
 - [x] **T2.3** Replace loose `project.json` existence sniffs; update
   `ProjectBundle.isBundle` to real validation.
 - [x] **T2.4** Tests for valid/invalid `.lcstudio` / `.lcbundle` / extensionless
-  bundle / empty JSON / malformed / unrelated directory / save routing.
+  bundle / empty JSON / malformed / oversized metadata / unrelated directory /
+  save routing.
 
 ## App Intent readiness
 

@@ -183,7 +183,7 @@ struct AppIntentsTests {
         let registry = ActiveEditorRegistry()
         let router = LocalCutAppIntentRouter(
             editorRegistry: registry,
-            readinessTimeout: .seconds(60)
+            readinessTimeout: .seconds(1)
         )
 
         let intent = Task {
@@ -192,27 +192,13 @@ struct AppIntentsTests {
         await Task.yield()
         intent.cancel()
 
-        let outcome = await withTaskGroup(of: AppIntentCancellationOutcome.self) { group in
-            group.addTask {
-                do {
-                    try await intent.value
-                    return .completed
-                } catch is CancellationError {
-                    return .cancelled
-                } catch {
-                    Issue.record("Expected CancellationError, got \(error)")
-                    return .completed
-                }
-            }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(1))
-                return .timedOut
-            }
-            let result = await group.next()!
-            group.cancelAll()
-            return result
+        do {
+            try await intent.value
+            Issue.record("Expected CancellationError.")
+        } catch is CancellationError {
+        } catch {
+            Issue.record("Expected CancellationError, got \(error)")
         }
-        #expect(outcome == .cancelled)
     }
 
     @Test func emptyTimelineExportIntentThrowsAndUpdatesStatus() async {

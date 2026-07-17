@@ -33,6 +33,11 @@ nonisolated enum ProjectLocationInspector {
         ProjectDocument.currentBundleFormat
     ]
 
+    /// Classification runs synchronously for open-panel validation. Bound the
+    /// metadata read so a renamed media file cannot make that path allocate an
+    /// arbitrarily large buffer on the main actor.
+    static let maximumMetadataSize = 10 * 1024 * 1024
+
     /// Classifies `url` as a LocalCut project location, or returns `nil` when
     /// the path is not a supported single-file project or validated bundle.
     static func inspect(_ url: URL) -> ProjectOpenDescriptor? {
@@ -85,7 +90,7 @@ nonisolated enum ProjectLocationInspector {
         guard url.pathExtension == ProjectDocument.fileExtension else {
             return nil
         }
-        guard let data = try? Data(contentsOf: url),
+        guard let data = readBoundedMetadata(at: url),
               (try? ProjectDocument(data: data)) != nil else {
             return nil
         }
@@ -95,12 +100,22 @@ nonisolated enum ProjectLocationInspector {
     private static func inspectBundleDirectory(_ url: URL) -> ProjectOpenDescriptor? {
         let projectJSON = url.appendingPathComponent(ProjectBundleLayout.projectJSON)
         guard FileManager.default.isReadableFile(atPath: projectJSON.path),
-              let data = try? Data(contentsOf: projectJSON),
+              let data = readBoundedMetadata(at: projectJSON),
               let document = try? ProjectDocument(data: data),
               let format = document.bundleFormat,
               supportedBundleFormats.contains(format) else {
             return nil
         }
         return ProjectOpenDescriptor(url: url, storageKind: .bundle)
+    }
+
+    private static func readBoundedMetadata(at url: URL) -> Data? {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+              values.isRegularFile == true,
+              let fileSize = values.fileSize,
+              fileSize <= maximumMetadataSize else {
+            return nil
+        }
+        return try? Data(contentsOf: url, options: .mappedIfSafe)
     }
 }
