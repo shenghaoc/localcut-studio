@@ -154,6 +154,7 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 ### Inputs / Fields
 - **Style:** System default text fields and pickers within grouped Forms.
 - **Forms:** `.formStyle(.grouped)` for inspector content. Sections use system section headers.
+- **Sliders:** Use the native control without an additional Form row separator beneath it; the separator reads as a second slider track.
 
 ### Navigation
 - **Side Rail:** Segmented picker (`.pickerStyle(.segmented)`, `.controlSize(.small)`) for Inspector / Audio / Captions / Tools. A secondary segmented picker within Tools for Beats / Renders / Markers / Program / Publish.

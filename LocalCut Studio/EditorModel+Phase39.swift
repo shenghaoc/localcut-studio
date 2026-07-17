@@ -61,6 +61,7 @@ extension EditorModel {
         }
     }
 
+    @MainActor
     func exportCover(to url: URL) async {
         let data: Data
         do {

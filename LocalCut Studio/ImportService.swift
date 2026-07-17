@@ -4,6 +4,7 @@ import LocalCutCore
 
 @MainActor
 final class ImportService {
+    @MainActor
     func importMedia(urls: [URL], wantsBundling: Bool = true, model: EditorModel) async -> EditorCommandOutcome {
         guard !urls.isEmpty else { return .actionCancelled }
         let generation = model.sessionGeneration
