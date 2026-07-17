@@ -1244,6 +1244,21 @@ private struct InspectorPosterView: View {
 }
 
 
+private struct CoverTimeLabelView: View {
+    var model: EditorModel
+
+    var body: some View {
+        Text(coverTimeLabel)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+    }
+
+    private var coverTimeLabel: String {
+        let time = model.project.coverFrame?.time.cmTime.sanitized.seconds ?? model.currentTime
+        return TimeFormatting.timecode(time)
+    }
+}
+
 /// Extracted view to isolate `@Observable` high-frequency updates (like `model.currentTime`)
 /// from the main `InspectorView.body`, preventing unnecessary re-renders of the entire form during playback.
 private struct CoverInspectorView: View {
@@ -1256,9 +1271,7 @@ private struct CoverInspectorView: View {
         Section("Cover") {
             coverPreview
             LabeledContent("Time") {
-                Text(coverTimeLabel)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                CoverTimeLabelView(model: model)
             }
             HStack {
                 Button {
@@ -1403,11 +1416,6 @@ private struct CoverInspectorView: View {
             coverPreviewError = "Cover preview unavailable."
         }
         coverPreviewIsLoading = false
-    }
-
-    private var coverTimeLabel: String {
-        let time = model.project.coverFrame?.time.cmTime.sanitized.seconds ?? model.currentTime
-        return TimeFormatting.timecode(time)
     }
 
     private var coverFormatBinding: Binding<CoverFormat> {
