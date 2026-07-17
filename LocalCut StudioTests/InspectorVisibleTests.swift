@@ -50,7 +50,7 @@ struct ActiveEditorRegistryTests {
         }
         await Task.yield()
         registry.markReady(model)
-        try await waiter.value
+        _ = try await waiter.value
         #expect(registry.readyEditor() === model)
     }
 }

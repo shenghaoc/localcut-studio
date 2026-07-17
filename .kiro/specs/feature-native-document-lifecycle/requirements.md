@@ -25,8 +25,8 @@
   of `project.json` alone is insufficient, and metadata reads are size-bounded
   before decoding.
 - **R2.3** Session state stores `ProjectStorageKind` beside the local filesystem
-  `documentURL`. Save dispatches from the stored kind; Save As from the
-  panel-selected representation.
+  `documentURL`. Save and queued bundle-asset snapshots dispatch from the
+  stored kind; Save As dispatches from the panel-selected representation.
 - **R2.4** Missing-media relinking, schema/downconversion protection, external
   change warnings, render-queue persistence, and preview/export parity remain
   owned by their existing services.
@@ -43,8 +43,9 @@
   reuse existing command paths (including empty-timeline export error).
 - **R3.4** If the editor window cannot become available, fail with a typed
   `editorUnavailable` error — not “open a project first.”
-- **R3.5** Queued window-dependent actions that lose the editor fail with
-  `targetWindowClosed` and never silently retarget.
+- **R3.5** Queued window-dependent actions are pinned to the ready-window
+  generation that satisfied cold-launch readiness. Actions that lose that
+  editor fail with `targetWindowClosed` and never silently retarget.
 - **R3.6** Concurrent intent actions remain serialized; cancellation while
   waiting for readiness finishes promptly.
 

@@ -11,7 +11,10 @@ final class ExportCoordinator {
     /// Exports using a specific preset (from the render queue inspector).
     func export(to url: URL, model: EditorModel, preset: ExportPreset) async -> EditorCommandOutcome {
         await export(to: url, model: model) { bookmark in
-            let snapshot = ProjectDocument(project: model.project, queueBundleURL: model.documentURL)
+            let snapshot = ProjectDocument(
+                project: model.project,
+                queueBundleURL: model.documentURL,
+                queueStorageKind: model.projectStorageKind)
             let job = QueueJob(
                 preset: preset,
                 outputBookmark: bookmark,

@@ -91,7 +91,9 @@ struct LocalCutStudioApp: App {
     @MainActor
     private var editorView: some View {
         EditorView(model: model, editorRegistry: LocalCutStudioAppState.editorRegistry)
-            .frame(minWidth: 1000, minHeight: 640)
+            .frame(
+                minWidth: EditorWindowPlacement.minimumContentSize.width,
+                minHeight: EditorWindowPlacement.minimumContentSize.height)
     }
 }
 
@@ -273,10 +275,11 @@ struct DocumentCommands: Commands {
     }
 
     private var recentProjectURLs: [URL] {
-        NSDocumentController.shared.recentDocumentURLs.filter { url in
-            url.pathExtension == ProjectDocument.fileExtension
-                || url.pathExtension == ProjectBundleLayout.fileExtension
-        }
+        Self.supportedRecentProjectURLs(from: NSDocumentController.shared.recentDocumentURLs)
+    }
+
+    static func supportedRecentProjectURLs(from urls: [URL]) -> [URL] {
+        urls.filter(ProjectLocationInspector.isSupportedProjectLocation)
     }
 }
 

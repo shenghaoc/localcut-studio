@@ -19,8 +19,9 @@
 
 - [x] **T2.1** Add `ProjectStorageKind` + `ProjectLocationInspector` with full,
   size-bounded metadata validation for single-file projects and bundles.
-- [x] **T2.2** Persist storage kind with `documentURL`; Save uses stored kind;
-  Save As uses destination representation.
+- [x] **T2.2** Persist storage kind with `documentURL`; Save and queued
+  bundle-asset snapshots use the stored kind; Save As uses destination
+  representation.
 - [x] **T2.3** Replace loose `project.json` existence sniffs; update
   `ProjectBundle.isBundle` to real validation.
 - [x] **T2.4** Tests for valid/invalid `.lcstudio` / `.lcbundle` / extensionless
@@ -33,8 +34,8 @@
   `ActiveEditorRegistry` (window readiness only).
 - [x] **T3.2** Cold-launch wait for New / Diagnostics / Import / Export;
   typed `editorUnavailable` and `targetWindowClosed`.
-- [x] **T3.3** Cancellation-safe readiness wait; serialized actions; no silent
-  retargeting.
+- [x] **T3.3** Cancellation-safe readiness wait; serialized actions pinned to
+  their cold-launch ready generation; no silent retargeting.
 - [x] **T3.4** Tests for cold-launch, timeout, cancellation, serialization,
   window-lost queue failure.
 

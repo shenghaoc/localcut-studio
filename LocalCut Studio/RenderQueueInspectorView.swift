@@ -231,7 +231,10 @@ struct RenderQueueInspectorView: View {
             return
         }
 
-        let snapshot = ProjectDocument(project: model.project, queueBundleURL: model.documentURL)
+        let snapshot = ProjectDocument(
+            project: model.project,
+            queueBundleURL: model.documentURL,
+            queueStorageKind: model.projectStorageKind)
         let job = QueueJob(
             preset: preset,
             outputBookmark: bookmark,

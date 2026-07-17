@@ -5,6 +5,7 @@ import CoreGraphics
 /// for windows that the person has already positioned.
 enum EditorWindowPlacement {
     static let preferredSize = CGSize(width: 1360, height: 860)
+    static let minimumContentSize = CGSize(width: 920, height: 620)
     static let displayInset: CGFloat = 80
 
     static func fittedSize(idealSize: CGSize, visibleRect: CGRect) -> CGSize {

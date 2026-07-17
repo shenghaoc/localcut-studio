@@ -25,12 +25,12 @@ struct EditorWindowPlacementTests {
         #expect(size == CGSize(width: 1500, height: 920))
     }
 
-    @Test("Clamps a fresh window inside the visible display inset")
+    @Test("Uses the editor minimum when a constrained display leaves only that size")
     func clampsToVisibleDisplay() {
         let size = EditorWindowPlacement.fittedSize(
             idealSize: CGSize(width: 1800, height: 1200),
             visibleRect: CGRect(x: 0, y: 0, width: 1000, height: 700))
-        #expect(size == CGSize(width: 920, height: 620))
+        #expect(size == EditorWindowPlacement.minimumContentSize)
     }
 
     @Test("Never produces a non-positive size on a tiny display")

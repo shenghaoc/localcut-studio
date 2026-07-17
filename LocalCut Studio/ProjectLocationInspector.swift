@@ -73,7 +73,7 @@ nonisolated enum ProjectLocationInspector {
     /// panel is reflected in the returned URL's extension via the panel
     /// type delegate.
     static func storageKindForSaveDestination(url: URL) -> ProjectStorageKind? {
-        switch url.pathExtension {
+        switch url.pathExtension.lowercased() {
         case ProjectBundleLayout.fileExtension:
             return .bundle
         case ProjectDocument.fileExtension:
@@ -87,7 +87,7 @@ nonisolated enum ProjectLocationInspector {
 
     private static func inspectSingleFile(_ url: URL) -> ProjectOpenDescriptor? {
         // A regular file with an `.lcbundle` suffix is not a package.
-        guard url.pathExtension == ProjectDocument.fileExtension else {
+        guard url.pathExtension.lowercased() == ProjectDocument.fileExtension else {
             return nil
         }
         guard let data = readBoundedMetadata(at: url),

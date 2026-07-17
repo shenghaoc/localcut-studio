@@ -142,6 +142,43 @@ struct AppIntentsTests {
         try await intent.value
     }
 
+    @Test func queuedColdLaunchActionFailsAfterAwakenedWindowIsReplaced() async throws {
+        let awakenedModel = EditorModel()
+        let replacementModel = EditorModel()
+        let registry = ActiveEditorRegistry()
+        let firstStarted = AppIntentStartSignal()
+        let releaseFirst = AppIntentReleaseGate()
+        let tracker = AppIntentEventTracker()
+        let router = LocalCutAppIntentRouter(editorRegistry: registry) { action, routed in
+            if action == .newProject {
+                await firstStarted.markStarted()
+                await releaseFirst.wait()
+            }
+            tracker.events.append(
+                "\(action.rawValue)-\(routed === awakenedModel ? "awakened" : "replacement")")
+        }
+
+        let first = Task { try await router.perform(.newProject) }
+        let queued = Task { try await router.perform(.importMedia) }
+        await Task.yield()
+
+        registry.markReady(awakenedModel)
+        await firstStarted.waitUntilStarted()
+        registry.markUnavailable(awakenedModel)
+        registry.markReady(replacementModel)
+        await releaseFirst.open()
+
+        try await first.value
+        do {
+            try await queued.value
+            Issue.record("Expected targetWindowClosed.")
+        } catch LocalCutAppIntentRouter.RouterError.targetWindowClosed {
+        } catch {
+            Issue.record("Expected targetWindowClosed, got \(error)")
+        }
+        #expect(tracker.events == ["newProject-awakened"])
+    }
+
     @Test func coldLaunchExportWithEmptyTimelineThrows() async throws {
         let model = EditorModel()
         let registry = ActiveEditorRegistry()

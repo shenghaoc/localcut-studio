@@ -71,9 +71,10 @@ persistence transactions.
 
 `ProjectLocationInspector` is the single classification path for Open / Open
 Recent / panel validation. It records an explicit `ProjectStorageKind`
-(`.singleFile` or `.bundle`) after successful open or Save As. Save dispatches
-from that stored kind; Save As dispatches from the panel-selected destination
-representation. A directory is never accepted merely because a file named
+(`.singleFile` or `.bundle`) after successful open or Save As. Save and queued
+bundle-asset snapshots dispatch from that stored kind; Save As dispatches from
+the panel-selected destination representation. A directory is never accepted
+merely because a file named
 `project.json` exists — metadata must decode as a supported `ProjectDocument`
 with a supported `bundleFormat`. Classification rejects project metadata larger
 than 10 MiB before reading or decoding it, so a renamed media file cannot force
@@ -97,9 +98,10 @@ an unbounded synchronous allocation during open-panel validation.
 `ActiveEditorRegistry` answers only “is the editor window available?” for the
 single process-wide model. Cold-launch New Project / Diagnostics / Import /
 Export wait for readiness (cancellation-safe continuation, bounded timeout).
-Window-dependent queued actions that lose the editor fail with
-`targetWindowClosed`. There is no multi-document identity map keyed by
-`ObjectIdentifier`.
+Window-dependent queued actions are pinned to the ready-window generation that
+awakened their cold launch; an action that loses that editor fails with
+`targetWindowClosed` rather than retargeting a replacement. There is no
+multi-document identity map keyed by `ObjectIdentifier`.
 
 ### AppKit that intentionally remains
 

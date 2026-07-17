@@ -191,8 +191,11 @@ final class LocalCutAppIntentRouter {
 
         // Cold launch: wait for the editor window without claiming a project
         // was already open.
+        let awakenedGeneration: UInt64
         do {
-            try await registry.waitUntilReady(timeout: timeout, clock: clock)
+            awakenedGeneration = try await registry.waitUntilReady(
+                timeout: timeout,
+                clock: clock)
         } catch is CancellationError {
             throw CancellationError()
         } catch ActiveEditorRegistry.WaitError.timedOut {
@@ -201,8 +204,13 @@ final class LocalCutAppIntentRouter {
             throw RouterError.editorUnavailable
         }
         try Task.checkCancellation()
-        guard let model = registry.readyEditor() else {
-            throw RouterError.editorUnavailable
+        // Every action queued during the same cold launch is pinned to the
+        // first ready generation after it was enqueued. If that window was
+        // replaced before this action reached the serialized router, do not
+        // silently retarget the replacement window.
+        guard awakenedGeneration == capture.generation &+ 1,
+              let model = registry.editor(matchingGeneration: awakenedGeneration) else {
+            throw RouterError.targetWindowClosed
         }
         return model
     }

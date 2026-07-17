@@ -1741,8 +1741,12 @@ final class RenderQueue {
     func enqueueWithDefaultPreset(outputURL: URL,
                                   project: Project,
                                   bookmark: Data,
+                                  projectStorageKind: ProjectStorageKind?,
                                   projectDocumentURL: URL? = nil) -> QueueEnqueueOutcome {
-        let snapshot = ProjectDocument(project: project, queueBundleURL: projectDocumentURL)
+        let snapshot = ProjectDocument(
+            project: project,
+            queueBundleURL: projectDocumentURL,
+            queueStorageKind: projectStorageKind)
         let job = QueueJob(
             preset: BuiltInExportPresets.defaultPreset,
             outputBookmark: bookmark,

@@ -583,7 +583,12 @@ struct ProjectBundleTests {
             #expect(savedOverlay.bookmark.isEmpty)
 
             model.project.overlayBookmarks.removeAll()
-            let snapshot = ProjectDocument(project: model.project, queueBundleURL: bundleURL)
+            try FileManager.default.removeItem(
+                at: bundleURL.appendingPathComponent(ProjectBundleLayout.projectJSON))
+            let snapshot = ProjectDocument(
+                project: model.project,
+                queueBundleURL: bundleURL,
+                queueStorageKind: .bundle)
             let queuedOverlay = try #require(snapshot.overlays.first)
 
             #expect(queuedOverlay.bundleRelativePath == savedOverlay.bundleRelativePath)
@@ -666,7 +671,10 @@ struct ProjectBundleTests {
                 source: .image,
                 imageBundleRelativePath: relativePath)
 
-            let snapshot = ProjectDocument(project: project, queueBundleURL: bundleURL)
+            let snapshot = ProjectDocument(
+                project: project,
+                queueBundleURL: bundleURL,
+                queueStorageKind: .bundle)
             let background = try #require(snapshot.paddedBackground)
 
             #expect(background.imageBundleRelativePath == relativePath)
@@ -1163,6 +1171,14 @@ struct ProjectBundleTests {
             try Data("{}".utf8).write(to: studio)
             #expect(ProjectLocationInspector.inspect(studio)?.storageKind == .singleFile)
 
+            let uppercaseStudio = tmp.appendingPathComponent("Uppercase.LCSTUDIO")
+            try Data("{}".utf8).write(to: uppercaseStudio)
+            #expect(ProjectLocationInspector.inspect(uppercaseStudio)?.storageKind == .singleFile)
+            #expect(ProjectLocationInspector.storageKindForSaveDestination(
+                url: tmp.appendingPathComponent("Output.LCBUNDLE")) == .bundle)
+            #expect(ProjectLocationInspector.storageKindForSaveDestination(
+                url: tmp.appendingPathComponent("Output.LCSTUDIO")) == .singleFile)
+
             let malformedStudio = tmp.appendingPathComponent("Broken.lcstudio")
             try Data("{".utf8).write(to: malformedStudio)
             #expect(ProjectLocationInspector.inspect(malformedStudio) == nil)
@@ -1199,6 +1215,25 @@ struct ProjectBundleTests {
         }
     }
 
+    @Test("Open Recent keeps extensionless validated bundles")
+    func recentProjectFilteringUsesProjectLocationInspector() throws {
+        try withTempDirectory("recent-projects") { tmp in
+            let extensionlessBundle = tmp.appendingPathComponent("Synced Project")
+            try FileManager.default.createDirectory(
+                at: extensionlessBundle,
+                withIntermediateDirectories: true)
+            try writeValidatedBundleMetadata(to: extensionlessBundle, name: "Synced")
+
+            let unrelatedDirectory = tmp.appendingPathComponent("Not a project")
+            try FileManager.default.createDirectory(
+                at: unrelatedDirectory,
+                withIntermediateDirectories: true)
+
+            #expect(DocumentCommands.supportedRecentProjectURLs(
+                from: [extensionlessBundle, unrelatedDirectory]) == [extensionlessBundle])
+        }
+    }
+
     @Test("Save preserves stored bundle kind for an extensionless validated bundle")
     func savePreservesStoredExtensionlessBundleKind() async throws {
         try await withTempDirectory("extless-save") { tmp in
@@ -1229,14 +1264,14 @@ struct ProjectBundleTests {
             let model = EditorModel()
             model.project.name = "Formats"
 
-            let bundleURL = tmp.appendingPathComponent("Out.lcbundle")
+            let bundleURL = tmp.appendingPathComponent("Out.LCBUNDLE")
             await model.saveAs(url: bundleURL)
             #expect(model.projectStorageKind == .bundle)
             #expect(model.documentURL == bundleURL)
             #expect(FileManager.default.fileExists(
                 atPath: bundleURL.appendingPathComponent(ProjectBundleLayout.projectJSON).path))
 
-            let studioURL = tmp.appendingPathComponent("Out.lcstudio")
+            let studioURL = tmp.appendingPathComponent("Out.LCSTUDIO")
             await model.saveAs(url: studioURL)
             #expect(model.projectStorageKind == .singleFile)
             #expect(model.documentURL == studioURL)

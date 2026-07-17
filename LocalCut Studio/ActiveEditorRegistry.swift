@@ -20,7 +20,7 @@ final class ActiveEditorRegistry {
 
     private weak var editor: EditorModel?
     private var isReady = false
-    private var waiters: [UUID: CheckedContinuation<Void, Error>] = [:]
+    private var waiters: [UUID: CheckedContinuation<UInt64, Error>] = [:]
 
     /// Marks the editor window ready for App Intent routing. Called from the
     /// editor view lifecycle and key-window activation. Re-marking the same
@@ -36,7 +36,7 @@ final class ActiveEditorRegistry {
         let waiters = self.waiters
         self.waiters.removeAll()
         for (_, continuation) in waiters {
-            continuation.resume()
+            continuation.resume(returning: generation)
         }
     }
 
@@ -80,10 +80,10 @@ final class ActiveEditorRegistry {
     func waitUntilReady(
         timeout: Duration,
         clock: ContinuousClock = ContinuousClock()
-    ) async throws {
-        if readyEditor() != nil { return }
+    ) async throws -> UInt64 {
+        if readyEditor() != nil { return generation }
 
-        try await withThrowingTaskGroup(of: Void.self) { group in
+        return try await withThrowingTaskGroup(of: UInt64.self) { group in
             group.addTask {
                 try await clock.sleep(for: timeout)
                 throw WaitError.timedOut
@@ -92,18 +92,21 @@ final class ActiveEditorRegistry {
                 try await self.waitForReadiness()
             }
             defer { group.cancelAll() }
-            _ = try await group.next()
+            guard let readyGeneration = try await group.next() else {
+                throw CancellationError()
+            }
+            return readyGeneration
         }
     }
 
     /// Suspends one structured child until readiness or cancellation. The
     /// sibling timeout task is cancelled as soon as this waiter finishes.
-    private func waitForReadiness() async throws {
+    private func waitForReadiness() async throws -> UInt64 {
         let waiterID = UUID()
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UInt64, Error>) in
                 if readyEditor() != nil {
-                    continuation.resume()
+                    continuation.resume(returning: generation)
                     return
                 }
                 waiters[waiterID] = continuation

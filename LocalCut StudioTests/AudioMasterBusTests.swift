@@ -948,7 +948,10 @@ func exportSmokeFixtureLoudness() async throws {
                                                     relativeTo: nil)
 
     let queue = RenderQueue(persistsToDisk: false)
-    queue.enqueueWithDefaultPreset(outputURL: outputURL, project: project, bookmark: outputBookmark)
+    queue.enqueueWithDefaultPreset(outputURL: outputURL,
+                                   project: project,
+                                   bookmark: outputBookmark,
+                                   projectStorageKind: nil)
     try await waitForRenderQueueToSettle(queue, expectedCount: 1, timeout: 60)
     let job = try #require(queue.jobs.first)
     #expect(job.status == .completed, "Export failed: \(job.errorMessage ?? "unknown error")")

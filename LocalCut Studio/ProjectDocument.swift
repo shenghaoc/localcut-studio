@@ -52,14 +52,23 @@ extension ProjectDocument {
     /// persists only the snapshot and not the enclosing bundle URL. When a live
     /// bundle project is queued, add temporary bookmarks for those bundled
     /// assets so the background runner can resolve and render them later.
-    init(project: Project, queueBundleURL: URL?) {
+    init(
+        project: Project,
+        queueBundleURL: URL?,
+        queueStorageKind: ProjectStorageKind?
+    ) {
         self.init(project: project)
-        addQueueBundleAssetBookmarks(from: queueBundleURL)
+        addQueueBundleAssetBookmarks(from: queueBundleURL, storageKind: queueStorageKind)
     }
 
-    private mutating func addQueueBundleAssetBookmarks(from bundleURL: URL?) {
-        guard let bundleURL,
-              ProjectLocationInspector.isValidatedBundle(bundleURL) else { return }
+    private mutating func addQueueBundleAssetBookmarks(
+        from bundleURL: URL?,
+        storageKind: ProjectStorageKind?
+    ) {
+        // The active session already established this representation while
+        // opening or saving. Revalidating project.json here would synchronously
+        // decode bundle metadata on the main-actor export-queue path.
+        guard storageKind == .bundle, let bundleURL else { return }
 
         let didAccess = bundleURL.startAccessingSecurityScopedResource()
         defer { if didAccess { bundleURL.stopAccessingSecurityScopedResource() } }
