@@ -35,7 +35,7 @@ Broadly: no template-driven UIs, no panel overload, no reskinning macOS to look 
 
 2. **Get out of the way** — the most important thing on screen is the user's content. Chrome is minimal; every control earns its place. The editor recedes so the work can advance.
 
-3. **Native by default** — respect macOS conventions: menus, keyboard shortcuts, the file system, sandbox, VoiceOver, Dynamic Type, and accessibility appearance settings. The editing chrome deliberately stays dark for colour-critical work; within that choice, semantic system colours and increased-contrast settings remain authoritative.
+3. **Native by default** — respect macOS conventions: menus, keyboard shortcuts, the file system, sandbox, VoiceOver, Dynamic Type, the user's control accent, and light/dark appearance. Like TeXShop, the app should feel at home on the Mac rather than impose a branded editor skin. The preview remains black because it is a media canvas, not window chrome.
 
 4. **Honest state** — long operations (import, thumbnailing, export) report progress and surface errors to the user. Nothing fails silently. A single status line communicates background work and errors.
 
@@ -47,5 +47,5 @@ Broadly: no template-driven UIs, no panel overload, no reskinning macOS to look 
 - VoiceOver: every icon-only control has a human-readable `accessibilityLabel`; clip blocks and selectable controls expose meaningful labels with selection state.
 - Keyboard: all primary actions have shortcuts (Space for play/pause, Delete for remove clip). No action is mouse-only. Focus is visible; no focus traps.
 - Dynamic Type: text uses system text styles so it scales; layouts reflow rather than truncate at large sizes.
-- Contrast: meet contrast ratios in the forced-dark editor and with Increase Contrast enabled. Don't rely on colour alone to convey state — pair colour with shape or label.
+- Contrast: meet contrast ratios in both system light and dark appearances and with Increase Contrast enabled. Don't rely on colour alone to convey state — pair colour with shape or label.
 - Motion: respect Reduce Motion for any animated affordances.

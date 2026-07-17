@@ -60,9 +60,8 @@ struct MarkersInspectorView: View {
         }
         .padding(.vertical, 2)
         .background(
-            // Use the system selection colour for standard list-row selection
-            // (matches the media bin and honours the user's system accent),
-            // reserving the brand gold for the bespoke timeline affordances.
+            // Use the native list-row selection colour so this standard control
+            // follows the user's macOS accent and accessibility preferences.
             (model.selectedMarkerID == marker.id ? Color(.selectedContentBackgroundColor) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 4)))
         .contentShape(Rectangle())

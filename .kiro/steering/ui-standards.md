@@ -2,7 +2,7 @@
 
 ## Aesthetic
 
-Native, professional-tool macOS look. Lean on system materials, the accent colour, and standard controls; do not reskin macOS into a web app. The editor is a single window with a three-pane workspace (media bin · preview · inspector) above a full-width timeline, split with `HSplitView` / `VSplitView`.
+Native, professional-tool macOS look in the spirit of TeXShop. Lean on system materials, the user's macOS control accent, and standard controls; do not reskin macOS into a web app. Follow the system light/dark appearance instead of forcing one, and do not introduce a branded gold or amber palette. The editor is a single window with a three-pane workspace (media bin · preview · inspector) above a full-width timeline, split with `HSplitView` / `VSplitView`.
 
 ## Layout
 
@@ -21,7 +21,7 @@ Native, professional-tool macOS look. Lean on system materials, the accent colou
 ## Visual tokens
 
 - Use SF Symbols for all iconography; every icon-only control has a `.help(...)` tooltip and an accessibility label.
-- Track colours: video = blue family, audio = green family, selection = accent colour.
+- Track colours: video = blue family, audio = green family, selection = the user's system accent. Orange is reserved for genuine warnings or paused/transient states, never branding.
 - Respect light/dark automatically; never hard-code colours that fight the system appearance.
 
 ## Consistency rules

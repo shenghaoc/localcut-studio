@@ -16,18 +16,13 @@ extension View {
 
 // MARK: - Colour Tokens
 
-/// Visual identity tokens for the editor. Kept intentionally small and sourced
-/// from the system rather than hard-coded RGB: the brand accent lives in the
-/// asset catalog (Display-P3, with room for light/dark + high-contrast variants)
-/// and the timeline surface is a semantic system colour that adapts on its own.
+/// Semantic colour tokens for the editor. Kept intentionally small and sourced
+/// from the system so the app follows the user's macOS appearance, accent, and
+/// accessibility contrast settings.
 extension Color {
-    /// LocalCut Studio brand accent — a warm film-gold defined in
-    /// `Assets.xcassets` as `AccentColor`. Referenced by name so it resolves
-    /// today; once the target's *Global Accent Color Name* build setting points
-    /// at `AccentColor`, `Color.accentColor` (and every system focus ring /
-    /// selection highlight) inherits the same gold app-wide. Every other NLE
-    /// reaches for blue or teal; the gold stays distinct from the red playhead.
-    static let lcAccent = Color("AccentColor")
+    /// The user's macOS control accent. Bespoke timeline and Canvas drawing use
+    /// the same semantic colour as native controls and focus rings.
+    static let lcAccent = Color.accentColor
 
     /// Lane fill for the timeline body so empty tracks still read as a recessed
     /// surface instead of a void. Uses the system content-background colour so it
@@ -48,9 +43,9 @@ extension Color {
     /// caption lane border.
     static let lcCaptionStroke = Color.indigo.opacity(0.75)
 
-    /// Transition glyph fill colour — base orange for the timeline transition
-    /// overlay; call sites apply varying opacity (0.3 / 0.5 / 0.8).
-    static let lcTransitionFill = Color.orange
+    /// Transition glyph fill colour. Neutral so orange remains reserved for
+    /// warnings and paused/transient states throughout the app.
+    static let lcTransitionFill = Color.secondary
 
     /// Beat marker colour — yellow at 65% opacity for the timeline ruler.
     static let lcBeatMarker = Color.yellow.opacity(0.65)
@@ -58,6 +53,7 @@ extension Color {
     /// Trim handle hover colour — white at 15% opacity for the timeline trim handles.
     static let lcTrimHover = Color.white.opacity(0.15)
 
-    /// Transition glyph icon colour — white for the timeline transition icon.
-    static let lcTransitionIcon = Color.white
+    /// Transition glyph icon colour — semantic primary text so it remains
+    /// legible in both system appearances.
+    static let lcTransitionIcon = Color.primary
 }

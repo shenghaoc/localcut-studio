@@ -2,13 +2,13 @@
 name: LocalCut Studio
 description: A native macOS non-linear video editor — TeXShop for video.
 colors:
-  film-gold: "#F5AB42"
+  selection-accent: "system: Color.accentColor"
   surface-canvas: "system: Color.black"
   surface-lane: "system: NSColor.underPageBackgroundColor"
   surface-rail: "system: NSColor.windowBackgroundColor"
   caption-fill: "system: Color.indigo"
   caption-stroke: "system: Color.indigo (opacity 0.75)"
-  transition-fill: "system: Color.orange"
+  transition-fill: "system: Color.secondary"
   beat-marker: "system: Color.yellow (opacity 0.65)"
 typography:
   body:
@@ -54,11 +54,11 @@ components:
 
 LocalCut Studio is TeXShop for video — an austere, utilitarian tool where every pixel serves the content and nothing shouts for attention. The editor recedes so the work can advance. Visual noise is eliminated by default; decoration is absent.
 
-The system is built on native macOS materials and system colours, not custom palettes. It respects Reduce Motion and Dynamic Type, and uses SF Symbols for all iconography. The editor chrome is deliberately dark (`.preferredColorScheme(.dark)`) as a product choice; system colours still adapt within that mode. The single deliberate colour choice — a warm Film Gold accent — is the only departure from system semantics, and it is used sparingly: selection highlights, focus rings, and key affordances.
+The system is built on native macOS materials and semantic colours, not a branded palette. It respects the user's light/dark appearance, control accent, Increase Contrast setting, Reduce Motion preference, and Dynamic Type, and uses SF Symbols for all iconography. Like TeXShop, the window chrome should feel like a focused document app supplied by macOS; the black preview remains a media canvas rather than a window-wide theme.
 
 **Key Characteristics:**
-- Deliberately dark editor chrome; system semantic colours and accessibility contrast remain adaptive
-- One accent (Film Gold), used on ≤10% of any screen
+- System-adaptive editor chrome that follows the user's macOS appearance
+- The user's system accent for selection, focus, and primary controls
 - System semantic colours for backgrounds, text, and separators — never hard-coded greys
 - Liquid Glass for interactive floating controls; thin material for non-interactive badges
 - SF Pro throughout; no custom fonts
@@ -68,10 +68,10 @@ This system explicitly rejects: glossy consumer aesthetics (Final Cut Pro), pane
 
 ## 2. Colours
 
-A restrained, system-anchored palette. The Film Gold accent is the only branded colour; everything else delegates to macOS semantic colours so the forced-dark editor continues to honor high-contrast settings without a parallel custom palette.
+A restrained, entirely system-anchored palette. Window chrome, selection, focus, and controls delegate to macOS so the editor follows the user's chosen appearance and accent without maintaining a parallel branded skin.
 
 ### Primary
-- **Film Gold** (#F5AB42, native Display-P3 0.960/0.670/0.260): Selection highlights, focus rings, and the Export button. Used sparingly — its rarity is the point. Defined in `Assets.xcassets/AccentColor.colorset`.
+- **System Accent** (`Color.accentColor` / `NSColor.controlAccentColor`): Selection borders, focus rings, and prominent controls. It is chosen by the user in macOS System Settings; LocalCut does not replace it with a brand colour.
 
 ### Neutral
 - **Canvas Black** (`Color.black`): The preview background. Always black regardless of appearance — it is a letterbox, not a surface.
@@ -82,15 +82,15 @@ A restrained, system-anchored palette. The Film Gold accent is the only branded 
 
 ### Functional
 - **Caption Indigo** (`Color.indigo`): Caption block fill (full opacity) and stroke (75% opacity) on the timeline caption lane.
-- **Transition Orange** (`Color.orange`): Transition glyph fill on the timeline, at varying opacities (0.3 / 0.5 / 0.8) by context.
+- **Transition Neutral** (`Color.secondary`): Transition glyph fill on the timeline, at varying opacities (0.3 / 0.5 / 0.8) by context.
 - **Beat Yellow** (`Color.yellow`, opacity 0.65): Beat markers on the timeline ruler.
 - **Trim White** (`Color.white`, opacity 0.15): Trim handle hover feedback on the timeline.
-- **Transition Icon White** (`Color.white`): Transition glyph icon on the timeline.
+- **Transition Icon** (`Color.primary`): Appearance-adaptive transition glyph icon on the timeline.
 
 ### Named Rules
-**The One Accent Rule.** Film Gold is used on ≤10% of any given screen. Its rarity is the point. System controls that inherit the accent through `.tint()` (steppers, toggles, side-rail selections) are exempt — the rule targets bespoke gold highlights outside the standard control vocabulary.
+**The Native Accent Rule.** Never register or hard-code an app-specific accent. Standard controls inherit the user's macOS control accent; bespoke Canvas and timeline affordances use `Color.accentColor` so their selection state matches native focus rings.
 
-**The System-First Rule.** Never hard-code a grey. Backgrounds, text, and separators always delegate to system semantic colours (`underPageBackgroundColor`, `.secondary`, `separatorColor`) so the dark editor tracks system contrast and semantic-colour changes automatically.
+**The System-First Rule.** Never hard-code a grey. Backgrounds, text, and separators always delegate to system semantic colours (`underPageBackgroundColor`, `.secondary`, `separatorColor`) so the editor tracks appearance, contrast, and semantic-colour changes automatically.
 
 ## 3. Typography
 
@@ -127,7 +127,7 @@ There is no shadow vocabulary. Depth is conveyed through surface colour contrast
 
 ### Buttons
 - **Shape:** System default (`.borderedProminent` uses system radius; borderless icon buttons have no visible shape).
-- **Primary:** `.borderedProminent` — Film Gold background with system-chosen foreground label. Used for the single most important action on a screen (Import Media, Export).
+- **Primary:** `.borderedProminent` — the user's system accent with a system-chosen foreground label. Used for the single most important action on a screen (Import Media, Export).
 - **Borderless:** `.buttonStyle(.borderless)` — no background, system tint for the icon. Default for toolbar and header icon buttons.
 - **Hover / Focus:** System default. Every icon-only button has `.help(...)` and `.accessibilityLabel(...)`.
 
@@ -168,7 +168,7 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 - **Structure:** Left gutter (track labels, 56pt wide) + horizontally scrollable content with time ruler (36pt height) + one lane per track (56pt height).
 - **Lanes:** `lcLane` background; clip blocks are rounded rectangles positioned by time.
 - **Playhead:** Red vertical line, draggable head, synchronized with `AVPlayer` time.
-- **Clip Colours:** Video clips = blue family, audio clips = green family, selected = Film Gold accent.
+- **Clip Colours:** Video clips = blue family, audio clips = green family, selected = the user's system accent.
 - **Trim Handles:** White at 15% opacity on hover.
 
 ### View Modifiers
@@ -184,17 +184,17 @@ LocalCut Studio does not use cards. Information is organized into panels (Media 
 - **Do** use SF Symbols for all iconography, with `.help(...)` tooltip and `.accessibilityLabel(...)` on every icon-only control.
 - **Do** use `.monospacedDigit()` on every timecode, duration, and frame number — prefer `.monospacedCaption()` when the text is also secondary and caption-sized.
 - **Do** use Liquid Glass (`.glassEffect`) only for interactive controls or compact functional HUDs floating over content — never as decoration.
-- **Do** preserve semantic system colours and verify every panel in forced-dark and increased-contrast states.
+- **Do** preserve semantic system colours and verify every panel in light, dark, and increased-contrast states.
 - **Do** disable (don't hide) temporarily unavailable actions, and explain why via `.help`.
 - **Do** use the shared `EditorPanelHeader` pattern for every new panel.
 
 ### Don't:
-- **Don't** use more than one bespoke Film Gold highlight per panel. System controls that inherit accent through `.tint()` are exempt. The accent earns its impact through restraint, not through detinting standard controls.
+- **Don't** add a branded gold, amber, or other app-specific accent. Let macOS provide the control accent and selection colour.
 - **Don't** import custom fonts. SF Pro is the only typeface.
 - **Don't** use cards. Organize content into panels separated by Dividers.
 - **Don't** nest cards inside cards — this is always wrong.
 - **Don't** use glassmorphism, blurs, or materials as decorative wallpaper.
-- **Don't** hard-code colours that bypass semantic contrast behavior or become illegible inside the forced-dark editor.
+- **Don't** hard-code colours that bypass semantic contrast behavior or become illegible in either system appearance.
 - **Don't** reskin macOS to look like a cross-platform web app. Native controls, native materials, native conventions.
 - **Don't** overload panels. If a screen has more than one primary action button, reconsider the hierarchy.
 - **Don't** let text overflow its container — test every panel at the largest Dynamic Type size.

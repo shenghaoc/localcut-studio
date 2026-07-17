@@ -278,8 +278,6 @@ struct EditorView: View {
                                                    isVertical: false))
         .toolbar { toolbarContent }
         .navigationTitle(model.project.name)
-        .tint(.lcAccent)
-        .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom) { statusBar }
         .onAppear { [weak model] in
             Task { [weak model] in await model?.scanRecoveredRecordings() }

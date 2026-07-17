@@ -110,24 +110,23 @@ surfaces touched by the integration:
   text does not overflow the narrow inspector.
 - Transition removal uses the native destructive verb “Delete” consistently in
   its menu, inspector, undo action, and success status.
-- `PRODUCT.md` and `DESIGN.md` distinguish the deliberate forced-dark editor
-  from adaptive semantic/high-contrast behavior and document only primitives
-  that have production call sites.
+- `PRODUCT.md` and `DESIGN.md` record the system-adaptive appearance and native
+  control accent, and document only primitives that have production call sites.
 
 ## Visual identity pass
 
-A screen-recording review found the editor read as a default light-grey SwiftUI
-app floating small on the desktop — no identity, and footage-unfriendly. This
-pass gives it a deliberate dark "studio" look without touching any engine code,
-all driven from a tiny `Theme.swift` token set:
+A screen-recording review found the editor read as an undifferentiated SwiftUI
+prototype floating small on the desktop. This pass gives it the quiet,
+purposeful structure of a native Mac document app without touching any engine
+code, driven from a tiny `Theme.swift` semantic token set:
 
-- **Dark editor chrome.** `EditorView` applies `.preferredColorScheme(.dark)` so
-  the whole window is dark — the convention for video tools, so footage and
-  posters pop instead of fighting a bright shell.
-- **One brand accent.** `Color.lcAccent` is a warm film-gold applied via
-  `.tint` on the editor root, so the active side-rail tab, primary buttons,
-  steppers, and toggles share one identity colour that is deliberately *not*
-  the blue/teal every other NLE defaults to. The red scrub playhead stays red.
+- **System-adaptive editor chrome.** `EditorView` does not force a colour
+  scheme, so the whole window follows the user's macOS Appearance. The preview
+  remains black because it is a letterbox canvas, not window chrome.
+- **Native control accent.** `Color.lcAccent` delegates to
+  `Color.accentColor`, so custom timeline selection and Canvas drawing match
+  native controls and focus rings without an app-specific palette. The red
+  scrub playhead stays red because it communicates a media state.
 - **A timeline that reads as a surface.** Video/audio/caption lanes fill with
   `Color.lcLane` (a hair lighter than the window) so empty tracks look like
   tracks, not a void; the gutter/ruler sit on `Color.lcRail`.
@@ -151,8 +150,8 @@ all driven from a tiny `Theme.swift` token set:
 Real AVFoundation playback/export, trim/drag, and the inspector feature
 surfaces already exist in the app and are untouched. The standalone `app/`
 prototype is **not** merged. No new model fields, no schema bump, no test-count
-regression. The accent and dark scheme are presentation-only (`.tint` /
-`.preferredColorScheme`); they introduce no custom-drawn control styles.
+regression. Appearance remains presentation-only and introduces no custom-drawn
+replacement for native controls.
 
 ## HIG conformance pass
 
@@ -180,8 +179,9 @@ are all standard SwiftUI/AppKit (no new paradigms):
   (`@SceneStorage`) is lifted to `EditorModel.inspectorVisible` (UserDefaults-
   persisted) so the menu toggle, toolbar button, and collapsed-rail restore
   strip can't disagree.
-- **Appearance & accessibility settings honored** (orthogonal to the deliberate
-  forced-dark chrome): Reduce Motion gates the scopes-panel transition/animation;
+- **Appearance & accessibility settings honored:** the editor follows system
+  light/dark appearance and control accent; Reduce Motion gates the scopes-panel
+  transition/animation;
   the marker stroke uses the adaptive `separatorColor`; clip blocks gain a
   film/waveform glyph so kind isn't hue-only (Differentiate Without Color); the
   format badge gets a spelled-out VoiceOver label; the scopes Canvas gains a
@@ -201,20 +201,16 @@ are all standard SwiftUI/AppKit (no new paradigms):
 - **Pointer feedback.** The ruler shows a resize cursor + "Drag to scrub"
   tooltip; marker diamonds show the pointing-hand cursor (the trim handles
   already used `resizeLeftRight`, matching the macOS 27 pointer set).
-- **List selection unified** on the system selection colour across the media bin
-  and marker rows (honoring the user's system accent for standard list rows
-  while the bespoke timeline keeps the brand gold).
+- **Selection unified** on the user's system accent across standard list rows
+  and bespoke timeline, marker, render, and diagnostics affordances.
 
-### HIG tensions (deliberate product choices, kept)
+### Native appearance decision
 
-- **Forced dark mode** overrides the user's Appearance, which strict HIG
-  discourages — but a fixed low-luminance UI is the near-universal pro-NLE
-  convention (Final Cut, Premiere, Resolve, Logic) so colour judgement isn't
-  biased by surrounding chrome. Kept; the orthogonal accessibility settings
-  above are honored instead.
-- **Brand accent** vs the user's system accent: kept for bespoke timeline /
-  transition / marker / render affordances that have no system-control
-  equivalent, while standard list-row selection uses the system colour.
+LocalCut follows the same native-document-app principle as TeXShop: macOS owns
+the window appearance, control accent, focus rings, and standard selection.
+Only content-semantic colours remain bespoke: black for the video letterbox,
+blue/green for media kinds, red for playhead/recording, and warning colours for
+actual caution states.
 
 ### Keyboard & direct-manipulation follow-ups (now complete)
 
@@ -258,17 +254,12 @@ custom additions are limited to the two genuinely-floating controls:
 The same pass removes hard-coded colour literals (the project's own UI standards
 forbid colours that fight the system appearance):
 
-- The **brand accent** moves from a Swift `Color(red:…)` literal to an
-  `Assets.xcassets` `AccentColor` set (Display-P3, with room for light/dark and
-  high-contrast variants). `lcLane`/`lcRail` become semantic system colours
+- The app removes its custom accent asset and global accent build setting;
+  `lcAccent` delegates to `Color.accentColor`. `lcLane`/`lcRail` are semantic
+  system colours
   (`.underPageBackgroundColor` / `.windowBackgroundColor`) that adapt with the
   appearance instead of pinning a fixed grey.
-- **Selection** is unified to the brand gold on bespoke affordances: the
-  `Color.accentColor` references in custom timeline / marker-diamond /
-  render-queue / diagnostics drawing now read `Color.lcAccent`, so selection
-  matches the tinted controls instead of falling back to system blue — while
-  standard list-row selection keeps the system colour (see *HIG tensions*). The
-  target now sets *Global Accent Color Name* = `AccentColor` (**T10.5**), so
-  `Color.accentColor` resolves to the gold app-wide (system focus rings
-  included); the explicit `lcAccent` references are therefore equivalent and
-  could later be simplified back to `Color.accentColor`.
+- **Selection** is unified to the user's system accent on bespoke affordances:
+  custom timeline, marker-diamond, render-queue, and diagnostics drawing read
+  `Color.lcAccent`, while standard list rows use the system selection colour.
+  Both paths therefore track the same macOS preference without a branded tint.

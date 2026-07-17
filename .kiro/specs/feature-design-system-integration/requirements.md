@@ -87,8 +87,9 @@
   duplicate visual/VoiceOver headings.
 - **R7.4** Caption timing controls reflow vertically when the inspector cannot
   fit their scaled horizontal layout.
-- **R7.5** Design context accurately records forced-dark chrome, functional HUD
-  glass, distinct content/chrome badge recipes, and only shipping primitives.
+- **R7.5** Design context accurately records system-adaptive chrome and native
+  control accent, functional HUD glass, distinct content/chrome badge recipes,
+  and only shipping primitives.
 - **R7.6** The destructive transition action uses “Delete Transition”
   consistently in menus, inspector copy, undo naming, and completion status.
 - **R7.7** Adjacent recorder controls expose distinct labels: “Microphone” for
