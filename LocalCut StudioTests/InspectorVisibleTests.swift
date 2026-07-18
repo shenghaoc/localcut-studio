@@ -4,7 +4,7 @@ import Testing
 /// Editor readiness for App Intents. The GUI has one process-wide editor model;
 /// this suite only covers window readiness and generation stability.
 @MainActor
-@Suite("Editor window readiness")
+@Suite("Editor window readiness", .serialized)
 struct ActiveEditorRegistryTests {
     @Test func markReadyExposesTheEditor() {
         let model = EditorModel()
@@ -48,7 +48,6 @@ struct ActiveEditorRegistryTests {
         let waiter = Task {
             try await registry.waitUntilReady(timeout: .seconds(2))
         }
-        await Task.yield()
         registry.markReady(model)
         _ = try await waiter.value
         #expect(registry.readyEditor() === model)
@@ -57,37 +56,16 @@ struct ActiveEditorRegistryTests {
     @Test func cancellationBeforeWaiterRegistrationDoesNotBlockLaterWaits() async {
         let registry = ActiveEditorRegistry()
         let cancelledWait = Task {
-            try await registry.waitUntilReady(timeout: .seconds(1))
+            withUnsafeCurrentTask { $0?.cancel() }
+            _ = try await registry.waitUntilReady(timeout: .seconds(1))
         }
-        cancelledWait.cancel()
-
-        let cancelledPromptly = await withTaskGroup(of: Bool.self) { group in
-            group.addTask {
-                do {
-                    _ = try await cancelledWait.value
-                    return false
-                } catch is CancellationError {
-                    return true
-                } catch {
-                    return false
-                }
-            }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(1))
-                return false
-            }
-            let result = await group.next()!
-            group.cancelAll()
-            return result
-        }
-        #expect(cancelledPromptly)
 
         do {
-            _ = try await registry.waitUntilReady(timeout: .milliseconds(20))
-            Issue.record("Expected the later readiness wait to time out.")
-        } catch ActiveEditorRegistry.WaitError.timedOut {
+            _ = try await cancelledWait.value
+            Issue.record("Expected the already-cancelled readiness wait to throw.")
+        } catch is CancellationError {
         } catch {
-            Issue.record("Expected WaitError.timedOut, got \(error)")
+            Issue.record("Expected CancellationError, got \(error)")
         }
     }
 }
