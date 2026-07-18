@@ -249,6 +249,34 @@ struct RenderQueueTests {
             projectSnapshot: snapshot())
     }
 
+    @Test("Output bookmark prefers the Save-panel file grant")
+    func outputBookmarkPrefersSelectedFile() {
+        let outputURL = URL(filePath: "/tmp/localcut-output-bookmark/test.mp4")
+        var requestedURLs: [URL] = []
+
+        let bookmark = RenderQueue.outputBookmark(for: outputURL) { url in
+            requestedURLs.append(url)
+            return Data([0x01])
+        }
+
+        #expect(bookmark == Data([0x01]))
+        #expect(requestedURLs == [outputURL])
+    }
+
+    @Test("Output bookmark falls back to an authorized directory")
+    func outputBookmarkFallsBackToDirectory() {
+        let outputURL = URL(filePath: "/tmp/localcut-output-bookmark/test.mp4")
+        var requestedURLs: [URL] = []
+
+        let bookmark = RenderQueue.outputBookmark(for: outputURL) { url in
+            requestedURLs.append(url)
+            return url == outputURL ? nil : Data([0x02])
+        }
+
+        #expect(bookmark == Data([0x02]))
+        #expect(requestedURLs == [outputURL, outputURL.deletingLastPathComponent()])
+    }
+
     @Test("Enqueue preserves insertion order")
     func enqueuePreservesOrder() {
         let queue = RenderQueue(persistsToDisk: false)
@@ -356,6 +384,32 @@ struct RenderQueueTests {
         queue.clearCompleted()
         #expect(queue.jobs.count == 1)
         #expect(queue.jobs[0].id == b.id)
+    }
+
+    @Test("Clearing a failed job removes its empty output reservation")
+    func clearCompletedRemovesOutputReservation() throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("localcut-output-reservation-\(UUID()).mp4")
+        try Data().write(to: outputURL, options: .withoutOverwriting)
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+        let job = QueueJob(
+            preset: BuiltInExportPresets.web720p,
+            outputBookmark: Data([0x01]),
+            outputDisplayName: outputURL.lastPathComponent,
+            projectSnapshot: snapshot(),
+            status: .failed,
+            outputReservationCreated: true)
+        let queue = RenderQueue(
+            jobs: [job],
+            persistsToDisk: false,
+            outputBookmarkResolver: { _ in
+                BookmarkResolution(url: outputURL, refreshedBookmark: nil)
+            })
+
+        queue.clearCompleted()
+
+        #expect(queue.jobs.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: outputURL.path))
     }
 
     @Test("Enqueue rejects an unsupported (container, codec) pair as .failed")

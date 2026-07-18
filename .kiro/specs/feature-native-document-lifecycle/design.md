@@ -55,7 +55,7 @@ implementation beside the existing package pipeline.
 | 2. Async loading / bookmark resolution / relinking / rebuild without main-actor blocking? | **No clean reuse path.** Synchronous wrapper-based callbacks would require a second persistence implementation. |
 | 3. Dirty, undo, save-on-close? | **Partial only.** DocumentGroup can drive edited state, but LocalCut still needs a close veto for recording and asynchronous save-before-close. |
 | 4. Recording guards for New/Open/Close? | **Not safely by scene APIs alone.** Existing model guards and `NSWindowDelegate.windowShouldClose` remain required. |
-| 5. Queued exports and security-scoped destinations independent of saves? | **Yes, unchanged.** |
+| 5. Queued exports and security-scoped destinations independent of saves? | **Yes.** Save-panel exports bookmark the exact selected file; older directory bookmarks remain supported. |
 | 6. Reliable App Intents with one editor? | **Yes.** `ActiveEditorRegistry` waits for editor-window readiness on cold launch and serializes actions. |
 | 7. Schema and package structure unchanged? | **Yes** with the custom controller. |
 
@@ -93,7 +93,12 @@ an unbounded synchronous allocation during open-panel validation.
   automatic restoration.
 - OTIO/EDL use in-memory serialization + `fileExporter`. Queued video render
   output remains `NSSavePanel` (streamed AVFoundation destination with a
-  security-scoped bookmark).
+  security-scoped bookmark). Because the sandbox grant belongs to the selected
+  output file rather than its parent directory, a new destination is reserved
+  as an empty file before its bookmark is encoded. The queue replaces that
+  reservation when rendering starts. Enqueue rejection removes it immediately;
+  failed/cancelled jobs keep it for Retry, and Clear Finished removes an empty
+  reservation.
 
 ### App Intent readiness
 
@@ -115,7 +120,9 @@ divider persistence with the collapsed inspector invariant.
 ## Compatibility and follow-up
 
 No project schema, `.lcstudio` encoding, `.lcbundle` layout, fingerprints,
-bookmark model, relinking semantics, or render queue persistence changes.
+relinking semantics, or render output format changes. The version-1 render
+queue document gains an optional reservation flag; older queue JSON decodes it
+as absent, and directory bookmarks from older builds remain supported.
 Without a bundled Launch Services declaration, File ▸ Open validates a selected
 local filesystem URL as either a regular `.lcstudio` file or a fully validated
 bundle directory; Finder double-click is not newly advertised.

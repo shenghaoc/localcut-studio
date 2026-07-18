@@ -51,6 +51,9 @@
   video export.
 - [x] **T4.5** `TimelineFocusUITests` harness for focus transitions (policy
   unit tests remain mapping-only).
+- [x] **T4.6** Preserve the Save-panel file sandbox grant through queued render
+  execution; retain compatibility with persisted directory bookmarks and
+  clean new-file reservations on rejection or when a terminal row is cleared.
 
 ## Documentation and verification
 

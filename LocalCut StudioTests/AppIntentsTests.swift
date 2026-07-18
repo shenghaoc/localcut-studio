@@ -536,12 +536,15 @@ struct AppIntentsTests {
 
     @Test func exportCoordinatorPropagatesQueueRejection() async {
         let model = EditorModel()
-        let outputURL = URL(filePath: "/private/tmp/app-intents-export-queue-rejection.mov")
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("app-intents-export-queue-rejection-\(UUID()).mov")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
         let outcome = await ExportCoordinator().export(to: outputURL, model: model) { _ in
             .failed("Output destination unavailable.")
         }
 
         #expect(outcome == .failed)
         #expect(model.statusMessage == "Output destination unavailable.")
+        #expect(!FileManager.default.fileExists(atPath: outputURL.path))
     }
 }

@@ -226,7 +226,7 @@ struct RenderQueueInspectorView: View {
 
         // Show progress while resolving the bookmark (may be slow on network volumes).
         model.statusMessage = "Preparing \(url.lastPathComponent)…"
-        guard let bookmark = RenderQueue.outputBookmark(for: url) else {
+        guard let preparedBookmark = RenderQueue.prepareOutputBookmark(for: url) else {
             model.statusMessage = "Could not access \(url.lastPathComponent). Possible causes: destination deleted, disk ejected, or sandbox permission denied. Try choosing a different location."
             return
         }
@@ -237,10 +237,16 @@ struct RenderQueueInspectorView: View {
             queueStorageKind: model.projectStorageKind)
         let job = QueueJob(
             preset: preset,
-            outputBookmark: bookmark,
+            outputBookmark: preparedBookmark.data,
             outputDisplayName: url.lastPathComponent,
-            projectSnapshot: snapshot)
-        _ = model.renderQueue.enqueue(job)
-        model.statusMessage = "Queued \(preset.name) → \(url.lastPathComponent)."
+            projectSnapshot: snapshot,
+            outputReservationCreated: preparedBookmark.placeholderURL != nil)
+        switch model.renderQueue.enqueue(job) {
+        case .queued:
+            model.statusMessage = "Queued \(preset.name) → \(url.lastPathComponent)."
+        case .failed(let message):
+            preparedBookmark.discardPlaceholder()
+            model.statusMessage = message
+        }
     }
 }

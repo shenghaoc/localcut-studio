@@ -54,9 +54,9 @@ nonisolated enum QueueEnqueueOutcome: Equatable, Sendable {
 struct QueueJob: Codable, Equatable, Sendable, Identifiable {
     let id: UUID
     var preset: ExportPreset
-    /// Security-scoped bookmark to the destination container. Older jobs may
-    /// still carry a bookmark to the file URL itself; resolution handles both
-    /// shapes so queued renders survive upgrades and retries.
+    /// Security-scoped bookmark to the selected output file. Older jobs may
+    /// carry a destination-directory bookmark; resolution handles both shapes
+    /// so queued renders survive upgrades and retries.
     var outputBookmark: Data
     /// Display filename for the inspector list and the leaf name appended when
     /// `outputBookmark` resolves to a directory URL.
@@ -69,6 +69,9 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
     /// status. Persisted so the inspector can show "completed in 12.3 s"
     /// across relaunches.
     var runtimeSeconds: Double?
+    /// New Save-panel files are reserved before their file bookmark is encoded.
+    /// Optional keeps persisted jobs from older builds source-compatible.
+    var outputReservationCreated: Bool?
 
     init(id: UUID = UUID(),
          preset: ExportPreset,
@@ -78,7 +81,8 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
          status: QueueJobStatus = .queued,
          progress: Double = 0,
          errorMessage: String? = nil,
-         runtimeSeconds: Double? = nil) {
+         runtimeSeconds: Double? = nil,
+         outputReservationCreated: Bool = false) {
         self.id = id
         self.preset = preset
         self.outputBookmark = outputBookmark
@@ -88,6 +92,7 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
         self.progress = progress
         self.errorMessage = errorMessage
         self.runtimeSeconds = runtimeSeconds
+        self.outputReservationCreated = outputReservationCreated ? true : nil
     }
 
     var isTerminal: Bool {
@@ -337,6 +342,8 @@ final class RenderQueue {
         guard ExportPreset.isSupportedCombination(container: job.preset.containerFormat,
                                                   codec: job.preset.videoCodec) else {
             var rejected = job
+            discardOutputReservation(for: rejected)
+            rejected.outputReservationCreated = nil
             rejected.status = .failed
             rejected.errorMessage = RenderQueueError.unsupportedCombination(
                 container: job.preset.containerFormat,
@@ -349,6 +356,8 @@ final class RenderQueue {
         }
         if let hostError = job.preset.hostCapabilityError() {
             var rejected = job
+            discardOutputReservation(for: rejected)
+            rejected.outputReservationCreated = nil
             rejected.status = .failed
             rejected.errorMessage = RenderQueueError.hostNotCapable(hostError).localizedDescription
             jobs.append(rejected)
@@ -427,6 +436,9 @@ final class RenderQueue {
     /// Drops every terminal (completed / cancelled / failed) job from the list.
     func clearCompleted() {
         let before = jobs.count
+        for job in jobs where job.isTerminal {
+            discardOutputReservation(for: job)
+        }
         jobs.removeAll { $0.isTerminal }
         if jobs.count != before {
             persist()
@@ -773,6 +785,7 @@ final class RenderQueue {
         // review).
         switch status {
         case .completed:
+            jobs[index].outputReservationCreated = nil
             log("job \(jobID.uuidString.prefix(8)) completed in \(String(format: "%.1f", runtime))s")
             statusMessage = "Rendered \(displayName) in \(String(format: "%.1f", runtime))s."
         case .cancelled:
@@ -785,6 +798,19 @@ final class RenderQueue {
             break
         }
         persist()
+    }
+
+    private func discardOutputReservation(for job: QueueJob) {
+        guard job.outputReservationCreated == true,
+              let resolution = resolveBookmark(job.outputBookmark) else { return }
+        let outputURL = Self.outputDestinationURL(
+            resolvedURL: resolution.url,
+            displayName: job.outputDisplayName)
+        let didStart = outputURL.startAccessingSecurityScopedResource()
+        defer { if didStart { outputURL.stopAccessingSecurityScopedResource() } }
+        guard let size = try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size == 0 else { return }
+        try? FileManager.default.removeItem(at: outputURL)
     }
 
     // MARK: AVAssetExportSession path
@@ -1487,13 +1513,84 @@ final class RenderQueue {
                                      relativeTo: nil)
     }
 
+    struct PreparedOutputBookmark {
+        let data: Data
+        let placeholderURL: URL?
+
+        nonisolated func discardPlaceholder() {
+            guard let placeholderURL else { return }
+            try? FileManager.default.removeItem(at: placeholderURL)
+        }
+    }
+
+    nonisolated static func prepareOutputBookmark(for outputURL: URL) -> PreparedOutputBookmark? {
+        let didStartOutput = outputURL.startAccessingSecurityScopedResource()
+        defer { if didStartOutput { outputURL.stopAccessingSecurityScopedResource() } }
+
+        if let bookmark = rawSecurityScopedBookmark(for: outputURL) {
+            return PreparedOutputBookmark(data: bookmark, placeholderURL: nil)
+        }
+
+        // A Save-panel URL can be authorized before it exists on disk. Create
+        // an exclusive zero-byte reservation so Foundation can encode a file
+        // bookmark; the queue replaces it when encoding begins. The caller
+        // removes the reservation if enqueueing is rejected.
+        let createdPlaceholder: Bool
+        do {
+            try Data().write(to: outputURL, options: .withoutOverwriting)
+            createdPlaceholder = true
+        } catch {
+            createdPlaceholder = false
+        }
+        if let bookmark = rawSecurityScopedBookmark(for: outputURL) {
+            return PreparedOutputBookmark(
+                data: bookmark,
+                placeholderURL: createdPlaceholder ? outputURL : nil)
+        }
+        if createdPlaceholder {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        // Keep the historical directory shape as a compatibility fallback for
+        // unsandboxed callers and previously authorized directory URLs.
+        guard let bookmark = securityScopedBookmark(for: outputURL.deletingLastPathComponent()) else {
+            return nil
+        }
+        return PreparedOutputBookmark(data: bookmark, placeholderURL: nil)
+    }
+
     nonisolated static func outputBookmark(for outputURL: URL) -> Data? {
-        let containerURL = outputURL.deletingLastPathComponent()
-        let didStart = containerURL.startAccessingSecurityScopedResource()
-        defer { if didStart { containerURL.stopAccessingSecurityScopedResource() } }
-        return try? containerURL.bookmarkData(options: .withSecurityScope,
-                                              includingResourceValuesForKeys: nil,
-                                              relativeTo: nil)
+        prepareOutputBookmark(for: outputURL)?.data
+    }
+
+    nonisolated static func outputBookmark(
+        for outputURL: URL,
+        bookmarkData: (URL) -> Data?
+    ) -> Data? {
+        // NSSavePanel grants the sandbox extension for the selected output
+        // file, not for its parent directory. Bookmark that exact URL first
+        // so a freshly selected destination can be queued in a sandboxed app.
+        // `outputDestinationURL` already accepts both file bookmarks (new
+        // jobs) and directory bookmarks (persisted jobs from older builds).
+        if let bookmark = bookmarkData(outputURL) {
+            return bookmark
+        }
+
+        // Keep the historical directory shape as a compatibility fallback for
+        // unsandboxed callers and previously authorized directory URLs.
+        return bookmarkData(outputURL.deletingLastPathComponent())
+    }
+
+    private nonisolated static func securityScopedBookmark(for url: URL) -> Data? {
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+        return rawSecurityScopedBookmark(for: url)
+    }
+
+    private nonisolated static func rawSecurityScopedBookmark(for url: URL) -> Data? {
+        return try? url.bookmarkData(options: .withSecurityScope,
+                                     includingResourceValuesForKeys: nil,
+                                     relativeTo: nil)
     }
 
     private nonisolated static func outputDestinationURL(

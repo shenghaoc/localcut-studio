@@ -18,8 +18,8 @@ enum EditorWindowPlacement {
             height: max(1, visibleRect.height - displayInset)
         )
         return CGSize(
-            width: min(requested.width, available.width),
-            height: min(requested.height, available.height)
+            width: max(minimumContentSize.width, min(requested.width, available.width)),
+            height: max(minimumContentSize.height, min(requested.height, available.height))
         )
     }
 }

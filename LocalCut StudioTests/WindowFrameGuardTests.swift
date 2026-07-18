@@ -33,12 +33,12 @@ struct EditorWindowPlacementTests {
         #expect(size == EditorWindowPlacement.minimumContentSize)
     }
 
-    @Test("Never produces a non-positive size on a tiny display")
-    func guardsTinyDisplays() {
+    @Test("Never requests less than the editor minimum on a tiny display")
+    func respectsEditorMinimumOnTinyDisplays() {
         let size = EditorWindowPlacement.fittedSize(
             idealSize: .zero,
             visibleRect: CGRect(x: 0, y: 0, width: 20, height: 10))
-        #expect(size == CGSize(width: 1, height: 1))
+        #expect(size == EditorWindowPlacement.minimumContentSize)
     }
 }
 
