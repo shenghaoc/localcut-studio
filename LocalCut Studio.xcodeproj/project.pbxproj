@@ -404,10 +404,8 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "LocalCut Studio";
-				INFOPLIST_KEY_NSCameraUsageDescription = "LocalCut Studio records webcam video when you add a camera source.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LocalCut Studio records microphone audio when you add a microphone source.";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
@@ -439,10 +437,8 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "LocalCut Studio";
-				INFOPLIST_KEY_NSCameraUsageDescription = "LocalCut Studio records webcam video when you add a camera source.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "LocalCut Studio records microphone audio when you add a microphone source.";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
