@@ -81,6 +81,7 @@ final class ActiveEditorRegistry {
         timeout: Duration,
         clock: ContinuousClock = ContinuousClock()
     ) async throws -> UInt64 {
+        try Task.checkCancellation()
         if readyEditor() != nil { return generation }
 
         return try await withThrowingTaskGroup(of: UInt64.self) { group in
@@ -105,6 +106,13 @@ final class ActiveEditorRegistry {
         let waiterID = UUID()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UInt64, Error>) in
+                // A task group may cancel this child before the MainActor gets
+                // to run its continuation body. Do not add an already-cancelled
+                // waiter because its cancellation handler has already run.
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
                 if readyEditor() != nil {
                     continuation.resume(returning: generation)
                     return

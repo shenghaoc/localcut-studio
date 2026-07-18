@@ -53,4 +53,41 @@ struct ActiveEditorRegistryTests {
         _ = try await waiter.value
         #expect(registry.readyEditor() === model)
     }
+
+    @Test func cancellationBeforeWaiterRegistrationDoesNotBlockLaterWaits() async {
+        let registry = ActiveEditorRegistry()
+        let cancelledWait = Task {
+            try await registry.waitUntilReady(timeout: .seconds(1))
+        }
+        cancelledWait.cancel()
+
+        let cancelledPromptly = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                do {
+                    _ = try await cancelledWait.value
+                    return false
+                } catch is CancellationError {
+                    return true
+                } catch {
+                    return false
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(1))
+                return false
+            }
+            let result = await group.next()!
+            group.cancelAll()
+            return result
+        }
+        #expect(cancelledPromptly)
+
+        do {
+            _ = try await registry.waitUntilReady(timeout: .milliseconds(20))
+            Issue.record("Expected the later readiness wait to time out.")
+        } catch ActiveEditorRegistry.WaitError.timedOut {
+        } catch {
+            Issue.record("Expected WaitError.timedOut, got \(error)")
+        }
+    }
 }

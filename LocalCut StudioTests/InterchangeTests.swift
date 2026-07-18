@@ -1379,4 +1379,20 @@ struct InterchangeExportRequestTests {
         #expect(edl.defaultFilename == "Lifecycle Test")
         #expect(!edl.document.data.isEmpty)
     }
+
+    @Test func cancelledInterchangeExportStaysSilent() {
+        #expect(InterchangeExportErrorPresentation.statusMessage(for: CancellationError()) == nil)
+
+        let cocoaCancellation = NSError(
+            domain: NSCocoaErrorDomain,
+            code: CocoaError.Code.userCancelled.rawValue)
+        #expect(InterchangeExportErrorPresentation.statusMessage(for: cocoaCancellation) == nil)
+
+        let writeError = NSError(
+            domain: "InterchangeExportRequestTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "The destination is unavailable."])
+        #expect(InterchangeExportErrorPresentation.statusMessage(for: writeError)
+                == "Interchange export failed: The destination is unavailable.")
+    }
 }

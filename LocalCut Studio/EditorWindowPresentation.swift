@@ -98,3 +98,12 @@ struct InterchangeExportRequest: Identifiable {
         }
     }
 }
+
+/// Formats interchange-export failures while treating an explicit panel
+/// dismissal as a normal, silent outcome.
+enum InterchangeExportErrorPresentation {
+    nonisolated static func statusMessage(for error: Error) -> String? {
+        guard !UserCancellation.isCancellation(error) else { return nil }
+        return String(localized: "Interchange export failed: \(error.localizedDescription)")
+    }
+}

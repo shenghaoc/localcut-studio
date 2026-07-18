@@ -426,7 +426,9 @@ struct EditorView: View {
         case .success(let url):
             model.statusMessage = request.completedMessage(at: url)
         case .failure(let error):
-            model.statusMessage = String(localized: "Interchange export failed: \(error.localizedDescription)")
+            if let message = InterchangeExportErrorPresentation.statusMessage(for: error) {
+                model.statusMessage = message
+            }
         }
     }
 
