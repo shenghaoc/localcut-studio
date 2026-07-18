@@ -213,6 +213,7 @@ struct TimelineView: View {
                 .accessibilityHidden(true)
             Slider(value: $model.pixelsPerSecond, in: 20...300)
                 .frame(width: zoomSliderWidth)
+                .help("Zoom timeline")
                 .accessibilityLabel("Timeline zoom")
             Image(systemName: "plus.magnifyingglass")
                 .foregroundStyle(.secondary)
