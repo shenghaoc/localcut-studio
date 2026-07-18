@@ -1046,7 +1046,7 @@ struct InspectorView: View {
             }
             .help("What happens when the overlay source reaches its end: Hide (stop), Freeze (hold last frame), or Loop.")
 
-            overlayKeyframeSection(overlay)
+            OverlayKeyframeSectionView(model: model, overlay: overlay)
 
             Button("Remove Overlay", role: .destructive) {
                 model.removeOverlay(id: overlay.id)
@@ -1054,9 +1054,15 @@ struct InspectorView: View {
         }
     }
 
-    @ViewBuilder
-    private func overlayKeyframeSection(_ overlay: OverlayClip) -> some View {
-        let localTime = overlayLocalPlayheadTime(overlay)
+/// Extracted view to isolate `@Observable` high-frequency updates (like `model.currentTime`)
+/// from `InspectorView.body`, preventing unnecessary re-renders of the inspector form
+/// during playback when an overlay is selected.
+private struct OverlayKeyframeSectionView: View {
+    let model: EditorModel
+    let overlay: OverlayClip
+
+    var body: some View {
+        let localTime = overlayLocalPlayheadTime()
         DisclosureGroup("Animation Keyframes") {
             HStack {
                 Text(localTime.map { "At \(TimeFormatting.timecode($0.seconds))" } ?? "Move playhead over overlay")
@@ -1076,7 +1082,7 @@ struct InspectorView: View {
 
             HStack(spacing: 8) {
                 Button {
-                    addOrUpdateOverlayKeyframe(overlay, localTime: localTime)
+                    addOrUpdateOverlayKeyframe(localTime: localTime)
                 } label: {
                     Label("Add Keyframe", systemImage: "plus.diamond.fill")
                 }
@@ -1105,13 +1111,13 @@ struct InspectorView: View {
         .help("Animate position, scale, rotation, and opacity over time using keyframes.")
     }
 
-    private func overlayLocalPlayheadTime(_ overlay: OverlayClip) -> CMTime? {
+    private func overlayLocalPlayheadTime() -> CMTime? {
         let playhead = CMTime(seconds: model.currentTime, preferredTimescale: 600)
         guard playhead >= overlay.timelineStart, playhead < overlay.timelineEnd else { return nil }
         return playhead - overlay.timelineStart
     }
 
-    private func addOrUpdateOverlayKeyframe(_ overlay: OverlayClip, localTime: CMTime?) {
+    private func addOrUpdateOverlayKeyframe(localTime: CMTime?) {
         guard let localTime else { return }
         model.addOrUpdateOverlayKeyframe(
             at: overlay.id,
@@ -1122,6 +1128,7 @@ struct InspectorView: View {
             rotation: Float(overlay.rotation),
             opacity: overlay.opacity)
     }
+}
 
     // MARK: - Overlay list
 
@@ -1244,6 +1251,21 @@ private struct InspectorPosterView: View {
 }
 
 
+private struct CoverTimeLabelView: View {
+    var model: EditorModel
+
+    var body: some View {
+        Text(coverTimeLabel)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+    }
+
+    private var coverTimeLabel: String {
+        let time = model.project.coverFrame?.time.cmTime.sanitized.seconds ?? model.currentTime
+        return TimeFormatting.timecode(time)
+    }
+}
+
 /// Extracted view to isolate `@Observable` high-frequency updates (like `model.currentTime`)
 /// from the main `InspectorView.body`, preventing unnecessary re-renders of the entire form during playback.
 private struct CoverInspectorView: View {
@@ -1256,9 +1278,7 @@ private struct CoverInspectorView: View {
         Section("Cover") {
             coverPreview
             LabeledContent("Time") {
-                Text(coverTimeLabel)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                CoverTimeLabelView(model: model)
             }
             HStack {
                 Button {
@@ -1403,11 +1423,6 @@ private struct CoverInspectorView: View {
             coverPreviewError = "Cover preview unavailable."
         }
         coverPreviewIsLoading = false
-    }
-
-    private var coverTimeLabel: String {
-        let time = model.project.coverFrame?.time.cmTime.sanitized.seconds ?? model.currentTime
-        return TimeFormatting.timecode(time)
     }
 
     private var coverFormatBinding: Binding<CoverFormat> {

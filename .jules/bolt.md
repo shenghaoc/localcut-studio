@@ -34,3 +34,9 @@ Append a dated entry whenever you learn something about keeping LocalCut Studio 
 ## 2026-08-01 - Isolate trace Canvas to prevent ScopesView full redraws
 **Learning:** Attaching accessibility modifiers (like `.accessibilityValue`) that depend on high-frequency state (`latest`) directly to an interactive `Canvas` (such as the scope trace) inside a large view like `ScopesView` forces the entire parent view to re-render 30 times a second.
 **Action:** Extract components that depend on high-frequency state into their own isolated, small views (e.g., `ScopeTraceView`). This confines the `@State` dependency tracking to only the smallest leaf nodes that actually need to re-evaluate, preserving the performance of the rest of the application layout.
+## 2026-08-04 - Isolate Cover Time Label to prevent full CoverInspectorView redraws
+**Learning:** Reading `model.currentTime` directly within `CoverInspectorView` to compute `coverTimeLabel` causes the entire "Cover" inspector section to unnecessarily redraw 60 times a second during playback.
+**Action:** Extract specific properties into small, isolated leaf views (e.g., `CoverTimeLabelView`) so that only those narrow components re-render when the high-frequency property changes, preserving performance.
+## 2026-08-04 - Isolate Overlay Keyframe Section to prevent InspectorView redraws
+**Learning:** Reading `model.currentTime` via `overlayLocalPlayheadTime` within `InspectorView.body`'s call chain (through `overlayKeyframeSection`) causes the entire Inspector form to re-evaluate during playback when an overlay is selected.
+**Action:** Extract the overlay keyframe section into an isolated `OverlayKeyframeSectionView` struct, following the same pattern as `CoverTimeLabelView`, so that only the leaf view re-renders when `model.currentTime` changes.
