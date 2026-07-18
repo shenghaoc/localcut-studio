@@ -17,13 +17,21 @@ struct DocumentGroupCompatibilityTests {
             .documentGroupCompatibilityFlat,
             .documentGroupCompatibilityBundle
         ])
+        #expect(UTType.documentGroupCompatibilityFlat.conforms(to: .data))
+        #expect(UTType.documentGroupCompatibilityFlat.preferredFilenameExtension == "lcstudio")
+        #expect(UTType.documentGroupCompatibilityBundle.conforms(to: .package))
+        #expect(UTType.documentGroupCompatibilityBundle.preferredFilenameExtension == "lcbundle")
         #expect(try document.snapshot(contentType: .documentGroupCompatibilityFlat).isEmpty)
     }
 }
 
 extension UTType {
-    nonisolated static let documentGroupCompatibilityFlat = UTType(exportedAs: "com.localcut.compat.lcstudio")
-    nonisolated static let documentGroupCompatibilityBundle = UTType(exportedAs: "com.localcut.compat.lcbundle")
+    nonisolated static let documentGroupCompatibilityFlat = UTType(
+        filenameExtension: "lcstudio",
+        conformingTo: .data) ?? .data
+    nonisolated static let documentGroupCompatibilityBundle = UTType(
+        filenameExtension: "lcbundle",
+        conformingTo: .package) ?? .package
 }
 
 /// `ReferenceFileDocument` has synchronous read/write callbacks on macOS 26.
