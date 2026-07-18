@@ -72,6 +72,13 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
     /// New Save-panel files are reserved before their file bookmark is encoded.
     /// Optional keeps persisted jobs from older builds source-compatible.
     var outputReservationCreated: Bool?
+    /// Set when the saved destination cannot safely be reused. This stays
+    /// optional so older persisted queue documents decode as retryable.
+    var retryUnavailable: Bool?
+    /// Set only when a post-export failure left a complete movie at the output
+    /// URL. This distinguishes that protected output from a missing bookmark
+    /// so crash recovery never requeues and overwrites the movie.
+    var completedOutputPreserved: Bool?
 
     init(id: UUID = UUID(),
          preset: ExportPreset,
@@ -82,7 +89,9 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
          progress: Double = 0,
          errorMessage: String? = nil,
          runtimeSeconds: Double? = nil,
-         outputReservationCreated: Bool = false) {
+         outputReservationCreated: Bool = false,
+         retryUnavailable: Bool = false,
+         completedOutputPreserved: Bool = false) {
         self.id = id
         self.preset = preset
         self.outputBookmark = outputBookmark
@@ -93,6 +102,8 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
         self.errorMessage = errorMessage
         self.runtimeSeconds = runtimeSeconds
         self.outputReservationCreated = outputReservationCreated ? true : nil
+        self.retryUnavailable = retryUnavailable ? true : nil
+        self.completedOutputPreserved = completedOutputPreserved ? true : nil
     }
 
     var isTerminal: Bool {
@@ -101,6 +112,10 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
         case .queued, .running: false
         }
     }
+
+    /// A row can only reuse its saved destination when doing so cannot either
+    /// overwrite a preserved movie or rely on a stale exact-file bookmark.
+    var canRetry: Bool { retryUnavailable != true }
 }
 
 // MARK: - Persistence document
@@ -404,6 +419,10 @@ final class RenderQueue {
     /// that already `.completed`.
     func retry(jobID: UUID, autoStart: Bool = true) {
         guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        guard jobs[index].canRetry else {
+            statusMessage = "Choose a new output destination before retrying \(jobs[index].outputDisplayName)."
+            return
+        }
         switch jobs[index].status {
         case .failed, .cancelled:
             jobs[index].status = .queued
@@ -548,6 +567,7 @@ final class RenderQueue {
         // `.failed` rather than a crash — the user can retry by adding a fresh
         // destination.
         guard let outputResolution = resolveBookmark(outputBookmark) else {
+            markRetryUnavailable(jobID: id)
             finish(jobID: id, status: .failed,
                    message: RenderQueueError.outputDestinationUnavailable.localizedDescription,
                    startWall: startWall)
@@ -556,25 +576,38 @@ final class RenderQueue {
         if let refreshed = outputResolution.refreshedBookmark {
             refreshOutputBookmark(jobID: id, bookmark: refreshed)
         }
-        let outputURL = Self.outputDestinationURL(resolvedURL: outputResolution.url,
+        let scopedOutputURL = outputResolution.url
+        let outputURL = Self.outputDestinationURL(resolvedURL: scopedOutputURL,
                                                   displayName: outputDisplayName)
-        let didStart = outputURL.startAccessingSecurityScopedResource()
-        defer { if didStart { outputURL.stopAccessingSecurityScopedResource() } }
+        // A legacy bookmark may resolve to the output directory rather than
+        // the exact file. Scope the resolved URL, not an appended child path.
+        let didStart = scopedOutputURL.startAccessingSecurityScopedResource()
+        defer { if didStart { scopedOutputURL.stopAccessingSecurityScopedResource() } }
 
         // A mid-encode cancel via `AVAssetExportSession.cancelExport()` leaves
         // the partially-written file at the user's path (the writer path cleans
-        // up after itself; the session path does not). Delete it on cancel so a
-        // cancel never leaves a corrupt artefact behind — an explicit
-        // release-readiness gate. `try?` no-ops when the writer already removed it.
+        // up after itself; the session path does not). Replace any partial file
+        // with a fresh empty reservation while its file scope is still held.
+        // This keeps the exact-file bookmark valid for Retry instead of leaving
+        // a cancelled or failed job pointing at a deleted file.
         //
         // Guarded by `didBeginEncoding`: until the deliberate overwrite below
         // runs, the file at `outputURL` is the user's *pre-existing* file, so a
         // pre-encode cancel (e.g. cancelled while `CompositionBuilder.build` is
         // still awaiting and throwing `CancellationError`) must not delete it.
         var didBeginEncoding = false
-        let removePartialOutput = {
-            guard didBeginEncoding else { return }
+        var didFinishEncoding = false
+        let retryUnavailableMessage = "The output reservation could not be recreated; choose a new output destination before retrying."
+        let restoreRetryReservation = { () -> Bool in
+            guard didBeginEncoding else { return true }
             _ = try? FileManager.default.removeItem(at: outputURL)
+            return self.restoreOutputReservation(jobID: id,
+                                                 at: outputURL,
+                                                 makeBookmark: { url in
+                                                     Self.outputBookmark(
+                                                         for: url,
+                                                         bookmarkData: Self.rawSecurityScopedBookmark)
+                                                 })
         }
 
         // Build the composition from the snapshot. The runner reconstructs a
@@ -711,6 +744,7 @@ final class RenderQueue {
                     chapterMarkers: chapterMarkers,
                     chapterDuration: chapterDuration)
             }
+            didFinishEncoding = true
 
             // Write YouTube chapter sidecar when chapter markers exist. The
             // sidecar is part of the promised output, so a write failure must be
@@ -737,9 +771,11 @@ final class RenderQueue {
 
             if cancelInFlightID == id {
                 cancelInFlightID = nil
-                removePartialOutput()
+                let restored = restoreRetryReservation()
                 await releaseActiveLease()
-                finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
+                finish(jobID: id, status: .cancelled,
+                       message: restored ? nil : retryUnavailableMessage,
+                       startWall: startWall)
                 return
             }
 
@@ -747,9 +783,11 @@ final class RenderQueue {
             finish(jobID: id, status: .completed, message: nil, startWall: startWall)
         } catch is CancellationError {
             cancelInFlightID = nil
-            removePartialOutput()
+            let restored = restoreRetryReservation()
             await releaseActiveLease()
-            finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
+            finish(jobID: id, status: .cancelled,
+                   message: restored ? nil : retryUnavailableMessage,
+                   startWall: startWall)
         } catch {
             await releaseActiveLease()
             // `AVAssetExportSession.cancelExport()` makes the awaited export
@@ -758,11 +796,30 @@ final class RenderQueue {
             // it actually is so the row doesn't persist as `.failed` (codex P2).
             if cancelInFlightID == id {
                 cancelInFlightID = nil
-                removePartialOutput()
-                finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
-            } else {
+                let restored = restoreRetryReservation()
+                finish(jobID: id, status: .cancelled,
+                       message: restored ? nil : retryUnavailableMessage,
+                       startWall: startWall)
+            } else if didFinishEncoding {
+                let preserved = preserveCompletedOutput(jobID: id,
+                                                        at: outputURL,
+                                                        makeBookmark: { url in
+                                                            Self.outputBookmark(
+                                                                for: url,
+                                                                bookmarkData: Self.rawSecurityScopedBookmark)
+                                                        })
                 finish(jobID: id, status: .failed,
-                       message: error.localizedDescription, startWall: startWall)
+                       message: preserved
+                           ? "\(error.localizedDescription) The rendered movie was preserved; export again to retry the sidecar."
+                           : "\(error.localizedDescription) The rendered movie is unavailable; choose a new output destination before retrying.",
+                       startWall: startWall)
+            } else {
+                let restored = restoreRetryReservation()
+                finish(jobID: id, status: .failed,
+                       message: restored
+                           ? error.localizedDescription
+                           : "\(error.localizedDescription) \(retryUnavailableMessage)",
+                       startWall: startWall)
             }
         }
     }
@@ -786,11 +843,13 @@ final class RenderQueue {
         switch status {
         case .completed:
             jobs[index].outputReservationCreated = nil
+            jobs[index].retryUnavailable = nil
+            jobs[index].completedOutputPreserved = nil
             log("job \(jobID.uuidString.prefix(8)) completed in \(String(format: "%.1f", runtime))s")
             statusMessage = "Rendered \(displayName) in \(String(format: "%.1f", runtime))s."
         case .cancelled:
             log("job \(jobID.uuidString.prefix(8)) cancelled")
-            statusMessage = "Cancelled \(displayName)."
+            statusMessage = message ?? "Cancelled \(displayName)."
         case .failed:
             log("job \(jobID.uuidString.prefix(8)) failed — \(message ?? "")")
             statusMessage = "Render of \(displayName) failed: \(message ?? "unknown error")"
@@ -800,14 +859,90 @@ final class RenderQueue {
         persist()
     }
 
+    /// Recreate the exact-file reservation after a job has removed a partial
+    /// encode. The fresh bookmark is essential: a bookmark to the deleted leaf
+    /// cannot be resolved by a later Retry even though the user chose the path
+    /// through `NSSavePanel`.
+    @discardableResult
+    func restoreOutputReservation(
+        jobID: UUID,
+        at outputURL: URL,
+        makeBookmark: (URL) -> Data?
+    ) -> Bool {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return false }
+        let fileExisted = FileManager.default.fileExists(atPath: outputURL.path)
+        if !fileExisted {
+            do {
+                try Data().write(to: outputURL, options: .withoutOverwriting)
+            } catch {
+                jobs[index].outputReservationCreated = nil
+                jobs[index].retryUnavailable = true
+                persist()
+                logger.warning("Could not recreate render reservation: \(error.localizedDescription)")
+                return false
+            }
+        }
+        guard let bookmark = makeBookmark(outputURL) else {
+            if !fileExisted {
+                try? FileManager.default.removeItem(at: outputURL)
+            }
+            jobs[index].outputReservationCreated = nil
+            jobs[index].retryUnavailable = true
+            persist()
+            logger.warning("Could not refresh render output bookmark for retry")
+            return false
+        }
+        jobs[index].outputBookmark = bookmark
+        jobs[index].outputReservationCreated = true
+        jobs[index].retryUnavailable = nil
+        persist()
+        return true
+    }
+
+    /// A failure after encoding (for example, writing a chapter sidecar) must
+    /// not replace a valid movie with an empty retry reservation. Preserve the
+    /// completed movie, refresh its bookmark if possible, and require a new
+    /// output destination for any future export so this row cannot overwrite it.
+    @discardableResult
+    func preserveCompletedOutput(
+        jobID: UUID,
+        at outputURL: URL,
+        makeBookmark: (URL) -> Data?
+    ) -> Bool {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return false }
+        guard FileManager.default.fileExists(atPath: outputURL.path) else {
+            jobs[index].outputReservationCreated = nil
+            jobs[index].retryUnavailable = true
+            persist()
+            return false
+        }
+        if let bookmark = makeBookmark(outputURL) {
+            jobs[index].outputBookmark = bookmark
+        } else {
+            logger.warning("Could not refresh completed render bookmark after post-export failure")
+        }
+        jobs[index].outputReservationCreated = nil
+        jobs[index].retryUnavailable = true
+        jobs[index].completedOutputPreserved = true
+        persist()
+        return true
+    }
+
+    private func markRetryUnavailable(jobID: UUID) {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        jobs[index].retryUnavailable = true
+        persist()
+    }
+
     private func discardOutputReservation(for job: QueueJob) {
         guard job.outputReservationCreated == true,
               let resolution = resolveBookmark(job.outputBookmark) else { return }
+        let scopedOutputURL = resolution.url
         let outputURL = Self.outputDestinationURL(
-            resolvedURL: resolution.url,
+            resolvedURL: scopedOutputURL,
             displayName: job.outputDisplayName)
-        let didStart = outputURL.startAccessingSecurityScopedResource()
-        defer { if didStart { outputURL.stopAccessingSecurityScopedResource() } }
+        let didStart = scopedOutputURL.startAccessingSecurityScopedResource()
+        defer { if didStart { scopedOutputURL.stopAccessingSecurityScopedResource() } }
         guard let size = try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
               size == 0 else { return }
         try? FileManager.default.removeItem(at: outputURL)
@@ -1456,8 +1591,8 @@ final class RenderQueue {
         jobs = reconciled
         recomputeTotalProgress()
         log("queue loaded — \(jobs.count) job(s)")
-        // If reconciliation actually changed anything (a running → queued
-        // rewind or a stale-bookmark → failed flip), persist so the change
+        // If reconciliation actually changed anything (a running-job recovery
+        // or a stale-bookmark → failed flip), persist so the change
         // survives a relaunch — otherwise the same stale state would be
         // re-resurrected on every launch (codex P2).
         if didMutate { persist() }
@@ -1465,10 +1600,12 @@ final class RenderQueue {
         start()
     }
 
-    /// Implements R3.2 + R3.3: any `running` job rewinds to `queued`; any job
-    /// with a now-unresolvable `outputBookmark` flips to `failed`. A stale but
-    /// resolvable output bookmark is refreshed in-place so the persisted queue
-    /// does not keep resurrecting stale security-scope data.
+    /// Implements R3.2 + R3.3: a normal `running` job rewinds to `queued`,
+    /// while a running row that protected a completed post-export output flips
+    /// to `failed`; any job with a now-unresolvable `outputBookmark` flips to
+    /// `failed`. A stale but resolvable output bookmark is refreshed in-place
+    /// so the persisted queue does not keep resurrecting stale security-scope
+    /// data.
     static func reconcile(
         loaded: [QueueJob],
         resolver: (Data) -> BookmarkResolution? = resolveSecurityScopedBookmark
@@ -1476,9 +1613,18 @@ final class RenderQueue {
         loaded.map { job in
             var copy = job
             if copy.status == .running {
-                copy.status = .queued
-                copy.progress = 0
-                copy.errorMessage = nil
+                // A post-export failure can preserve a completed movie while
+                // the queued persistence write for the terminal `.failed`
+                // state is still pending. Never rewind that protected row to
+                // `.queued`: rerunning it would overwrite the preserved movie.
+                if copy.completedOutputPreserved == true {
+                    copy.status = .failed
+                    copy.errorMessage = "Rendered output was preserved after a post-export failure. Choose a new output destination before retrying."
+                } else {
+                    copy.status = .queued
+                    copy.progress = 0
+                    copy.errorMessage = nil
+                }
             }
             if copy.status == .queued {
                 if let resolution = resolver(copy.outputBookmark) {
@@ -1488,6 +1634,7 @@ final class RenderQueue {
                 } else {
                     copy.status = .failed
                     copy.errorMessage = RenderQueueError.outputDestinationUnavailable.localizedDescription
+                    copy.retryUnavailable = true
                 }
             }
             return copy

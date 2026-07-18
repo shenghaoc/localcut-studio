@@ -149,7 +149,7 @@ struct RenderQueueInspectorView: View {
                     .help("Reveal in Finder")
                     .accessibilityLabel("Reveal \(job.outputDisplayName) in Finder")
                 }
-                if job.status == .failed || job.status == .cancelled {
+                if (job.status == .failed || job.status == .cancelled) && job.canRetry {
                     Button {
                         model.renderQueue.retry(jobID: job.id)
                     } label: {
@@ -162,12 +162,12 @@ struct RenderQueueInspectorView: View {
             }
             // Surface the underlying failure so the user can act on it
             // rather than guessing why the pill went red (codex P2).
-            if job.status == .failed, let message = job.errorMessage {
+            if (job.status == .failed || job.status == .cancelled), let message = job.errorMessage {
                 Text(message)
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(job.status == .failed ? .red : .secondary)
                     .lineLimit(2)
-                    .accessibilityLabel("Failure reason: \(message)")
+                    .accessibilityLabel("Render status detail: \(message)")
             }
         }
         .padding(.vertical, 2)

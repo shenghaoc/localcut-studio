@@ -116,16 +116,22 @@ struct RenderQueueDocTests {
 
     @Test("RenderQueueDoc round-trips through JSON")
     func docRoundTrip() throws {
+        var protected = sampleJob(status: .failed)
+        protected.retryUnavailable = true
+        protected.completedOutputPreserved = true
         let doc = RenderQueueDoc(jobs: [
             sampleJob(status: .queued),
             sampleJob(status: .completed),
+            protected,
         ])
         let data = try JSONEncoder().encode(doc)
         let decoded = try JSONDecoder().decode(RenderQueueDoc.self, from: data)
         #expect(decoded == doc)
-        #expect(decoded.jobs.count == 2)
+        #expect(decoded.jobs.count == 3)
         #expect(decoded.jobs[0].status == .queued)
         #expect(decoded.jobs[1].status == .completed)
+        #expect(decoded.jobs[2].retryUnavailable == true)
+        #expect(decoded.jobs[2].completedOutputPreserved == true)
     }
 
     @Test("Reconcile: a .running job from disk rewinds to .queued")
@@ -162,6 +168,32 @@ struct RenderQueueDocTests {
         // either to `.queued` (resolved) or to `.failed` (stale bookmark).
         #expect(reconciled[0].status != .running)
         #expect(reconciled[0].progress == 0)
+    }
+
+    @Test("Reconcile preserves a protected post-export output after a crash")
+    func reconcileDoesNotRequeueProtectedRunningJob() {
+        let bookmark = Data([0x0a])
+        let protected = QueueJob(
+            preset: BuiltInExportPresets.web720p,
+            outputBookmark: bookmark,
+            outputDisplayName: "preserved.mp4",
+            projectSnapshot: ProjectDocument(
+                name: "T", renderWidth: 1280, renderHeight: 720, frameRate: 30,
+                media: [], videoTracks: [], audioTracks: []),
+            status: .running,
+            retryUnavailable: true,
+            completedOutputPreserved: true)
+
+        let reconciled = RenderQueue.reconcile(loaded: [protected]) { resolved in
+            #expect(resolved == bookmark)
+            return BookmarkResolution(
+                url: URL(filePath: "/tmp/preserved.mp4"),
+                refreshedBookmark: nil)
+        }
+
+        #expect(reconciled[0].status == .failed)
+        #expect(reconciled[0].retryUnavailable == true)
+        #expect(reconciled[0].errorMessage?.contains("preserved") == true)
     }
 
     @Test("Reconcile: an unresolvable bookmark flips a queued job to .failed")
@@ -410,6 +442,119 @@ struct RenderQueueTests {
 
         #expect(queue.jobs.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: outputURL.path))
+    }
+
+    @Test("Failed render cleanup recreates an exact-file reservation for retry")
+    func failedRenderCleanupRecreatesReservationForRetry() throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("localcut-retry-reservation-\(UUID()).mp4")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let initialBookmark = Data([0x01])
+        let refreshedBookmark = Data([0x02])
+        let job = QueueJob(
+            preset: BuiltInExportPresets.web720p,
+            outputBookmark: initialBookmark,
+            outputDisplayName: outputURL.lastPathComponent,
+            projectSnapshot: snapshot(),
+            status: .failed)
+        let queue = RenderQueue(jobs: [job], persistsToDisk: false)
+
+        let restored = queue.restoreOutputReservation(
+            jobID: job.id,
+            at: outputURL,
+            makeBookmark: { url in
+                #expect(url == outputURL)
+                #expect(FileManager.default.fileExists(atPath: url.path))
+                return refreshedBookmark
+            })
+
+        #expect(restored)
+        #expect(queue.jobs[0].outputBookmark == refreshedBookmark)
+        #expect(queue.jobs[0].outputReservationCreated == true)
+        #expect(try outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize == 0)
+    }
+
+    @Test("Retry is unavailable when a fresh output bookmark cannot be created")
+    func failedRenderCleanupDisablesRetryWhenBookmarkRefreshFails() {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("localcut-retry-bookmark-failure-\(UUID()).mp4")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let job = QueueJob(
+            preset: BuiltInExportPresets.web720p,
+            outputBookmark: Data([0x01]),
+            outputDisplayName: outputURL.lastPathComponent,
+            projectSnapshot: snapshot(),
+            status: .failed)
+        let queue = RenderQueue(jobs: [job], persistsToDisk: false)
+
+        let restored = queue.restoreOutputReservation(
+            jobID: job.id,
+            at: outputURL,
+            makeBookmark: { _ in nil })
+
+        #expect(!restored)
+        #expect(!FileManager.default.fileExists(atPath: outputURL.path))
+        #expect(queue.jobs[0].retryUnavailable == true)
+        #expect(!queue.jobs[0].canRetry)
+    }
+
+    @Test("Post-export failure preserves the completed movie and disables retry")
+    func postExportFailurePreservesCompletedOutput() throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("localcut-post-export-failure-\(UUID()).mp4")
+        let movieData = Data([0x00, 0x01, 0x02])
+        try movieData.write(to: outputURL, options: .withoutOverwriting)
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let refreshedBookmark = Data([0x02])
+        let job = QueueJob(
+            preset: BuiltInExportPresets.web720p,
+            outputBookmark: Data([0x01]),
+            outputDisplayName: outputURL.lastPathComponent,
+            projectSnapshot: snapshot(),
+            status: .failed,
+            outputReservationCreated: true)
+        let queue = RenderQueue(jobs: [job], persistsToDisk: false)
+
+        let preserved = queue.preserveCompletedOutput(
+            jobID: job.id,
+            at: outputURL,
+            makeBookmark: { _ in refreshedBookmark })
+
+        #expect(preserved)
+        #expect(try Data(contentsOf: outputURL) == movieData)
+        #expect(queue.jobs[0].outputBookmark == refreshedBookmark)
+        #expect(queue.jobs[0].outputReservationCreated == nil)
+        #expect(queue.jobs[0].retryUnavailable == true)
+        #expect(queue.jobs[0].completedOutputPreserved == true)
+        #expect(!queue.jobs[0].canRetry)
+    }
+
+    @Test("Post-export failure does not claim a missing movie was preserved")
+    func postExportFailureMarksMissingOutputUnavailable() {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("localcut-post-export-missing-\(UUID()).mp4")
+        let job = QueueJob(
+            preset: BuiltInExportPresets.web720p,
+            outputBookmark: Data([0x01]),
+            outputDisplayName: outputURL.lastPathComponent,
+            projectSnapshot: snapshot(),
+            status: .failed,
+            outputReservationCreated: true)
+        let queue = RenderQueue(jobs: [job], persistsToDisk: false)
+
+        let preserved = queue.preserveCompletedOutput(
+            jobID: job.id,
+            at: outputURL,
+            makeBookmark: { _ in Data([0x02]) })
+
+        #expect(!preserved)
+        #expect(queue.jobs[0].outputReservationCreated == nil)
+        #expect(queue.jobs[0].retryUnavailable == true)
+        #expect(queue.jobs[0].completedOutputPreserved == nil)
+        #expect(!queue.jobs[0].canRetry)
     }
 
     @Test("Enqueue rejects an unsupported (container, codec) pair as .failed")
