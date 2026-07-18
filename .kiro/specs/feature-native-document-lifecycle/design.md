@@ -69,9 +69,11 @@ support. `DocumentController` remains the owner of New, Open, Open Recent,
 Save, Save As, recent-document registration, local filesystem URL state, and
 persistence transactions.
 
-`ProjectLocationInspector` is the single classification path for Open / Open
-Recent / panel validation. It records an explicit `ProjectStorageKind`
-(`.singleFile` or `.bundle`) after successful open or Save As. Save and queued
+`ProjectLocationInspector` is the single full-classification path for Open and
+panel validation. Open Recent constructs its menu from URL-only candidates so
+it never performs filesystem I/O on the main actor; selecting a candidate
+revalidates it off the main actor before loading. It records an explicit
+`ProjectStorageKind` (`.singleFile` or `.bundle`) after successful open or Save As. Save and queued
 bundle-asset snapshots dispatch from that stored kind; Save As dispatches from
 the panel-selected destination representation. A directory is never accepted
 merely because a file named

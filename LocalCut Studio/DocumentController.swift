@@ -134,7 +134,10 @@ final class DocumentController {
                 url.stopAccessingSecurityScopedResource()
             }
         }
-        guard let descriptor = ProjectLocationInspector.inspect(url) else {
+        let descriptor = await Task.detached(priority: .userInitiated) {
+            ProjectLocationInspector.inspect(url)
+        }.value
+        guard let descriptor else {
             model.statusMessage = String(localized: "Open failed: not a LocalCut project (.lcstudio or .lcbundle).")
             return
         }

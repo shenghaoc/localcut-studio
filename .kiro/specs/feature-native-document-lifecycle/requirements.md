@@ -30,7 +30,10 @@
 - **R2.4** Missing-media relinking, schema/downconversion protection, external
   change warnings, render-queue persistence, and preview/export parity remain
   owned by their existing services.
-- **R2.5** Dirty state, undo labels/grouping, recording guards, and asynchronous
+- **R2.5** Open Recent menu construction performs URL-only candidate filtering;
+  it must not synchronously inspect project metadata or touch user storage.
+  The selected URL is fully revalidated off the main actor before loading.
+- **R2.6** Dirty state, undo labels/grouping, recording guards, and asynchronous
   save-before-close behaviour must not regress.
 
 ## R3 — App Intent editor readiness

@@ -279,7 +279,7 @@ struct DocumentCommands: Commands {
     }
 
     static func supportedRecentProjectURLs(from urls: [URL]) -> [URL] {
-        urls.filter(ProjectLocationInspector.isSupportedProjectLocation)
+        urls.filter(ProjectLocationInspector.isRecentProjectCandidate)
     }
 }
 

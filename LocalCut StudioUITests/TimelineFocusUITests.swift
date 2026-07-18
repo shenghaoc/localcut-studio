@@ -96,6 +96,20 @@ final class TimelineFocusUITests: XCTestCase {
     }
 
     @MainActor
+    func testRealTimelineHeaderSliderKeepsKeyboardFocus() {
+        let app = launchTimelineViewHarness()
+        XCTAssertTrue(element(in: app, identifiedBy: "uitest-real-timeline-harness")
+            .waitForExistence(timeout: 5))
+
+        let slider = app.sliders["Timeline zoom"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 2))
+        let initialValue = String(describing: slider.value ?? "")
+        slider.click()
+        app.typeKey(XCUIKeyboardKey.leftArrow.rawValue, modifierFlags: [])
+        XCTAssertNotEqual(String(describing: slider.value ?? ""), initialValue)
+    }
+
+    @MainActor
     private func launchHarness() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = [

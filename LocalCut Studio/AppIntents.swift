@@ -166,11 +166,6 @@ final class LocalCutAppIntentRouter {
             Task {
                 await result.cancel()
             }
-            Task { @MainActor in
-                if actionChain === currentRef {
-                    actionChain = predecessorRef
-                }
-            }
         }
     }
 

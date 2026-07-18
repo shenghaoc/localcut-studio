@@ -122,11 +122,6 @@ struct TimelineView: View {
             didRequestInitialTimelineFocus = true
             receivesTimelineShortcuts = true
         }
-        .simultaneousGesture(TapGesture().onEnded {
-            // Clicking the timeline claims shortcut focus without blocking
-            // clip drag / trim gestures on child views.
-            receivesTimelineShortcuts = true
-        })
         .onKeyPress { press in
             // The popover's text field gets first refusal. This guard also
             // prevents a transient focus hand-off from turning typed m/M into
@@ -390,6 +385,11 @@ struct TimelineView: View {
                     }
                 }
             }
+            .simultaneousGesture(TapGesture().onEnded {
+                // Keep shortcut focus in the timeline canvas without stealing
+                // keyboard focus from header buttons or the zoom slider.
+                receivesTimelineShortcuts = true
+            })
         }
     }
 

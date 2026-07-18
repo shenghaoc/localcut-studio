@@ -1215,22 +1215,17 @@ struct ProjectBundleTests {
         }
     }
 
-    @Test("Open Recent keeps extensionless validated bundles")
-    func recentProjectFilteringUsesProjectLocationInspector() throws {
+    @Test("Open Recent keeps extensionless bundle candidates without filesystem I/O")
+    func recentProjectFilteringAvoidsSynchronousValidation() throws {
         try withTempDirectory("recent-projects") { tmp in
             let extensionlessBundle = tmp.appendingPathComponent("Synced Project")
-            try FileManager.default.createDirectory(
-                at: extensionlessBundle,
-                withIntermediateDirectories: true)
-            try writeValidatedBundleMetadata(to: extensionlessBundle, name: "Synced")
-
-            let unrelatedDirectory = tmp.appendingPathComponent("Not a project")
-            try FileManager.default.createDirectory(
-                at: unrelatedDirectory,
-                withIntermediateDirectories: true)
+            let staleExtensionlessBundle = tmp.appendingPathComponent("Offline Project")
+            let uppercaseStudio = tmp.appendingPathComponent("Project.LCSTUDIO")
+            let unrelatedMedia = tmp.appendingPathComponent("clip.mov")
 
             #expect(DocumentCommands.supportedRecentProjectURLs(
-                from: [extensionlessBundle, unrelatedDirectory]) == [extensionlessBundle])
+                from: [extensionlessBundle, staleExtensionlessBundle, uppercaseStudio, unrelatedMedia])
+                == [extensionlessBundle, staleExtensionlessBundle, uppercaseStudio])
         }
     }
 

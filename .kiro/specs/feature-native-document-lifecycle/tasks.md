@@ -27,6 +27,8 @@
 - [x] **T2.4** Tests for valid/invalid `.lcstudio` / `.lcbundle` / extensionless
   bundle / empty JSON / malformed / oversized metadata / unrelated directory /
   save routing.
+- [x] **T2.5** Keep Open Recent menu construction free of filesystem I/O;
+  revalidate its selected candidate off the main actor before loading.
 
 ## App Intent readiness
 

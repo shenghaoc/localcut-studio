@@ -24,6 +24,10 @@ private actor AppIntentStartSignal {
             self.continuation = continuation
         }
     }
+
+    func hasStarted() -> Bool {
+        started
+    }
 }
 
 private actor AppIntentReleaseGate {
@@ -389,6 +393,50 @@ struct AppIntentsTests {
         } catch {
             Issue.record("Expected CancellationError for second action, got \(error)")
         }
+    }
+
+    @Test func cancelledCurrentActionRetainsSerializationBarrierUntilItUnwinds() async throws {
+        let model = EditorModel()
+        let (registry, _) = readyRouting(model)
+        let firstStarted = AppIntentStartSignal()
+        let releaseFirst = AppIntentReleaseGate()
+        let followingStarted = AppIntentStartSignal()
+        let tracker = AppIntentEventTracker()
+        let router = LocalCutAppIntentRouter(editorRegistry: registry) { action, _ in
+            if action == .importMedia {
+                tracker.events.append("start-import")
+                await firstStarted.markStarted()
+                // Simulate a cancelled AppKit panel whose completion is still
+                // unwinding after the intent caller has returned.
+                await releaseFirst.wait()
+                tracker.events.append("finish-import")
+            } else if action == .showDiagnostics {
+                tracker.events.append("start-diagnostics")
+                await followingStarted.markStarted()
+            }
+        }
+
+        let first = Task { try await router.perform(.importMedia) }
+        await firstStarted.waitUntilStarted()
+        first.cancel()
+
+        do {
+            try await first.value
+            Issue.record("Expected CancellationError.")
+        } catch is CancellationError {
+        } catch {
+            Issue.record("Expected CancellationError, got \(error)")
+        }
+
+        let following = Task { try await router.perform(.showDiagnostics) }
+        try? await Task.sleep(for: .milliseconds(100))
+        let didFollowingStartEarly = await followingStarted.hasStarted()
+        #expect(!didFollowingStartEarly)
+
+        await releaseFirst.open()
+        await followingStarted.waitUntilStarted()
+        try await following.value
+        #expect(tracker.events == ["start-import", "finish-import", "start-diagnostics"])
     }
 
     @Test func newProjectCommandCancelledAfterPromptDoesNotResetDocument() async {

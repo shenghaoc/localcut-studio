@@ -58,6 +58,20 @@ nonisolated enum ProjectLocationInspector {
         inspect(url) != nil
     }
 
+    /// Identifies a URL that can be displayed in Open Recent without touching
+    /// the filesystem. The recent-document controller is populated only after
+    /// a successful Open or Save, and `DocumentController.open` revalidates a
+    /// selected candidate before loading it. Extensionless URLs are retained
+    /// for validated synced bundle projects.
+    static func isRecentProjectCandidate(_ url: URL) -> Bool {
+        switch url.pathExtension.lowercased() {
+        case ProjectDocument.fileExtension, ProjectBundleLayout.fileExtension, "":
+            true
+        default:
+            false
+        }
+    }
+
     /// Whether `url` is a validated LocalCut bundle directory.
     ///
     /// This performs full metadata validation — not a loose content sniff.
