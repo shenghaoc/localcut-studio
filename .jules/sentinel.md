@@ -47,3 +47,8 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Vulnerability:** WHIP client allowed publishing stream keys (Bearer tokens) over unencrypted HTTP connections.
 **Learning:** Network clients must explicitly validate that sensitive credentials are only transmitted over secure channels (HTTPS) or local loopback interfaces. Unencrypted transmission exposes stream keys to interception on the network path.
 **Prevention:** Always assert the protocol scheme is `https` (or target is `localhost` for local dev tools) before attaching authentication headers to outgoing HTTP requests.
+
+## 2024-05-24 - File Access Vulnerability in WhipClientImpl ValidateSecureTransmission check
+**Vulnerability:** The code uses `kSecAttrAccessibleWhenUnlocked` instead of `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. This allows the stream keys/passwords to be migrated to new devices or synchronized to iCloud Keychain, which could be less secure depending on the use case.
+**Learning:** `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` prevents credentials from being synced or migrated.
+**Prevention:** Check for `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` instead of `kSecAttrAccessibleWhenUnlocked`.
