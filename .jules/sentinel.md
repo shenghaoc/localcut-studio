@@ -47,3 +47,8 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Vulnerability:** WHIP client allowed publishing stream keys (Bearer tokens) over unencrypted HTTP connections.
 **Learning:** Network clients must explicitly validate that sensitive credentials are only transmitted over secure channels (HTTPS) or local loopback interfaces. Unencrypted transmission exposes stream keys to interception on the network path.
 **Prevention:** Always assert the protocol scheme is `https` (or target is `localhost` for local dev tools) before attaching authentication headers to outgoing HTTP requests.
+
+## 2026-07-20 - Insecure Keychain Item Synchronization
+**Vulnerability:** The application was using `kSecAttrAccessibleWhenUnlocked` to store credentials in the macOS Keychain. This configuration allows sensitive items to sync across devices via iCloud Keychain.
+**Learning:** For application-specific sensitive credentials (like stream keys or specific API tokens), syncing them across iCloud to other devices or migrating them can unnecessarily expand the attack surface.
+**Prevention:** Always use `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` when saving sensitive credentials to the Keychain to ensure they remain bound to the device where they were created and do not sync to iCloud Keychain.
