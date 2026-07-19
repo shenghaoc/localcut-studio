@@ -49,3 +49,7 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 ## 2026-07-18 - Tooltips for visually unlabeled controls
 **Learning:** Icon-only controls or standalone Sliders (like the timeline zoom slider) that have an `.accessibilityLabel` for screen readers still leave pointer/mouse users guessing about their function if they lack a visual label.
 **Action:** Always verify that interactive components without visible text labels include a `.help()` modifier to provide a tooltip for pointer users, even if an `.accessibilityLabel` is already present.
+## 2026-07-19 — Apply .labelStyle(.iconOnly) to Label-based icon-only buttons
+
+**Learning:** Buttons built with `Label(..., systemImage: ...)` in property editors that act as icon-only controls must explicitly use `.labelStyle(.iconOnly)`. This visually hides the text so they render strictly as icons, matching the design of sibling `Image` buttons, while preserving the text for VoiceOver screen readers.
+**Action:** Add `.labelStyle(.iconOnly)` to `Label`-based buttons in toolbars and keyframe navigators to ensure they behave properly as icon-only controls.
