@@ -49,6 +49,6 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Prevention:** Always assert the protocol scheme is `https` (or target is `localhost` for local dev tools) before attaching authentication headers to outgoing HTTP requests.
 
 ## 2026-07-20 - Insecure Keychain Item Synchronization
-**Vulnerability:** The application was using `kSecAttrAccessibleWhenUnlocked` to store credentials in the macOS Keychain. This configuration allows sensitive items to sync across devices via iCloud Keychain.
-**Learning:** For application-specific sensitive credentials (like stream keys or specific API tokens), syncing them across iCloud to other devices or migrating them can unnecessarily expand the attack surface.
-**Prevention:** Always use `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` when saving sensitive credentials to the Keychain to ensure they remain bound to the device where they were created and do not sync to iCloud Keychain.
+**Vulnerability:** The application was using `kSecAttrAccessibleWhenUnlocked` (without `kSecUseDataProtectionKeychain`) to store credentials in the macOS Keychain. Accessibility alone does not bind file-based keychain items, and non-`ThisDeviceOnly` items can sync via iCloud Keychain.
+**Learning:** For application-specific sensitive credentials (like stream keys or API tokens), secrets must be device-bound and stored in the data-protection keychain; already-saved tokens need migration on load.
+**Prevention:** Always use `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` with `kSecUseDataProtectionKeychain: true` when saving sensitive credentials, and re-save legacy items so the remediation covers existing remembered tokens.
