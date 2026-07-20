@@ -61,6 +61,7 @@ struct KeyframeNavBar: View {
                     systemImage: hasKeyframeAtPlayhead ? "diamond.fill" : "plus.diamond.fill"
                 )
             }
+            .labelStyle(.iconOnly)
             .disabled(!canAddOrUpdate)
             .help(addOrUpdateGuidance)
             .accessibilityLabel(hasKeyframeAtPlayhead

@@ -287,6 +287,7 @@ struct CaptionsInspectorView: View {
                     Label(hasKeyframe ? "Update" : "Add",
                           systemImage: "diamond.fill")
                 }
+                .labelStyle(.iconOnly)
                 .disabled(!isEditable)
                 .help(hasKeyframe ? "Update caption style keyframe" : "Add caption style keyframe")
                 .accessibilityLabel(hasKeyframe ? "Update caption style keyframe" : "Add caption style keyframe")

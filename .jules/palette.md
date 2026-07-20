@@ -46,3 +46,7 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 ## 2026-07-20 - Add missing labels to icon-only buttons in property editors
 **Learning:** Buttons containing only `Label(..., systemImage: ...)` may still only render as icon-only in certain SwiftUI contexts and lack proper VoiceOver labels if the visual text is omitted or ignored by the view hierarchy. In `CaptionsInspectorView` and `ClipTransformKeyframeEditor`, the Add/Update keyframe buttons used a `Label` but were missing explicit `.accessibilityLabel(...)` and `.help(...)` modifiers compared to neighboring buttons.
 **Action:** Always append explicit `.help(...)` and `.accessibilityLabel(...)` modifiers to any button functioning as an icon-only control, even if its content is a `Label` with text, to guarantee VoiceOver coverage and tooltips.
+
+## 2026-07-28 - Force icon-only layout on accessible Label buttons
+**Learning:** When using `Label` for buttons in compact `HStack`s to ensure proper VoiceOver reading, the text may still render visually and break the icon-only layout if not explicitly constrained, unlike using a plain `Image`.
+**Action:** Always append `.labelStyle(.iconOnly)` when using a `Label` to construct an icon-only button so the visual text is hidden while retaining full VoiceOver semantics.
