@@ -5,9 +5,13 @@ import LocalCutCore
 
 private struct SpeedCurveGridCanvas: View, Equatable {
     let rect: CGRect
+    /// Included so light/dark appearance changes invalidate the equatable canvas.
+    let colorScheme: ColorScheme
 
     var body: some View {
         Canvas { context, _ in
+            // Touch colorScheme so appearance is a real input to this view.
+            let _ = colorScheme
             let border = Path(roundedRect: rect, cornerRadius: 6)
             context.fill(border, with: .color(Color(nsColor: .controlBackgroundColor).opacity(0.65)))
             context.stroke(border, with: .color(.secondary.opacity(0.28)), lineWidth: 1)
@@ -37,6 +41,7 @@ struct SpeedCurveEditor: View {
     let onCommit: () -> Void
     let onReset: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var dragTarget: SpeedCurveDragTarget?
 
     private let inset: CGFloat = 10
@@ -46,7 +51,7 @@ struct SpeedCurveEditor: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                SpeedCurveGridCanvas(rect: plotRect(size: proxy.size))
+                SpeedCurveGridCanvas(rect: plotRect(size: proxy.size), colorScheme: colorScheme)
                     .equatable()
                 Canvas { context, size in
                     let plan = localSegmentPlan

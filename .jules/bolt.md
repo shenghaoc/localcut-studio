@@ -42,5 +42,5 @@ Append a dated entry whenever you learn something about keeping LocalCut Studio 
 **Action:** Extract the overlay keyframe section into an isolated `OverlayKeyframeSectionView` struct, following the same pattern as `CoverTimeLabelView`, so that only the leaf view re-renders when `model.currentTime` changes.
 
 ## 2026-08-08 - Isolate static grid in SpeedCurveEditor to prevent full Canvas redraws
-**Learning:** Dragging handles in the `SpeedCurveEditor` updates the high-frequency state (`clip.speedCurve`), causing the entire `Canvas` (including static elements like the grid) to re-evaluate constantly.
-**Action:** Extract static background elements (like the grid) into an isolated `Equatable` `Canvas` view layered under the dynamic components using a `ZStack`. This limits the `Canvas` re-drawing to only the elements that actually need to re-evaluate, preserving application performance.
+**Learning:** Dragging handles in the `SpeedCurveEditor` updates the high-frequency state (`clip.speedCurve`), causing the entire `Canvas` (including static elements like the grid) to re-evaluate constantly. Equatable isolation must still invalidate on appearance changes when the canvas samples dynamic system colors.
+**Action:** Extract static background elements (like the grid) into an isolated `Equatable` `Canvas` view layered under the dynamic components using a `ZStack`, and include `colorScheme` in the equatable inputs so light/dark switches still redraw.
