@@ -3,6 +3,26 @@ import AppKit
 import AVFoundation
 import LocalCutCore
 
+private struct SpeedCurveGridCanvas: View, Equatable {
+    let rect: CGRect
+
+    var body: some View {
+        Canvas { context, _ in
+            let border = Path(roundedRect: rect, cornerRadius: 6)
+            context.fill(border, with: .color(Color(nsColor: .controlBackgroundColor).opacity(0.65)))
+            context.stroke(border, with: .color(.secondary.opacity(0.28)), lineWidth: 1)
+
+            for step in 1..<4 {
+                let y = rect.minY + rect.height * CGFloat(step) / 4
+                var path = Path()
+                path.move(to: CGPoint(x: rect.minX, y: y))
+                path.addLine(to: CGPoint(x: rect.maxX, y: y))
+                context.stroke(path, with: .color(.secondary.opacity(0.16)), lineWidth: 0.5)
+            }
+        }
+    }
+}
+
 private enum SpeedCurveDragTarget: Equatable {
     case defaultValue
     case keyframe(UUID)
@@ -25,22 +45,25 @@ struct SpeedCurveEditor: View {
 
     var body: some View {
         GeometryReader { proxy in
-            Canvas { context, size in
-                let plan = localSegmentPlan
-                let outputDuration = TimeRemapping.outputDuration(for: plan)
-                drawGrid(context: &context, size: size)
-                drawCurve(context: &context,
-                          size: size,
-                          plan: plan,
-                          outputDuration: outputDuration)
-                drawHandles(context: &context,
-                            size: size,
-                            plan: plan,
-                            outputDuration: outputDuration)
-                drawKeyframes(context: &context,
+            ZStack {
+                SpeedCurveGridCanvas(rect: plotRect(size: proxy.size))
+                    .equatable()
+                Canvas { context, size in
+                    let plan = localSegmentPlan
+                    let outputDuration = TimeRemapping.outputDuration(for: plan)
+                    drawCurve(context: &context,
                               size: size,
                               plan: plan,
                               outputDuration: outputDuration)
+                    drawHandles(context: &context,
+                                size: size,
+                                plan: plan,
+                                outputDuration: outputDuration)
+                    drawKeyframes(context: &context,
+                                  size: size,
+                                  plan: plan,
+                                  outputDuration: outputDuration)
+                }
             }
             .contentShape(Rectangle())
             .gesture(
@@ -96,21 +119,6 @@ struct SpeedCurveEditor: View {
 
     private var localSegmentPlan: [TimeRemapSegment] {
         TimeRemapping.segmentPlan(sourceDuration: clip.duration, speedCurve: clip.speedCurve)
-    }
-
-    private func drawGrid(context: inout GraphicsContext, size: CGSize) {
-        let rect = plotRect(size: size)
-        let border = Path(roundedRect: rect, cornerRadius: 6)
-        context.fill(border, with: .color(Color(nsColor: .controlBackgroundColor).opacity(0.65)))
-        context.stroke(border, with: .color(.secondary.opacity(0.28)), lineWidth: 1)
-
-        for step in 1..<4 {
-            let y = rect.minY + rect.height * CGFloat(step) / 4
-            var path = Path()
-            path.move(to: CGPoint(x: rect.minX, y: y))
-            path.addLine(to: CGPoint(x: rect.maxX, y: y))
-            context.stroke(path, with: .color(.secondary.opacity(0.16)), lineWidth: 0.5)
-        }
     }
 
     private func drawCurve(context: inout GraphicsContext,

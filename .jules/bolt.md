@@ -40,3 +40,7 @@ Append a dated entry whenever you learn something about keeping LocalCut Studio 
 ## 2026-08-04 - Isolate Overlay Keyframe Section to prevent InspectorView redraws
 **Learning:** Reading `model.currentTime` via `overlayLocalPlayheadTime` within `InspectorView.body`'s call chain (through `overlayKeyframeSection`) causes the entire Inspector form to re-evaluate during playback when an overlay is selected.
 **Action:** Extract the overlay keyframe section into an isolated `OverlayKeyframeSectionView` struct, following the same pattern as `CoverTimeLabelView`, so that only the leaf view re-renders when `model.currentTime` changes.
+
+## 2026-08-08 - Isolate static grid in SpeedCurveEditor to prevent full Canvas redraws
+**Learning:** Dragging handles in the `SpeedCurveEditor` updates the high-frequency state (`clip.speedCurve`), causing the entire `Canvas` (including static elements like the grid) to re-evaluate constantly.
+**Action:** Extract static background elements (like the grid) into an isolated `Equatable` `Canvas` view layered under the dynamic components using a `ZStack`. This limits the `Canvas` re-drawing to only the elements that actually need to re-evaluate, preserving application performance.
