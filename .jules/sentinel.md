@@ -47,3 +47,8 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Vulnerability:** WHIP client allowed publishing stream keys (Bearer tokens) over unencrypted HTTP connections.
 **Learning:** Network clients must explicitly validate that sensitive credentials are only transmitted over secure channels (HTTPS) or local loopback interfaces. Unencrypted transmission exposes stream keys to interception on the network path.
 **Prevention:** Always assert the protocol scheme is `https` (or target is `localhost` for local dev tools) before attaching authentication headers to outgoing HTTP requests.
+
+## 2026-07-18 - Keychain accessibility and data-protection binding in KeychainHelper
+**Vulnerability:** Publish stream keys were stored with `kSecAttrAccessibleWhenUnlocked` and without `kSecUseDataProtectionKeychain`. On macOS, accessibility attributes are ignored for the file-based keychain, and non-`ThisDeviceOnly` items can sync or migrate more broadly than intended.
+**Learning:** Sensitive credentials must use `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` *and* target the data-protection keychain. Existing items should be re-saved on load so the fix remediates already-remembered tokens.
+**Prevention:** Always set `kSecUseDataProtectionKeychain: true` with a `*ThisDeviceOnly` accessibility class when saving secrets; delete from both stores and migrate legacy items on load.
