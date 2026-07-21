@@ -481,7 +481,8 @@ extension EditorModel {
     }
 
     /// Reads and opens either a `.lcstudio` document or a `.lcbundle` package.
-    func open(url: URL) async {
+    @discardableResult
+    func open(url: URL) async -> Bool {
         await documentController.open(url: url, model: self)
     }
 

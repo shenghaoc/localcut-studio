@@ -36,8 +36,8 @@ enum ProjectOpenPanelConfiguration {
         // `.lcbundle` has an in-process filename-backed UTType rather than a
         // Finder-registered document type. NSOpenPanel cannot match that
         // runtime type for a directory, so leave the type filter unrestricted
-        // and validate through the panel delegate below. This keeps real
-        // bundles selectable without accepting an unrelated path as a project.
+        // and run a cheap shape/size check through the panel delegate below.
+        // Full JSON classification happens off MainActor after confirmation.
         panel.allowsMultipleSelection = false
         // LocalCut bundles are directories on disk, so accept directory
         // candidates and validate their canonical project metadata at the
@@ -50,8 +50,8 @@ enum ProjectOpenPanelConfiguration {
         panel.treatsFilePackagesAsDirectories = false
     }
 
-    static func isSupportedProjectURL(_ url: URL) -> Bool {
-        ProjectLocationInspector.isSupportedProjectLocation(url)
+    static func isOpenPanelCandidate(_ url: URL) -> Bool {
+        ProjectLocationInspector.isOpenPanelCandidate(url)
     }
 }
 
@@ -107,7 +107,7 @@ private final class ProjectSavePanelTypeDelegate: NSObject, NSOpenSavePanelDeleg
 @MainActor
 private final class ProjectOpenPanelValidator: NSObject, NSOpenSavePanelDelegate {
     func panel(_ sender: Any, validate url: URL) throws {
-        guard ProjectOpenPanelConfiguration.isSupportedProjectURL(url) else {
+        guard ProjectOpenPanelConfiguration.isOpenPanelCandidate(url) else {
             throw NSError(
                 domain: "LocalCutStudio.ProjectOpen",
                 code: 1,
@@ -225,18 +225,17 @@ extension EditorModel {
     func performOpenProjectCommand(
         confirmSave: @escaping @MainActor () async -> Bool,
         presentPanel: @escaping @MainActor () async -> (NSApplication.ModalResponse, URL?),
-        openProject: @escaping @MainActor (URL) async -> Void
+        openProject: @escaping @MainActor (URL) async -> Bool
     ) async -> EditorCommandOutcome {
         guard !blockDocumentCommandWhileRecording() else { return .actionCancelled }
         guard await confirmSave() else { return .actionCancelled }
         let (response, url) = await presentPanel()
         guard response == .OK, let url else { return .panelCancelled }
-        guard ProjectOpenPanelConfiguration.isSupportedProjectURL(url) else {
+        guard ProjectOpenPanelConfiguration.isOpenPanelCandidate(url) else {
             statusMessage = String(localized: "Choose a LocalCut project (.lcstudio or .lcbundle).")
             return .failed
         }
-        await openProject(url)
-        return .completed
+        return await openProject(url) ? .completed : .failed
     }
 
     @discardableResult

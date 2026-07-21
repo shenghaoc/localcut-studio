@@ -206,9 +206,10 @@ struct RenderQueueInspectorView: View {
 
     // MARK: - Add to queue
 
-    /// Opens an `NSSavePanel` filtered to the preset's container, captures a
-    /// security-scoped bookmark for the chosen destination folder, and
-    /// enqueues a job carrying the current project's snapshot.
+    /// Opens an `NSSavePanel` filtered to the preset's container, reserves and
+    /// bookmarks the exact selected output file, then enqueues a job carrying
+    /// the current project snapshot. A directory bookmark is compatibility
+    /// fallback only when the file grant cannot be encoded.
     private func addToQueue(preset: ExportPreset) {
         let panel = NSSavePanel()
         if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
@@ -233,8 +234,7 @@ struct RenderQueueInspectorView: View {
 
         let snapshot = ProjectDocument(
             project: model.project,
-            queueBundleURL: model.documentURL,
-            queueStorageKind: model.projectStorageKind)
+            queueSessionLocation: model.projectSessionLocation)
         let job = QueueJob(
             preset: preset,
             outputBookmark: preparedBookmark.data,

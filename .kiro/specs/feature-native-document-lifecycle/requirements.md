@@ -21,12 +21,13 @@
   needed, fingerprinted, security-scoped, and compatible with the existing
   project/document services.
 - **R2.2** Open classification uses one inspector path that fully validates
-  bundle metadata (`project.json` decode + supported `bundleFormat`). Existence
-  of `project.json` alone is insufficient, and metadata reads are size-bounded
-  before decoding.
-- **R2.3** Session state stores `ProjectStorageKind` beside the local filesystem
-  `documentURL`. Save and queued bundle-asset snapshots dispatch from the
-  stored kind; Save As dispatches from the panel-selected representation.
+  bundle metadata (`project.json` decode + supported `bundleFormat`) off the
+  main actor. The open panel performs only cheap shape/extension/size checks;
+  existence of `project.json` alone is insufficient for the final Open result.
+- **R2.3** Session state models the local filesystem URL and
+  `ProjectStorageKind` as one `ProjectSessionLocation`. Save and queued
+  bundle-asset snapshots dispatch from that value; Save As dispatches from the
+  panel-selected representation.
 - **R2.4** Missing-media relinking, schema/downconversion protection, external
   change warnings, render-queue persistence, and preview/export parity remain
   owned by their existing services.

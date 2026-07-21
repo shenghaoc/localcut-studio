@@ -420,7 +420,7 @@ func renderQueueExportsAllOverlayKinds() async throws {
     queue.enqueueWithDefaultPreset(outputURL: outputURL,
                                    project: project,
                                    bookmark: outputBookmark,
-                                   projectStorageKind: nil)
+                                   projectSessionLocation: .unsaved)
     let job = try await waitForFinishedOverlayJob(queue)
 
     #expect(job.status == .completed, "Render queue export failed: \(job.errorMessage ?? "unknown error")")

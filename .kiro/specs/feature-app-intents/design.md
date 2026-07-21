@@ -1,6 +1,10 @@
 # Design: App Intents + Shortcuts Integration
 
-> **Ownership note:** App Intent cold-launch readiness and editor-window routing are now owned by [`feature-native-document-lifecycle`](../feature-native-document-lifecycle/design.md). That design supersedes the earlier assumption that intents always share a process-wide model without waiting for the editor window.
+> **Ownership note:** App Intent cold-launch readiness, editor-window routing,
+> and exact-file render destination grants are now owned by
+> [`feature-native-document-lifecycle`](../feature-native-document-lifecycle/design.md).
+> That design supersedes the earlier readiness and destination-folder models
+> retained in this historical feature spec.
 
 
 > Status: **Implemented** on PR #54.
@@ -20,8 +24,10 @@ the same user-visible status when an action is blocked, cancelled, or fails.
 `LocalCutStudioApp.init()` registers that router with `AppDependencyManager`, so App Intents resolve
 the same live editor session the window uses even if SwiftUI recreates the `App` value.
 
-This replaces the earlier "connect later from the first window appearance" design. Intents no
-longer depend on window timing to find a model.
+This replaces the earlier "connect later from the first window appearance" dependency wiring.
+The router no longer depends on a view callback to find the process-wide model, but each action
+still waits for `ActiveEditorRegistry` to report a ready editor window and remains pinned to that
+window generation.
 
 ### Thin router, existing commands
 
@@ -68,10 +74,10 @@ had already surfaced an error to the user.
 
 ### Export destination persistence
 
-Queued exports persist a security-scoped bookmark to the destination folder plus the output filename,
-not a bookmark to the non-existent output file itself. That matches `NSSavePanel` for brand-new
-files, survives queue retries/relaunches, and still resolves older file-bookmark jobs for backward
-compatibility.
+Queued exports reserve the exact `NSSavePanel` output file, persist that file's security-scoped
+bookmark, and replace the empty reservation when rendering begins. This preserves the user's file
+grant across retries and relaunches. Directory-bookmark jobs from the original implementation remain
+supported as a backward-compatibility shape.
 
 ## UX / HIG fit
 

@@ -58,45 +58,48 @@ struct ProjectBundleTests {
         #expect(panel.allowedContentTypes.isEmpty)
     }
 
-    @Test("Project open policy rejects unrelated folders and unvalidated packages")
-    func projectOpenPolicyValidatesDirectoryCandidates() throws {
+    @Test("Project open panel performs only cheap shape and size validation")
+    func projectOpenPanelValidatesCandidatesWithoutDecoding() throws {
         try withTempDirectory("open-policy") { temporaryDirectory in
-            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(temporaryDirectory))
+            #expect(!ProjectOpenPanelConfiguration.isOpenPanelCandidate(temporaryDirectory))
 
             let emptyJSONBundle = temporaryDirectory.appendingPathComponent("EmptyJSON.lcbundle")
             try FileManager.default.createDirectory(at: emptyJSONBundle, withIntermediateDirectories: true)
             try Data("{}".utf8).write(to: emptyJSONBundle.appendingPathComponent(ProjectBundleLayout.projectJSON))
-            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(emptyJSONBundle))
+            #expect(ProjectOpenPanelConfiguration.isOpenPanelCandidate(emptyJSONBundle))
+            #expect(ProjectLocationInspector.inspect(emptyJSONBundle) == nil)
 
             let validBundle = temporaryDirectory.appendingPathComponent("Project.lcbundle")
             try FileManager.default.createDirectory(at: validBundle, withIntermediateDirectories: true)
             try writeValidatedBundleMetadata(to: validBundle, name: "Project")
-            #expect(ProjectOpenPanelConfiguration.isSupportedProjectURL(validBundle))
+            #expect(ProjectOpenPanelConfiguration.isOpenPanelCandidate(validBundle))
 
             let flatProject = temporaryDirectory.appendingPathComponent("Legacy.lcstudio")
             try Data("{}".utf8).write(to: flatProject)
-            #expect(ProjectOpenPanelConfiguration.isSupportedProjectURL(flatProject))
+            #expect(ProjectOpenPanelConfiguration.isOpenPanelCandidate(flatProject))
 
             let malformedStudio = temporaryDirectory.appendingPathComponent("Broken.lcstudio")
             try Data("{not-json".utf8).write(to: malformedStudio)
-            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(malformedStudio))
+            #expect(ProjectOpenPanelConfiguration.isOpenPanelCandidate(malformedStudio))
+            #expect(ProjectLocationInspector.inspect(malformedStudio) == nil)
 
             let misleadingProjectDirectory = temporaryDirectory.appendingPathComponent("NotAProject.lcstudio")
             try FileManager.default.createDirectory(at: misleadingProjectDirectory, withIntermediateDirectories: true)
-            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(misleadingProjectDirectory))
+            #expect(!ProjectOpenPanelConfiguration.isOpenPanelCandidate(misleadingProjectDirectory))
 
             let emptyBundleDirectory = temporaryDirectory.appendingPathComponent("Empty.lcbundle")
             try FileManager.default.createDirectory(at: emptyBundleDirectory, withIntermediateDirectories: true)
-            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(emptyBundleDirectory))
+            #expect(!ProjectOpenPanelConfiguration.isOpenPanelCandidate(emptyBundleDirectory))
 
             let misleadingBundleFile = temporaryDirectory.appendingPathComponent("NotABundle.lcbundle")
             try Data("not a package".utf8).write(to: misleadingBundleFile)
-            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(misleadingBundleFile))
+            #expect(!ProjectOpenPanelConfiguration.isOpenPanelCandidate(misleadingBundleFile))
 
             let malformedJSONBundle = temporaryDirectory.appendingPathComponent("BadJSON.lcbundle")
             try FileManager.default.createDirectory(at: malformedJSONBundle, withIntermediateDirectories: true)
             try Data("{not-json".utf8).write(to: malformedJSONBundle.appendingPathComponent(ProjectBundleLayout.projectJSON))
-            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(malformedJSONBundle))
+            #expect(ProjectOpenPanelConfiguration.isOpenPanelCandidate(malformedJSONBundle))
+            #expect(ProjectLocationInspector.inspect(malformedJSONBundle) == nil)
 
             let missingFormatBundle = temporaryDirectory.appendingPathComponent("NoFormat.lcbundle")
             try FileManager.default.createDirectory(at: missingFormatBundle, withIntermediateDirectories: true)
@@ -111,7 +114,44 @@ struct ProjectBundleTests {
             )
             doc.bundleFormat = nil
             try doc.encoded().write(to: missingFormatBundle.appendingPathComponent(ProjectBundleLayout.projectJSON))
-            #expect(!ProjectOpenPanelConfiguration.isSupportedProjectURL(missingFormatBundle))
+            #expect(ProjectOpenPanelConfiguration.isOpenPanelCandidate(missingFormatBundle))
+            #expect(ProjectLocationInspector.inspect(missingFormatBundle) == nil)
+
+            let oversizedStudio = temporaryDirectory.appendingPathComponent("Oversized.lcstudio")
+            #expect(FileManager.default.createFile(atPath: oversizedStudio.path, contents: nil))
+            let handle = try FileHandle(forWritingTo: oversizedStudio)
+            try handle.truncate(atOffset: UInt64(ProjectLocationInspector.maximumMetadataSize + 1))
+            try handle.close()
+            #expect(!ProjectOpenPanelConfiguration.isOpenPanelCandidate(oversizedStudio))
+        }
+    }
+
+    @Test("Project session location keeps URL and storage kind inseparable")
+    func projectSessionLocationPairsURLAndStorageKind() {
+        let url = URL(filePath: "/tmp/Session.lcbundle", directoryHint: .isDirectory)
+        let saved = ProjectSessionLocation.saved(url: url, storageKind: .bundle)
+
+        #expect(saved.url == url)
+        #expect(saved.storageKind == .bundle)
+        #expect(ProjectSessionLocation.unsaved.url == nil)
+        #expect(ProjectSessionLocation.unsaved.storageKind == nil)
+    }
+
+    @Test("Open reports failure after detached validation rejects a panel candidate")
+    func openRejectsMalformedPanelCandidate() async throws {
+        try await withTempDirectory("open-malformed") { temporaryDirectory in
+            let malformed = temporaryDirectory.appendingPathComponent("Malformed.lcstudio")
+            try Data("{not-json".utf8).write(to: malformed)
+            let model = EditorModel()
+
+            let outcome = await model.performOpenProjectCommand(
+                confirmSave: { true },
+                presentPanel: { (.OK, malformed) },
+                openProject: { url in await model.open(url: url) })
+
+            #expect(outcome == .failed)
+            #expect(model.projectSessionLocation == .unsaved)
+            #expect(model.statusMessage.contains("Open failed"))
         }
     }
 
@@ -499,8 +539,7 @@ struct ProjectBundleTests {
                 .write(to: sourceURL, options: .atomic)
 
             let model = EditorModel()
-            model.documentURL = bundleURL
-            model.projectStorageKind = .bundle
+            model.projectSessionLocation = .saved(url: bundleURL, storageKind: .bundle)
             model.project.overlays = [
                 OverlayClip(
                     id: overlayID,
@@ -532,8 +571,7 @@ struct ProjectBundleTests {
                 .write(to: sourceURL, options: .atomic)
 
             let model = EditorModel()
-            model.documentURL = bundleURL
-            model.projectStorageKind = .bundle
+            model.projectSessionLocation = .saved(url: bundleURL, storageKind: .bundle)
             model.project.overlays = [
                 OverlayClip(
                     id: overlayID,
@@ -587,8 +625,7 @@ struct ProjectBundleTests {
                 at: bundleURL.appendingPathComponent(ProjectBundleLayout.projectJSON))
             let snapshot = ProjectDocument(
                 project: model.project,
-                queueBundleURL: bundleURL,
-                queueStorageKind: .bundle)
+                queueSessionLocation: .saved(url: bundleURL, storageKind: .bundle))
             let queuedOverlay = try #require(snapshot.overlays.first)
 
             #expect(queuedOverlay.bundleRelativePath == savedOverlay.bundleRelativePath)
@@ -640,8 +677,7 @@ struct ProjectBundleTests {
             try Data([0x89, 0x50, 0x4E, 0x47]).write(to: sourceURL, options: .atomic)
 
             let model = EditorModel()
-            model.documentURL = bundleURL
-            model.projectStorageKind = .bundle
+            model.projectSessionLocation = .saved(url: bundleURL, storageKind: .bundle)
             model.project.paddedBackground = PaddedBackgroundPreset(
                 source: .image,
                 imageBundleRelativePath: relativePath)
@@ -673,8 +709,7 @@ struct ProjectBundleTests {
 
             let snapshot = ProjectDocument(
                 project: project,
-                queueBundleURL: bundleURL,
-                queueStorageKind: .bundle)
+                queueSessionLocation: .saved(url: bundleURL, storageKind: .bundle))
             let background = try #require(snapshot.paddedBackground)
 
             #expect(background.imageBundleRelativePath == relativePath)
@@ -1015,7 +1050,7 @@ struct ProjectBundleTests {
                                           duration: time(1))
                 model.project.overlays = [overlay]
                 model.project.overlayBundlePaths[overlay.id] = "../escape.gif"
-                model.documentURL = bundleURL
+                model.projectSessionLocation = .saved(url: bundleURL, storageKind: .bundle)
 
                 #expect(model.resolveOverlayURL(for: overlay) == nil)
             }

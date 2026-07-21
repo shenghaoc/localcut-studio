@@ -41,8 +41,6 @@ final class DocumentController {
         model.silenceDetectionTask?.cancel()
         model.silenceDetectionTask = nil
         model.silenceProposals = []
-        model.documentURL = nil
-        model.projectStorageKind = nil
         model.isDirty = false
         model.unresolvedMedia = []
         model.totalDuration = 0
@@ -54,6 +52,7 @@ final class DocumentController {
 
     func releaseSession(model: EditorModel) {
         model.sessionGeneration &+= 1
+        model.projectSessionLocation = .unsaved
         model.player.pause()
         model.isPlaying = false
         model.replacePreviewItem(with: nil)
@@ -126,7 +125,8 @@ final class DocumentController {
         }
     }
 
-    func open(url: URL, model: EditorModel) async {
+    @discardableResult
+    func open(url: URL, model: EditorModel) async -> Bool {
         let initialAccess = url.startAccessingSecurityScopedResource()
         var didTransferAccess = false
         defer {
@@ -139,7 +139,7 @@ final class DocumentController {
         }.value
         guard let descriptor else {
             model.statusMessage = String(localized: "Open failed: not a LocalCut project (.lcstudio or .lcbundle).")
-            return
+            return false
         }
         do {
             switch descriptor.storageKind {
@@ -172,13 +172,15 @@ final class DocumentController {
                            externallyEditedAssets: [],
                            model: model)
             }
+            return true
         } catch is CancellationError {
-            return
+            return false
         } catch {
             model.statusMessage = EditorModel.failureStatusMessage(
                 summary: "Open failed",
                 detail: error.localizedDescription,
                 recoverySuggestion: "Try reopening from File > Open Recent, or check that the project file hasn't been moved.")
+            return false
         }
     }
 
@@ -195,14 +197,15 @@ final class DocumentController {
         model.lastBundleFingerprints = bundleFingerprints
         // Prefer the caller-supplied classification; fall back only when load
         // is used without a prior open descriptor (tests / internal paths).
+        let resolvedStorageKind: ProjectStorageKind?
         if let storageKind {
-            model.projectStorageKind = storageKind
+            resolvedStorageKind = storageKind
         } else if bundleURL != nil {
-            model.projectStorageKind = .bundle
+            resolvedStorageKind = .bundle
         } else if url != nil {
-            model.projectStorageKind = .singleFile
+            resolvedStorageKind = .singleFile
         } else {
-            model.projectStorageKind = nil
+            resolvedStorageKind = nil
         }
 
         if let bundleURL, bundleAccessDidStart {
@@ -278,7 +281,13 @@ final class DocumentController {
         }
 
         let isNewerSchema = document.schemaVersion > ProjectDocument.currentSchemaVersion
-        model.documentURL = isNewerSchema ? nil : url
+        if !isNewerSchema, let url, let resolvedStorageKind {
+            model.projectSessionLocation = .saved(
+                url: url,
+                storageKind: resolvedStorageKind)
+        } else {
+            model.projectSessionLocation = .unsaved
+        }
         model.unresolvedMedia = unresolved
         model.isDirty = isNewerSchema || refreshedBookmark
         if let url, !isNewerSchema {
@@ -307,12 +316,8 @@ final class DocumentController {
     }
 
     func save(model: EditorModel) async {
-        guard let url = model.documentURL else { return }
-        guard let kind = storageKindForWrite(to: url, model: model) else {
-            model.statusMessage = String(localized: "Save failed: choose Save As to pick a LocalCut project format.")
-            return
-        }
-        await write(to: url, storageKind: kind, model: model)
+        guard case .saved(let url, let storageKind) = model.projectSessionLocation else { return }
+        await write(to: url, storageKind: storageKind, model: model)
     }
 
     func saveAs(url: URL, model: EditorModel) async {
@@ -399,16 +404,16 @@ final class DocumentController {
     ) -> ProjectStorageKind? {
         let standardized = url.standardizedFileURL
         if !isSaveAs,
-           let stored = model.projectStorageKind,
-           model.documentURL?.standardizedFileURL == standardized {
-            return stored
+           case .saved(let sessionURL, let storageKind) = model.projectSessionLocation,
+           sessionURL.standardizedFileURL == standardized {
+            return storageKind
         }
         if let kind = ProjectLocationInspector.storageKindForSaveDestination(url: url) {
             return kind
         }
         // Extensionless in-place save of a previously validated bundle only.
-        if model.documentURL?.standardizedFileURL == standardized,
-           model.projectStorageKind == .bundle {
+        if case .saved(let sessionURL, .bundle) = model.projectSessionLocation,
+           sessionURL.standardizedFileURL == standardized {
             return .bundle
         }
         return nil
@@ -541,8 +546,8 @@ final class DocumentController {
     }
 
     func canConvertToBundle(model: EditorModel) -> Bool {
-        guard let url = model.documentURL else { return false }
-        return url.pathExtension == ProjectDocument.fileExtension
+        guard case .saved(_, .singleFile) = model.projectSessionLocation else { return false }
+        return true
     }
 
     func convertToBundle(to bundleURL: URL, model: EditorModel) async {
@@ -921,8 +926,7 @@ final class DocumentController {
     private func singleFileOverlayBookmark(for overlay: OverlayClipDoc, model: EditorModel) -> Data? {
         guard let relativePath = overlay.bundleRelativePath,
               ProjectBundleLayout.isSafeAssetRelativePath(relativePath),
-              let bundleURL = model.documentURL,
-              model.projectStorageKind == .bundle else {
+              case .saved(let bundleURL, .bundle) = model.projectSessionLocation else {
             return nil
         }
         let didAccess = bundleURL.startAccessingSecurityScopedResource()
@@ -963,8 +967,7 @@ final class DocumentController {
         cleanIfRevision revision: Int? = nil,
         model: EditorModel
     ) {
-        model.documentURL = url
-        model.projectStorageKind = storageKind
+        model.projectSessionLocation = .saved(url: url, storageKind: storageKind)
         model.project.name = url.deletingPathExtension().lastPathComponent
         if revision == nil || revision == model.mutationRevision { model.isDirty = false }
         NSDocumentController.shared.noteNewRecentDocumentURL(url)

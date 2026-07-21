@@ -13,8 +13,7 @@ final class ExportCoordinator {
         await export(to: url, model: model) { preparedBookmark in
             let snapshot = ProjectDocument(
                 project: model.project,
-                queueBundleURL: model.documentURL,
-                queueStorageKind: model.projectStorageKind)
+                queueSessionLocation: model.projectSessionLocation)
             let job = QueueJob(
                 preset: preset,
                 outputBookmark: preparedBookmark.data,

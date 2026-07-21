@@ -69,18 +69,20 @@ support. `DocumentController` remains the owner of New, Open, Open Recent,
 Save, Save As, recent-document registration, local filesystem URL state, and
 persistence transactions.
 
-`ProjectLocationInspector` is the single full-classification path for Open and
-panel validation. Open Recent constructs its menu from URL-only candidates so
-it never performs filesystem I/O on the main actor; selecting a candidate
-revalidates it off the main actor before loading. It records an explicit
-`ProjectStorageKind` (`.singleFile` or `.bundle`) after successful open or Save As. Save and queued
-bundle-asset snapshots dispatch from that stored kind; Save As dispatches from
-the panel-selected destination representation. A directory is never accepted
-merely because a file named
+`ProjectLocationInspector` is the single full-classification path for Open.
+The open panel performs only cheap filesystem-shape, extension, and size checks;
+after confirmation, `DocumentController.open` fully classifies and decodes the
+candidate off the main actor. Open Recent constructs its menu from URL-only
+candidates and follows the same detached full-classification path when selected.
+Successful Open or Save As records `ProjectSessionLocation.saved`, which keeps
+the local filesystem URL inseparable from its `ProjectStorageKind`
+(`.singleFile` or `.bundle`). Save and queued bundle-asset snapshots dispatch
+from that session value; Save As dispatches from the panel-selected destination
+representation. A directory is never ultimately accepted merely because a file named
 `project.json` exists — metadata must decode as a supported `ProjectDocument`
 with a supported `bundleFormat`. Classification rejects project metadata larger
-than 10 MiB before reading or decoding it, so a renamed media file cannot force
-an unbounded synchronous allocation during open-panel validation.
+than 10 MiB before reading or decoding it, while panel validation never performs
+the decode on the main actor.
 
 ### Window state and commands
 
@@ -97,8 +99,10 @@ an unbounded synchronous allocation during open-panel validation.
   output file rather than its parent directory, a new destination is reserved
   as an empty file before its bookmark is encoded. The queue replaces that
   reservation when rendering starts. Enqueue rejection removes it immediately;
-  failed/cancelled jobs keep it for Retry, and Clear Finished removes an empty
-  reservation.
+  failed/cancelled jobs keep it for Retry, and Clear Finished removes only an
+  empty reservation. Before replacement the queue durably records that output
+  writing began; a completed encode is protected before sidecar work, so crash
+  recovery never auto-requeues over user data, a partial encode, or a finished movie.
 
 ### App Intent readiness
 
@@ -121,8 +125,8 @@ divider persistence with the collapsed inspector invariant.
 
 No project schema, `.lcstudio` encoding, `.lcbundle` layout, fingerprints,
 relinking semantics, or render output format changes. The version-1 render
-queue document gains an optional reservation flag; older queue JSON decodes it
-as absent, and directory bookmarks from older builds remain supported.
+queue document gains optional reservation/output-protection flags; older queue
+JSON decodes them as absent, and directory bookmarks from older builds remain supported.
 Without a bundled Launch Services declaration, File ▸ Open validates a selected
 local filesystem URL as either a regular `.lcstudio` file or a fully validated
 bundle directory; Finder double-click is not newly advertised.

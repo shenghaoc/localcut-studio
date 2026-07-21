@@ -1155,6 +1155,7 @@ struct RecordingDocumentCommandGuardTests {
             },
             openProject: { _ in
                 openedProject = true
+                return true
             })
 
         #expect(openOutcome == .actionCancelled)

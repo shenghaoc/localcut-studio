@@ -17,16 +17,17 @@
 
 ## File-based project classification
 
-- [x] **T2.1** Add `ProjectStorageKind` + `ProjectLocationInspector` with full,
-  size-bounded metadata validation for single-file projects and bundles.
-- [x] **T2.2** Persist storage kind with `documentURL`; Save and queued
-  bundle-asset snapshots use the stored kind; Save As uses destination
-  representation.
+- [x] **T2.1** Add `ProjectStorageKind` + `ProjectLocationInspector` with cheap
+  panel candidate checks and detached, full size-bounded metadata validation
+  for single-file projects and bundles.
+- [x] **T2.2** Persist URL and storage kind as `ProjectSessionLocation`; Save
+  and queued bundle-asset snapshots use that paired value; Save As uses the
+  destination representation.
 - [x] **T2.3** Replace loose `project.json` existence sniffs; update
   `ProjectBundle.isBundle` to real validation.
-- [x] **T2.4** Tests for valid/invalid `.lcstudio` / `.lcbundle` / extensionless
-  bundle / empty JSON / malformed / oversized metadata / unrelated directory /
-  save routing.
+- [x] **T2.4** Tests for cheap panel candidates, full valid/invalid `.lcstudio`
+  / `.lcbundle` / extensionless bundle classification, empty JSON / malformed /
+  oversized metadata / unrelated directory / save routing.
 - [x] **T2.5** Keep Open Recent menu construction free of filesystem I/O;
   revalidate its selected candidate off the main actor before loading.
 
@@ -53,7 +54,9 @@
   unit tests remain mapping-only).
 - [x] **T4.6** Preserve the Save-panel file sandbox grant through queued render
   execution; retain compatibility with persisted directory bookmarks and
-  clean new-file reservations on rejection or when a terminal row is cleared.
+  clean empty new-file reservations on rejection or when a terminal row is
+  cleared. Persist output-write/commit protection so recovery never overwrites
+  an existing, partial, or completed output automatically.
 
 ## Documentation and verification
 

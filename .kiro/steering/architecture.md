@@ -61,7 +61,8 @@ load/relink/rebuild, atomic `.lcstudio` and `.lcbundle` writes, package
 staging/fingerprints, and security-scoped resource lifetime. `EditorModel`
 owns the live AVFoundation/editor state (including its one `AVPlayer`), undo
 manager, capture state, and render queue. Open/save routing records an
-explicit `ProjectStorageKind` rather than re-sniffing paths.
+explicit `ProjectSessionLocation` that keeps the local filesystem URL paired
+with its `ProjectStorageKind` rather than re-sniffing paths.
 
 `DocumentGroup` is technically feasible on macOS 26, but `ReferenceFileDocument`
 does not directly reuse the filesystem-URL-based asynchronous package pipeline,

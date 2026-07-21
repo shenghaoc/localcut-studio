@@ -75,10 +75,15 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
     /// Set when the saved destination cannot safely be reused. This stays
     /// optional so older persisted queue documents decode as retryable.
     var retryUnavailable: Bool?
-    /// Set only when a post-export failure left a complete movie at the output
-    /// URL. This distinguishes that protected output from a missing bookmark
-    /// so crash recovery never requeues and overwrites the movie.
+    /// Set as soon as encoding leaves a complete movie at the output URL and
+    /// retained if later post-work fails. Normal completion clears it; crash
+    /// recovery uses it to avoid requeueing over the finished movie.
     var completedOutputPreserved: Bool?
+    /// Set before the runner removes the selected file/reservation and begins
+    /// writing. If the process exits mid-run, the destination may contain the
+    /// user's prior file, a partial encode, or a complete movie, so recovery
+    /// must leave it untouched instead of automatically requeueing the job.
+    var outputWriteStarted: Bool?
 
     init(id: UUID = UUID(),
          preset: ExportPreset,
@@ -91,7 +96,8 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
          runtimeSeconds: Double? = nil,
          outputReservationCreated: Bool = false,
          retryUnavailable: Bool = false,
-         completedOutputPreserved: Bool = false) {
+         completedOutputPreserved: Bool = false,
+         outputWriteStarted: Bool = false) {
         self.id = id
         self.preset = preset
         self.outputBookmark = outputBookmark
@@ -104,6 +110,7 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
         self.outputReservationCreated = outputReservationCreated ? true : nil
         self.retryUnavailable = retryUnavailable ? true : nil
         self.completedOutputPreserved = completedOutputPreserved ? true : nil
+        self.outputWriteStarted = outputWriteStarted ? true : nil
     }
 
     var isTerminal: Bool {
@@ -115,7 +122,11 @@ struct QueueJob: Codable, Equatable, Sendable, Identifiable {
 
     /// A row can only reuse its saved destination when doing so cannot either
     /// overwrite a preserved movie or rely on a stale exact-file bookmark.
-    var canRetry: Bool { retryUnavailable != true }
+    var canRetry: Bool {
+        retryUnavailable != true
+            && completedOutputPreserved != true
+            && outputWriteStarted != true
+    }
 }
 
 // MARK: - Persistence document
@@ -156,6 +167,7 @@ nonisolated enum RenderQueueError: Error, LocalizedError {
     case chapterSidecarWriteFailed(String)
     case exportSessionCreationFailed
     case writerInitializationFailed(String)
+    case outputProtectionPersistenceFailed
 
     var errorDescription: String? {
         switch self {
@@ -175,6 +187,8 @@ nonisolated enum RenderQueueError: Error, LocalizedError {
             "Could not create an export session for this preset."
         case .writerInitializationFailed(let detail):
             "Could not start the writer: \(detail)"
+        case .outputProtectionPersistenceFailed:
+            "Render queue protection could not be saved, so the output was left unchanged."
         }
     }
 }
@@ -259,7 +273,7 @@ final class RenderQueue {
     /// Without this chain, two successive `persist()` calls could spawn two
     /// overlapping writes where the second finishes first.
     @ObservationIgnored
-    private var pendingWriteTask: Task<Void, Never>?
+    private var pendingWriteTask: Task<Bool, Never>?
 
     @ObservationIgnored
     private var pendingWriteToken: UUID?
@@ -609,6 +623,12 @@ final class RenderQueue {
                                                          bookmarkData: Self.rawSecurityScopedBookmark)
                                                  })
         }
+        let cancellationOutputMessage = { () -> String? in
+            if didFinishEncoding {
+                return "The rendered movie was preserved; choose a new output destination before retrying."
+            }
+            return restoreRetryReservation() ? nil : retryUnavailableMessage
+        }
 
         // Build the composition from the snapshot. The runner reconstructs a
         // throwaway `Project` from the document so it can reuse
@@ -710,8 +730,11 @@ final class RenderQueue {
 
             // Replace any existing file so the writer/session doesn't trip
             // over a stale artefact from a previous run. Past this point the
-            // user's pre-existing file is gone, so a cancel may safely delete
-            // whatever the encode wrote.
+            // user's pre-existing file may be gone. Persist ownership first so
+            // crash recovery never auto-requeues over whatever remains there.
+            guard await markOutputWriteStarted(jobID: id) else {
+                throw RenderQueueError.outputProtectionPersistenceFailed
+            }
             try? FileManager.default.removeItem(at: outputURL)
             didBeginEncoding = true
 
@@ -745,6 +768,17 @@ final class RenderQueue {
                     chapterDuration: chapterDuration)
             }
             didFinishEncoding = true
+            guard await preserveCompletedOutput(
+                jobID: id,
+                at: outputURL,
+                makeBookmark: { url in
+                    Self.outputBookmark(
+                        for: url,
+                        bookmarkData: Self.rawSecurityScopedBookmark)
+                }
+            ) else {
+                throw RenderQueueError.outputDestinationUnavailable
+            }
 
             // Write YouTube chapter sidecar when chapter markers exist. The
             // sidecar is part of the promised output, so a write failure must be
@@ -771,10 +805,10 @@ final class RenderQueue {
 
             if cancelInFlightID == id {
                 cancelInFlightID = nil
-                let restored = restoreRetryReservation()
+                let message = cancellationOutputMessage()
                 await releaseActiveLease()
                 finish(jobID: id, status: .cancelled,
-                       message: restored ? nil : retryUnavailableMessage,
+                       message: message,
                        startWall: startWall)
                 return
             }
@@ -783,10 +817,10 @@ final class RenderQueue {
             finish(jobID: id, status: .completed, message: nil, startWall: startWall)
         } catch is CancellationError {
             cancelInFlightID = nil
-            let restored = restoreRetryReservation()
+            let message = cancellationOutputMessage()
             await releaseActiveLease()
             finish(jobID: id, status: .cancelled,
-                   message: restored ? nil : retryUnavailableMessage,
+                   message: message,
                    startWall: startWall)
         } catch {
             await releaseActiveLease()
@@ -796,18 +830,19 @@ final class RenderQueue {
             // it actually is so the row doesn't persist as `.failed` (codex P2).
             if cancelInFlightID == id {
                 cancelInFlightID = nil
-                let restored = restoreRetryReservation()
+                let message = cancellationOutputMessage()
                 finish(jobID: id, status: .cancelled,
-                       message: restored ? nil : retryUnavailableMessage,
+                       message: message,
                        startWall: startWall)
             } else if didFinishEncoding {
-                let preserved = preserveCompletedOutput(jobID: id,
-                                                        at: outputURL,
-                                                        makeBookmark: { url in
-                                                            Self.outputBookmark(
-                                                                for: url,
-                                                                bookmarkData: Self.rawSecurityScopedBookmark)
-                                                        })
+                let preserved = await preserveCompletedOutput(
+                    jobID: id,
+                    at: outputURL,
+                    makeBookmark: { url in
+                        Self.outputBookmark(
+                            for: url,
+                            bookmarkData: Self.rawSecurityScopedBookmark)
+                    })
                 finish(jobID: id, status: .failed,
                        message: preserved
                            ? "\(error.localizedDescription) The rendered movie was preserved; export again to retry the sidecar."
@@ -845,6 +880,7 @@ final class RenderQueue {
             jobs[index].outputReservationCreated = nil
             jobs[index].retryUnavailable = nil
             jobs[index].completedOutputPreserved = nil
+            jobs[index].outputWriteStarted = nil
             log("job \(jobID.uuidString.prefix(8)) completed in \(String(format: "%.1f", runtime))s")
             statusMessage = "Rendered \(displayName) in \(String(format: "%.1f", runtime))s."
         case .cancelled:
@@ -895,6 +931,8 @@ final class RenderQueue {
         jobs[index].outputBookmark = bookmark
         jobs[index].outputReservationCreated = true
         jobs[index].retryUnavailable = nil
+        jobs[index].completedOutputPreserved = nil
+        jobs[index].outputWriteStarted = nil
         persist()
         return true
     }
@@ -908,12 +946,16 @@ final class RenderQueue {
         jobID: UUID,
         at outputURL: URL,
         makeBookmark: (URL) -> Data?
-    ) -> Bool {
+    ) async -> Bool {
         guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return false }
-        guard FileManager.default.fileExists(atPath: outputURL.path) else {
+        guard let values = try? outputURL.resourceValues(
+            forKeys: [.fileSizeKey, .isRegularFileKey]),
+              values.isRegularFile == true,
+              let fileSize = values.fileSize,
+              fileSize > 0 else {
             jobs[index].outputReservationCreated = nil
             jobs[index].retryUnavailable = true
-            persist()
+            _ = await persistDurably()
             return false
         }
         if let bookmark = makeBookmark(outputURL) {
@@ -924,7 +966,29 @@ final class RenderQueue {
         jobs[index].outputReservationCreated = nil
         jobs[index].retryUnavailable = true
         jobs[index].completedOutputPreserved = true
-        persist()
+        jobs[index].outputWriteStarted = true
+        return await persistDurably()
+    }
+
+    /// Persist before removing the selected leaf. A crash after this point may
+    /// leave user data or an encode at the destination, so startup recovery
+    /// must not run the job again automatically.
+    private func markOutputWriteStarted(jobID: UUID) async -> Bool {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return false }
+        let priorReservation = jobs[index].outputReservationCreated
+        let priorPreserved = jobs[index].completedOutputPreserved
+        let priorWriteStarted = jobs[index].outputWriteStarted
+        jobs[index].outputReservationCreated = nil
+        jobs[index].completedOutputPreserved = nil
+        jobs[index].outputWriteStarted = true
+        guard await persistDurably() else {
+            if let restoreIndex = jobs.firstIndex(where: { $0.id == jobID }) {
+                jobs[restoreIndex].outputReservationCreated = priorReservation
+                jobs[restoreIndex].completedOutputPreserved = priorPreserved
+                jobs[restoreIndex].outputWriteStarted = priorWriteStarted
+            }
+            return false
+        }
         return true
     }
 
@@ -1513,9 +1577,28 @@ final class RenderQueue {
                 let message = "Render queue was not saved: \(error.localizedDescription)"
                 log.error("queue persist failed: \(error.localizedDescription, privacy: .public)")
                 await self?.recordPersistenceFailure(message)
+                await self?.clearPendingWriteTask(token: token)
+                return false
             }
             await self?.clearPendingWriteTask(token: token)
+            return true
         }
+    }
+
+    /// Schedules the current queue state and waits for that exact write. This
+    /// is reserved for output-safety boundaries where touching the selected
+    /// file before queue.json reaches disk would reopen an overwrite window.
+    private func persistDurably() async -> Bool {
+        guard persistsToDisk else { return true }
+        guard !refusingPersist else { return false }
+        let priorToken = pendingWriteToken
+        persist()
+        guard let token = pendingWriteToken,
+              token != priorToken,
+              let writeTask = pendingWriteTask else {
+            return false
+        }
+        return await writeTask.value
     }
 
     private func recordPersistenceFailure(_ message: String) {
@@ -1531,7 +1614,7 @@ final class RenderQueue {
     /// Lets tests observe the detached persistence chain without making
     /// production callers wait for fire-and-forget writes.
     func waitForPendingPersistenceForTesting() async {
-        await pendingWriteTask?.value
+        _ = await pendingWriteTask?.value
     }
 
     /// Reads the on-disk queue and reconciles state. Called once at app
@@ -1600,31 +1683,33 @@ final class RenderQueue {
         start()
     }
 
-    /// Implements R3.2 + R3.3: a normal `running` job rewinds to `queued`,
-    /// while a running row that protected a completed post-export output flips
-    /// to `failed`; any job with a now-unresolvable `outputBookmark` flips to
-    /// `failed`. A stale but resolvable output bookmark is refreshed in-place
-    /// so the persisted queue does not keep resurrecting stale security-scope
-    /// data.
+    /// Implements R3.2 + R3.3: a `running` job that never took ownership of its
+    /// output rewinds to `queued`. Once output writing began, recovery instead
+    /// fails the row and leaves the destination untouched because it may hold
+    /// user data, a partial encode, or a completed movie. Any job with a now-
+    /// unresolvable `outputBookmark` also flips to `failed`. A stale but
+    /// resolvable bookmark is refreshed in-place.
     static func reconcile(
         loaded: [QueueJob],
         resolver: (Data) -> BookmarkResolution? = resolveSecurityScopedBookmark
     ) -> [QueueJob] {
         loaded.map { job in
             var copy = job
-            if copy.status == .running {
-                // A post-export failure can preserve a completed movie while
-                // the queued persistence write for the terminal `.failed`
-                // state is still pending. Never rewind that protected row to
-                // `.queued`: rerunning it would overwrite the preserved movie.
-                if copy.completedOutputPreserved == true {
-                    copy.status = .failed
-                    copy.errorMessage = "Rendered output was preserved after a post-export failure. Choose a new output destination before retrying."
-                } else {
-                    copy.status = .queued
-                    copy.progress = 0
-                    copy.errorMessage = nil
-                }
+            if !copy.isTerminal, copy.completedOutputPreserved == true {
+                copy.status = .failed
+                copy.outputReservationCreated = nil
+                copy.retryUnavailable = true
+                copy.outputWriteStarted = true
+                copy.errorMessage = "Rendered output was preserved after an interrupted export. Choose a new output destination before retrying."
+            } else if !copy.isTerminal, copy.outputWriteStarted == true {
+                copy.status = .failed
+                copy.outputReservationCreated = nil
+                copy.retryUnavailable = true
+                copy.errorMessage = "Export was interrupted after output writing began. The destination was left untouched; choose a new output destination before retrying."
+            } else if copy.status == .running {
+                copy.status = .queued
+                copy.progress = 0
+                copy.errorMessage = nil
             }
             if copy.status == .queued {
                 if let resolution = resolver(copy.outputBookmark) {
@@ -1985,12 +2070,10 @@ final class RenderQueue {
     func enqueueWithDefaultPreset(outputURL: URL,
                                   project: Project,
                                   bookmark: Data,
-                                  projectStorageKind: ProjectStorageKind?,
-                                  projectDocumentURL: URL? = nil) -> QueueEnqueueOutcome {
+                                  projectSessionLocation: ProjectSessionLocation = .unsaved) -> QueueEnqueueOutcome {
         let snapshot = ProjectDocument(
             project: project,
-            queueBundleURL: projectDocumentURL,
-            queueStorageKind: projectStorageKind)
+            queueSessionLocation: projectSessionLocation)
         let job = QueueJob(
             preset: BuiltInExportPresets.defaultPreset,
             outputBookmark: bookmark,

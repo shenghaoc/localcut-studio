@@ -355,12 +355,11 @@ final class EditorModel {
     }
 
     // MARK: Document state
-    /// Local filesystem URL for the current project file or bundle directory,
-    /// or `nil` for an unsaved project.
-    var documentURL: URL?
-    /// Explicit storage representation established by Open / Save As. Save
-    /// dispatches from this value rather than re-sniffing the path.
-    var projectStorageKind: ProjectStorageKind?
+    /// The current document's local filesystem URL and storage representation
+    /// move together so Save cannot observe only half of the session identity.
+    var projectSessionLocation: ProjectSessionLocation = .unsaved
+    var documentURL: URL? { projectSessionLocation.url }
+    var projectStorageKind: ProjectStorageKind? { projectSessionLocation.storageKind }
     /// Whether the project has unsaved changes (drives the window's edited dot).
     var isDirty = false
     /// True while a window-close Save choice is already writing asynchronously.

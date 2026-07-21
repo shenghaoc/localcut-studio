@@ -54,22 +54,17 @@ extension ProjectDocument {
     /// assets so the background runner can resolve and render them later.
     init(
         project: Project,
-        queueBundleURL: URL?,
-        queueStorageKind: ProjectStorageKind?
+        queueSessionLocation: ProjectSessionLocation
     ) {
         self.init(project: project)
-        addQueueBundleAssetBookmarks(from: queueBundleURL, storageKind: queueStorageKind)
+        guard case .saved(let bundleURL, .bundle) = queueSessionLocation else { return }
+        addQueueBundleAssetBookmarks(from: bundleURL)
     }
 
-    private mutating func addQueueBundleAssetBookmarks(
-        from bundleURL: URL?,
-        storageKind: ProjectStorageKind?
-    ) {
+    private mutating func addQueueBundleAssetBookmarks(from bundleURL: URL) {
         // The active session already established this representation while
         // opening or saving. Revalidating project.json here would synchronously
         // decode bundle metadata on the main-actor export-queue path.
-        guard storageKind == .bundle, let bundleURL else { return }
-
         let didAccess = bundleURL.startAccessingSecurityScopedResource()
         defer { if didAccess { bundleURL.stopAccessingSecurityScopedResource() } }
 

@@ -525,8 +525,7 @@ struct BeatToolsEditorTests {
         // Production open sets projectStorageKind from ProjectLocationInspector; this
         // partial fixture mirrors that session state so beat caches resolve under the bundle.
         let reopened = EditorModel()
-        reopened.documentURL = bundleURL
-        reopened.projectStorageKind = .bundle
+        reopened.projectSessionLocation = .saved(url: bundleURL, storageKind: .bundle)
         let reopenedMedia = MediaItem(url: wav)
         reopenedMedia.hasAudio = true
         reopenedMedia.duration = time(4)

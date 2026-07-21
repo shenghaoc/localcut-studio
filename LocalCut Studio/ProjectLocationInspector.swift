@@ -3,7 +3,7 @@ import LocalCutCore
 
 /// How a LocalCut project is stored on the local filesystem.
 ///
-/// Persist this alongside `documentURL` after a successful open or Save As so
+/// Stored inside `ProjectSessionLocation` after a successful open or Save As so
 /// later Save routing never re-sniffs the path with loose heuristics.
 nonisolated enum ProjectStorageKind: Equatable, Sendable {
     /// A single regular file with the `.lcstudio` extension.
@@ -13,16 +13,34 @@ nonisolated enum ProjectStorageKind: Equatable, Sendable {
     case bundle
 }
 
+/// A document session is either unsaved or has one inseparable URL/storage
+/// pairing. Modeling the pair as one value prevents Save and queued-export
+/// routing from observing a URL without its representation (or vice versa).
+nonisolated enum ProjectSessionLocation: Equatable, Sendable {
+    case unsaved
+    case saved(url: URL, storageKind: ProjectStorageKind)
+
+    var url: URL? {
+        guard case .saved(let url, _) = self else { return nil }
+        return url
+    }
+
+    var storageKind: ProjectStorageKind? {
+        guard case .saved(_, let storageKind) = self else { return nil }
+        return storageKind
+    }
+}
+
 /// Result of classifying a user-selected local filesystem URL as a LocalCut
 /// project location. Produced by `ProjectLocationInspector` and consumed by
-/// Open, Open Recent, and open-panel validation.
+/// Open and Open Recent after their cheap panel/menu candidate checks.
 nonisolated struct ProjectOpenDescriptor: Equatable, Sendable {
     /// Local filesystem URL selected by the user (file or directory package).
     let url: URL
     let storageKind: ProjectStorageKind
 }
 
-/// Single classification path for Open / Open Recent / panel validation.
+/// Full classification path used by Open after the panel returns.
 ///
 /// A directory is accepted only when its `project.json` decodes as a supported
 /// LocalCut document **and** advertises a supported `bundleFormat`. Existence
@@ -33,9 +51,9 @@ nonisolated enum ProjectLocationInspector {
         ProjectDocument.currentBundleFormat
     ]
 
-    /// Classification runs synchronously for open-panel validation. Bound the
-    /// metadata read so a renamed media file cannot make that path allocate an
-    /// arbitrarily large buffer on the main actor.
+    /// Bound every metadata read before decoding so a renamed media file cannot
+    /// allocate an arbitrarily large buffer. Full inspection runs off the main
+    /// actor; the open panel uses `isOpenPanelCandidate(_:)` below.
     static let maximumMetadataSize = 10 * 1024 * 1024
 
     /// Classifies `url` as a LocalCut project location, or returns `nil` when
@@ -52,10 +70,22 @@ nonisolated enum ProjectLocationInspector {
         return inspectSingleFile(url)
     }
 
-    /// Convenience used by open-panel validation and callers that only need a
-    /// yes/no answer. Equivalent to `inspect(url) != nil`.
-    static func isSupportedProjectLocation(_ url: URL) -> Bool {
-        inspect(url) != nil
+    /// Cheap open-panel boundary: validate only filesystem shape, extension,
+    /// and the same metadata-size ceiling used by the detached full inspector.
+    /// JSON decoding is intentionally deferred to `inspect(_:)` during Open.
+    static func isOpenPanelCandidate(_ url: URL) -> Bool {
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return false
+        }
+        if isDirectory.boolValue {
+            return hasBoundedRegularMetadata(
+                at: url.appendingPathComponent(ProjectBundleLayout.projectJSON))
+        }
+        guard url.pathExtension.lowercased() == ProjectDocument.fileExtension else {
+            return false
+        }
+        return hasBoundedRegularMetadata(at: url)
     }
 
     /// Identifies a URL that can be displayed in Open Recent without touching
@@ -75,9 +105,9 @@ nonisolated enum ProjectLocationInspector {
     /// Whether `url` is a validated LocalCut bundle directory.
     ///
     /// This performs full metadata validation — not a loose content sniff.
-    /// Prefer the stored `projectStorageKind` on `EditorModel` for save routing
-    /// after a successful open; use this for one-shot classification of an
-    /// arbitrary local filesystem URL.
+    /// Prefer `EditorModel.projectSessionLocation` for save routing after a
+    /// successful open; use this for one-shot classification of an arbitrary
+    /// local filesystem URL.
     static func isValidatedBundle(_ url: URL) -> Bool {
         inspect(url)?.storageKind == .bundle
     }
@@ -124,12 +154,17 @@ nonisolated enum ProjectLocationInspector {
     }
 
     private static func readBoundedMetadata(at url: URL) -> Data? {
+        guard hasBoundedRegularMetadata(at: url) else { return nil }
+        return try? Data(contentsOf: url, options: .mappedIfSafe)
+    }
+
+    private static func hasBoundedRegularMetadata(at url: URL) -> Bool {
         guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
               values.isRegularFile == true,
               let fileSize = values.fileSize,
               fileSize <= maximumMetadataSize else {
-            return nil
+            return false
         }
-        return try? Data(contentsOf: url, options: .mappedIfSafe)
+        return true
     }
 }

@@ -479,7 +479,7 @@ nonisolated enum ProjectBundle: Sendable {
     /// merely contains `{}` as `project.json` is rejected.
     ///
     /// For save routing after a successful open, prefer the session's stored
-    /// `projectStorageKind` rather than re-classifying the path.
+    /// `projectSessionLocation` rather than re-classifying the path.
     static func isBundle(url: URL) -> Bool {
         ProjectLocationInspector.isValidatedBundle(url)
     }
