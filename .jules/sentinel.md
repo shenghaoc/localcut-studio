@@ -52,3 +52,7 @@ Append a dated entry whenever you learn something about LocalCut Studio's sandbo
 **Vulnerability:** Publish stream keys were stored with `kSecAttrAccessibleWhenUnlocked` and without `kSecUseDataProtectionKeychain`. On macOS, accessibility attributes are ignored for the file-based keychain, and non-`ThisDeviceOnly` items can sync or migrate more broadly than intended.
 **Learning:** Sensitive credentials must use `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` *and* target the data-protection keychain. Existing items should be re-saved on load so the fix remediates already-remembered tokens.
 **Prevention:** Always set `kSecUseDataProtectionKeychain: true` with a `*ThisDeviceOnly` accessibility class when saving secrets; delete from both stores and migrate legacy items on load.
+## 2026-07-21 - Untrusted Media Metadata Validation in Beat Analyzer and Silence Detector
+**Vulnerability:** Untrusted external media file metadata like `duration` was being loaded directly into internal properties without sanitization in `BeatTools.swift` and `SilenceDetector.swift`.
+**Learning:** This could lead to infinite loops, division by zero, layout crashes, or DoS when rendering the UI or calculating timeline mathematics, due to invalid geometric and timing values.
+**Prevention:** All metadata parameters must be validated and clamped before assignment. A set of `.sanitized` computed properties for `CMTime`, `CGSize`, and `CGAffineTransform` ensures values fall back to safe zero or identity states.

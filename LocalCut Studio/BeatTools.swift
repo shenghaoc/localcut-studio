@@ -46,7 +46,7 @@ struct BeatAnalyzer {
         }
 
         var samples: [Float] = []
-        let duration = try? await asset.load(.duration)
+        let duration = try? await asset.load(.duration).sanitized
         if let duration, duration.seconds.isFinite, duration.seconds > 0 {
             // Cap the speculative reservation: a corrupt or hostile asset can
             // report an implausibly large duration, and Int(seconds * rate) would

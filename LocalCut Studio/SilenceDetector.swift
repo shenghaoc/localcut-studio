@@ -88,9 +88,9 @@ actor SilenceDetector {
         var samples: [Float] = []
         let duration: CMTime?
         if let requestedTimeRange {
-            duration = requestedTimeRange.duration
+            duration = requestedTimeRange.duration.sanitized
         } else {
-            duration = try? await asset.load(.duration)
+            duration = try? await asset.load(.duration).sanitized
         }
         if let duration, duration.seconds.isFinite, duration.seconds > 0 {
             let cappedSeconds = min(duration.seconds, 7200) // 2 hours cap
