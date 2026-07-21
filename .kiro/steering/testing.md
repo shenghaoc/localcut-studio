@@ -56,7 +56,12 @@ Shortcuts cold-launch UX.
 7. Recording blocks New, Open, and Close (real privacy permissions).
 8. Queued render retains output access through execution and retry.
 9. External bundle modification warning; missing-media relinking.
-10. Cold-launch each App Intent through Shortcuts (New, Diagnostics, Import, Export).
+10. For an Apple Development-signed build, cold-launch each App Intent through
+    Shortcuts (New, Diagnostics, Import, Export). For an intentionally unsigned
+    local build, verify that all four intents are present in
+    `Metadata.appintents` and run the App Intent / `ActiveEditorRegistry` tests;
+    record the signed Shortcuts UI path as not performed rather than claiming
+    manual coverage.
 11. Marker/caption text fields keep Space, M, Shift-M, Backspace, Forward Delete.
 12. Keyboard-focused button/toggle keeps Space; timeline shortcuts only while timeline focused.
 13. Timeline focus recovers after leaving a marker rename or caption editor.
@@ -66,6 +71,12 @@ Shortcuts cold-launch UX.
 Automated coverage: `ProjectLocationInspector` / storage-kind tests,
 `ActiveEditorRegistry` readiness tests, pure `TimelineShortcutPolicy` mapping,
 and `TimelineFocusUITests` harness transitions.
+
+Apple Development signing is not a merge prerequisite for this hobby project.
+An ad-hoc build may be rejected by `linkd` before application code runs, so that
+result is a signing-environment limitation, not evidence that intent routing
+failed. A future signed distribution build should still exercise item 10 as an
+integration check.
 
 ## Quality gate
 

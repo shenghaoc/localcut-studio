@@ -134,4 +134,8 @@ bundle directory; Finder double-click is not newly advertised.
 ## Manual verification
 
 See the native lifecycle checklist in `.kiro/steering/testing.md`. Two-document
-GUI checks are not applicable under the single-editor architecture.
+GUI checks are not applicable under the single-editor architecture. This
+project does not require Apple Development signing for merge: intentionally
+unsigned builds use the checklist's metadata + automated App Intent route for
+the signing-dependent Shortcuts item, and do not claim that the Shortcuts UI
+itself was manually exercised.

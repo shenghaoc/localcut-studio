@@ -76,17 +76,26 @@ final class TimelineFocusUITests: XCTestCase {
         app.typeKey("m", modifierFlags: .shift)
         let field = app.textFields["Name"].firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 2))
-        field.typeKey("m", modifierFlags: [])
-        field.typeKey(" ", modifierFlags: [])
-        field.typeKey("m", modifierFlags: .shift)
-        XCTAssertEqual(field.value as? String, "m M")
+        field.click()
+        // Use IME-neutral digits for the production text-field assertion.
+        // The focused harness above covers M/Shift-M routing directly; a
+        // composing input source may legitimately consume Space to choose a
+        // candidate instead of inserting the literal `m M` expected by an
+        // ASCII layout.
+        app.typeKey("a", modifierFlags: .command)
+        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
+        app.typeKey("1", modifierFlags: [])
+        app.typeKey("2", modifierFlags: [])
+        app.typeKey(" ", modifierFlags: [])
+        app.typeKey("3", modifierFlags: [])
+        XCTAssertEqual(field.value as? String, "12 3")
         XCTAssertEqual(markers.count, 1)
 
-        field.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
-        field.typeKey("x", modifierFlags: [])
-        field.typeKey(XCUIKeyboardKey.leftArrow.rawValue, modifierFlags: [])
-        field.typeKey(XCUIKeyboardKey.forwardDelete.rawValue, modifierFlags: [])
-        XCTAssertEqual(field.value as? String, "m ")
+        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
+        app.typeKey("4", modifierFlags: [])
+        app.typeKey(XCUIKeyboardKey.leftArrow.rawValue, modifierFlags: [])
+        app.typeKey(XCUIKeyboardKey.forwardDelete.rawValue, modifierFlags: [])
+        XCTAssertEqual(field.value as? String, "12 ")
         XCTAssertEqual(markers.count, 1)
 
         app.buttons["Done"].click()

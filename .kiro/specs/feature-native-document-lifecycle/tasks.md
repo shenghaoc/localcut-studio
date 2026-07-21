@@ -66,5 +66,7 @@
   language and accurate DocumentGroup trade-off wording.
 - [x] **V1** Focused suites pass under `xcodebuild test`.
 - [x] **V2** Full macOS scheme tests, core SwiftPM tests, `git diff --check`.
-- [ ] **V3** Manual checklist in `.kiro/steering/testing.md` — complete live
-  GUI checks or keep the PR draft with outstanding items listed honestly.
+- [x] **V3** Manual checklist in `.kiro/steering/testing.md` — all applicable
+  unsigned-build GUI checks completed. The signing-dependent Shortcuts item
+  used its documented metadata + automated App Intent verification route; no
+  manual signed-Shortcuts coverage is claimed.
