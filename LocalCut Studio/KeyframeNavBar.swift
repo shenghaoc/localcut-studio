@@ -60,6 +60,7 @@ struct KeyframeNavBar: View {
                     hasKeyframeAtPlayhead ? "Update" : "Add",
                     systemImage: hasKeyframeAtPlayhead ? "diamond.fill" : "plus.diamond.fill"
                 )
+                .labelStyle(.iconOnly)
             }
             .disabled(!canAddOrUpdate)
             .help(addOrUpdateGuidance)

@@ -285,7 +285,8 @@ struct CaptionsInspectorView: View {
                         lineID: line.id, in: track.id, coalesced: false)
                 } label: {
                     Label(hasKeyframe ? "Update" : "Add",
-                          systemImage: "diamond.fill")
+                          systemImage: hasKeyframe ? "diamond.fill" : "plus.diamond.fill")
+                        .labelStyle(.iconOnly)
                 }
                 .disabled(!isEditable)
                 .help(hasKeyframe ? "Update caption style keyframe" : "Add caption style keyframe")
