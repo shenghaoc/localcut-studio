@@ -12,7 +12,9 @@
 
 - **R2.1** App Intents resolve through `AppDependencyManager`, not a view-lifecycle callback.
 - **R2.2** The router and visible editor share the same app-scoped `EditorModel` instance for the process lifetime.
-- **R2.3** Intent routing must not depend on whether a window has already appeared.
+- **R2.3** Router dependency registration must not depend on a view callback;
+  action execution waits for the ready editor window as specified by the
+  superseding native-document-lifecycle feature.
 
 ## R3 — Routing behaviour
 
@@ -30,11 +32,14 @@
 
 ## R5 — Export destination handling
 
-- **R5.1** Export queue jobs persist access to the selected destination folder plus the chosen filename, so brand-new save destinations are valid.
-- **R5.2** Queue resolution continues to support older jobs whose bookmark resolves directly to a file URL.
+- **R5.1** Export queue jobs reserve and persist access to the exact selected
+  output file so brand-new save destinations remain valid across execution and retry.
+- **R5.2** Queue resolution continues to support older jobs whose bookmark
+  resolves to a destination directory plus the persisted filename.
 
 ## R6 — Verification
 
 - **R6.1** `xcodebuild test -project "LocalCut Studio.xcodeproj" -scheme "LocalCut Studio" -destination "platform=macOS" -only-testing:"LocalCut StudioTests/AppIntentsTests"` passes.
 - **R6.2** App Intents tests cover routing, serialization, cancellation, and import/export failure propagation.
-- **R6.3** Export queue tests cover resolving folder-backed output destinations back to the intended output file path.
+- **R6.3** Export queue tests cover exact-file bookmarks and resolving legacy
+  folder-backed destinations back to the intended output file path.

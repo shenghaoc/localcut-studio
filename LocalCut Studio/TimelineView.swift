@@ -37,6 +37,12 @@ struct TimelineView: View {
     @State private var timelineCurrentScrollSeconds: Double = 0
     @FocusState private var focusedClipID: Clip.ID?
     @FocusState private var focusedTransitionClipID: Clip.ID?
+    @FocusState private var receivesTimelineShortcuts: Bool
+    @FocusState private var isMarkerRenameFieldFocused: Bool
+    /// One-shot initial focus so transport shortcuts work without a click on
+    /// first layout. Subsequent appears must not steal focus from text fields,
+    /// buttons, or the inspector.
+    @State private var didRequestInitialTimelineFocus = false
 
     private var pps: CGFloat { CGFloat(model.pixelsPerSecond) }
 
@@ -108,10 +114,35 @@ struct TimelineView: View {
                 timelineScroller
             }
         }
-        .background(EditorKeyHandler(onAdd: { model.addMarkerAtPlayhead() },
-                                     onRename: { beginRenamingSelectedMarker() },
-                                     onDelete: { deleteSelectedMarkerIfAny() },
-                                     onTogglePlay: { model.togglePlayPause() }))
+        .focusable()
+        .focused($receivesTimelineShortcuts)
+        .accessibilityIdentifier("timeline-root")
+        .onAppear {
+            guard !didRequestInitialTimelineFocus else { return }
+            didRequestInitialTimelineFocus = true
+            receivesTimelineShortcuts = true
+        }
+        .onKeyPress { press in
+            // The popover's text field gets first refusal. This guard also
+            // prevents a transient focus hand-off from turning typed m/M into
+            // timeline marker shortcuts while the editor is visible.
+            guard renamingMarkerID == nil else { return .ignored }
+            switch TimelineShortcutPolicy.action(for: press) {
+            case .ignore:
+                return .ignored
+            case .togglePlay:
+                model.togglePlayPause()
+            case .addMarker:
+                model.addMarkerAtPlayhead()
+            case .renameMarker:
+                beginRenamingSelectedMarker()
+            case .maybeDeleteMarker:
+                // Leave clip / transition deletion to the existing scoped
+                // `onDeleteCommand` when no marker owns this key press.
+                guard deleteSelectedMarkerIfAny() else { return .ignored }
+            }
+            return .handled
+        }
         .onDeleteCommand {
             _ = deleteSelectedClipOrTransitionIfAny()
         }
@@ -354,6 +385,11 @@ struct TimelineView: View {
                     }
                 }
             }
+            .simultaneousGesture(TapGesture().onEnded {
+                // Keep shortcut focus in the timeline canvas without stealing
+                // keyboard focus from header buttons or the zoom slider.
+                receivesTimelineShortcuts = true
+            })
         }
     }
 
@@ -491,6 +527,8 @@ struct TimelineView: View {
             TextField("Name", text: $renameDraft)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: markerRenameFieldWidth)
+                .focused($isMarkerRenameFieldFocused)
+                .onAppear { isMarkerRenameFieldFocused = true }
                 .onSubmit { commitRenameIfActive(); renamingMarkerID = nil }
             Button("Done") {
                 commitRenameIfActive()
@@ -1266,157 +1304,20 @@ private struct MarkerDiamond: Shape {
     }
 }
 
-/// Window-scoped key handler for bare-key editor shortcuts that must yield to
-/// text inputs: m / shift-m (add / rename marker), Delete (when a marker is
-/// selected), and Space (play/pause). These can't be menu/button
-/// key-equivalents because those fire before a focused text field, swallowing
-/// the key while the user is typing into a rename popover / caption field.
-///
-/// The monitor is scoped two ways: it only fires for events targeted at the
-/// *hosting* window (multi-project windows each install their own monitor and
-/// must not fight over each other's keys), and it defers to any text-input
-/// first responder so typing into caption / inspector fields isn't stolen.
-///
-/// `Delete` only consumes the event when there is a selected marker — when
-/// none is selected, the event falls through to the scoped `onDeleteCommand`
-/// that drives clip / transition deletion from timeline focus.
-private struct EditorKeyHandler: NSViewRepresentable {
-    let onAdd: () -> Void
-    let onRename: () -> Void
-    let onDelete: () -> Bool
-    let onTogglePlay: () -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        context.coordinator.view = view
-        context.coordinator.onAdd = onAdd
-        context.coordinator.onRename = onRename
-        context.coordinator.onDelete = onDelete
-        context.coordinator.onTogglePlay = onTogglePlay
-        context.coordinator.install()
-        return view
+/// Pure shortcut mapping for the focused timeline. SwiftUI's `onKeyPress`
+/// gives text fields and focused controls first refusal, so this mapper no
+/// longer needs raw key codes, an event monitor, or responder inspection.
+enum TimelineShortcutPolicy: Sendable {
+    enum Key: Equatable, Sendable {
+        case space
+        case marker
+        case deleteBackward
+        case deleteForward
+        case other
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.view = nsView
-        context.coordinator.onAdd = onAdd
-        context.coordinator.onRename = onRename
-        context.coordinator.onDelete = onDelete
-        context.coordinator.onTogglePlay = onTogglePlay
-    }
-
-    @MainActor
-    final class Coordinator {
-        var onAdd: (() -> Void)?
-        var onRename: (() -> Void)?
-        var onDelete: (() -> Bool)?
-        var onTogglePlay: (() -> Void)?
-        weak var view: NSView?
-        // Owned by this coordinator. Installed on the main actor, then read
-        // from nonisolated `deinit` only to dispatch AppKit monitor removal back
-        // to the main thread; Objective-C monitor lifetimes cannot express that
-        // through Swift actor isolation.
-        nonisolated(unsafe) private var monitor: Any?
-
-        func install() {
-            guard monitor == nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                // Read every NSEvent / NSWindow field we need on the delivery
-                // queue (.main) *before* entering assumeIsolated. Capturing the
-                // non-Sendable NSEvent (or NSWindow) inside the isolated
-                // closure would be a Swift 6 "sending risks data races" error,
-                // and the return type of `assumeIsolated` must itself be
-                // Sendable — so we funnel a `Bool` verdict out and materialise
-                // the `NSEvent?` on the way back. (See the matching pattern on
-                // the player's endObserver in `EditorModel.init`.)
-                let chars = event.charactersIgnoringModifiers ?? ""
-                let modifiers = event.modifierFlags
-                let keyCode = event.keyCode
-                let eventWindowID = event.window.map(ObjectIdentifier.init)
-                let consume: Bool = MainActor.assumeIsolated {
-                    self?.handle(chars: chars,
-                                 modifiers: modifiers,
-                                 keyCode: keyCode,
-                                 eventWindowID: eventWindowID) ?? false
-                }
-                return consume ? nil : event
-            }
-        }
-
-        deinit {
-            if let m = monitor {
-                DispatchQueue.main.async { NSEvent.removeMonitor(m) }
-            }
-        }
-
-        /// Returns whether the event should be consumed (true) or passed
-        /// through (false). Doing the consume/pass decision as a `Bool` keeps
-        /// `NSEvent` out of `MainActor.assumeIsolated`'s Sendable return type;
-        /// the inputs are all Sendable primitives extracted at the call site.
-        private func handle(chars: String,
-                            modifiers: NSEvent.ModifierFlags,
-                            keyCode: UInt16,
-                            eventWindowID: ObjectIdentifier?) -> Bool {
-            // Only fire for events targeted at the timeline's own window.
-            // Without this guard, every open project window installs a monitor
-            // and the most-recently-active one steals M / Delete keys from
-            // whichever window the user is actually typing into (Gemini #1-2).
-            guard let hostWindow = view?.window,
-                  let eventWindowID,
-                  ObjectIdentifier(hostWindow) == eventWindowID else {
-                return false
-            }
-            // Snapshot responder identity to pure booleans so the policy
-            // decision lives in a free function we can unit-test (audit P1
-            // testability extraction). The Space-trap fix and its NSControl
-            // / SwiftUI-hosted exemptions are all encoded in the policy enum.
-            let responder = hostWindow.firstResponder
-            let textInput = responder is NSText
-                || responder is NSTextField
-                || responder is NSTextView
-            let nonTimelineFocus = responder != nil
-                && responder !== view
-                && responder !== hostWindow
-            let action = EditorKeyHandlerPolicy.action(
-                keyCode: keyCode,
-                chars: chars,
-                modifiers: modifiers,
-                firstResponderIsTextInput: textInput,
-                firstResponderIsNonTimelineFocus: nonTimelineFocus)
-            switch action {
-            case .ignore:
-                return false
-            case .togglePlay:
-                onTogglePlay?()
-                return true
-            case .addMarker:
-                onAdd?()
-                return true
-            case .renameMarker:
-                onRename?()
-                return true
-            case .maybeDeleteMarker:
-                // Only consume when a marker is selected so the scoped clip /
-                // transition delete command can still fire.
-                return onDelete?() == true
-            }
-        }
-    }
-}
-
-/// Pure decision layer for the editor's window-scoped key handler.
-///
-/// Extracting the policy lets us regression-test all the carve-outs that the
-/// Space-trap fix introduced (Codex P1 on d8c7ee2 + verifier strengthening
-/// for the SwiftUI-hosted control path) without standing up an `NSWindow`.
-/// The Coordinator only has to translate live responder state into the four
-/// booleans the policy takes; the rest is deterministic.
-enum EditorKeyHandlerPolicy: Sendable {
     enum Action: Equatable {
-        /// Pass the event through unchanged. Used for any event we don't own
-        /// (foreign window, modifier-laden chord, focused text input, etc.).
+        /// Pass the key through unchanged.
         case ignore
         /// Space — toggle play/pause.
         case togglePlay
@@ -1424,50 +1325,48 @@ enum EditorKeyHandlerPolicy: Sendable {
         case addMarker
         /// `Shift+m` — open the rename popover on the selected marker.
         case renameMarker
-        /// Backspace/Forward-Delete — try to delete the selected marker; the
-        /// Coordinator's `onDelete` callback returns whether a marker was
-        /// actually selected and consumed the key, so the scoped timeline
-        /// delete command can handle clips/transitions when no marker is selected.
+        /// Try to delete the selected marker; the scoped timeline delete command
+        /// remains responsible for clips and transitions when no marker is set.
         case maybeDeleteMarker
     }
 
-    /// Decide what to do with a key event delivered to the host window.
-    ///
-    /// - `firstResponderIsTextInput`: true when the focused responder is an
-    ///   `NSText`/`NSTextField`/`NSTextView` (rename popovers, inspector
-    ///   fields, caption editor) — never steal keys while the user is typing.
-    /// - `firstResponderIsNonTimelineFocus`: true when the focused responder
-    ///   is neither the timeline view itself nor the bare window — i.e. some
-    ///   AppKit `NSControl` or a SwiftUI Toggle/Button bridged through an
-    ///   `NSHostingView`. Space yields to those so a Tab-focused widget
-    ///   receives Space normally (HIG keyboard-trap fix).
-    static func action(keyCode: UInt16,
-                       chars: String,
-                       modifiers: NSEvent.ModifierFlags,
-                       firstResponderIsTextInput: Bool,
-                       firstResponderIsNonTimelineFocus: Bool) -> Action {
-        // Anything other than plain or Shift modifiers (Command/Option/etc.)
-        // belongs to a different command — never swallow those.
-        let stripped = modifiers
-            .intersection(.deviceIndependentFlagsMask)
-            .subtracting([.shift, .capsLock, .numericPad, .function])
-        guard stripped.isEmpty else { return .ignore }
-        // While the user is typing, every key passes through unchanged.
-        if firstResponderIsTextInput { return .ignore }
+    /// SwiftUI deprecated its `.function` convenience flag, while AppKit still
+    /// exposes the raw event bit. Keep it passive, together with Caps Lock and
+    /// keypad flags, so the focused timeline preserves the former handler's
+    /// behavior instead of mistaking those hardware-state flags for commands.
+    private static let passiveModifierFlags: EventModifiers = [
+        .shift,
+        .capsLock,
+        .numericPad,
+        EventModifiers(rawValue: Int(NSEvent.ModifierFlags.function.rawValue))
+    ]
 
-        let shift = modifiers.contains(.shift)
-        // Space → play/pause. Yield when some other control owns focus so it
-        // can receive Space normally — keeps Tab-focused checkboxes/buttons
-        // out of the keyboard trap.
-        if keyCode == 0x31, !shift {
-            if firstResponderIsNonTimelineFocus { return .ignore }
-            return .togglePlay
+    static func action(for press: KeyPress) -> Action {
+        let key: Key
+        if press.key == .space {
+            key = .space
+        } else if press.key == .delete {
+            key = .deleteBackward
+        } else if press.key == .deleteForward {
+            key = .deleteForward
+        } else if press.characters == "m" || press.characters == "M" {
+            key = .marker
+        } else {
+            key = .other
         }
-        if chars == "m" || chars == "M" {
+        return action(key: key, modifiers: press.modifiers)
+    }
+
+    static func action(key: Key, modifiers: EventModifiers = []) -> Action {
+        guard modifiers.isSubset(of: passiveModifierFlags) else { return .ignore }
+        let shift = modifiers.contains(.shift)
+        if key == .space, !shift { return .togglePlay }
+        if key == .marker {
             return shift ? .renameMarker : .addMarker
         }
-        // Backspace (0x33) / Forward-Delete (0x75) — try to delete a marker.
-        if keyCode == 0x33 || keyCode == 0x75 { return .maybeDeleteMarker }
+        if key == .deleteBackward || key == .deleteForward {
+            return .maybeDeleteMarker
+        }
         return .ignore
     }
 }

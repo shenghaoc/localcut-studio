@@ -1,5 +1,12 @@
 # Design: Project Bundles (P23 native equivalent)
 
+> **Ownership note:** Open/save panel policy and `ProjectSessionLocation`
+> classification are owned by
+> [`feature-native-document-lifecycle`](../feature-native-document-lifecycle/design.md).
+> The open panel performs a cheap candidate check; a directory is accepted only
+> after detached full bundle-metadata validation.
+
+
 > Status: **Implemented**. Infrastructure prerequisite for Phase 30 (already merged with the simpler single-file doc — the migration path lets existing Phase 30 projects upgrade), Phase 34 (beat tools), Phase 38 (look packs), and Phase 48 (OTIO export).
 
 ## Goal

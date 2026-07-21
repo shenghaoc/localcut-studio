@@ -1118,6 +1118,52 @@ struct RecordingDocumentCommandGuardTests {
         #expect(model.confirmClose(window: window) == false)
         #expect(model.statusMessage == blocker.expectedMessage)
     }
+
+    @Test("New and Open never replace a paused recording project")
+    func projectReplacementCommandsAreBlockedWhilePaused() async {
+        let model = EditorModel()
+        model.isPaused = true
+        var confirmedNewProject = false
+        var resetProject = false
+
+        let newOutcome = await model.performNewProjectCommand(
+            confirmSave: {
+                confirmedNewProject = true
+                return true
+            },
+            resetDocument: {
+                resetProject = true
+            })
+
+        #expect(newOutcome == .actionCancelled)
+        #expect(!confirmedNewProject)
+        #expect(!resetProject)
+        #expect(model.statusMessage == "Resume and stop the recording before switching projects.")
+
+        var confirmedOpenProject = false
+        var presentedOpenPanel = false
+        var openedProject = false
+        let projectURL = URL(filePath: "/private/tmp/recording-guard.lcstudio")
+        let openOutcome = await model.performOpenProjectCommand(
+            confirmSave: {
+                confirmedOpenProject = true
+                return true
+            },
+            presentPanel: {
+                presentedOpenPanel = true
+                return (.OK, projectURL)
+            },
+            openProject: { _ in
+                openedProject = true
+                return true
+            })
+
+        #expect(openOutcome == .actionCancelled)
+        #expect(!confirmedOpenProject)
+        #expect(!presentedOpenPanel)
+        #expect(!openedProject)
+        #expect(model.statusMessage == "Resume and stop the recording before switching projects.")
+    }
 }
 
 // MARK: - Floating-panel fallback (R7.2)

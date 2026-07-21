@@ -23,11 +23,15 @@
 
 ## Export destination persistence
 
-- [x] **T4.1** Store export queue access as a destination-folder bookmark plus `outputDisplayName`, not a bookmark to a non-existent new file.
-- [x] **T4.2** Continue resolving older file-backed bookmarks for reveal, retry, and queued execution.
+- [x] **T4.1** Superseded by native-document-lifecycle: reserve and bookmark
+  the exact selected output file, retaining `outputDisplayName` for UI and
+  legacy directory-bookmark resolution.
+- [x] **T4.2** Continue resolving older directory-backed bookmarks for reveal,
+  retry, and queued execution.
 
 ## Verification
 
 - [x] **V1** Add `AppIntentsTests.swift` coverage for shortcut parity, supported modes, diagnostics routing, empty timeline export, router error mapping, serialization, cancellation, and import/export failure propagation.
-- [x] **V2** Add `ExportQueueTests` coverage for resolving folder-backed output destinations.
+- [x] **V2** Add `ExportQueueTests` coverage for exact-file output grants and
+  resolving legacy folder-backed output destinations.
 - [x] **V3** Keep local `xcodebuild` validation green for the App Intents suite and the full macOS scheme before merge.

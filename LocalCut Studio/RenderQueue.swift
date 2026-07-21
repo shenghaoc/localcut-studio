@@ -8,157 +8,6 @@ import LocalCutCore
 import LocalCutPlatform
 import LocalCutDomain
 
-// MARK: - Job model
-
-/// Lifecycle states a queue job moves through. The state machine is monotone
-/// for terminal states — `completed` / `cancelled` / `failed` are never
-/// re-entered.
-nonisolated enum QueueJobStatus: String, Codable, Hashable, Sendable {
-    case queued
-    case running
-    case completed
-    case cancelled
-    case failed
-
-    var displayName: String {
-        switch self {
-        case .queued: "Queued"
-        case .running: "Running"
-        case .completed: "Completed"
-        case .cancelled: "Cancelled"
-        case .failed: "Failed"
-        }
-    }
-}
-
-nonisolated enum QueueEnqueueOutcome: Equatable, Sendable {
-    case queued
-    case failed(String)
-}
-
-/// One render job: the recipe (`preset`) + where to write it
-/// (`outputBookmark`) + a frozen project snapshot the runner expands into an
-/// `AVComposition` at job-start.
-///
-/// The job is the persistence unit — every field round-trips through
-/// `RenderQueueDoc`. The `projectSnapshot` field reuses `ProjectDocument`
-/// rather than introducing a parallel snapshot type so the queue inherits the
-/// document model's existing schema-versioning + lenient decoding.
-///
-/// Implicitly MainActor (no `nonisolated` marker) to match the surrounding
-/// document model — `ProjectDocument`'s Codable methods are MainActor, so
-/// `QueueJob.init(from:)` has to be MainActor too to nest the decode.
-/// MainActor structs are Sendable in Swift 6, so cross-task passing still
-/// compiles. Equatable rather than Hashable because `ProjectDocument` is only
-/// Equatable; nothing in the queue needs a `Set<QueueJob>`.
-struct QueueJob: Codable, Equatable, Sendable, Identifiable {
-    let id: UUID
-    var preset: ExportPreset
-    /// Security-scoped bookmark to the destination container. Older jobs may
-    /// still carry a bookmark to the file URL itself; resolution handles both
-    /// shapes so queued renders survive upgrades and retries.
-    var outputBookmark: Data
-    /// Display filename for the inspector list and the leaf name appended when
-    /// `outputBookmark` resolves to a directory URL.
-    var outputDisplayName: String
-    var projectSnapshot: ProjectDocument
-    var status: QueueJobStatus
-    var progress: Double
-    var errorMessage: String?
-    /// Wall-clock seconds the job spent in `.running` before its terminal
-    /// status. Persisted so the inspector can show "completed in 12.3 s"
-    /// across relaunches.
-    var runtimeSeconds: Double?
-
-    init(id: UUID = UUID(),
-         preset: ExportPreset,
-         outputBookmark: Data,
-         outputDisplayName: String,
-         projectSnapshot: ProjectDocument,
-         status: QueueJobStatus = .queued,
-         progress: Double = 0,
-         errorMessage: String? = nil,
-         runtimeSeconds: Double? = nil) {
-        self.id = id
-        self.preset = preset
-        self.outputBookmark = outputBookmark
-        self.outputDisplayName = outputDisplayName
-        self.projectSnapshot = projectSnapshot
-        self.status = status
-        self.progress = progress
-        self.errorMessage = errorMessage
-        self.runtimeSeconds = runtimeSeconds
-    }
-
-    var isTerminal: Bool {
-        switch status {
-        case .completed, .cancelled, .failed: true
-        case .queued, .running: false
-        }
-    }
-}
-
-// MARK: - Persistence document
-
-/// Versioned on-disk shape for the queue. A build that opens a newer-version
-/// file refuses to overwrite it, matching `ProjectDocument`'s schema-version
-/// guard. Implicitly MainActor for the same nested-decode reason as
-/// `QueueJob`.
-struct RenderQueueDoc: Codable, Equatable, Sendable {
-    static let currentVersion = 1
-    var version: Int
-    var jobs: [QueueJob]
-
-    init(version: Int = RenderQueueDoc.currentVersion, jobs: [QueueJob]) {
-        self.version = version
-        self.jobs = jobs
-    }
-
-    private enum CodingKeys: String, CodingKey { case version, jobs }
-
-    init(from decoder: any Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? RenderQueueDoc.currentVersion
-        jobs = try c.decodeIfPresent([QueueJob].self, forKey: .jobs) ?? []
-    }
-}
-
-// MARK: - Errors
-
-/// Errors surfaced from the run loop. `errorDescription` populates the
-/// inspector status pill via `QueueJob.errorMessage`.
-nonisolated enum RenderQueueError: Error, LocalizedError {
-    case unsupportedCombination(container: String, codec: String)
-    case hostNotCapable(String)
-    case outputDestinationUnavailable
-    case compositionEmpty
-    case chapterValidationFailed(String)
-    case chapterSidecarWriteFailed(String)
-    case exportSessionCreationFailed
-    case writerInitializationFailed(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .unsupportedCombination(let container, let codec):
-            "Container \(container) does not support codec \(codec)."
-        case .hostNotCapable(let reason):
-            reason
-        case .outputDestinationUnavailable:
-            "Output destination unavailable."
-        case .compositionEmpty:
-            "Nothing to export — the project's timeline is empty."
-        case .chapterValidationFailed(let detail):
-            "Fix chapter markers before export: \(detail)"
-        case .chapterSidecarWriteFailed(let detail):
-            "Chapter sidecar was not written: \(detail)"
-        case .exportSessionCreationFailed:
-            "Could not create an export session for this preset."
-        case .writerInitializationFailed(let detail):
-            "Could not start the writer: \(detail)"
-        }
-    }
-}
-
 // MARK: - Single-shot resume guard
 
 /// Tiny serialised one-shot flag used by the AVAssetWriter pump to call
@@ -239,7 +88,7 @@ final class RenderQueue {
     /// Without this chain, two successive `persist()` calls could spawn two
     /// overlapping writes where the second finishes first.
     @ObservationIgnored
-    private var pendingWriteTask: Task<Void, Never>?
+    private var pendingWriteTask: Task<Bool, Never>?
 
     @ObservationIgnored
     private var pendingWriteToken: UUID?
@@ -337,6 +186,8 @@ final class RenderQueue {
         guard ExportPreset.isSupportedCombination(container: job.preset.containerFormat,
                                                   codec: job.preset.videoCodec) else {
             var rejected = job
+            discardOutputReservation(for: rejected)
+            rejected.outputReservationCreated = nil
             rejected.status = .failed
             rejected.errorMessage = RenderQueueError.unsupportedCombination(
                 container: job.preset.containerFormat,
@@ -349,6 +200,8 @@ final class RenderQueue {
         }
         if let hostError = job.preset.hostCapabilityError() {
             var rejected = job
+            discardOutputReservation(for: rejected)
+            rejected.outputReservationCreated = nil
             rejected.status = .failed
             rejected.errorMessage = RenderQueueError.hostNotCapable(hostError).localizedDescription
             jobs.append(rejected)
@@ -395,6 +248,10 @@ final class RenderQueue {
     /// that already `.completed`.
     func retry(jobID: UUID, autoStart: Bool = true) {
         guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        guard jobs[index].canRetry else {
+            statusMessage = "Choose a new output destination before retrying \(jobs[index].outputDisplayName)."
+            return
+        }
         switch jobs[index].status {
         case .failed, .cancelled:
             jobs[index].status = .queued
@@ -427,6 +284,9 @@ final class RenderQueue {
     /// Drops every terminal (completed / cancelled / failed) job from the list.
     func clearCompleted() {
         let before = jobs.count
+        for job in jobs where job.isTerminal {
+            discardOutputReservation(for: job)
+        }
         jobs.removeAll { $0.isTerminal }
         if jobs.count != before {
             persist()
@@ -536,6 +396,7 @@ final class RenderQueue {
         // `.failed` rather than a crash — the user can retry by adding a fresh
         // destination.
         guard let outputResolution = resolveBookmark(outputBookmark) else {
+            markRetryUnavailable(jobID: id)
             finish(jobID: id, status: .failed,
                    message: RenderQueueError.outputDestinationUnavailable.localizedDescription,
                    startWall: startWall)
@@ -544,25 +405,44 @@ final class RenderQueue {
         if let refreshed = outputResolution.refreshedBookmark {
             refreshOutputBookmark(jobID: id, bookmark: refreshed)
         }
-        let outputURL = Self.outputDestinationURL(resolvedURL: outputResolution.url,
+        let scopedOutputURL = outputResolution.url
+        let outputURL = Self.outputDestinationURL(resolvedURL: scopedOutputURL,
                                                   displayName: outputDisplayName)
-        let didStart = outputURL.startAccessingSecurityScopedResource()
-        defer { if didStart { outputURL.stopAccessingSecurityScopedResource() } }
+        // A legacy bookmark may resolve to the output directory rather than
+        // the exact file. Scope the resolved URL, not an appended child path.
+        let didStart = scopedOutputURL.startAccessingSecurityScopedResource()
+        defer { if didStart { scopedOutputURL.stopAccessingSecurityScopedResource() } }
 
         // A mid-encode cancel via `AVAssetExportSession.cancelExport()` leaves
         // the partially-written file at the user's path (the writer path cleans
-        // up after itself; the session path does not). Delete it on cancel so a
-        // cancel never leaves a corrupt artefact behind — an explicit
-        // release-readiness gate. `try?` no-ops when the writer already removed it.
+        // up after itself; the session path does not). Replace any partial file
+        // with a fresh empty reservation while its file scope is still held.
+        // This keeps the exact-file bookmark valid for Retry instead of leaving
+        // a cancelled or failed job pointing at a deleted file.
         //
         // Guarded by `didBeginEncoding`: until the deliberate overwrite below
         // runs, the file at `outputURL` is the user's *pre-existing* file, so a
         // pre-encode cancel (e.g. cancelled while `CompositionBuilder.build` is
         // still awaiting and throwing `CancellationError`) must not delete it.
         var didBeginEncoding = false
-        let removePartialOutput = {
-            guard didBeginEncoding else { return }
+        var didFinishEncoding = false
+        let retryUnavailableMessage = "The output reservation could not be recreated; choose a new output destination before retrying."
+        let restoreRetryReservation = { () -> Bool in
+            guard didBeginEncoding else { return true }
             _ = try? FileManager.default.removeItem(at: outputURL)
+            return self.restoreOutputReservation(jobID: id,
+                                                 at: outputURL,
+                                                 makeBookmark: { url in
+                                                     Self.outputBookmark(
+                                                         for: url,
+                                                         bookmarkData: Self.rawSecurityScopedBookmark)
+                                                 })
+        }
+        let cancellationOutputMessage = { () -> String? in
+            if didFinishEncoding {
+                return "The rendered movie was preserved; choose a new output destination before retrying."
+            }
+            return restoreRetryReservation() ? nil : retryUnavailableMessage
         }
 
         // Build the composition from the snapshot. The runner reconstructs a
@@ -665,8 +545,11 @@ final class RenderQueue {
 
             // Replace any existing file so the writer/session doesn't trip
             // over a stale artefact from a previous run. Past this point the
-            // user's pre-existing file is gone, so a cancel may safely delete
-            // whatever the encode wrote.
+            // user's pre-existing file may be gone. Persist ownership first so
+            // crash recovery never auto-requeues over whatever remains there.
+            guard await markOutputWriteStarted(jobID: id) else {
+                throw RenderQueueError.outputProtectionPersistenceFailed
+            }
             try? FileManager.default.removeItem(at: outputURL)
             didBeginEncoding = true
 
@@ -699,6 +582,18 @@ final class RenderQueue {
                     chapterMarkers: chapterMarkers,
                     chapterDuration: chapterDuration)
             }
+            didFinishEncoding = true
+            guard await preserveCompletedOutput(
+                jobID: id,
+                at: outputURL,
+                makeBookmark: { url in
+                    Self.outputBookmark(
+                        for: url,
+                        bookmarkData: Self.rawSecurityScopedBookmark)
+                }
+            ) else {
+                throw RenderQueueError.outputDestinationUnavailable
+            }
 
             // Write YouTube chapter sidecar when chapter markers exist. The
             // sidecar is part of the promised output, so a write failure must be
@@ -725,9 +620,11 @@ final class RenderQueue {
 
             if cancelInFlightID == id {
                 cancelInFlightID = nil
-                removePartialOutput()
+                let message = cancellationOutputMessage()
                 await releaseActiveLease()
-                finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
+                finish(jobID: id, status: .cancelled,
+                       message: message,
+                       startWall: startWall)
                 return
             }
 
@@ -735,9 +632,11 @@ final class RenderQueue {
             finish(jobID: id, status: .completed, message: nil, startWall: startWall)
         } catch is CancellationError {
             cancelInFlightID = nil
-            removePartialOutput()
+            let message = cancellationOutputMessage()
             await releaseActiveLease()
-            finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
+            finish(jobID: id, status: .cancelled,
+                   message: message,
+                   startWall: startWall)
         } catch {
             await releaseActiveLease()
             // `AVAssetExportSession.cancelExport()` makes the awaited export
@@ -746,11 +645,31 @@ final class RenderQueue {
             // it actually is so the row doesn't persist as `.failed` (codex P2).
             if cancelInFlightID == id {
                 cancelInFlightID = nil
-                removePartialOutput()
-                finish(jobID: id, status: .cancelled, message: nil, startWall: startWall)
-            } else {
+                let message = cancellationOutputMessage()
+                finish(jobID: id, status: .cancelled,
+                       message: message,
+                       startWall: startWall)
+            } else if didFinishEncoding {
+                let preserved = await preserveCompletedOutput(
+                    jobID: id,
+                    at: outputURL,
+                    makeBookmark: { url in
+                        Self.outputBookmark(
+                            for: url,
+                            bookmarkData: Self.rawSecurityScopedBookmark)
+                    })
                 finish(jobID: id, status: .failed,
-                       message: error.localizedDescription, startWall: startWall)
+                       message: preserved
+                           ? "\(error.localizedDescription) The rendered movie was preserved; export again to retry the sidecar."
+                           : "\(error.localizedDescription) The rendered movie is unavailable; choose a new output destination before retrying.",
+                       startWall: startWall)
+            } else {
+                let restored = restoreRetryReservation()
+                finish(jobID: id, status: .failed,
+                       message: restored
+                           ? error.localizedDescription
+                           : "\(error.localizedDescription) \(retryUnavailableMessage)",
+                       startWall: startWall)
             }
         }
     }
@@ -773,11 +692,13 @@ final class RenderQueue {
         // review).
         switch status {
         case .completed:
+            jobs[index].outputReservationCreated = nil
+            jobs[index].applyDestinationProtection(.reusable)
             log("job \(jobID.uuidString.prefix(8)) completed in \(String(format: "%.1f", runtime))s")
             statusMessage = "Rendered \(displayName) in \(String(format: "%.1f", runtime))s."
         case .cancelled:
             log("job \(jobID.uuidString.prefix(8)) cancelled")
-            statusMessage = "Cancelled \(displayName)."
+            statusMessage = message ?? "Cancelled \(displayName)."
         case .failed:
             log("job \(jobID.uuidString.prefix(8)) failed — \(message ?? "")")
             statusMessage = "Render of \(displayName) failed: \(message ?? "unknown error")"
@@ -785,6 +706,113 @@ final class RenderQueue {
             break
         }
         persist()
+    }
+
+    /// Recreate the exact-file reservation after a job has removed a partial
+    /// encode. The fresh bookmark is essential: a bookmark to the deleted leaf
+    /// cannot be resolved by a later Retry even though the user chose the path
+    /// through `NSSavePanel`.
+    @discardableResult
+    func restoreOutputReservation(
+        jobID: UUID,
+        at outputURL: URL,
+        makeBookmark: (URL) -> Data?
+    ) -> Bool {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return false }
+        let fileExisted = FileManager.default.fileExists(atPath: outputURL.path)
+        if !fileExisted {
+            do {
+                try Data().write(to: outputURL, options: .withoutOverwriting)
+            } catch {
+                jobs[index].applyDestinationProtection(.permanentlyUnavailable)
+                persist()
+                logger.warning("Could not recreate render reservation: \(error.localizedDescription)")
+                return false
+            }
+        }
+        guard let bookmark = makeBookmark(outputURL) else {
+            if !fileExisted {
+                try? FileManager.default.removeItem(at: outputURL)
+            }
+            jobs[index].applyDestinationProtection(.permanentlyUnavailable)
+            persist()
+            logger.warning("Could not refresh render output bookmark for retry")
+            return false
+        }
+        jobs[index].outputBookmark = bookmark
+        jobs[index].outputReservationCreated = true
+        jobs[index].applyDestinationProtection(.reusable)
+        persist()
+        return true
+    }
+
+    /// A failure after encoding (for example, writing a chapter sidecar) must
+    /// not replace a valid movie with an empty retry reservation. Preserve the
+    /// completed movie, refresh its bookmark if possible, and require a new
+    /// output destination for any future export so this row cannot overwrite it.
+    @discardableResult
+    func preserveCompletedOutput(
+        jobID: UUID,
+        at outputURL: URL,
+        makeBookmark: (URL) -> Data?
+    ) async -> Bool {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return false }
+        guard let values = try? outputURL.resourceValues(
+            forKeys: [.fileSizeKey, .isRegularFileKey]),
+              values.isRegularFile == true,
+              let fileSize = values.fileSize,
+              fileSize > 0 else {
+            jobs[index].applyDestinationProtection(.permanentlyUnavailable)
+            _ = await persistDurably()
+            return false
+        }
+        if let bookmark = makeBookmark(outputURL) {
+            jobs[index].outputBookmark = bookmark
+        } else {
+            logger.warning("Could not refresh completed render bookmark after post-export failure")
+        }
+        jobs[index].applyDestinationProtection(.completedPreserved)
+        return await persistDurably()
+    }
+
+    /// Persist before removing the selected leaf. A crash after this point may
+    /// leave user data or an encode at the destination, so startup recovery
+    /// must not run the job again automatically.
+    private func markOutputWriteStarted(jobID: UUID) async -> Bool {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return false }
+        let priorReservation = jobs[index].outputReservationCreated
+        let priorProtection = jobs[index].destinationProtection
+        jobs[index].applyDestinationProtection(.writeStarted)
+        guard await persistDurably() else {
+            if let restoreIndex = jobs.firstIndex(where: { $0.id == jobID }) {
+                jobs[restoreIndex].applyDestinationProtection(priorProtection)
+                if priorProtection == .reusable {
+                    jobs[restoreIndex].outputReservationCreated = priorReservation
+                }
+            }
+            return false
+        }
+        return true
+    }
+
+    private func markRetryUnavailable(jobID: UUID) {
+        guard let index = jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        jobs[index].applyDestinationProtection(.permanentlyUnavailable)
+        persist()
+    }
+
+    private func discardOutputReservation(for job: QueueJob) {
+        guard job.outputReservationCreated == true,
+              let resolution = resolveBookmark(job.outputBookmark) else { return }
+        let scopedOutputURL = resolution.url
+        let outputURL = Self.outputDestinationURL(
+            resolvedURL: scopedOutputURL,
+            displayName: job.outputDisplayName)
+        let didStart = scopedOutputURL.startAccessingSecurityScopedResource()
+        defer { if didStart { scopedOutputURL.stopAccessingSecurityScopedResource() } }
+        guard let size = try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+              size == 0 else { return }
+        try? FileManager.default.removeItem(at: outputURL)
     }
 
     // MARK: AVAssetExportSession path
@@ -1352,9 +1380,28 @@ final class RenderQueue {
                 let message = "Render queue was not saved: \(error.localizedDescription)"
                 log.error("queue persist failed: \(error.localizedDescription, privacy: .public)")
                 await self?.recordPersistenceFailure(message)
+                await self?.clearPendingWriteTask(token: token)
+                return false
             }
             await self?.clearPendingWriteTask(token: token)
+            return true
         }
+    }
+
+    /// Schedules the current queue state and waits for that exact write. This
+    /// is reserved for output-safety boundaries where touching the selected
+    /// file before queue.json reaches disk would reopen an overwrite window.
+    private func persistDurably() async -> Bool {
+        guard persistsToDisk else { return true }
+        guard !refusingPersist else { return false }
+        let priorToken = pendingWriteToken
+        persist()
+        guard let token = pendingWriteToken,
+              token != priorToken,
+              let writeTask = pendingWriteTask else {
+            return false
+        }
+        return await writeTask.value
     }
 
     private func recordPersistenceFailure(_ message: String) {
@@ -1370,7 +1417,7 @@ final class RenderQueue {
     /// Lets tests observe the detached persistence chain without making
     /// production callers wait for fire-and-forget writes.
     func waitForPendingPersistenceForTesting() async {
-        await pendingWriteTask?.value
+        _ = await pendingWriteTask?.value
     }
 
     /// Reads the on-disk queue and reconciles state. Called once at app
@@ -1430,8 +1477,8 @@ final class RenderQueue {
         jobs = reconciled
         recomputeTotalProgress()
         log("queue loaded — \(jobs.count) job(s)")
-        // If reconciliation actually changed anything (a running → queued
-        // rewind or a stale-bookmark → failed flip), persist so the change
+        // If reconciliation actually changed anything (a running-job recovery
+        // or a stale-bookmark → failed flip), persist so the change
         // survives a relaunch — otherwise the same stale state would be
         // re-resurrected on every launch (codex P2).
         if didMutate { persist() }
@@ -1439,20 +1486,40 @@ final class RenderQueue {
         start()
     }
 
-    /// Implements R3.2 + R3.3: any `running` job rewinds to `queued`; any job
-    /// with a now-unresolvable `outputBookmark` flips to `failed`. A stale but
-    /// resolvable output bookmark is refreshed in-place so the persisted queue
-    /// does not keep resurrecting stale security-scope data.
+    /// Implements R3.2 + R3.3: a `running` job that never took ownership of its
+    /// output rewinds to `queued`. Once output writing began, recovery instead
+    /// fails the row and leaves the destination untouched because it may hold
+    /// user data, a partial encode, or a completed movie. Any job with a now-
+    /// unresolvable `outputBookmark` also flips to `failed`. A stale but
+    /// resolvable bookmark is refreshed in-place.
     static func reconcile(
         loaded: [QueueJob],
         resolver: (Data) -> BookmarkResolution? = resolveSecurityScopedBookmark
     ) -> [QueueJob] {
         loaded.map { job in
             var copy = job
-            if copy.status == .running {
-                copy.status = .queued
-                copy.progress = 0
-                copy.errorMessage = nil
+            if !copy.isTerminal {
+                switch copy.destinationProtection {
+                case .completedPreserved:
+                    copy.status = .failed
+                    copy.applyDestinationProtection(.completedPreserved)
+                    copy.errorMessage = "Rendered output was preserved after an interrupted export. Choose a new output destination before retrying."
+                case .writeStarted:
+                    copy.status = .failed
+                    copy.applyDestinationProtection(.permanentlyUnavailable)
+                    copy.errorMessage = "Export was interrupted after output writing began. The destination was left untouched; choose a new output destination before retrying."
+                case .permanentlyUnavailable:
+                    copy.status = .failed
+                    copy.applyDestinationProtection(.permanentlyUnavailable)
+                    copy.errorMessage = copy.errorMessage
+                        ?? "Export destination is no longer reusable. Choose a new output destination before retrying."
+                case .reusable:
+                    if copy.status == .running {
+                        copy.status = .queued
+                        copy.progress = 0
+                        copy.errorMessage = nil
+                    }
+                }
             }
             if copy.status == .queued {
                 if let resolution = resolver(copy.outputBookmark) {
@@ -1462,6 +1529,7 @@ final class RenderQueue {
                 } else {
                     copy.status = .failed
                     copy.errorMessage = RenderQueueError.outputDestinationUnavailable.localizedDescription
+                    copy.applyDestinationProtection(.permanentlyUnavailable)
                 }
             }
             return copy
@@ -1487,13 +1555,84 @@ final class RenderQueue {
                                      relativeTo: nil)
     }
 
+    struct PreparedOutputBookmark {
+        let data: Data
+        let placeholderURL: URL?
+
+        nonisolated func discardPlaceholder() {
+            guard let placeholderURL else { return }
+            try? FileManager.default.removeItem(at: placeholderURL)
+        }
+    }
+
+    nonisolated static func prepareOutputBookmark(for outputURL: URL) -> PreparedOutputBookmark? {
+        let didStartOutput = outputURL.startAccessingSecurityScopedResource()
+        defer { if didStartOutput { outputURL.stopAccessingSecurityScopedResource() } }
+
+        if let bookmark = rawSecurityScopedBookmark(for: outputURL) {
+            return PreparedOutputBookmark(data: bookmark, placeholderURL: nil)
+        }
+
+        // A Save-panel URL can be authorized before it exists on disk. Create
+        // an exclusive zero-byte reservation so Foundation can encode a file
+        // bookmark; the queue replaces it when encoding begins. The caller
+        // removes the reservation if enqueueing is rejected.
+        let createdPlaceholder: Bool
+        do {
+            try Data().write(to: outputURL, options: .withoutOverwriting)
+            createdPlaceholder = true
+        } catch {
+            createdPlaceholder = false
+        }
+        if let bookmark = rawSecurityScopedBookmark(for: outputURL) {
+            return PreparedOutputBookmark(
+                data: bookmark,
+                placeholderURL: createdPlaceholder ? outputURL : nil)
+        }
+        if createdPlaceholder {
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+
+        // Keep the historical directory shape as a compatibility fallback for
+        // unsandboxed callers and previously authorized directory URLs.
+        guard let bookmark = securityScopedBookmark(for: outputURL.deletingLastPathComponent()) else {
+            return nil
+        }
+        return PreparedOutputBookmark(data: bookmark, placeholderURL: nil)
+    }
+
     nonisolated static func outputBookmark(for outputURL: URL) -> Data? {
-        let containerURL = outputURL.deletingLastPathComponent()
-        let didStart = containerURL.startAccessingSecurityScopedResource()
-        defer { if didStart { containerURL.stopAccessingSecurityScopedResource() } }
-        return try? containerURL.bookmarkData(options: .withSecurityScope,
-                                              includingResourceValuesForKeys: nil,
-                                              relativeTo: nil)
+        prepareOutputBookmark(for: outputURL)?.data
+    }
+
+    nonisolated static func outputBookmark(
+        for outputURL: URL,
+        bookmarkData: (URL) -> Data?
+    ) -> Data? {
+        // NSSavePanel grants the sandbox extension for the selected output
+        // file, not for its parent directory. Bookmark that exact URL first
+        // so a freshly selected destination can be queued in a sandboxed app.
+        // `outputDestinationURL` already accepts both file bookmarks (new
+        // jobs) and directory bookmarks (persisted jobs from older builds).
+        if let bookmark = bookmarkData(outputURL) {
+            return bookmark
+        }
+
+        // Keep the historical directory shape as a compatibility fallback for
+        // unsandboxed callers and previously authorized directory URLs.
+        return bookmarkData(outputURL.deletingLastPathComponent())
+    }
+
+    private nonisolated static func securityScopedBookmark(for url: URL) -> Data? {
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+        return rawSecurityScopedBookmark(for: url)
+    }
+
+    private nonisolated static func rawSecurityScopedBookmark(for url: URL) -> Data? {
+        return try? url.bookmarkData(options: .withSecurityScope,
+                                     includingResourceValuesForKeys: nil,
+                                     relativeTo: nil)
     }
 
     private nonisolated static func outputDestinationURL(
@@ -1741,8 +1880,10 @@ final class RenderQueue {
     func enqueueWithDefaultPreset(outputURL: URL,
                                   project: Project,
                                   bookmark: Data,
-                                  projectDocumentURL: URL? = nil) -> QueueEnqueueOutcome {
-        let snapshot = ProjectDocument(project: project, queueBundleURL: projectDocumentURL)
+                                  projectSessionLocation: ProjectSessionLocation = .unsaved) -> QueueEnqueueOutcome {
+        let snapshot = ProjectDocument(
+            project: project,
+            queueSessionLocation: projectSessionLocation)
         let job = QueueJob(
             preset: BuiltInExportPresets.defaultPreset,
             outputBookmark: bookmark,

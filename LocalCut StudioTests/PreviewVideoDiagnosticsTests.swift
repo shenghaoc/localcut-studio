@@ -177,11 +177,7 @@ struct PreviewVideoDiagnosticsTests {
         let url = try await makeVideoFixture(seconds: 2)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let suiteName = "PreviewVideoDiagnosticsTests-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let model = EditorModel(defaultsStore: defaults)
+        let model = EditorModel()
         let media = try await loadedMedia(from: url)
         model.project.mediaItems.append(media)
 

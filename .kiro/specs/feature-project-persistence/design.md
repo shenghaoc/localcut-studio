@@ -1,5 +1,8 @@
 # Design: Project Persistence
 
+> **Ownership note:** The custom file-based document controller remains; see [`feature-native-document-lifecycle`](../feature-native-document-lifecycle/design.md) for the DocumentGroup trade-off on macOS 26.
+
+
 > Status: **Implemented**. Shipped in [#6](https://github.com/shenghaoc/localcut-studio/pull/6); schema since carried through later phases to the current version documented in [`docs/PROJECT_SCHEMA.md`](../../../docs/PROJECT_SCHEMA.md). See [tasks.md](./tasks.md) for the per-box source citations.
 
 ## Approach

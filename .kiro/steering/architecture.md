@@ -2,7 +2,12 @@
 
 ## Overview
 
-LocalCut Studio is a single-window SwiftUI app over an AVFoundation editing core. The data model is the source of truth; whenever it changes, the engine rebuilds an immutable `AVComposition` + `AVVideoComposition` that drives **both** preview (`AVPlayerItem`) and export (`AVAssetExportSession` / `AVAssetWriter`).
+LocalCut Studio is a SwiftUI app over an AVFoundation editing core. On the
+current macOS 26 baseline, its custom file-based document controller owns one
+live editor session rather than a `DocumentGroup` document scene. The data
+model is the source of truth; whenever it changes, the engine rebuilds an
+immutable `AVComposition` + `AVVideoComposition` that drives **both** preview
+(`AVPlayerItem`) and export (`AVAssetExportSession` / `AVAssetWriter`).
 
 ```
 SwiftUI views ──▶ EditorModel (@Observable, @MainActor)
@@ -47,6 +52,36 @@ SwiftUI views ──▶ EditorModel (@Observable, @MainActor)
 This is a dependency direction, not a claim that every non-view type is
 portable: app → macOS platform → Apple media core → portable domain, never the
 reverse.
+
+## Document and window lifecycle
+
+`DocumentController` remains the document owner at the macOS 26 deployment
+target. It uses the user-selected local filesystem URL for asynchronous
+load/relink/rebuild, atomic `.lcstudio` and `.lcbundle` writes, package
+staging/fingerprints, and security-scoped resource lifetime. `EditorModel`
+owns the live AVFoundation/editor state (including its one `AVPlayer`), undo
+manager, capture state, and render queue. Open/save routing records an
+explicit `ProjectSessionLocation` that keeps the local filesystem URL paired
+with its `ProjectStorageKind` rather than re-sniffing paths.
+
+`DocumentGroup` is technically feasible on macOS 26, but `ReferenceFileDocument`
+does not directly reuse the filesystem-URL-based asynchronous package pipeline,
+so adopting it would require a second persistence implementation. See
+[`feature-native-document-lifecycle`](../specs/feature-native-document-lifecycle/design.md).
+
+Window presentation state belongs to SwiftUI scenes where possible: inspector
+visibility uses `@SceneStorage`, focused bindings route the View menu to the key
+scene, and scene placement/restoration own new-window geometry. The narrow
+`WindowConfigurator` bridge remains only for represented filesystem URL/dirty
+state, editor-window readiness for App Intents, and close veto while a recording
+or asynchronous save is active. `SplitViewAutosaveConfigurator` remains because
+SwiftUI has no equivalent divider-position persistence with the collapsed-rail
+invariant.
+
+`ActiveEditorRegistry` tracks readiness of the single process-wide editor window
+so cold-launch App Intents can wait for the window instead of failing with a
+misleading “open a project first” error. The GUI does not support independent
+document models.
 
 ## Render path invariant
 

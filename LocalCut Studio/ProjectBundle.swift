@@ -6,15 +6,18 @@ import LocalCutCore
 // MARK: - Bundle content type
 
 extension UTType {
-    /// The `.lcbundle` project bundle: a directory the OS treats as one item.
-    /// Conforming to `.package` is what makes Finder open it as a double-click
-    /// target rather than browsing its insides. Full Launch Services adoption on
-    /// a fresh install still needs an Info.plist `UTExportedTypeDeclarations`
-    /// entry; the dynamic UTType here is enough for the in-app New/Open/Save
-    /// path. See `Project Bundles` design § UTType for the follow-up.
+    /// The `.lcbundle` project bundle: LocalCut's portable directory package.
+    /// The filename-backed dynamic type is intentional until the app ships a
+    /// full Launch Services declaration: it gives `NSSavePanel` the
+    /// `.lcbundle` tag. The save-panel policy explicitly selects this type as
+    /// its default when the legacy `.lcstudio` type is also offered.
+    /// `NSOpenPanel` validates bundle candidates at its URL boundary because a
+    /// runtime type alone does not register the package with Launch Services.
+    /// See `Project Bundles` design § UTType for the Finder/cold-launch
+    /// declaration follow-up.
     static let lcStudioProjectBundle = UTType(
-        exportedAs: "com.localcutstudio.project-bundle",
-        conformingTo: .package)
+        filenameExtension: ProjectBundleLayout.fileExtension,
+        conformingTo: .package) ?? .package
 }
 
 // MARK: - Fingerprints
@@ -467,26 +470,17 @@ nonisolated enum ProjectBundle: Sendable {
 
     // MARK: - Detection
 
-    /// Whether the URL points to a `.lcbundle` directory. Used by the open path
-    /// to dispatch between bundle and single-file loads.
+    /// Whether `url` is a validated LocalCut bundle directory.
     ///
-    /// The `project.json` fallback after the extension check is intentional: the
-    /// open panel already filters to `.lcbundle`/`.lcstudio`, so the fallback
-    /// only fires for edge cases where a bundle arrives without the canonical
-    /// extension (e.g. a file-sync service that strips extensions, or a user
-    /// who renamed the directory). A random directory opened by mistake will
-    /// fail the `project.json` existence check and fall through to the
-    /// single-file decode path, which returns its own error.
+    /// Performs full metadata validation via `ProjectLocationInspector`: the
+    /// path must be a directory whose `project.json` decodes as a supported
+    /// `ProjectDocument` with a supported `bundleFormat`. A regular file with
+    /// an `.lcbundle` suffix, an empty package directory, or a directory that
+    /// merely contains `{}` as `project.json` is rejected.
+    ///
+    /// For save routing after a successful open, prefer the session's stored
+    /// `projectSessionLocation` rather than re-classifying the path.
     static func isBundle(url: URL) -> Bool {
-        // Extension first — the cheap check — then a directory test in case the
-        // user (or a synced volume) saved a bundle without the canonical suffix.
-        if url.pathExtension == ProjectBundleLayout.fileExtension { return true }
-        var isDir: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
-        guard exists, isDir.boolValue else { return false }
-        // Look for a `project.json` at the root to disambiguate from a random
-        // directory the user opened by mistake.
-        let project = url.appendingPathComponent(ProjectBundleLayout.projectJSON)
-        return FileManager.default.fileExists(atPath: project.path)
+        ProjectLocationInspector.isValidatedBundle(url)
     }
 }

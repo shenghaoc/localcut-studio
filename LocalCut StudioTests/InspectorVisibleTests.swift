@@ -1,72 +1,71 @@
 import Testing
-import Foundation
 @testable import LocalCut_Studio
 
-// Tests for EditorModel.inspectorVisible — a UserDefaults-persisted flag that
-// the Show Inspector menu / toolbar / collapsed-rail share as one source of
-// truth. The injection seam (`init(defaultsStore:)`) lets these tests verify
-// the round-trip without polluting the user's preferences database.
-//
-// Locks the invariant that a regression decoupling the bool from
-// SplitViewAutosaveConfigurator's `isEnabled` would re-introduce the
-// saved-width clobber on collapse.
-
+/// Editor readiness for App Intents. The GUI has one process-wide editor model;
+/// this suite only covers window readiness and generation stability.
 @MainActor
-@Suite("EditorModel.inspectorVisible persistence")
-struct InspectorVisiblePersistenceTests {
+@Suite("Editor window readiness", .serialized)
+struct ActiveEditorRegistryTests {
+    @Test func markReadyExposesTheEditor() {
+        let model = EditorModel()
+        let registry = ActiveEditorRegistry()
 
-    /// Fresh, isolated UserDefaults suite per test so tests don't share state
-    /// with each other or with `.standard`.
-    private static func freshDefaults() -> UserDefaults {
-        let suite = "test.localcut.inspectorVisible.\(UUID().uuidString)"
-        let store = UserDefaults(suiteName: suite)!
-        store.removePersistentDomain(forName: suite)
-        return store
+        registry.markReady(model)
+
+        #expect(registry.readyEditor() === model)
+        #expect(registry.capture().wasReady)
     }
 
-    @Test("Defaults to true when nothing is stored")
-    func defaultsToTrueWhenAbsent() {
-        let store = Self.freshDefaults()
-        let model = EditorModel(defaultsStore: store)
-        #expect(model.inspectorVisible == true)
+    @Test func reMarkingTheSameEditorKeepsGenerationStable() {
+        let model = EditorModel()
+        let registry = ActiveEditorRegistry()
+
+        registry.markReady(model)
+        let generation = registry.generation
+        registry.markReady(model)
+
+        #expect(registry.generation == generation)
+        #expect(registry.editor(matchingGeneration: generation) === model)
     }
 
-    @Test("A previously stored false survives a fresh model")
-    func falseRoundTripsAcrossInstances() {
-        let store = Self.freshDefaults()
-        do {
-            let model = EditorModel(defaultsStore: store)
-            model.inspectorVisible = false
+    @Test func markUnavailableClearsReadiness() {
+        let model = EditorModel()
+        let registry = ActiveEditorRegistry()
+
+        registry.markReady(model)
+        let generation = registry.generation
+        registry.markUnavailable(model)
+
+        #expect(registry.readyEditor() == nil)
+        #expect(registry.editor(matchingGeneration: generation) == nil)
+        #expect(!registry.capture().wasReady)
+    }
+
+    @Test func waitUntilReadyResumesWhenEditorAppears() async throws {
+        let model = EditorModel()
+        let registry = ActiveEditorRegistry()
+
+        let waiter = Task {
+            try await registry.waitUntilReady(timeout: .seconds(2))
         }
-        // A fresh model wired to the same store reads the persisted value.
-        let model2 = EditorModel(defaultsStore: store)
-        #expect(model2.inspectorVisible == false)
+        registry.markReady(model)
+        _ = try await waiter.value
+        #expect(registry.readyEditor() === model)
     }
 
-    @Test("Flipping the property writes back to the injected store, not .standard")
-    func writesGoToInjectedStore() {
-        let store = Self.freshDefaults()
-        let model = EditorModel(defaultsStore: store)
+    @Test func cancellationBeforeWaiterRegistrationDoesNotBlockLaterWaits() async {
+        let registry = ActiveEditorRegistry()
+        let cancelledWait = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            _ = try await registry.waitUntilReady(timeout: .seconds(1))
+        }
 
-        model.inspectorVisible = false
-        #expect(store.bool(forKey: EditorModel.inspectorVisibleKey) == false)
-
-        model.inspectorVisible = true
-        #expect(store.bool(forKey: EditorModel.inspectorVisibleKey) == true)
-    }
-
-    @Test("Distinguishes 'never set' from 'explicitly false'")
-    func absentSentinelIsDistinctFromExplicitFalse() {
-        // The bool(forKey:) fallback would silently return false for both
-        // states; using object(forKey:) as? Bool preserves the distinction.
-        let store = Self.freshDefaults()
-        #expect(store.object(forKey: EditorModel.inspectorVisibleKey) == nil)
-        let modelA = EditorModel(defaultsStore: store)
-        #expect(modelA.inspectorVisible == true)              // default
-
-        modelA.inspectorVisible = false
-        #expect(store.object(forKey: EditorModel.inspectorVisibleKey) as? Bool == false)
-        let modelB = EditorModel(defaultsStore: store)
-        #expect(modelB.inspectorVisible == false)             // honors explicit false
+        do {
+            _ = try await cancelledWait.value
+            Issue.record("Expected the already-cancelled readiness wait to throw.")
+        } catch is CancellationError {
+        } catch {
+            Issue.record("Expected CancellationError, got \(error)")
+        }
     }
 }

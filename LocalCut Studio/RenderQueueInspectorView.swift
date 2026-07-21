@@ -149,7 +149,7 @@ struct RenderQueueInspectorView: View {
                     .help("Reveal in Finder")
                     .accessibilityLabel("Reveal \(job.outputDisplayName) in Finder")
                 }
-                if job.status == .failed || job.status == .cancelled {
+                if (job.status == .failed || job.status == .cancelled) && job.canRetry {
                     Button {
                         model.renderQueue.retry(jobID: job.id)
                     } label: {
@@ -162,12 +162,12 @@ struct RenderQueueInspectorView: View {
             }
             // Surface the underlying failure so the user can act on it
             // rather than guessing why the pill went red (codex P2).
-            if job.status == .failed, let message = job.errorMessage {
+            if (job.status == .failed || job.status == .cancelled), let message = job.errorMessage {
                 Text(message)
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(job.status == .failed ? .red : .secondary)
                     .lineLimit(2)
-                    .accessibilityLabel("Failure reason: \(message)")
+                    .accessibilityLabel("Render status detail: \(message)")
             }
         }
         .padding(.vertical, 2)
@@ -206,9 +206,10 @@ struct RenderQueueInspectorView: View {
 
     // MARK: - Add to queue
 
-    /// Opens an `NSSavePanel` filtered to the preset's container, captures a
-    /// security-scoped bookmark for the chosen destination folder, and
-    /// enqueues a job carrying the current project's snapshot.
+    /// Opens an `NSSavePanel` filtered to the preset's container, reserves and
+    /// bookmarks the exact selected output file, then enqueues a job carrying
+    /// the current project snapshot. A directory bookmark is compatibility
+    /// fallback only when the file grant cannot be encoded.
     private func addToQueue(preset: ExportPreset) {
         let panel = NSSavePanel()
         if let type = UTType(filenameExtension: preset.defaultFilenameExtension) {
@@ -226,18 +227,26 @@ struct RenderQueueInspectorView: View {
 
         // Show progress while resolving the bookmark (may be slow on network volumes).
         model.statusMessage = "Preparing \(url.lastPathComponent)…"
-        guard let bookmark = RenderQueue.outputBookmark(for: url) else {
+        guard let preparedBookmark = RenderQueue.prepareOutputBookmark(for: url) else {
             model.statusMessage = "Could not access \(url.lastPathComponent). Possible causes: destination deleted, disk ejected, or sandbox permission denied. Try choosing a different location."
             return
         }
 
-        let snapshot = ProjectDocument(project: model.project, queueBundleURL: model.documentURL)
+        let snapshot = ProjectDocument(
+            project: model.project,
+            queueSessionLocation: model.projectSessionLocation)
         let job = QueueJob(
             preset: preset,
-            outputBookmark: bookmark,
+            outputBookmark: preparedBookmark.data,
             outputDisplayName: url.lastPathComponent,
-            projectSnapshot: snapshot)
-        _ = model.renderQueue.enqueue(job)
-        model.statusMessage = "Queued \(preset.name) → \(url.lastPathComponent)."
+            projectSnapshot: snapshot,
+            outputReservationCreated: preparedBookmark.placeholderURL != nil)
+        switch model.renderQueue.enqueue(job) {
+        case .queued:
+            model.statusMessage = "Queued \(preset.name) → \(url.lastPathComponent)."
+        case .failed(let message):
+            preparedBookmark.discardPlaceholder()
+            model.statusMessage = message
+        }
     }
 }

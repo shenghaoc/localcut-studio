@@ -41,6 +41,43 @@ Any non-trivial logic change **must** ship with tests; the test count must not d
 4. Scrub, play/pause, split at playhead, delete; adjust opacity.
 5. Export to `.mov` → progress advances → the file plays back correctly.
 
+## Native document lifecycle manual check
+
+Run this checklist whenever document/window shell code changes. These are GUI
+behaviours; do not claim pure unit tests as proof of focus transitions or
+Shortcuts cold-launch UX.
+
+1. New project.
+2. Save as `.lcbundle`.
+3. Save as legacy `.lcstudio`.
+4. Reopen both forms.
+5. Close with Save / Don’t Save / Cancel.
+6. Failed save leaves the window open and dirty.
+7. Recording blocks New, Open, and Close (real privacy permissions).
+8. Queued render retains output access through execution and retry.
+9. External bundle modification warning; missing-media relinking.
+10. For an Apple Development-signed build, cold-launch each App Intent through
+    Shortcuts (New, Diagnostics, Import, Export). For an intentionally unsigned
+    local build, verify that all four intents are present in
+    `Metadata.appintents` and run the App Intent / `ActiveEditorRegistry` tests;
+    record the signed Shortcuts UI path as not performed rather than claiming
+    manual coverage.
+11. Marker/caption text fields keep Space, M, Shift-M, Backspace, Forward Delete.
+12. Keyboard-focused button/toggle keeps Space; timeline shortcuts only while timeline focused.
+13. Timeline focus recovers after leaving a marker rename or caption editor.
+14. Window placement/restoration on a constrained display; split-view divider
+    persistence through inspector collapse/re-expansion.
+
+Automated coverage: `ProjectLocationInspector` / storage-kind tests,
+`ActiveEditorRegistry` readiness tests, pure `TimelineShortcutPolicy` mapping,
+and `TimelineFocusUITests` harness transitions.
+
+Apple Development signing is not a merge prerequisite for this hobby project.
+An ad-hoc build may be rejected by `linkd` before application code runs, so that
+result is a signing-environment limitation, not evidence that intent routing
+failed. A future signed distribution build should still exercise item 10 as an
+integration check.
+
 ## Quality gate
 
 `swift test --package-path Packages/LocalCutCore` must pass on macOS and Linux

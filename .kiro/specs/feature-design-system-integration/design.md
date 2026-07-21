@@ -1,5 +1,9 @@
 # Design: Design-System Integration Polish
 
+> **Ownership note:** Inspector presentation, window placement, and timeline
+> keyboard focus ownership are superseded by
+> [`feature-native-document-lifecycle`](../feature-native-document-lifecycle/design.md).
+>
 > Status: **Implemented**. Presentation-led polish with narrow computed model
 > helpers for error copy and keyframe navigation; no model fields, document
 > schema, engine pipeline, or composition-math changes.
@@ -174,14 +178,13 @@ are all standard SwiftUI/AppKit (no new paradigms):
   **View ▸ Show Inspector (⌥⌘I)** and **Go to Start (⌘↑)** join Show Diagnostics.
   The **Space** shortcut for play/pause is
   intentionally not a menu key-equivalent (those fire globally, swallowing
-  spaces typed into text fields) — it lives on a window-scoped `NSEvent` local monitor
-  (`EditorKeyHandler` in `TimelineView.swift`) that yields to focused text
-  inputs *and* any focused non-text control (so a Tab-focused checkbox /
-  button receives Space normally).
-- **Single source of truth for the inspector.** `isSideRailCollapsed`
-  (`@SceneStorage`) is lifted to `EditorModel.inspectorVisible` (UserDefaults-
-  persisted) so the menu toggle, toolbar button, and collapsed-rail restore
-  strip can't disagree.
+  spaces typed into text fields) — it lives on the focused timeline's SwiftUI
+  `onKeyPress` handler. SwiftUI gives text inputs and focused controls first
+  refusal, so a Tab-focused checkbox/button receives Space normally.
+- **Single source of truth for the inspector.** The inspector is restorable
+  `@SceneStorage` window presentation state. A focused binding keeps the menu
+  toggle, toolbar button, and collapsed-rail restore strip attached to the key
+  scene without putting presentation state in `EditorModel`.
 - **Appearance & accessibility settings honored:** the editor follows system
   light/dark appearance and control accent; Reduce Motion gates the scopes-panel
   transition/animation;

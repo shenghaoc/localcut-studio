@@ -1357,3 +1357,42 @@ struct GoldenFixtureTests {
 }
 
 // Test helpers are in InterchangeTestHelpers.swift (internal access).
+
+// MARK: - File-exporter request layer
+
+@MainActor
+@Suite("Interchange export requests")
+struct InterchangeExportRequestTests {
+    @Test func interchangeRequestsCarryFileExporterTypesAndNames() throws {
+        let model = EditorModel()
+        model.project.name = "Lifecycle Test"
+        // Nonzero duration reaches both existing serializers for the request layer.
+        model.totalDuration = 1
+
+        let otio = try #require(model.makeOtioExportRequest())
+        #expect(otio.contentType == .localCutOtioExport)
+        #expect(otio.defaultFilename == "Lifecycle Test")
+        #expect(!otio.document.data.isEmpty)
+
+        let edl = try #require(model.makeEdlExportRequest(trackIndex: 0))
+        #expect(edl.contentType == .localCutEdlExport)
+        #expect(edl.defaultFilename == "Lifecycle Test")
+        #expect(!edl.document.data.isEmpty)
+    }
+
+    @Test func cancelledInterchangeExportStaysSilent() {
+        #expect(InterchangeExportErrorPresentation.statusMessage(for: CancellationError()) == nil)
+
+        let cocoaCancellation = NSError(
+            domain: NSCocoaErrorDomain,
+            code: CocoaError.Code.userCancelled.rawValue)
+        #expect(InterchangeExportErrorPresentation.statusMessage(for: cocoaCancellation) == nil)
+
+        let writeError = NSError(
+            domain: "InterchangeExportRequestTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "The destination is unavailable."])
+        #expect(InterchangeExportErrorPresentation.statusMessage(for: writeError)
+                == "Interchange export failed: The destination is unavailable.")
+    }
+}
