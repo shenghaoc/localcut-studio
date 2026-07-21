@@ -28,6 +28,31 @@ private final class PanelCancellationHandle: @unchecked Sendable {
     }
 }
 
+/// Shared AppKit panel presentation with task-cancellation that closes the
+/// sheet. `NSOpenPanel` is an `NSSavePanel` subclass, so one path covers Open
+/// and Save panels without triplicating the continuation boilerplate.
+@MainActor
+private func presentCancellablePanel(_ panel: NSSavePanel) async -> NSApplication.ModalResponse {
+    let cancellationHandle = PanelCancellationHandle(panel)
+    return await withTaskCancellationHandler {
+        await withCheckedContinuation { continuation in
+            MainActor.assumeIsolated {
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: NSApplication.ModalResponse.cancel)
+                    return
+                }
+                cancellationHandle.panel.begin { response in
+                    continuation.resume(returning: response)
+                }
+            }
+        }
+    } onCancel: {
+        Task { @MainActor in
+            cancellationHandle.cancel()
+        }
+    }
+}
+
 /// Centralizes the project-open panel policy so package selection remains
 /// regression-testable without coupling a test to an asynchronous menu action.
 @MainActor
@@ -268,24 +293,7 @@ extension EditorModel {
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
-        let cancellationHandle = PanelCancellationHandle(panel)
-        let response = await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                MainActor.assumeIsolated {
-                    guard !Task.isCancelled else {
-                        continuation.resume(returning: NSApplication.ModalResponse.cancel)
-                        return
-                    }
-                    cancellationHandle.panel.begin { response in
-                        continuation.resume(returning: response)
-                    }
-                }
-            }
-        } onCancel: {
-            Task { @MainActor in
-                cancellationHandle.cancel()
-            }
-        }
+        let response = await presentCancellablePanel(panel)
         return (response, panel.urls)
     }
 
@@ -294,25 +302,10 @@ extension EditorModel {
         ProjectOpenPanelConfiguration.apply(to: panel)
         let validator = ProjectOpenPanelValidator()
         panel.delegate = validator
-        let cancellationHandle = PanelCancellationHandle(panel)
-        let response = await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                MainActor.assumeIsolated {
-                    guard !Task.isCancelled else {
-                        continuation.resume(returning: NSApplication.ModalResponse.cancel)
-                        return
-                    }
-                    panel.begin { [validator] response in
-                        _ = validator
-                        continuation.resume(returning: response)
-                    }
-                }
-            }
-        } onCancel: {
-            Task { @MainActor in
-                cancellationHandle.cancel()
-            }
-        }
+        // Retain the validator for the full presentation lifetime; the panel
+        // holds its delegate weakly.
+        let response = await presentCancellablePanel(panel)
+        _ = validator
         return (response, panel.url)
     }
 
@@ -352,24 +345,7 @@ extension EditorModel {
         }
         panel.nameFieldStringValue = "\(project.name).\(preset.defaultFilenameExtension)"
         panel.canCreateDirectories = true
-        let cancellationHandle = PanelCancellationHandle(panel)
-        let response = await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                MainActor.assumeIsolated {
-                    guard !Task.isCancelled else {
-                        continuation.resume(returning: NSApplication.ModalResponse.cancel)
-                        return
-                    }
-                    cancellationHandle.panel.begin { response in
-                        continuation.resume(returning: response)
-                    }
-                }
-            }
-        } onCancel: {
-            Task { @MainActor in
-                cancellationHandle.cancel()
-            }
-        }
+        let response = await presentCancellablePanel(panel)
         return (response, panel.url)
     }
 
@@ -549,11 +525,7 @@ extension EditorModel {
                 panel.directoryURL = docURL.deletingLastPathComponent()
             }
             panel.canCreateDirectories = true
-            let response = await withCheckedContinuation { continuation in
-                panel.begin { response in
-                    continuation.resume(returning: response)
-                }
-            }
+            let response = await presentCancellablePanel(panel)
             guard response == .OK, let url = panel.url else { return }
             await convertToBundle(to: url)
         }

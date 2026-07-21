@@ -117,9 +117,7 @@ struct RenderQueueDocTests {
     @Test("RenderQueueDoc round-trips through JSON")
     func docRoundTrip() throws {
         var protected = sampleJob(status: .failed)
-        protected.retryUnavailable = true
-        protected.completedOutputPreserved = true
-        protected.outputWriteStarted = true
+        protected.applyDestinationProtection(.completedPreserved)
         let doc = RenderQueueDoc(jobs: [
             sampleJob(status: .queued),
             sampleJob(status: .completed),
@@ -134,6 +132,55 @@ struct RenderQueueDocTests {
         #expect(decoded.jobs[2].retryUnavailable == true)
         #expect(decoded.jobs[2].completedOutputPreserved == true)
         #expect(decoded.jobs[2].outputWriteStarted == true)
+    }
+
+    @Test("Destination protection canonicalizes flags and legacy combinations fail closed")
+    func destinationProtectionPolicy() throws {
+        var job = sampleJob()
+
+        job.applyDestinationProtection(.writeStarted)
+        #expect(job.destinationProtection == .writeStarted)
+        #expect(job.retryUnavailable == nil)
+        #expect(job.completedOutputPreserved == nil)
+        #expect(job.outputWriteStarted == true)
+        #expect(!job.canRetry)
+
+        job.applyDestinationProtection(.completedPreserved)
+        #expect(job.destinationProtection == .completedPreserved)
+        #expect(job.retryUnavailable == true)
+        #expect(job.completedOutputPreserved == true)
+        #expect(job.outputWriteStarted == true)
+
+        job.applyDestinationProtection(.permanentlyUnavailable)
+        #expect(job.destinationProtection == .permanentlyUnavailable)
+        #expect(job.retryUnavailable == true)
+        #expect(job.completedOutputPreserved == nil)
+        #expect(job.outputWriteStarted == nil)
+
+        job.applyDestinationProtection(.reusable)
+        #expect(job.destinationProtection == .reusable)
+        #expect(job.retryUnavailable == nil)
+        #expect(job.completedOutputPreserved == nil)
+        #expect(job.outputWriteStarted == nil)
+        #expect(job.canRetry)
+
+        let encoded = try JSONEncoder().encode(sampleJob())
+        guard var legacyObject = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+            Issue.record("QueueJob test fixture did not encode as a JSON object")
+            return
+        }
+        legacyObject["retryUnavailable"] = true
+        legacyObject["outputWriteStarted"] = true
+        let unavailableData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let unavailable = try JSONDecoder().decode(QueueJob.self, from: unavailableData)
+        #expect(unavailable.destinationProtection == .permanentlyUnavailable)
+        #expect(!unavailable.canRetry)
+
+        legacyObject["completedOutputPreserved"] = true
+        let completedData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let completed = try JSONDecoder().decode(QueueJob.self, from: completedData)
+        #expect(completed.destinationProtection == .completedPreserved)
+        #expect(!completed.canRetry)
     }
 
     @Test("Reconcile: a .running job from disk rewinds to .queued")
@@ -183,7 +230,7 @@ struct RenderQueueDocTests {
                 name: "T", renderWidth: 1280, renderHeight: 720, frameRate: 30,
                 media: [], videoTracks: [], audioTracks: []),
             status: .running,
-            completedOutputPreserved: true)
+            destinationProtection: .completedPreserved)
 
         let reconciled = RenderQueue.reconcile(loaded: [protected]) { resolved in
             #expect(resolved == bookmark)
@@ -209,7 +256,7 @@ struct RenderQueueDocTests {
                 media: [], videoTracks: [], audioTracks: []),
             status: .running,
             progress: 0.8,
-            outputWriteStarted: true)
+            destinationProtection: .writeStarted)
 
         let reconciled = RenderQueue.reconcile(loaded: [job]) { _ in
             Issue.record("Protected output writes must not reach bookmark-based auto-requeue.")
@@ -221,6 +268,29 @@ struct RenderQueueDocTests {
         #expect(reconciled[0].retryUnavailable == true)
         #expect(!reconciled[0].canRetry)
         #expect(reconciled[0].errorMessage?.contains("left untouched") == true)
+    }
+
+    @Test("Reconcile fails a queued job whose destination is permanently unavailable")
+    func reconcileFailsQueuedUnavailableDestination() {
+        let job = QueueJob(
+            preset: BuiltInExportPresets.web720p,
+            outputBookmark: Data([0x0c]),
+            outputDisplayName: "unavailable.mp4",
+            projectSnapshot: ProjectDocument(
+                name: "T", renderWidth: 1280, renderHeight: 720, frameRate: 30,
+                media: [], videoTracks: [], audioTracks: []),
+            status: .queued,
+            destinationProtection: .permanentlyUnavailable)
+
+        let reconciled = RenderQueue.reconcile(loaded: [job]) { _ in
+            Issue.record("Permanently unavailable destinations must not be resolved or requeued")
+            return nil
+        }
+
+        #expect(reconciled[0].status == .failed)
+        #expect(reconciled[0].destinationProtection == .permanentlyUnavailable)
+        #expect(!reconciled[0].canRetry)
+        #expect(reconciled[0].errorMessage?.contains("no longer reusable") == true)
     }
 
     @Test("Reconcile: an unresolvable bookmark flips a queued job to .failed")
@@ -409,14 +479,15 @@ struct RenderQueueTests {
         job.status = .failed
         job.errorMessage = "Rendered movie was preserved."
         job.progress = 0.75
-        job.completedOutputPreserved = true
+        job.applyDestinationProtection(.completedPreserved)
         let queue = RenderQueue(jobs: [job], persistsToDisk: false)
         let before = queue.jobs[0]
 
         queue.retry(jobID: job.id, autoStart: false)
 
         #expect(queue.jobs[0] == before)
-        #expect(queue.jobs[0].retryUnavailable == nil)
+        #expect(queue.jobs[0].destinationProtection == .completedPreserved)
+        #expect(queue.jobs[0].retryUnavailable == true)
         #expect(!queue.jobs[0].canRetry)
         #expect(queue.statusMessage?.contains("new output destination") == true)
     }
@@ -532,7 +603,7 @@ struct RenderQueueTests {
             outputDisplayName: outputURL.lastPathComponent,
             projectSnapshot: snapshot(),
             status: .failed,
-            outputWriteStarted: true)
+            destinationProtection: .writeStarted)
         let queue = RenderQueue(jobs: [job], persistsToDisk: false)
 
         let restored = queue.restoreOutputReservation(
@@ -651,7 +722,7 @@ struct RenderQueueTests {
             outputDisplayName: outputURL.lastPathComponent,
             projectSnapshot: snapshot(),
             status: .running,
-            outputWriteStarted: true)
+            destinationProtection: .writeStarted)
         let queue = RenderQueue(
             jobs: [job],
             persistsToDisk: true,
