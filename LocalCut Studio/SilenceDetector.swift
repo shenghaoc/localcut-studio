@@ -11,6 +11,12 @@ import LocalCutCore
 /// pure DSP in LocalCutCore.
 actor SilenceDetector {
     private let targetSampleRate: Double = 22_050
+    /// Practical decode budget: long enough for tutorial cuts, short enough to
+    /// bound memory when metadata or media is hostile/corrupt.
+    private static let maxDecodeSeconds: Double = 7_200 // 2 hours
+    private var maxDecodeSamples: Int {
+        Int(min(Self.maxDecodeSeconds * targetSampleRate, Double(Int.max / 2)))
+    }
 
     /// Runs silence detection on the audio at the given URL.
     ///
@@ -56,15 +62,25 @@ actor SilenceDetector {
         }
 
         let reader = try AVAssetReader(asset: asset)
-        let requestedTimeRange = timeRange.flatMap { range -> CMTimeRange? in
-            guard range.start.isNumeric,
-                  range.duration.isNumeric,
-                  range.duration > .zero else { return nil }
-            return range
+        // Sanitize + clamp the decode window *before* configuring the reader so
+        // untrusted duration metadata cannot force a multi-day sample read.
+        // Caller-supplied ranges are never rewritten into a full-asset fallback —
+        // if the window is invalid after sanitization, the sample budget alone
+        // bounds the loop.
+        let decodeTimeRange: CMTimeRange?
+        if let timeRange {
+            decodeTimeRange = timeRange.sanitized(maxDurationSeconds: Self.maxDecodeSeconds)
+        } else if let assetDuration = try? await asset.load(.duration).sanitized,
+                  assetDuration > .zero {
+            decodeTimeRange = CMTimeRange(start: .zero, duration: assetDuration)
+                .sanitized(maxDurationSeconds: Self.maxDecodeSeconds)
+        } else {
+            decodeTimeRange = nil
         }
-        if let requestedTimeRange {
-            reader.timeRange = requestedTimeRange
+        if let decodeTimeRange {
+            reader.timeRange = decodeTimeRange
         }
+
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: targetSampleRate,
@@ -85,25 +101,27 @@ actor SilenceDetector {
                 reader.error?.localizedDescription ?? "Unknown reader error")
         }
 
+        let sampleBudget = maxDecodeSamples
         var samples: [Float] = []
-        let duration: CMTime?
-        if let requestedTimeRange {
-            duration = requestedTimeRange.duration.sanitized
-        } else {
-            duration = try? await asset.load(.duration).sanitized
-        }
-        if let duration, duration.seconds.isFinite, duration.seconds > 0 {
-            let cappedSeconds = min(duration.seconds, 7200) // 2 hours cap
-            let estimatedSamples = Int(cappedSeconds * targetSampleRate)
-            if estimatedSamples > 0 {
-                samples.reserveCapacity(estimatedSamples)
+        if let decodeTimeRange {
+            let estimated = Int(min(
+                decodeTimeRange.duration.seconds * targetSampleRate,
+                Double(sampleBudget)))
+            if estimated > 0 {
+                samples.reserveCapacity(estimated)
             }
         }
 
-        while reader.status == .reading {
+        while reader.status == .reading, samples.count < sampleBudget {
             try Task.checkCancellation()
             guard let buffer = output.copyNextSampleBuffer() else { break }
-            samples.append(contentsOf: floats(from: buffer))
+            let chunk = floats(from: buffer)
+            let remaining = sampleBudget - samples.count
+            if chunk.count > remaining {
+                samples.append(contentsOf: chunk.prefix(remaining))
+                break
+            }
+            samples.append(contentsOf: chunk)
         }
 
         if reader.status == .failed || reader.status == .cancelled {
