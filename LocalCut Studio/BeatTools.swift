@@ -15,6 +15,12 @@ import LocalCutCore
 /// The `analyze` method is async because it performs AVFoundation I/O.
 struct BeatAnalyzer {
     private let targetSampleRate: Double = 22_050
+    /// Practical decode budget: one hour covers any realistic music source and
+    /// bounds memory when metadata or media is hostile/corrupt.
+    private static let maxDecodeSeconds: Double = 3_600
+    private var maxDecodeSamples: Int {
+        Int(min(Self.maxDecodeSeconds * targetSampleRate, Double(Int.max / 2)))
+    }
 
     func analyze(url: URL) async throws -> BeatAnalysis {
         let samples = try await decodeMonoSamples(from: url)
@@ -28,6 +34,15 @@ struct BeatAnalyzer {
         }
 
         let reader = try AVAssetReader(asset: asset)
+        // Bound the reader window from sanitized metadata before startReading so
+        // a corrupt multi-day duration cannot force an unbounded decode.
+        let assetDuration = try? await asset.load(.duration).sanitized
+        if let assetDuration, assetDuration > .zero,
+           let bounded = CMTimeRange(start: .zero, duration: assetDuration)
+            .sanitized(maxDurationSeconds: Self.maxDecodeSeconds) {
+            reader.timeRange = bounded
+        }
+
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: targetSampleRate,
@@ -45,23 +60,22 @@ struct BeatAnalyzer {
             throw BeatAnalysisError.readerFailed(reader.error?.localizedDescription ?? "unknown error")
         }
 
+        let sampleBudget = maxDecodeSamples
         var samples: [Float] = []
-        let duration = try? await asset.load(.duration)
-        if let duration, duration.seconds.isFinite, duration.seconds > 0 {
+        if let assetDuration, assetDuration.seconds.isFinite, assetDuration.seconds > 0 {
             // Cap the speculative reservation: a corrupt or hostile asset can
             // report an implausibly large duration, and Int(seconds * rate) would
             // otherwise trap on overflow or balloon allocation before the reader
             // has validated a single sample. One hour covers any realistic source.
-            let cappedSeconds = min(duration.seconds, 3600)
+            let cappedSeconds = min(assetDuration.seconds, Self.maxDecodeSeconds)
             let estimatedSamplesDouble = cappedSeconds * targetSampleRate
-            // Guard against overflow: on macOS Int is 64-bit, so this is safe
-            // for any realistic duration, but we clamp defensively.
-            let estimatedSamples = Int(min(estimatedSamplesDouble, Double(Int.max / 2)))
+            let estimatedSamples = Int(min(estimatedSamplesDouble, Double(sampleBudget)))
             if estimatedSamples > 0 {
                 samples.reserveCapacity(estimatedSamples)
             }
         }
-        while reader.status == .reading {
+
+        while reader.status == .reading, samples.count < sampleBudget {
             try Task.checkCancellation()
             guard let buffer = output.copyNextSampleBuffer() else { break }
             // Validate the actual sample rate matches the requested rate.
@@ -75,7 +89,13 @@ struct BeatAnalyzer {
                         "Audio sample rate mismatch: requested \(targetSampleRate) Hz, got \(actualRate) Hz")
                 }
             }
-            samples.append(contentsOf: floats(from: buffer))
+            let chunk = floats(from: buffer)
+            let remaining = sampleBudget - samples.count
+            if chunk.count > remaining {
+                samples.append(contentsOf: chunk.prefix(remaining))
+                break
+            }
+            samples.append(contentsOf: chunk)
         }
 
         if reader.status == .failed || reader.status == .cancelled {

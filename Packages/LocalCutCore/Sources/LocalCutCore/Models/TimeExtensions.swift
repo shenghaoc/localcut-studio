@@ -22,6 +22,36 @@ extension CMTime {
     }
 }
 
+extension CMTimeRange {
+    /// Sanitizes start/duration and clamps duration to `maxDurationSeconds`.
+    ///
+    /// Used by offline audio decode paths (beat analysis, silence detection) so
+    /// `AVAssetReader.timeRange` is never configured from untrusted metadata and
+    /// decode windows stay within a practical memory budget.
+    ///
+    /// - Returns: A bounded range, or `nil` when the input is non-numeric or
+    ///   collapses to empty after sanitization / clamping.
+    public func sanitized(maxDurationSeconds: Double) -> CMTimeRange? {
+        guard start.isNumeric,
+              duration.isNumeric,
+              maxDurationSeconds.isFinite,
+              maxDurationSeconds > 0 else {
+            return nil
+        }
+        let safeStart = start.sanitized
+        let safeDuration = duration.sanitized
+        guard safeDuration > .zero else { return nil }
+
+        let timescale = max(duration.timescale, 600)
+        let maxDuration = CMTime(seconds: maxDurationSeconds, preferredTimescale: timescale)
+        guard maxDuration.isNumeric, maxDuration > .zero else { return nil }
+
+        let clampedDuration = CMTimeMinimum(safeDuration, maxDuration)
+        guard clampedDuration > .zero else { return nil }
+        return CMTimeRange(start: safeStart, duration: clampedDuration)
+    }
+}
+
 extension CGSize {
     /// Upper bound (in pixels) for a plausible media dimension. Beyond this,
     /// values are treated as corrupt.

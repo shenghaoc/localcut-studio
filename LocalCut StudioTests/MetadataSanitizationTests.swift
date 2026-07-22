@@ -40,6 +40,55 @@ struct MetadataSanitizationTests {
         #expect(CMTime(value: Int64.max, timescale: 1).sanitized == .zero)
     }
 
+    // MARK: - CMTimeRange decode windows
+
+    @Test("Valid short range passes through unchanged under decode cap")
+    func timeRangePassesValid() {
+        let range = CMTimeRange(
+            start: CMTime(seconds: 1, preferredTimescale: 600),
+            duration: CMTime(seconds: 5, preferredTimescale: 600))
+        let bounded = range.sanitized(maxDurationSeconds: 7_200)
+        #expect(bounded?.start == range.start)
+        #expect(bounded?.duration == range.duration)
+    }
+
+    @Test("Decode-window sanitization clamps duration to the analysis budget")
+    func timeRangeClampsDuration() {
+        let range = CMTimeRange(
+            start: .zero,
+            duration: CMTime(seconds: 10_000, preferredTimescale: 600))
+        let bounded = range.sanitized(maxDurationSeconds: 3_600)
+        #expect(bounded != nil)
+        #expect(abs((bounded?.duration.seconds ?? -1) - 3_600) < 0.01)
+        #expect(bounded?.start == .zero)
+    }
+
+    @Test("Non-numeric or empty ranges collapse to nil for decode windows")
+    func timeRangeRejectsInvalid() {
+        #expect(CMTimeRange.invalid.sanitized(maxDurationSeconds: 3_600) == nil)
+        #expect(
+            CMTimeRange(start: .zero, duration: .zero)
+                .sanitized(maxDurationSeconds: 3_600) == nil)
+        #expect(
+            CMTimeRange(start: .zero, duration: CMTime.positiveInfinity)
+                .sanitized(maxDurationSeconds: 3_600) == nil)
+        #expect(
+            CMTimeRange(
+                start: .zero,
+                duration: CMTime(seconds: 10, preferredTimescale: 600))
+            .sanitized(maxDurationSeconds: -1) == nil)
+    }
+
+    @Test("Implausibly large finite duration collapses the decode window to nil")
+    func timeRangeRejectsEnormousDuration() {
+        let range = CMTimeRange(
+            start: .zero,
+            duration: CMTime(value: Int64.max, timescale: 1))
+        // `.sanitized` maps the duration to zero, so the window is rejected
+        // rather than rewritten into an unbounded decode.
+        #expect(range.sanitized(maxDurationSeconds: 7_200) == nil)
+    }
+
     // MARK: - CGSize
 
     @Test("Valid finite size passes through unchanged")
