@@ -44,3 +44,7 @@ Append a dated entry whenever you learn something about keeping LocalCut Studio 
 ## 2026-08-08 - Isolate static grid in SpeedCurveEditor to prevent full Canvas redraws
 **Learning:** Dragging handles in the `SpeedCurveEditor` updates the high-frequency state (`clip.speedCurve`), causing the entire `Canvas` (including static elements like the grid) to re-evaluate constantly. Equatable isolation must still invalidate on appearance changes when the canvas samples dynamic system colors.
 **Action:** Extract static background elements (like the grid) into an isolated `Equatable` `Canvas` view layered under the dynamic components using a `ZStack`, and include `colorScheme` in the equatable inputs so light/dark switches still redraw.
+
+## 2026-08-11 - Isolate Callout Keyframe Section to prevent InspectorView redraws
+**Learning:** Reading `model.selectedCalloutLocalPlayheadTime` directly within `ScreencastInspectorView.body`'s call chain (through `calloutKeyframeEditor` and `calloutKeyframeValueEditor`) causes the entire inspector form to re-evaluate 60 times a second during playback when a callout is selected.
+**Action:** Extract the callout keyframe section into isolated `CalloutKeyframeEditorView` and `CalloutKeyframeValueEditorView` structs, so that only the leaf views re-render when `model.currentTime` (via `selectedCalloutLocalPlayheadTime`) changes.

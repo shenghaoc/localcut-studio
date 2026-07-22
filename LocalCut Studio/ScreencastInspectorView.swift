@@ -320,81 +320,7 @@ struct ScreencastInspectorView: View {
                     .accessibilityHidden(true)
             }
 
-            calloutKeyframeEditor
-        }
-    }
-
-    @ViewBuilder
-    private var calloutKeyframeEditor: some View {
-        DisclosureGroup("Transform Keyframes") {
-            LabeledContent("Local Time") {
-                Text(model.selectedCalloutLocalPlayheadTime.map { TimeFormatting.timecode($0.seconds) } ?? "--:--")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            LabeledContent("Count") {
-                Text("\(model.selectedCalloutTransformKeyframeCount)")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-
-            KeyframeNavBar(
-                keyframeKind: "callout transform",
-                canGoToPrevious: model.hasPreviousSelectedCalloutTransformKeyframe,
-                canAddOrUpdate: model.selectedCalloutLocalPlayheadTime != nil,
-                canRemove: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
-                canGoToNext: model.hasNextSelectedCalloutTransformKeyframe,
-                hasKeyframeAtPlayhead: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
-                onPrevious: { model.seekToPreviousSelectedCalloutTransformKeyframe() },
-                onAddOrUpdate: { model.addOrUpdateSelectedCalloutTransformKeyframe() },
-                onRemove: { model.removeSelectedCalloutTransformKeyframe() },
-                onNext: { model.seekToNextSelectedCalloutTransformKeyframe() }
-            )
-
-            if model.selectedCalloutTransformKeyframeAtPlayhead != nil {
-                calloutKeyframeValueEditor
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var calloutKeyframeValueEditor: some View {
-        let value = model.selectedCalloutTransformAtPlayhead
-        LabeledContent("Keyframe X") {
-            TextField("X", value: Binding(
-                get: { Double(model.selectedCalloutTransformAtPlayhead.tx) },
-                set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(translateX: Float($0))) }),
-                      format: .number.precision(.fractionLength(0)))
-                .frame(width: numericFieldWidth)
-                .multilineTextAlignment(.trailing)
-        }
-        LabeledContent("Keyframe Y") {
-            TextField("Y", value: Binding(
-                get: { Double(model.selectedCalloutTransformAtPlayhead.ty) },
-                set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(translateY: Float($0))) }),
-                      format: .number.precision(.fractionLength(0)))
-                .frame(width: numericFieldWidth)
-                .multilineTextAlignment(.trailing)
-        }
-        HStack {
-            Text("Keyframe Scale")
-                .accessibilityHidden(true)
-            Slider(value: Binding(
-                get: { Double(model.selectedCalloutTransformAtPlayhead.decomposedScale) },
-                set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(scale: Float($0))) }),
-                   in: 0.1...4, step: 0.05)
-                .accessibilityLabel("Keyframe Scale")
-                .accessibilityValue(String(format: "%.2fx", model.selectedCalloutTransformAtPlayhead.decomposedScale))
-        }
-        HStack {
-            Text("Keyframe Rotation")
-                .accessibilityHidden(true)
-            Slider(value: Binding(
-                get: { Double(model.selectedCalloutTransformAtPlayhead.decomposedRotation) * 180 / Double.pi },
-                set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(rotationDegrees: Float($0))) }),
-                   in: -180...180, step: 1)
-                .accessibilityLabel("Keyframe Rotation")
-                .accessibilityValue("\(Int((Double(model.selectedCalloutTransformAtPlayhead.decomposedRotation) * 180 / Double.pi).rounded())) degrees")
+            CalloutKeyframeEditorView(model: model, numericFieldWidth: numericFieldWidth)
         }
     }
 
@@ -552,6 +478,94 @@ struct AutoZoomReviewSheet: View {
             Button("Skip") {
                 model.skipAutoZoomProposal(proposal)
             }
+        }
+    }
+}
+
+/// Extracted view to isolate high-frequency `@Observable` state updates
+/// (`model.currentTime` via `selectedCalloutLocalPlayheadTime`) from the main
+/// `ScreencastInspectorView.body`, preventing redundant full form redraws during playback.
+private struct CalloutKeyframeEditorView: View {
+    let model: EditorModel
+    let numericFieldWidth: CGFloat
+
+    var body: some View {
+        DisclosureGroup("Transform Keyframes") {
+            LabeledContent("Local Time") {
+                Text(model.selectedCalloutLocalPlayheadTime.map { TimeFormatting.timecode($0.seconds) } ?? "--:--")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            LabeledContent("Count") {
+                Text("\(model.selectedCalloutTransformKeyframeCount)")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+            KeyframeNavBar(
+                keyframeKind: "callout transform",
+                canGoToPrevious: model.hasPreviousSelectedCalloutTransformKeyframe,
+                canAddOrUpdate: model.selectedCalloutLocalPlayheadTime != nil,
+                canRemove: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
+                canGoToNext: model.hasNextSelectedCalloutTransformKeyframe,
+                hasKeyframeAtPlayhead: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
+                onPrevious: { model.seekToPreviousSelectedCalloutTransformKeyframe() },
+                onAddOrUpdate: { model.addOrUpdateSelectedCalloutTransformKeyframe() },
+                onRemove: { model.removeSelectedCalloutTransformKeyframe() },
+                onNext: { model.seekToNextSelectedCalloutTransformKeyframe() }
+            )
+
+            if model.selectedCalloutTransformKeyframeAtPlayhead != nil {
+                CalloutKeyframeValueEditorView(model: model, numericFieldWidth: numericFieldWidth)
+            }
+        }
+    }
+}
+
+/// Extracted view to isolate high-frequency `@Observable` state updates
+/// (`model.currentTime` via `selectedCalloutLocalPlayheadTime`) from the main
+/// `ScreencastInspectorView.body`, preventing redundant full form redraws during playback.
+private struct CalloutKeyframeValueEditorView: View {
+    let model: EditorModel
+    let numericFieldWidth: CGFloat
+
+    var body: some View {
+        let value = model.selectedCalloutTransformAtPlayhead
+        LabeledContent("Keyframe X") {
+            TextField("X", value: Binding(
+                get: { Double(model.selectedCalloutTransformAtPlayhead.tx) },
+                set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(translateX: Float($0))) }),
+                      format: .number.precision(.fractionLength(0)))
+                .frame(width: numericFieldWidth)
+                .multilineTextAlignment(.trailing)
+        }
+        LabeledContent("Keyframe Y") {
+            TextField("Y", value: Binding(
+                get: { Double(model.selectedCalloutTransformAtPlayhead.ty) },
+                set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(translateY: Float($0))) }),
+                      format: .number.precision(.fractionLength(0)))
+                .frame(width: numericFieldWidth)
+                .multilineTextAlignment(.trailing)
+        }
+        HStack {
+            Text("Keyframe Scale")
+                .accessibilityHidden(true)
+            Slider(value: Binding(
+                get: { Double(model.selectedCalloutTransformAtPlayhead.decomposedScale) },
+                set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(scale: Float($0))) }),
+                   in: 0.1...4, step: 0.05)
+                .accessibilityLabel("Keyframe Scale")
+                .accessibilityValue(String(format: "%.2fx", model.selectedCalloutTransformAtPlayhead.decomposedScale))
+        }
+        HStack {
+            Text("Keyframe Rotation")
+                .accessibilityHidden(true)
+            Slider(value: Binding(
+                get: { Double(model.selectedCalloutTransformAtPlayhead.decomposedRotation) * 180 / Double.pi },
+                set: { model.updateSelectedCalloutTransformKeyframeValue(value.replacing(rotationDegrees: Float($0))) }),
+                   in: -180...180, step: 1)
+                .accessibilityLabel("Keyframe Rotation")
+                .accessibilityValue("\(Int((Double(model.selectedCalloutTransformAtPlayhead.decomposedRotation) * 180 / Double.pi).rounded())) degrees")
         }
     }
 }
