@@ -320,7 +320,7 @@ struct ScreencastInspectorView: View {
                     .accessibilityHidden(true)
             }
 
-            CalloutKeyframeEditorView(model: model, numericFieldWidth: numericFieldWidth)
+            CalloutKeyframeEditorView(model: model)
         }
     }
 
@@ -482,14 +482,16 @@ struct AutoZoomReviewSheet: View {
     }
 }
 
-/// Extracted view to isolate high-frequency `@Observable` state updates
-/// (`model.currentTime` via `selectedCalloutLocalPlayheadTime`) from the main
-/// `ScreencastInspectorView.body`, preventing redundant full form redraws during playback.
+/// Isolates high-frequency `@Observable` updates (`model.currentTime` via
+/// `selectedCalloutLocalPlayheadTime`) from `ScreencastInspectorView.body`, so
+/// only this leaf re-renders during playback when a callout is selected.
 private struct CalloutKeyframeEditorView: View {
     let model: EditorModel
-    let numericFieldWidth: CGFloat
+    @ScaledMetric(relativeTo: .body) private var numericFieldWidth: CGFloat = 72
 
     var body: some View {
+        let hasKeyframe = model.selectedCalloutTransformKeyframeAtPlayhead != nil
+
         DisclosureGroup("Transform Keyframes") {
             LabeledContent("Local Time") {
                 Text(model.selectedCalloutLocalPlayheadTime.map { TimeFormatting.timecode($0.seconds) } ?? "--:--")
@@ -506,30 +508,23 @@ private struct CalloutKeyframeEditorView: View {
                 keyframeKind: "callout transform",
                 canGoToPrevious: model.hasPreviousSelectedCalloutTransformKeyframe,
                 canAddOrUpdate: model.selectedCalloutLocalPlayheadTime != nil,
-                canRemove: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
+                canRemove: hasKeyframe,
                 canGoToNext: model.hasNextSelectedCalloutTransformKeyframe,
-                hasKeyframeAtPlayhead: model.selectedCalloutTransformKeyframeAtPlayhead != nil,
+                hasKeyframeAtPlayhead: hasKeyframe,
                 onPrevious: { model.seekToPreviousSelectedCalloutTransformKeyframe() },
                 onAddOrUpdate: { model.addOrUpdateSelectedCalloutTransformKeyframe() },
                 onRemove: { model.removeSelectedCalloutTransformKeyframe() },
                 onNext: { model.seekToNextSelectedCalloutTransformKeyframe() }
             )
 
-            if model.selectedCalloutTransformKeyframeAtPlayhead != nil {
-                CalloutKeyframeValueEditorView(model: model, numericFieldWidth: numericFieldWidth)
+            if hasKeyframe {
+                keyframeValueEditor
             }
         }
     }
-}
 
-/// Extracted view to isolate high-frequency `@Observable` state updates
-/// (`model.currentTime` via `selectedCalloutLocalPlayheadTime`) from the main
-/// `ScreencastInspectorView.body`, preventing redundant full form redraws during playback.
-private struct CalloutKeyframeValueEditorView: View {
-    let model: EditorModel
-    let numericFieldWidth: CGFloat
-
-    var body: some View {
+    @ViewBuilder
+    private var keyframeValueEditor: some View {
         let value = model.selectedCalloutTransformAtPlayhead
         LabeledContent("Keyframe X") {
             TextField("X", value: Binding(
