@@ -48,3 +48,6 @@ Append a dated entry whenever you learn something about keeping LocalCut Studio 
 ## 2026-08-11 - Isolate Callout Keyframe Section to prevent ScreencastInspectorView redraws
 **Learning:** Reading `model.selectedCalloutLocalPlayheadTime` directly within `ScreencastInspectorView.body`'s call chain (through `calloutKeyframeEditor`) causes the entire inspector form to re-evaluate 60 times a second during playback when a callout is selected.
 **Action:** Extract the callout keyframe section into an isolated `CalloutKeyframeEditorView` struct, so that only that leaf re-renders when `model.currentTime` (via `selectedCalloutLocalPlayheadTime`) changes.
+## 2026-08-20 - Batch Canvas drawing operations in Scopes
+**Learning:** Creating a new `Path` and executing a `GraphicsContext.fill` call for every single data point in a dense visualisation (like a waveform or vectorscope with thousands of points) causes significant CPU overhead during 30fps/60fps redraws.
+**Action:** Always batch Canvas drawing. For uniform paths (like all vectorscope dots), append to a single `Path` instance and execute one `fill`. For varying properties like opacity (as in waveform bins), quantise the property values into buckets (e.g., 64 levels) and map them to grouped `Path` instances, performing one `fill` per unique property bucket.

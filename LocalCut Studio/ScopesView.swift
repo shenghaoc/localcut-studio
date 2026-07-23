@@ -156,6 +156,7 @@ private struct ScopeTraceView: View {
         // Each column's bins are drawn vertically: bin index 0 → bottom, last → top.
         // The bin's normalised intensity (0…1) drives both opacity and width.
         let columnSpacing = frameRect.width / CGFloat(sample.waveform.count)
+        var pathsByOpacity: [Double: Path] = [:]
         for column in sample.waveform {
             let colX = frameRect.minX + CGFloat(column.x) * frameRect.width
             for (binIndex, value) in column.bins.enumerated() where value > 0.02 {
@@ -166,8 +167,16 @@ private struct ScopeTraceView: View {
                     y: y - 1,
                     width: columnSpacing,
                     height: 2)
-                context.fill(Path(dot), with: .color(.green.opacity(Double(value))))
+
+                let opacity = Double(Int(value * 64)) / 64.0
+                var path = pathsByOpacity[opacity] ?? Path()
+                path.addRect(dot)
+                pathsByOpacity[opacity] = path
             }
+        }
+
+        for (opacity, path) in pathsByOpacity {
+            context.fill(path, with: .color(.green.opacity(opacity)))
         }
     }
 
@@ -182,11 +191,13 @@ private struct ScopeTraceView: View {
             return
         }
 
+        var path = Path()
         for point in sample.vectorscope {
             let center = vectorscopePoint(point, in: plot)
             let dot = CGRect(x: center.x - 0.75, y: center.y - 0.75, width: 1.5, height: 1.5)
-            context.fill(Path(ellipseIn: dot), with: .color(.green.opacity(0.45)))
+            path.addEllipse(in: dot)
         }
+        context.fill(path, with: .color(.green.opacity(0.45)))
     }
 
     private func placeholder(into context: GraphicsContext, size: CGSize, label: String) {
