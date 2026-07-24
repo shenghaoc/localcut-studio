@@ -237,6 +237,42 @@ func unknownWorkingSpaceDecodesAsSRGB() throws {
 
 }
 
+// MARK: - Scope trace batching (pure opacity quantisation)
+
+@Suite("Colour management — scope trace batching")
+struct ScopeTraceBatchingTests {
+
+    @Test("quantisedOpacity maps unit intensity onto the shared bucket grid")
+    func quantisedOpacityBuckets() {
+        #expect(ScopeTraceBatching.quantisedOpacity(intensity: 0) == 1.0 / 64.0)
+        #expect(ScopeTraceBatching.quantisedOpacity(intensity: 1) == 1)
+        #expect(ScopeTraceBatching.quantisedOpacity(intensity: 0.5) == 0.5)
+        // Exact bucket centres round-trip; values just below the next step stay put.
+        #expect(ScopeTraceBatching.quantisedOpacity(intensity: 21.0 / 64.0) == 21.0 / 64.0)
+        #expect(ScopeTraceBatching.quantisedOpacity(intensity: 22.0 / 64.0 - 1e-9) == 21.0 / 64.0)
+    }
+
+    @Test("densityOpacity preserves source-over accumulation across hit counts")
+    func densityOpacityAccumulates() {
+        let single = ScopeTraceBatching.densityOpacity(hitCount: 1)
+        let double = ScopeTraceBatching.densityOpacity(hitCount: 2)
+        let many = ScopeTraceBatching.densityOpacity(hitCount: 32)
+
+        // One hit ≈ base 0.45 (quantised); more hits must read brighter.
+        #expect(single > 0.4)
+        #expect(single < 0.5)
+        #expect(double > single)
+        #expect(many > double)
+        #expect(many <= 1)
+
+        #expect(ScopeTraceBatching.densityOpacity(hitCount: 0) == 0)
+
+        // Exact source-over for N=2 before quantisation: 1 - (1 - 0.45)^2 = 0.6975
+        let expectedDouble = 1.0 - pow(1.0 - 0.45, 2.0)
+        #expect(abs(double - ScopeTraceBatching.quantisedOpacity(intensity: expectedDouble)) < 1e-12)
+    }
+}
+
 // MARK: - Sampler gate (serialized — touches ScopeSampler.shared)
 
 @Suite("Colour management — sampler gate", .serialized)

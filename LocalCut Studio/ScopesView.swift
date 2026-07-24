@@ -38,6 +38,29 @@ private func vectorscopePoint(_ point: VectorPoint, in plot: CGRect) -> CGPoint 
                    y: plot.midY - CGFloat(point.v) * radius)
 }
 
+/// Opacity quantisation steps shared by waveform intensity and vectorscope density fills.
+enum ScopeTraceBatching {
+    static let opacityBuckets = 64
+    static let vectorscopeBaseOpacity = 0.45
+    static let vectorscopeCellSize: CGFloat = 1.5
+
+    /// Quantises a 0…1 intensity into a bucketed opacity in `(0, 1]`.
+    /// Empty / near-zero inputs are expected to be filtered by the caller.
+    static func quantisedOpacity(intensity: Double) -> Double {
+        let bucket = min(opacityBuckets, max(1, Int(intensity * Double(opacityBuckets))))
+        return Double(bucket) / Double(opacityBuckets)
+    }
+
+    /// Source-over stack of `count` fills at `baseOpacity`, then quantised into
+    /// the shared bucket grid so batched Canvas fills stay ≤ `opacityBuckets`.
+    /// Models the pre-batching per-dot vectorscope look: dense cells read brighter.
+    static func densityOpacity(hitCount: Int, baseOpacity: Double = vectorscopeBaseOpacity) -> Double {
+        guard hitCount > 0 else { return 0 }
+        let accumulated = 1.0 - pow(1.0 - baseOpacity, Double(hitCount))
+        return quantisedOpacity(intensity: accumulated)
+    }
+}
+
 /// The scopes panel: a `Picker` over scope kinds plus a `Canvas` drawing the
 /// latest sample published by `ScopeSampler.shared`.
 ///
@@ -156,6 +179,7 @@ private struct ScopeTraceView: View {
         // Each column's bins are drawn vertically: bin index 0 → bottom, last → top.
         // The bin's normalised intensity (0…1) drives both opacity and width.
         let columnSpacing = frameRect.width / CGFloat(sample.waveform.count)
+        var pathsByOpacity: [Double: Path] = [:]
         for column in sample.waveform {
             let colX = frameRect.minX + CGFloat(column.x) * frameRect.width
             for (binIndex, value) in column.bins.enumerated() where value > 0.02 {
@@ -166,8 +190,18 @@ private struct ScopeTraceView: View {
                     y: y - 1,
                     width: columnSpacing,
                     height: 2)
-                context.fill(Path(dot), with: .color(.green.opacity(Double(value))))
+
+                // Quantise intensity into a fixed bucket count so thousands of
+                // bins collapse into ≤64 fill calls without Double-keyed drift.
+                let opacity = ScopeTraceBatching.quantisedOpacity(intensity: Double(value))
+                var path = pathsByOpacity[opacity] ?? Path()
+                path.addRect(dot)
+                pathsByOpacity[opacity] = path
             }
+        }
+
+        for (opacity, path) in pathsByOpacity {
+            context.fill(path, with: .color(.green.opacity(opacity)))
         }
     }
 
@@ -182,10 +216,44 @@ private struct ScopeTraceView: View {
             return
         }
 
+        // A single Path fills all subpaths in one alpha pass, which flattens
+        // overlapping ellipses. Quantise plot space, count hits per cell, and
+        // map the count through source-over accumulation of `baseOpacity`:
+        //   alpha(N) = 1 - (1 - base)^N
+        // Then batch fills by quantised opacity (≤64 draws) so dense chroma
+        // clusters still read brighter while CoreGraphics cost stays low.
+        let cellSize = ScopeTraceBatching.vectorscopeCellSize
+        let gridW = max(1, Int(ceil(plot.width / cellSize)))
+        let gridH = max(1, Int(ceil(plot.height / cellSize)))
+        var density: [Int: Int] = [:]
+        density.reserveCapacity(min(sample.vectorscope.count, gridW * gridH))
+
         for point in sample.vectorscope {
             let center = vectorscopePoint(point, in: plot)
-            let dot = CGRect(x: center.x - 0.75, y: center.y - 0.75, width: 1.5, height: 1.5)
-            context.fill(Path(ellipseIn: dot), with: .color(.green.opacity(0.45)))
+            let qx = min(gridW - 1, max(0, Int(floor((center.x - plot.minX) / cellSize))))
+            let qy = min(gridH - 1, max(0, Int(floor((center.y - plot.minY) / cellSize))))
+            density[qy * gridW + qx, default: 0] += 1
+        }
+
+        var pathsByOpacity: [Double: Path] = [:]
+
+        for (key, count) in density {
+            let qx = key % gridW
+            let qy = key / gridW
+            let center = CGPoint(
+                x: plot.minX + (CGFloat(qx) + 0.5) * cellSize,
+                y: plot.minY + (CGFloat(qy) + 0.5) * cellSize)
+            let half = cellSize / 2
+            let dot = CGRect(x: center.x - half, y: center.y - half, width: cellSize, height: cellSize)
+            let opacity = ScopeTraceBatching.densityOpacity(hitCount: count)
+
+            var path = pathsByOpacity[opacity] ?? Path()
+            path.addEllipse(in: dot)
+            pathsByOpacity[opacity] = path
+        }
+
+        for (opacity, path) in pathsByOpacity {
+            context.fill(path, with: .color(.green.opacity(opacity)))
         }
     }
 
