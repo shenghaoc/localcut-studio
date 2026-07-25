@@ -53,3 +53,6 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 
 **Learning:** Buttons built with `Label(..., systemImage: ...)` in property editors that act as icon-only controls must explicitly use `.labelStyle(.iconOnly)`. This visually hides the text so they render strictly as icons, matching the design of sibling `Image` buttons, while preserving the text for VoiceOver screen readers.
 **Action:** Add `.labelStyle(.iconOnly)` to `Label`-based buttons in toolbars and keyframe navigators to ensure they behave properly as icon-only controls.
+## $(date +%Y-%m-%d) - Add .labelStyle(.iconOnly) to toolbar buttons
+**Learning:** In SwiftUI toolbars, explicitly specifying `.labelStyle(.iconOnly)` on buttons using `Label("Title", systemImage: "...")` is a best-practice to enforce the intended visual style (hiding the text) while preserving accessibility, ensuring VoiceOver automatically reads the text and tooltips remain functional.
+**Action:** Always add `.labelStyle(.iconOnly)` to `Label` components inside toolbar or other compact contexts where only the icon should be visible, instead of using an accessible, invisible text container next to the image.

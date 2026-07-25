@@ -440,6 +440,7 @@ struct EditorView: View {
             } label: {
                 Label("Split", systemImage: "scissors")
             }
+            .labelStyle(.iconOnly)
             .disabled(model.selectedClipID == nil)
             .help("Split clip at playhead")
 
@@ -448,6 +449,7 @@ struct EditorView: View {
             } label: {
                 Label("Add Transition", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right")
             }
+            .labelStyle(.iconOnly)
             .disabled(!model.canAddTransitionAtSelection)
             .help("Add transition at selected cut")
             .accessibilityLabel("Add transition at selected cut")
@@ -461,6 +463,7 @@ struct EditorView: View {
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .labelStyle(.iconOnly)
             .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             .help("Delete selected clip or transition")
 
@@ -471,6 +474,7 @@ struct EditorView: View {
                     } label: {
                         Label("Resume", systemImage: "play.circle.fill")
                     }
+                    .labelStyle(.iconOnly)
                     .help("Resume recording")
                 } else {
                     Button { [weak model] in
@@ -478,6 +482,7 @@ struct EditorView: View {
                     } label: {
                         Label("Pause", systemImage: "pause.circle.fill")
                     }
+                    .labelStyle(.iconOnly)
                     .help("Pause recording")
                 }
                 Button {
@@ -485,6 +490,7 @@ struct EditorView: View {
                 } label: {
                     Label("Stop", systemImage: "stop.circle.fill")
                 }
+                .labelStyle(.iconOnly)
                 .disabled(model.isStartingRecording || model.isPausingRecording || model.isStoppingRecording)
                 .help("Stop recording")
             } else {
@@ -493,6 +499,7 @@ struct EditorView: View {
                 } label: {
                     Label("Record", systemImage: "record.circle")
                 }
+                .labelStyle(.iconOnly)
                 .disabled(model.isCountdownActive || model.isStartingRecording || model.isPausingRecording || model.isStoppingRecording)
                 .help("Open recorder")
 
@@ -502,6 +509,7 @@ struct EditorView: View {
                     } label: {
                         Label("Collapse Recording Gaps", systemImage: "arrow.left.and.right")
                     }
+                    .labelStyle(.iconOnly)
                     .disabled(!model.canCollapseRecordingGaps)
                     .help("Collapse pause gaps in the last recording")
 
@@ -510,6 +518,7 @@ struct EditorView: View {
                     } label: {
                         Label("Retake Last Recording", systemImage: "arrow.counterclockwise")
                     }
+                    .labelStyle(.iconOnly)
                     .disabled(!model.canRetakeRecording)
                     .help("Retake the last recording in the same timeline slot")
                 }
@@ -520,6 +529,7 @@ struct EditorView: View {
             } label: {
                 Label(inspectorVisible ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.right")
             }
+            .labelStyle(.iconOnly)
             .help(inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
             .accessibilityLabel(inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
 
@@ -536,6 +546,7 @@ struct EditorView: View {
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
+            .labelStyle(.iconOnly)
             .disabled(model.totalDuration <= 0)
             .help("Queue an export with the default preset.")
         }
