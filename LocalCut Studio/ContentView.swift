@@ -443,6 +443,7 @@ struct EditorView: View {
             .labelStyle(.iconOnly)
             .disabled(model.selectedClipID == nil)
             .help("Split clip at playhead")
+            .accessibilityLabel("Split clip at playhead")
 
             Button {
                 model.addTransitionToSelectedClip()
@@ -466,6 +467,7 @@ struct EditorView: View {
             .labelStyle(.iconOnly)
             .disabled(model.selectedClipID == nil && model.selectedTransitionClipID == nil)
             .help("Delete selected clip or transition")
+            .accessibilityLabel("Delete selected clip or transition")
 
             if model.isRecording || model.isPaused {
                 if model.isPaused {
@@ -476,6 +478,7 @@ struct EditorView: View {
                     }
                     .labelStyle(.iconOnly)
                     .help("Resume recording")
+                    .accessibilityLabel("Resume recording")
                 } else {
                     Button { [weak model] in
                         Task { [weak model] in await model?.pauseRecording() }
@@ -484,6 +487,7 @@ struct EditorView: View {
                     }
                     .labelStyle(.iconOnly)
                     .help("Pause recording")
+                    .accessibilityLabel("Pause recording")
                 }
                 Button {
                     model.stopRecording()
@@ -493,6 +497,7 @@ struct EditorView: View {
                 .labelStyle(.iconOnly)
                 .disabled(model.isStartingRecording || model.isPausingRecording || model.isStoppingRecording)
                 .help("Stop recording")
+                .accessibilityLabel("Stop recording")
             } else {
                 Button {
                     model.requestRecorder()
@@ -502,6 +507,7 @@ struct EditorView: View {
                 .labelStyle(.iconOnly)
                 .disabled(model.isCountdownActive || model.isStartingRecording || model.isPausingRecording || model.isStoppingRecording)
                 .help("Open recorder")
+                .accessibilityLabel("Open recorder")
 
                 if model.hasLastRecordingTake {
                     Button {
@@ -512,6 +518,7 @@ struct EditorView: View {
                     .labelStyle(.iconOnly)
                     .disabled(!model.canCollapseRecordingGaps)
                     .help("Collapse pause gaps in the last recording")
+                    .accessibilityLabel("Collapse pause gaps in the last recording")
 
                     Button { [weak model] in
                         Task { [weak model] in await model?.retakeRecording() }
@@ -521,6 +528,7 @@ struct EditorView: View {
                     .labelStyle(.iconOnly)
                     .disabled(!model.canRetakeRecording)
                     .help("Retake the last recording in the same timeline slot")
+                    .accessibilityLabel("Retake the last recording in the same timeline slot")
                 }
             }
 
@@ -549,6 +557,7 @@ struct EditorView: View {
             .labelStyle(.iconOnly)
             .disabled(model.totalDuration <= 0)
             .help("Queue an export with the default preset.")
+            .accessibilityLabel("Queue an export with the default preset.")
         }
     }
 
