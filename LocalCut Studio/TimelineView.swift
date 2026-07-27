@@ -1116,21 +1116,21 @@ private struct RulerBackgroundCanvas: View, Equatable {
             // above them stays visually distinct.
             let tickTop = rulerHeight - 12
             var i = 0
+            var tickPath = Path()
             while true {
                 let t = Double(i) * step
                 let x = CGFloat(t) * pps
                 guard x <= size.width else { break }
                 let isMajor = (i % 5 == 0)
-                var line = Path()
-                line.move(to: CGPoint(x: x, y: isMajor ? tickTop : tickTop + 6))
-                line.addLine(to: CGPoint(x: x, y: rulerHeight))
-                context.stroke(line, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
+                tickPath.move(to: CGPoint(x: x, y: isMajor ? tickTop : tickTop + 6))
+                tickPath.addLine(to: CGPoint(x: x, y: rulerHeight))
                 if isMajor {
                     let text = Text(TimeFormatting.timecode(t)).font(.caption2.monospaced()).foregroundStyle(.secondary)
                     context.draw(text, at: CGPoint(x: x + 2, y: tickTop), anchor: .topLeading)
                 }
                 i += 1
             }
+            context.stroke(tickPath, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
 
             // One Path stroked once, not one stroke per marker — long
             // timelines can carry thousands of beats and per-line draw calls
