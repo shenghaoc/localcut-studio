@@ -111,8 +111,8 @@ extension EditorModel {
         let asset = mediaItem.asset
         if let videoTrack = try? await asset.loadTracks(withMediaType: .video).first {
             mediaItem.hasVideo = true
-            mediaItem.naturalSize = (try? await videoTrack.load(.naturalSize)) ?? .zero
-            mediaItem.preferredTransform = (try? await videoTrack.load(.preferredTransform)) ?? .identity
+            mediaItem.naturalSize = (try? await videoTrack.load(.naturalSize))?.sanitized ?? .zero
+            mediaItem.preferredTransform = (try? await videoTrack.load(.preferredTransform))?.sanitized ?? .identity
         }
         mediaItem.hasAudio = (try? await !asset.loadTracks(withMediaType: .audio).isEmpty) ?? false
         return mediaItem
