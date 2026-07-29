@@ -1086,6 +1086,9 @@ private struct OverlayKeyframeSectionView: View {
                 } label: {
                     Label("Add Keyframe", systemImage: "plus.diamond.fill")
                 }
+                .labelStyle(.iconOnly)
+                .help("Add keyframe at current time")
+                .accessibilityLabel("Add overlay keyframe at current time")
                 .disabled(localTime == nil)
 
                 Button(role: .destructive) {

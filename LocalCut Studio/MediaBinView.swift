@@ -219,6 +219,7 @@ private struct MediaRow: View {
                 } label: {
                     Label("Add", systemImage: "plus")
                 }
+                .labelStyle(.iconOnly)
                 .controlSize(.small)
                 .help("Add \(item.name) to timeline")
                 .accessibilityLabel("Add \(item.name) to timeline")

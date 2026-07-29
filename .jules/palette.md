@@ -56,3 +56,6 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 ## 2026-07-27 - Added missing labels to icon-only buttons in ContentView
 **Learning:** Buttons containing only `Label(..., systemImage: ...)` with `.labelStyle(.iconOnly)` in `ContentView` were missing explicit `.accessibilityLabel(...)` modifiers, meaning VoiceOver users would not hear the full context of the button.
 **Action:** Always append explicit `.accessibilityLabel(...)` modifiers to any button functioning as an icon-only control to guarantee VoiceOver coverage.
+## 2026-08-01 - Add missing label styles to icon-only buttons
+**Learning:** Some icon-only buttons built with `Label(..., systemImage: ...)` were missing the `.labelStyle(.iconOnly)` modifier in `InspectorView` and `MediaBinView`, which can lead to visual inconsistencies if the view context expects an icon but renders text.
+**Action:** Always append explicit `.labelStyle(.iconOnly)` to any button functioning as an icon-only control when it uses a `Label`, to guarantee it visually renders as an icon.
