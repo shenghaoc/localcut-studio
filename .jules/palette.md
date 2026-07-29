@@ -53,3 +53,6 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 
 **Learning:** Buttons built with `Label(..., systemImage: ...)` in property editors that act as icon-only controls must explicitly use `.labelStyle(.iconOnly)`. This visually hides the text so they render strictly as icons, matching the design of sibling `Image` buttons, while preserving the text for VoiceOver screen readers.
 **Action:** Add `.labelStyle(.iconOnly)` to `Label`-based buttons in toolbars and keyframe navigators to ensure they behave properly as icon-only controls.
+## 2026-07-27 - Added missing labels to icon-only buttons in ContentView
+**Learning:** Buttons containing only `Label(..., systemImage: ...)` with `.labelStyle(.iconOnly)` in `ContentView` were missing explicit `.accessibilityLabel(...)` modifiers, meaning VoiceOver users would not hear the full context of the button.
+**Action:** Always append explicit `.accessibilityLabel(...)` modifiers to any button functioning as an icon-only control to guarantee VoiceOver coverage.
