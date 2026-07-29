@@ -57,12 +57,12 @@ extension EditorModel {
                     let videoClip = Clip(
                         mediaID: candidate.mediaItem.id,
                         sourceStart: .zero,
-                        duration: candidate.clip.duration,
+                        duration: candidate.clip.duration.sanitized,
                         timelineStart: timelineStart)
                     let trackIndex = Self.firstAvailableReplayTrackIndex(
                         in: project.videoTracks,
                         timelineStart: timelineStart,
-                        duration: candidate.clip.duration)
+                        duration: candidate.clip.duration.sanitized)
                     Self.ensureReplayTrack(at: trackIndex, in: &project.videoTracks, kind: .video)
                     project.videoTracks[trackIndex].clips.append(videoClip)
                 }
@@ -70,12 +70,12 @@ extension EditorModel {
                     let audioClip = Clip(
                         mediaID: candidate.mediaItem.id,
                         sourceStart: .zero,
-                        duration: candidate.clip.duration,
+                        duration: candidate.clip.duration.sanitized,
                         timelineStart: timelineStart)
                     let trackIndex = Self.firstAvailableReplayTrackIndex(
                         in: project.audioTracks,
                         timelineStart: timelineStart,
-                        duration: candidate.clip.duration)
+                        duration: candidate.clip.duration.sanitized)
                     Self.ensureReplayTrack(at: trackIndex, in: &project.audioTracks, kind: .audio)
                     project.audioTracks[trackIndex].clips.append(audioClip)
                 }
@@ -84,7 +84,7 @@ extension EditorModel {
         }
 
         let savedDuration = prepared.reduce(CMTime.zero) { result, candidate in
-            CMTimeMaximum(result, candidate.clip.timelineOffset + candidate.clip.duration)
+            CMTimeMaximum(result, candidate.clip.timelineOffset + candidate.clip.duration.sanitized)
         }
         if prepared.count == 1 {
             statusMessage = String(format: "Inserted %.1fs replay clip at playhead.", savedDuration.seconds)
@@ -101,7 +101,7 @@ extension EditorModel {
                                         sourceIndex: Int,
                                         sourceCount: Int) async -> MediaItem {
         let mediaItem = MediaItem(url: savedClip.url)
-        mediaItem.duration = savedClip.duration
+        mediaItem.duration = savedClip.duration.sanitized
         let sourceName = savedClip.sourceFileURL.deletingPathExtension().lastPathComponent
         mediaItem.name = sourceCount == 1
             ? "Replay \(timestamp)"
@@ -111,8 +111,8 @@ extension EditorModel {
         let asset = mediaItem.asset
         if let videoTrack = try? await asset.loadTracks(withMediaType: .video).first {
             mediaItem.hasVideo = true
-            mediaItem.naturalSize = (try? await videoTrack.load(.naturalSize)) ?? .zero
-            mediaItem.preferredTransform = (try? await videoTrack.load(.preferredTransform)) ?? .identity
+            mediaItem.naturalSize = (try? await videoTrack.load(.naturalSize))?.sanitized ?? .zero
+            mediaItem.preferredTransform = (try? await videoTrack.load(.preferredTransform))?.sanitized ?? .identity
         }
         mediaItem.hasAudio = (try? await !asset.loadTracks(withMediaType: .audio).isEmpty) ?? false
         return mediaItem
