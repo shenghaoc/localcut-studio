@@ -540,6 +540,8 @@ struct EditorView: View {
             .labelStyle(.iconOnly)
             .help(inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
             .accessibilityLabel(inspectorVisible ? "Hide inspector panel" : "Show inspector panel")
+            .accessibilityAddTraits(.isToggle)
+            .accessibilityAddTraits(inspectorVisible ? .isSelected : [])
 
             Spacer()
 
@@ -556,8 +558,8 @@ struct EditorView: View {
             }
             .labelStyle(.iconOnly)
             .disabled(model.totalDuration <= 0)
-            .help("Queue an export with the default preset.")
-            .accessibilityLabel("Queue an export with the default preset.")
+            .help("Queue an export with the default preset")
+            .accessibilityLabel("Queue an export with the default preset")
         }
     }
 
