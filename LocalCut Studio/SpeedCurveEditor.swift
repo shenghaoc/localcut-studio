@@ -157,6 +157,9 @@ struct SpeedCurveEditor: View {
         let keyframes = clip.speedCurve.keyframes
         guard keyframes.count > 1 else { return }
 
+        var linesPath = Path()
+        var dotsPath = Path()
+
         for index in keyframes.indices {
             let keyframe = keyframes[index]
             let keyPoint = point(sourceOffset: keyframe.time,
@@ -172,8 +175,11 @@ struct SpeedCurveEditor: View {
                                                 size: size,
                                                 plan: plan,
                                                 outputDuration: outputDuration)
-                drawHandleLine(context: &context, from: keyPoint, to: handlePoint)
-                drawHandleDot(context: &context, at: handlePoint)
+                linesPath.move(to: keyPoint)
+                linesPath.addLine(to: handlePoint)
+                let rect = CGRect(x: handlePoint.x - handleRadius, y: handlePoint.y - handleRadius,
+                                  width: handleRadius * 2, height: handleRadius * 2)
+                dotsPath.addEllipse(in: rect)
             }
             if index > keyframes.startIndex {
                 let handle = incomingHandle(for: keyframe, previous: keyframes[index - 1])
@@ -183,23 +189,16 @@ struct SpeedCurveEditor: View {
                                                 size: size,
                                                 plan: plan,
                                                 outputDuration: outputDuration)
-                drawHandleLine(context: &context, from: keyPoint, to: handlePoint)
-                drawHandleDot(context: &context, at: handlePoint)
+                linesPath.move(to: keyPoint)
+                linesPath.addLine(to: handlePoint)
+                let rect = CGRect(x: handlePoint.x - handleRadius, y: handlePoint.y - handleRadius,
+                                  width: handleRadius * 2, height: handleRadius * 2)
+                dotsPath.addEllipse(in: rect)
             }
         }
-    }
 
-    private func drawHandleLine(context: inout GraphicsContext, from start: CGPoint, to end: CGPoint) {
-        var path = Path()
-        path.move(to: start)
-        path.addLine(to: end)
-        context.stroke(path, with: .color(.secondary.opacity(0.42)), lineWidth: 1)
-    }
-
-    private func drawHandleDot(context: inout GraphicsContext, at point: CGPoint) {
-        let rect = CGRect(x: point.x - handleRadius, y: point.y - handleRadius,
-                          width: handleRadius * 2, height: handleRadius * 2)
-        context.fill(Path(ellipseIn: rect), with: .color(.secondary.opacity(0.8)))
+        context.stroke(linesPath, with: .color(.secondary.opacity(0.42)), lineWidth: 1)
+        context.fill(dotsPath, with: .color(.secondary.opacity(0.8)))
     }
 
     private func drawKeyframes(context: inout GraphicsContext,
@@ -221,6 +220,7 @@ struct SpeedCurveEditor: View {
             return
         }
 
+        var keyframesFillPath = Path()
         for keyframe in keyframes {
             let point = point(sourceOffset: keyframe.time,
                               speed: keyframe.value,
@@ -231,9 +231,10 @@ struct SpeedCurveEditor: View {
                               y: point.y - keyframeRadius,
                               width: keyframeRadius * 2,
                               height: keyframeRadius * 2)
-            context.fill(Path(ellipseIn: rect), with: .color(.lcAccent))
-            context.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.8)), lineWidth: 1)
+            keyframesFillPath.addEllipse(in: rect)
         }
+        context.fill(keyframesFillPath, with: .color(.lcAccent))
+        context.stroke(keyframesFillPath, with: .color(.white.opacity(0.8)), lineWidth: 1)
     }
 
     private func nearestTarget(to location: CGPoint, size: CGSize) -> SpeedCurveDragTarget? {
