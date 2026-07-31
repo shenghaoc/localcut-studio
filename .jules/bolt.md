@@ -57,3 +57,6 @@ Append a dated entry whenever you learn something about keeping LocalCut Studio 
 ## 2026-10-25 - Batch Canvas drawing in SpeedCurveEditor
 **Learning:** The interactive `SpeedCurveEditor` redraws continuously during dragging. Previously, drawing multiple keyframes and bezier handles using separate `context.stroke` and `context.fill` calls for every single element resulted in O(N) core graphics calls per frame, leading to CPU overhead.
 **Action:** Always batch related Canvas operations. Accumulate `Path` objects inside loops (e.g., lines for handles, ellipses for dots) and issue single `context.stroke` and `context.fill` calls at the end to drastically reduce the number of render calls.
+## 2026-10-25 - Batch Canvas drawing in SafeZoneOverlayView
+**Learning:** Drawing each safe-zone region with its own `context.fill` / `context.stroke` is O(N) Core Graphics work per Canvas pass. Separate translucent fills also compound alpha where regions overlap, which is wrong for a unified mask.
+**Action:** Accumulate every region as a subpath of one `Path`, then issue a single `fill` and `stroke`. Skip the draw when the path is empty.
