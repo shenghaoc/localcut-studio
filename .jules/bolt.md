@@ -54,3 +54,6 @@ Append a dated entry whenever you learn something about keeping LocalCut Studio 
 ## 2026-10-24 - Batch Canvas tick lines drawing in TimelineView
 **Learning:** Drawing many individual paths using multiple `context.stroke` calls inside a loop in a SwiftUI Canvas leads to significant CPU overhead.
 **Action:** Always batch related Canvas drawing operations, such as timeline ticks, into a single `Path` instance and perform a single `context.stroke` or `context.fill` call at the end to drastically reduce core graphics call overhead.
+## 2026-10-25 - Batch Canvas drawing in SpeedCurveEditor
+**Learning:** The interactive `SpeedCurveEditor` redraws continuously during dragging. Previously, drawing multiple keyframes and bezier handles using separate `context.stroke` and `context.fill` calls for every single element resulted in O(N) core graphics calls per frame, leading to CPU overhead.
+**Action:** Always batch related Canvas operations. Accumulate `Path` objects inside loops (e.g., lines for handles, ellipses for dots) and issue single `context.stroke` and `context.fill` calls at the end to drastically reduce the number of render calls.
