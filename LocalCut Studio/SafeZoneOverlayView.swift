@@ -10,9 +10,7 @@ struct SafeZoneOverlayView: View {
                 container: proxy.size,
                 renderSize: renderSize)
             Canvas { context, _ in
-                // ⚡ Bolt: Batching all safe-zone regions into a single Path and issuing one
-                // context.fill / context.stroke reduces O(N) core graphics calls to O(1).
-                // It also fixes overlapping translucent fills compounding in alpha.
+                // One path so translucent region fills share a single alpha (no compound overlap).
                 var path = Path()
                 for region in profile.regions {
                     guard let first = region.points.first else { continue }
@@ -22,6 +20,7 @@ struct SafeZoneOverlayView: View {
                     }
                     path.closeSubpath()
                 }
+                guard !path.isEmpty else { return }
                 context.fill(path, with: .color(.red.opacity(0.18)))
                 context.stroke(path, with: .color(.red.opacity(0.75)), lineWidth: 1.5)
             }
