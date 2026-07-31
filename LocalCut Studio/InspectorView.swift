@@ -1087,7 +1087,7 @@ private struct OverlayKeyframeSectionView: View {
                     Label("Add Keyframe", systemImage: "plus.diamond.fill")
                 }
                 .labelStyle(.iconOnly)
-                .help("Add keyframe at current time")
+                .help("Add overlay keyframe at current time")
                 .accessibilityLabel("Add overlay keyframe at current time")
                 .disabled(localTime == nil)
 
@@ -1096,7 +1096,7 @@ private struct OverlayKeyframeSectionView: View {
                 } label: {
                     Image(systemName: "trash")
                 }
-                .help("Remove keyframes at current time")
+                .help("Remove overlay keyframes at current time")
                 .accessibilityLabel("Remove overlay keyframes at current time")
                 .disabled(localTime == nil || !overlay.isAnimated)
 
