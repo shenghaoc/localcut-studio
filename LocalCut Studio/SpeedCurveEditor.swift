@@ -16,13 +16,13 @@ private struct SpeedCurveGridCanvas: View, Equatable {
             context.fill(border, with: .color(Color(nsColor: .controlBackgroundColor).opacity(0.65)))
             context.stroke(border, with: .color(.secondary.opacity(0.28)), lineWidth: 1)
 
+            var linesPath = Path()
             for step in 1..<4 {
                 let y = rect.minY + rect.height * CGFloat(step) / 4
-                var path = Path()
-                path.move(to: CGPoint(x: rect.minX, y: y))
-                path.addLine(to: CGPoint(x: rect.maxX, y: y))
-                context.stroke(path, with: .color(.secondary.opacity(0.16)), lineWidth: 0.5)
+                linesPath.move(to: CGPoint(x: rect.minX, y: y))
+                linesPath.addLine(to: CGPoint(x: rect.maxX, y: y))
             }
+            context.stroke(linesPath, with: .color(.secondary.opacity(0.16)), lineWidth: 0.5)
         }
     }
 }

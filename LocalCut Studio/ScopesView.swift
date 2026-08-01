@@ -308,12 +308,11 @@ private struct ScopeBackgroundView: View, Equatable {
     /// Horizontal IRE reference lines (0/25/50/75/100) with small labels so luma
     /// levels read against a scale instead of empty black.
     private func drawWaveformGraticule(into context: GraphicsContext, frameRect: CGRect) {
+        var linesPath = Path()
         for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
             let y = frameRect.maxY - CGFloat(fraction) * frameRect.height
-            var line = Path()
-            line.move(to: CGPoint(x: frameRect.minX, y: y))
-            line.addLine(to: CGPoint(x: frameRect.maxX, y: y))
-            context.stroke(line, with: .color(Self.gridColor), lineWidth: 0.5)
+            linesPath.move(to: CGPoint(x: frameRect.minX, y: y))
+            linesPath.addLine(to: CGPoint(x: frameRect.maxX, y: y))
             let label = Text("\(Int(fraction * 100))")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.5))
@@ -326,6 +325,7 @@ private struct ScopeBackgroundView: View, Equatable {
                 at: CGPoint(x: frameRect.minX + 4, y: y),
                 anchor: isTopLine ? .topLeading : .bottomLeading)
         }
+        context.stroke(linesPath, with: .color(Self.gridColor), lineWidth: 0.5)
     }
 
     // MARK: - Vectorscope background
