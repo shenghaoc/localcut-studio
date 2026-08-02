@@ -308,12 +308,21 @@ private struct ScopeBackgroundView: View, Equatable {
     /// Horizontal IRE reference lines (0/25/50/75/100) with small labels so luma
     /// levels read against a scale instead of empty black.
     private func drawWaveformGraticule(into context: GraphicsContext, frameRect: CGRect) {
-        for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+        let fractions = [0.0, 0.25, 0.5, 0.75, 1.0]
+        // Batch identical-style grid strokes into one Path / one Core Graphics
+        // stroke. Labels must paint *after* the stroke so they stay on top of
+        // the full-width IRE lines (pre-batch draw order was stroke-then-label
+        // per line).
+        var linesPath = Path()
+        for fraction in fractions {
             let y = frameRect.maxY - CGFloat(fraction) * frameRect.height
-            var line = Path()
-            line.move(to: CGPoint(x: frameRect.minX, y: y))
-            line.addLine(to: CGPoint(x: frameRect.maxX, y: y))
-            context.stroke(line, with: .color(Self.gridColor), lineWidth: 0.5)
+            linesPath.move(to: CGPoint(x: frameRect.minX, y: y))
+            linesPath.addLine(to: CGPoint(x: frameRect.maxX, y: y))
+        }
+        context.stroke(linesPath, with: .color(Self.gridColor), lineWidth: 0.5)
+
+        for fraction in fractions {
+            let y = frameRect.maxY - CGFloat(fraction) * frameRect.height
             let label = Text("\(Int(fraction * 100))")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.5))
