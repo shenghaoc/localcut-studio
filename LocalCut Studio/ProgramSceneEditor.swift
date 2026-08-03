@@ -179,7 +179,9 @@ struct SceneLayerEditorRow: View {
 
             Slider(value: opacityBinding, in: 0...1) {
                 Text("Opacity")
+                    .accessibilityHidden(true)
             }
+            .accessibilityLabel("Opacity")
         }
         .padding(.vertical, 4)
     }
