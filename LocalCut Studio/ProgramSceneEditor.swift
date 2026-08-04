@@ -172,9 +172,11 @@ struct SceneLayerEditorRow: View {
                         .font(.caption)
                 }
                 Spacer()
-                Text("\(Int(layer.opacity * 100))%")
+                Text(opacityPercentLabel)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
+                    // Slider already announces label + value; keep this visual-only.
+                    .accessibilityHidden(true)
             }
 
             Slider(value: opacityBinding, in: 0...1) {
@@ -182,6 +184,7 @@ struct SceneLayerEditorRow: View {
                     .accessibilityHidden(true)
             }
             .accessibilityLabel("Opacity")
+            .accessibilityValue(opacityPercentLabel)
         }
         .padding(.vertical, 4)
     }
@@ -201,5 +204,9 @@ struct SceneLayerEditorRow: View {
         Binding(
             get: { Double(layer.opacity) },
             set: { layer.opacity = Float($0) })
+    }
+
+    private var opacityPercentLabel: String {
+        "\(Int(layer.opacity * 100))%"
     }
 }
