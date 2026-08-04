@@ -59,3 +59,7 @@ Append a dated entry whenever you learn something about LocalCut Studio's access
 ## 2026-08-01 - Add missing label styles to icon-only buttons
 **Learning:** Some icon-only buttons built with `Label(..., systemImage: ...)` were missing the `.labelStyle(.iconOnly)` modifier in `InspectorView` and `MediaBinView`, which can lead to visual inconsistencies if the view context expects an icon but renders text.
 **Action:** Always append explicit `.labelStyle(.iconOnly)` to any button functioning as an icon-only control when it uses a `Label`, to guarantee it visually renders as an icon.
+## 2026-08-04 — Program scene opacity slider: label + value + hide readout
+
+**Learning:** `ProgramSceneEditor`'s layer opacity control used `Slider(...) { Text("Opacity") }` without an explicit `.accessibilityLabel` / `.accessibilityValue`, and left the neighboring `Text("70%")` readout exposed. VoiceOver either announced a generic slider or read the percentage as a separate orphaned element.
+**Action:** Pair `.accessibilityLabel("Opacity")` with `.accessibilityValue("…%")` on the `Slider`, hide both the label `Text` inside the slider closure and the visual percentage readout with `.accessibilityHidden(true)`. Prefer `LabeledSliderRow` for new inspector sliders so this pairing lives in one place.
